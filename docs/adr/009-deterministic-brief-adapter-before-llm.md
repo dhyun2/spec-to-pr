@@ -1,4 +1,4 @@
-# ADR-009: Deterministic Brief Adapter Before LLM Interpretation
+# ADR-009: Deterministic Brief Intake Adapter Before LLM Interpretation
 
 ## Status
 
@@ -12,16 +12,18 @@ If the plugin sends raw brief text directly to a tool-enabled LLM, prompt-inject
 
 ## Decision
 
-Task 08 introduces a deterministic Brief Adapter before any LLM-based interpretation.
+Task 08 introduces a deterministic Brief Intake Adapter before any LLM-based interpretation.
 
 The adapter:
 
-- reads a registered Source snapshot
-- parses Markdown-like structure
-- extracts candidate requirement lines
-- preserves file-line Evidence
+- reads a registered Source snapshot when the source is file-backed
+- detects the brief source format
+- normalizes supported formats into a NormalizedBriefDocument
+- extracts candidate requirement blocks
+- preserves source Evidence locations
 - flags ambiguity as requirement Gap
 - flags prompt-injection-like content as security Gap
+- flags unsupported brief formats as requirement Gaps
 
 ## Why Not Use An LLM First?
 
@@ -36,10 +38,12 @@ Good:
 - Every candidate has line Evidence.
 - Ambiguous content is not silently implemented.
 - Prompt-injection-like text is recorded but not followed.
+- PDF, ticket, URL, HTML, and unknown inputs are not silently ignored.
 - Later OpenSpec and Gherkin generation can operate on structured inputs.
 
 Tradeoffs:
 
 - Rule-based classification is conservative.
 - Some valid requirements may be classified as notes.
+- PDF and ticket extraction are deferred behind explicit unsupported Gaps.
 - LLM-assisted refinement is deferred to later tasks.

@@ -85,7 +85,7 @@ A natural-language statement such as “implemented” or “tests passed” is 
 |   05 | Security and Policy Baseline                   | Pending     | Path, command, secret, prompt-injection protection                   |
 |   06 | Intake Manifest and Project Profiler           | Pending     | Detect repository stack and input manifest                           |
 |   07 | Source Registry and Content Addressing         | Pending     | Snapshot and digest all inputs                                       |
-|   08 | Brief Adapter                                  | Pending     | Convert brief into structured requirement evidence                   |
+|   08 | Brief Intake Adapter and Text Normalization    | Pending     | Normalize brief inputs and extract evidence or unsupported gaps      |
 |   09 | Figma Intake Adapter                           | Pending     | Convert Figma URL into node/design evidence                          |
 |   10 | OpenAPI Intake Adapter                         | Pending     | Parse and validate OpenAPI documents                                 |
 |   11 | Evidence Graph and Requirement Traceability    | Pending     | Connect brief → spec → API → Figma → code → tests                    |
@@ -262,18 +262,18 @@ Primary outputs:
 - SHA-256 digests
 - capturedAt metadata
 
-### Task 08 — Brief Adapter
+### Task 08 — Brief Intake Adapter and Text Normalization
 
 Goal:
 
-Extract requirement evidence from the product brief.
+Normalize product brief inputs and extract requirement evidence when supported.
 
 Primary outputs:
 
-- structured brief model
+- normalized brief document
 - requirement evidence
 - ambiguity gaps
-- contradiction gaps
+- unsupported source gaps
 
 ### Task 09 — Figma Intake Adapter
 
