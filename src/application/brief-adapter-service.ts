@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { BriefAnalysisResultSchema, type BriefExtractedItem } from "../brief/brief-analysis.js";
+import { detectBriefSourceType } from "../brief/brief-source-type.js";
 import {
   BriefIssueFlagSchema,
   BriefItemTypeSchema,
@@ -8,7 +9,10 @@ import {
   type BriefIssueFlag,
   type BriefItemType,
 } from "../brief/brief-classifier.js";
-import { parseMarkdownLines } from "../brief/markdown-lines.js";
+import { parseMarkdownBrief } from "../brief/markdown-brief-parser.js";
+import type { NormalizedBriefBlock, NormalizedBriefDocument } from "../brief/normalized-brief.js";
+import { parsePlainTextBrief } from "../brief/plaintext-brief-parser.js";
+import { createUnsupportedBriefDocument } from "../brief/unsupported-brief-parser.js";
 import { RunManifestSchema } from "../run/index.js";
 import { createEvidenceId, createGapId } from "../runtime/id-factory.js";
 import { RunIdSchema, SourceIdSchema } from "../runtime/ids.js";
@@ -61,42 +65,61 @@ export class BriefAdapterService {
       });
     }
 
-    if (source.locator.type !== "file") {
-      throw new Error("Task 08 only supports file brief sources");
-    }
-
-    const snapshotContent = await this.snapshotStore.readContent(sourceDigest);
-    const content = snapshotContent.toString("utf8");
-
-    const parsed = parseMarkdownLines(content);
-    const candidates = classifyBriefBlocks(parsed.blocks);
+    const document = await this.normalizeBriefSource(source, sourceDigest);
     const timestamp = IsoDateTimeSchema.parse(this.now());
 
     const evidenceToAdd: EvidenceRef[] = [];
     const gapsToAdd: Gap[] = [];
     const items: BriefExtractedItem[] = [];
 
+    if (isUnsupportedDocument(document)) {
+      const unsupportedBlock = document.blocks[0]!;
+      const evidence = createEvidenceFromBlock({
+        source,
+        sourceDigest,
+        block: unsupportedBlock,
+        timestamp,
+        itemType: "note",
+        flags: [],
+      });
+      const gap = createUnsupportedGap({
+        evidence,
+        block: unsupportedBlock,
+        timestamp,
+      });
+
+      evidenceToAdd.push(evidence);
+      gapsToAdd.push(gap);
+
+      items.push({
+        evidenceId: evidence.id,
+        itemType: "note",
+        location: evidence.location,
+        ...fileLineFields(evidence.location),
+        summary: evidence.summary,
+        headingPath: [],
+        flags: [],
+        gapIds: [gap.id],
+      });
+    }
+
+    const candidates = isUnsupportedDocument(document) ? [] : classifyBriefBlocks(document.blocks);
+
     for (const candidate of candidates) {
-      const evidence = EvidenceRefSchema.parse({
-        id: createEvidenceId(),
-        sourceId: source.id,
-        location: {
-          type: "file-lines",
-          path: source.locator.path,
-          startLine: candidate.lineStart,
-          endLine: candidate.lineEnd,
-        },
-        summary: candidate.summary,
-        excerpt: candidate.text,
-        digest: sha256Digest(Buffer.from(candidate.text, "utf8")),
-        capturedAt: timestamp,
-        metadata: {
-          adapter: BRIEF_ADAPTER_VERSION,
-          sourceDigest,
-          itemType: candidate.itemType,
+      const evidence = createEvidenceFromBlock({
+        source,
+        sourceDigest,
+        block: {
+          blockId: "candidate",
+          kind: "paragraph",
+          text: candidate.text,
+          location: candidate.location,
           headingPath: candidate.headingPath,
-          flags: candidate.flags,
+          metadata: {},
         },
+        timestamp,
+        itemType: candidate.itemType,
+        flags: candidate.flags,
       });
 
       evidenceToAdd.push(evidence);
@@ -149,8 +172,8 @@ export class BriefAdapterService {
       items.push({
         evidenceId: evidence.id,
         itemType: candidate.itemType,
-        lineStart: candidate.lineStart,
-        lineEnd: candidate.lineEnd,
+        location: evidence.location,
+        ...fileLineFields(evidence.location),
         summary: candidate.summary,
         headingPath: candidate.headingPath,
         flags: candidate.flags,
@@ -174,12 +197,65 @@ export class BriefAdapterService {
       sourceId: source.id,
       sourceDigest,
       duplicate: false,
-      sectionCount: parsed.headings.length,
+      sectionCount: countDocumentSections(document),
       candidateCount: candidates.length,
       evidenceAdded: evidenceToAdd.length,
       gapsAdded: gapsToAdd.length,
       items,
     });
+  }
+
+  private async normalizeBriefSource(
+    source: SourceRef,
+    sourceDigest: Sha256Digest,
+  ): Promise<NormalizedBriefDocument> {
+    const format = detectBriefSourceType(source);
+
+    if (source.locator.type !== "file") {
+      return createUnsupportedBriefDocument({
+        source,
+        sourceDigest,
+        format,
+        reason: unsupportedReason(format),
+      });
+    }
+
+    await this.assertSnapshotMatches(sourceDigest);
+
+    if (format !== "markdown" && format !== "plaintext") {
+      return createUnsupportedBriefDocument({
+        source,
+        sourceDigest,
+        format,
+        reason: unsupportedReason(format),
+      });
+    }
+
+    const content = (await this.snapshotStore.readContent(sourceDigest)).toString("utf8");
+
+    if (format === "plaintext") {
+      return parsePlainTextBrief({
+        source,
+        sourceDigest,
+        content,
+      });
+    }
+
+    return parseMarkdownBrief({
+      source,
+      sourceDigest,
+      content,
+    });
+  }
+
+  private async assertSnapshotMatches(sourceDigest: Sha256Digest): Promise<void> {
+    const metadata = await this.snapshotStore.readMetadata(sourceDigest);
+
+    if (metadata.canonicalDigest !== sourceDigest) {
+      throw new Error(
+        `Source snapshot digest mismatch: expected ${sourceDigest}, got ${metadata.canonicalDigest}`,
+      );
+    }
   }
 }
 
@@ -221,14 +297,12 @@ function existingEvidenceItem(evidence: EvidenceRef, gaps: Gap[]): BriefExtracte
   const itemType = parseMetadataItemType(evidence.metadata["itemType"]);
   const flags = parseMetadataFlags(evidence.metadata["flags"]);
   const headingPath = parseMetadataHeadingPath(evidence.metadata["headingPath"]);
-  const location =
-    evidence.location.type === "file-lines" ? evidence.location : { startLine: 1, endLine: 1 };
 
   return {
     evidenceId: evidence.id,
     itemType,
-    lineStart: location.startLine,
-    lineEnd: location.endLine,
+    location: evidence.location,
+    ...fileLineFields(evidence.location),
     summary: evidence.summary,
     headingPath,
     flags,
@@ -274,4 +348,102 @@ function parseMetadataHeadingPath(value: unknown): string[] {
   }
 
   return value.filter((item): item is string => typeof item === "string");
+}
+
+function createEvidenceFromBlock(input: {
+  source: SourceRef;
+  sourceDigest: Sha256Digest;
+  block: NormalizedBriefBlock;
+  timestamp: string;
+  itemType: BriefItemType;
+  flags: BriefIssueFlag[];
+}): EvidenceRef {
+  return EvidenceRefSchema.parse({
+    id: createEvidenceId(),
+    sourceId: input.source.id,
+    location: input.block.location,
+    summary: summarizeEvidence(input.block.text),
+    excerpt: input.block.text,
+    digest: sha256Digest(Buffer.from(input.block.text, "utf8")),
+    capturedAt: input.timestamp,
+    metadata: {
+      adapter: BRIEF_ADAPTER_VERSION,
+      sourceDigest: input.sourceDigest,
+      itemType: input.itemType,
+      headingPath: input.block.headingPath,
+      flags: input.flags,
+      blockId: input.block.blockId,
+      blockKind: input.block.kind,
+      ...(input.block.metadata["unsupported"] === true ? { unsupported: true } : {}),
+    },
+  });
+}
+
+function createUnsupportedGap(input: {
+  evidence: EvidenceRef;
+  block: NormalizedBriefBlock;
+  timestamp: string;
+}): Gap {
+  return GapSchema.parse({
+    id: createGapId(),
+    category: "requirement",
+    severity: "major",
+    status: "open",
+    title: "Unsupported brief source format",
+    expected: "Brief sources should be normalized by a supported adapter before extraction.",
+    observed: input.block.text,
+    impact:
+      "The brief could contain requirements, but this source format cannot be extracted deterministically yet.",
+    sourceEvidenceIds: [input.evidence.id],
+    owner: "spec-bdd",
+    createdAt: input.timestamp,
+    updatedAt: input.timestamp,
+  });
+}
+
+function isUnsupportedDocument(document: NormalizedBriefDocument): boolean {
+  return document.metadata["unsupported"] === true;
+}
+
+function countDocumentSections(document: NormalizedBriefDocument): number {
+  return document.blocks.filter((block) => block.kind === "heading").length;
+}
+
+function fileLineFields(location: EvidenceRef["location"]): {
+  lineStart?: number;
+  lineEnd?: number;
+} {
+  if (location.type !== "file-lines") {
+    return {};
+  }
+
+  return {
+    lineStart: location.startLine,
+    lineEnd: location.endLine,
+  };
+}
+
+function summarizeEvidence(text: string): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+
+  if (normalized.length <= 160) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, 157)}...`;
+}
+
+function unsupportedReason(format: string): string {
+  switch (format) {
+    case "pdf":
+      return "PDF brief extraction is not implemented yet.";
+    case "ticket":
+      return "Ticket brief connector extraction is not implemented yet.";
+    case "html":
+      return "HTML brief extraction is not implemented yet.";
+    case "unknown":
+      return "Brief source format could not be detected.";
+    default:
+      return `Brief source format is not supported yet: ${format}.`;
+  }
 }

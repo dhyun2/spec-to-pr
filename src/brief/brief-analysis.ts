@@ -2,14 +2,16 @@ import { z } from "zod";
 
 import { EvidenceIdSchema, GapIdSchema, SourceIdSchema } from "../runtime/ids.js";
 import { Sha256DigestSchema } from "../runtime/scalars.js";
+import { EvidenceLocationSchema } from "../runtime/source.js";
 import { BriefIssueFlagSchema, BriefItemTypeSchema } from "./brief-classifier.js";
 
 export const BriefExtractedItemSchema = z
   .object({
     evidenceId: EvidenceIdSchema,
     itemType: BriefItemTypeSchema,
-    lineStart: z.number().int().positive(),
-    lineEnd: z.number().int().positive(),
+    location: EvidenceLocationSchema,
+    lineStart: z.number().int().positive().optional(),
+    lineEnd: z.number().int().positive().optional(),
     summary: z.string().trim().min(1),
     headingPath: z.array(z.string()).default([]),
     flags: z.array(BriefIssueFlagSchema).default([]),

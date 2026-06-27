@@ -1,6 +1,7 @@
 import { z } from "zod";
 
-import type { MarkdownBlock } from "./markdown-lines.js";
+import { EvidenceLocationSchema } from "../runtime/source.js";
+import type { NormalizedBriefBlock } from "./normalized-brief.js";
 
 export const BriefItemTypeSchema = z.enum([
   "requirement",
@@ -17,8 +18,9 @@ export const BriefIssueFlagSchema = z.enum(["ambiguous", "prompt-injection-like"
 export const BriefCandidateSchema = z
   .object({
     itemType: BriefItemTypeSchema,
-    lineStart: z.number().int().positive(),
-    lineEnd: z.number().int().positive(),
+    location: EvidenceLocationSchema,
+    lineStart: z.number().int().positive().optional(),
+    lineEnd: z.number().int().positive().optional(),
     text: z.string().trim().min(1),
     summary: z.string().trim().min(1),
     headingPath: z.array(z.string()).default([]),
@@ -152,14 +154,14 @@ const PROMPT_INJECTION_LIKE_PATTERNS = [
   /모든\s*도구.*실행/,
 ] as const;
 
-export function classifyBriefBlocks(blocks: MarkdownBlock[]): BriefCandidate[] {
+export function classifyBriefBlocks(blocks: NormalizedBriefBlock[]): BriefCandidate[] {
   return blocks
     .filter((block) => block.kind !== "heading")
     .map(classifyBlock)
     .filter((candidate): candidate is BriefCandidate => candidate !== undefined);
 }
 
-function classifyBlock(block: MarkdownBlock): BriefCandidate | undefined {
+function classifyBlock(block: NormalizedBriefBlock): BriefCandidate | undefined {
   const text = block.text.trim();
 
   if (text.length === 0) {
@@ -175,8 +177,13 @@ function classifyBlock(block: MarkdownBlock): BriefCandidate | undefined {
 
   return BriefCandidateSchema.parse({
     itemType,
-    lineStart: block.lineStart,
-    lineEnd: block.lineEnd,
+    location: block.location,
+    ...(block.location.type === "file-lines"
+      ? {
+          lineStart: block.location.startLine,
+          lineEnd: block.location.endLine,
+        }
+      : {}),
     text,
     summary: summarizeText(text),
     headingPath: block.headingPath,
