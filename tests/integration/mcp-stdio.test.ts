@@ -49,11 +49,18 @@ describe("spec-to-pr MCP stdio server", () => {
     const tools = await client.listTools();
 
     expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
+      "block_stage",
+      "complete_stage",
       "create_run",
+      "fail_stage",
+      "get_resume_plan",
       "get_run",
+      "heartbeat_stage",
       "kernel_info",
       "kernel_ping",
       "list_runs",
+      "skip_stage",
+      "start_stage",
     ]);
 
     const info = await client.callTool({
@@ -94,6 +101,92 @@ describe("spec-to-pr MCP stdio server", () => {
       id: runId,
       status: "created",
       revision: 0,
+    });
+
+    const started = await client.callTool({
+      name: "start_stage",
+      arguments: {
+        runId,
+        stageName: "intake",
+        workerId: "worker-1",
+        leaseTtlMs: 60_000,
+      },
+    });
+
+    expect(started.structuredContent).toMatchObject({
+      stage: {
+        name: "intake",
+        status: "running",
+      },
+    });
+
+    const leaseId = (
+      started.structuredContent as {
+        stage: {
+          lease: {
+            id: string;
+          };
+        };
+      }
+    ).stage.lease.id;
+
+    const heartbeat = await client.callTool({
+      name: "heartbeat_stage",
+      arguments: {
+        runId,
+        stageName: "intake",
+        workerId: "worker-1",
+        leaseId,
+        checkpoint: {
+          name: "mcp-smoke",
+          data: {
+            ok: true,
+          },
+        },
+      },
+    });
+
+    expect(heartbeat.structuredContent).toMatchObject({
+      stage: {
+        name: "intake",
+        status: "running",
+        checkpoint: {
+          name: "mcp-smoke",
+          data: {
+            ok: true,
+          },
+        },
+      },
+    });
+
+    const completed = await client.callTool({
+      name: "complete_stage",
+      arguments: {
+        runId,
+        stageName: "intake",
+        workerId: "worker-1",
+        leaseId,
+      },
+    });
+
+    expect(completed.structuredContent).toMatchObject({
+      stage: {
+        name: "intake",
+        status: "passed",
+      },
+    });
+
+    const resumePlan = await client.callTool({
+      name: "get_resume_plan",
+      arguments: {
+        runId,
+      },
+    });
+
+    expect(resumePlan.structuredContent).toMatchObject({
+      runId,
+      nextStages: ["project-profile"],
+      completedStages: ["intake"],
     });
 
     const listed = await client.callTool({
