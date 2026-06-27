@@ -100,6 +100,7 @@ describe("source registry utilities", () => {
         },
         digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         capturedAt: "2026-06-23T00:00:00.000Z",
+        metadata: {},
       },
       canonical: canonicalizeFileContent({
         path: "docs/brief.md",
