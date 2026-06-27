@@ -1,9 +1,5 @@
 import packageJson from "../../package.json" with { type: "json" };
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-
-import { createKernelServer } from "./create-server.js";
-import { createLazyRunServiceProvider } from "./run-service-provider.js";
 
 const SERVER_NAME = "spec-to-pr-kernel" as const;
 const MINIMUM_NODE_MAJOR = 22 as const;
@@ -15,6 +11,13 @@ void zodWarmup;
 
 async function main(): Promise<void> {
   assertSupportedNodeVersion();
+
+  const [{ StdioServerTransport }, { createKernelServer }, { createLazyRunServiceProvider }] =
+    await Promise.all([
+      import("@modelcontextprotocol/sdk/server/stdio.js"),
+      import("./create-server.js"),
+      import("./run-service-provider.js"),
+    ]);
 
   const server = createKernelServer(createLazyRunServiceProvider());
   const transport = new StdioServerTransport();
