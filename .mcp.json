@@ -2,7 +2,10 @@
   "mcpServers": {
     "spec-to-pr": {
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/mcp/server.js"]
+      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/mcp/server.js"],
+      "env": {
+        "SPEC_TO_PR_DATA_DIR": "${CLAUDE_PLUGIN_DATA}"
+      }
     }
   }
 }
