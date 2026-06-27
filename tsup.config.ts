@@ -1,12 +1,12 @@
-import { defineConfig } from 'tsup';
+import { defineConfig } from "tsup";
 
 export default defineConfig({
   entry: {
-    'mcp/server': 'src/mcp/server.ts',
+    "mcp/server": "src/mcp/server.ts",
   },
-  format: ['esm'],
-  platform: 'node',
-  target: 'node22',
+  format: ["esm"],
+  platform: "node",
+  target: "node22",
   bundle: true,
   splitting: false,
   sourcemap: true,
@@ -15,6 +15,6 @@ export default defineConfig({
   minify: false,
   noExternal: [/@modelcontextprotocol\/sdk/, /zod/],
   banner: {
-    js: '#!/usr/bin/env node',
+    js: "#!/usr/bin/env node",
   },
 });
