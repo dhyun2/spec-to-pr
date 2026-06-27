@@ -1,5 +1,6 @@
 export * from "./constants.js";
 export * from "./ids.js";
+export * from "./id-factory.js";
 export * from "./scalars.js";
 export * from "./source.js";
 export * from "./artifact.js";
