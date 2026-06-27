@@ -8,7 +8,7 @@ export const UntrustedContentInputSchema = z
   })
   .strict();
 
-export type UntrustedContentInput = z.infer<typeof UntrustedContentInputSchema>;
+export type UntrustedContentInput = z.input<typeof UntrustedContentInputSchema>;
 
 export function wrapUntrustedContent(rawInput: UntrustedContentInput): string {
   const input = UntrustedContentInputSchema.parse(rawInput);
