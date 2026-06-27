@@ -7,8 +7,17 @@ import {
   GetRunInputSchema,
   ListRunsInputSchema,
 } from "../application/run-service.js";
+import {
+  BlockStageInputSchema,
+  CompleteStageInputSchema,
+  FailStageInputSchema,
+  GetResumePlanInputSchema,
+  HeartbeatStageInputSchema,
+  SkipStageInputSchema,
+  StartStageInputSchema,
+} from "../application/stage-service.js";
 import { RunManifestSchema, RunSummarySchema } from "../run/index.js";
-import type { RunServiceProvider } from "./run-service-provider.js";
+import type { ServicesProvider } from "./run-service-provider.js";
 
 const CONTRACT_VERSION = "0.2.0" as const;
 const SERVER_NAME = "spec-to-pr-kernel" as const;
@@ -52,7 +61,22 @@ type ToolResult<TStructuredContent> = {
   structuredContent: TStructuredContent;
 };
 
-export function createKernelServer(runServiceProvider: RunServiceProvider): McpServer {
+const TOOL_NAMES = [
+  "kernel_info",
+  "kernel_ping",
+  "create_run",
+  "get_run",
+  "list_runs",
+  "start_stage",
+  "heartbeat_stage",
+  "complete_stage",
+  "fail_stage",
+  "block_stage",
+  "skip_stage",
+  "get_resume_plan",
+] as const;
+
+export function createKernelServer(servicesProvider: ServicesProvider): McpServer {
   const metadata = packageMetadata();
 
   const server = new McpServer({
@@ -84,7 +108,7 @@ export function createKernelServer(runServiceProvider: RunServiceProvider): McpS
             name: "node",
             minimumMajor: MINIMUM_NODE_MAJOR,
           },
-          tools: ["kernel_info", "kernel_ping", "create_run", "get_run", "list_runs"],
+          tools: TOOL_NAMES,
         });
 
         return {
@@ -140,8 +164,8 @@ export function createKernelServer(runServiceProvider: RunServiceProvider): McpS
     },
     async (input: unknown) =>
       handleTool(async () => {
-        const service = await runServiceProvider();
-        const structuredContent = await service.createRun(input);
+        const { runService } = await servicesProvider();
+        const structuredContent = await runService.createRun(input);
 
         return {
           text: `Created run ${structuredContent.id} for ${structuredContent.projectRoot}.`,
@@ -164,8 +188,8 @@ export function createKernelServer(runServiceProvider: RunServiceProvider): McpS
     },
     async (input: unknown) =>
       handleTool(async () => {
-        const service = await runServiceProvider();
-        const structuredContent = await service.getRun(input);
+        const { runService } = await servicesProvider();
+        const structuredContent = await runService.getRun(input);
 
         return {
           text: `Loaded run ${structuredContent.id}.`,
@@ -188,12 +212,179 @@ export function createKernelServer(runServiceProvider: RunServiceProvider): McpS
     },
     async (input: unknown) =>
       handleTool(async () => {
-        const service = await runServiceProvider();
-        const runs = await service.listRuns(input);
+        const { runService } = await servicesProvider();
+        const runs = await runService.listRuns(input);
         const structuredContent = ListRunsOutputSchema.parse({ runs });
 
         return {
           text: `Loaded ${structuredContent.runs.length} run summaries.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "start_stage",
+    {
+      title: "Start stage",
+      description: "Transition a Run stage to running and acquire a lease.",
+      inputSchema: StartStageInputSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { stageService } = await servicesProvider();
+        const result = await stageService.start(input);
+
+        return {
+          text: `Started stage ${result.stage.name} with lease ${result.stage.lease?.id}.`,
+          structuredContent: result,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "heartbeat_stage",
+    {
+      title: "Heartbeat stage",
+      description: "Renew the current lease for a running stage and optionally update checkpoint.",
+      inputSchema: HeartbeatStageInputSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { stageService } = await servicesProvider();
+        const result = await stageService.heartbeat(input);
+
+        return {
+          text: `Heartbeat accepted for stage ${result.stage.name}.`,
+          structuredContent: result,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "complete_stage",
+    {
+      title: "Complete stage",
+      description: "Transition a running stage to passed.",
+      inputSchema: CompleteStageInputSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { stageService } = await servicesProvider();
+        const result = await stageService.complete(input);
+
+        return {
+          text: `Completed stage ${result.stage.name}.`,
+          structuredContent: result,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "fail_stage",
+    {
+      title: "Fail stage",
+      description: "Transition a running stage to failed.",
+      inputSchema: FailStageInputSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { stageService } = await servicesProvider();
+        const result = await stageService.fail(input);
+
+        return {
+          text: `Failed stage ${result.stage.name}.`,
+          structuredContent: result,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "block_stage",
+    {
+      title: "Block stage",
+      description: "Transition a running stage to blocked and attach gap references.",
+      inputSchema: BlockStageInputSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { stageService } = await servicesProvider();
+        const result = await stageService.block(input);
+
+        return {
+          text: `Blocked stage ${result.stage.name}.`,
+          structuredContent: result,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "skip_stage",
+    {
+      title: "Skip stage",
+      description: "Transition a running stage to skipped.",
+      inputSchema: SkipStageInputSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { stageService } = await servicesProvider();
+        const result = await stageService.skip(input);
+
+        return {
+          text: `Skipped stage ${result.stage.name}.`,
+          structuredContent: result,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "get_resume_plan",
+    {
+      title: "Get resume plan",
+      description: "Inspect a Run and return the next resumable stages.",
+      inputSchema: GetResumePlanInputSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { stageService } = await servicesProvider();
+        const structuredContent = await stageService.getResumePlan(input);
+
+        return {
+          text: `Resume plan for run ${structuredContent.runId}.`,
           structuredContent,
         };
       }),

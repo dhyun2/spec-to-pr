@@ -12,14 +12,14 @@ void zodWarmup;
 async function main(): Promise<void> {
   assertSupportedNodeVersion();
 
-  const [{ StdioServerTransport }, { createKernelServer }, { createLazyRunServiceProvider }] =
+  const [{ StdioServerTransport }, { createKernelServer }, { createLazyServicesProvider }] =
     await Promise.all([
       import("@modelcontextprotocol/sdk/server/stdio.js"),
       import("./create-server.js"),
       import("./run-service-provider.js"),
     ]);
 
-  const server = createKernelServer(createLazyRunServiceProvider());
+  const server = createKernelServer(createLazyServicesProvider());
   const transport = new StdioServerTransport();
 
   await server.connect(transport);

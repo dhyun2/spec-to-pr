@@ -3,28 +3,36 @@ import path from "node:path";
 
 import packageJson from "../../package.json" with { type: "json" };
 import { RunService } from "../application/run-service.js";
+import { StageService } from "../application/stage-service.js";
 import type { RunStore } from "../store/run-store.js";
 
-export type RunServiceProvider = () => Promise<RunService>;
+export type Services = {
+  runService: RunService;
+  stageService: StageService;
+};
 
-export function createLazyRunServiceProvider(): RunServiceProvider {
-  let service: RunService | undefined;
-  let store: RunStore | undefined;
+export type ServicesProvider = () => Promise<Services>;
+
+export function createLazyServicesProvider(): ServicesProvider {
+  let services: Services | undefined;
 
   return async () => {
-    if (service !== undefined) {
-      return service;
+    if (services !== undefined) {
+      return services;
     }
 
     const { SqliteRunStore } = await import("../store/sqlite-run-store.js");
 
-    store = new SqliteRunStore(resolveDatabasePath());
+    const store: RunStore = new SqliteRunStore(resolveDatabasePath());
 
-    service = new RunService(store, {
-      pluginVersion: packageJson.version,
-    });
+    services = {
+      runService: new RunService(store, {
+        pluginVersion: packageJson.version,
+      }),
+      stageService: new StageService(store),
+    };
 
-    return service;
+    return services;
   };
 }
 

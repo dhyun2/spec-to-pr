@@ -32324,11 +32324,13 @@ function createInitialStageStates() {
       name,
       status: "pending",
       attempt: 0,
-      artifactIds: []
+      maxAttempts: 3,
+      artifactIds: [],
+      gapIds: []
     })
   );
 }
-var RUN_STAGE_NAMES, RunStageNameSchema, StageStatusSchema, StageErrorSchema, StageStateSchema;
+var RUN_STAGE_NAMES, RunStageNameSchema, StageStatusSchema, LeaseIdSchema, WorkerIdSchema, StageLeaseSchema, StageCheckpointSchema, StageErrorSchema, StageStateSchema;
 var init_stages = __esm({
   "src/run/stages.ts"() {
     "use strict";
@@ -32373,6 +32375,35 @@ var init_stages = __esm({
       "waived",
       "skipped"
     ]);
+    LeaseIdSchema = external_exports.string().regex(/^lease_[a-f0-9]{32}$/, "Expected lease_<32 lowercase hex characters>");
+    WorkerIdSchema = external_exports.string().trim().min(1).max(200).regex(/^[A-Za-z0-9._:-]+$/, "Worker id contains unsupported characters");
+    StageLeaseSchema = external_exports.object({
+      id: LeaseIdSchema,
+      workerId: WorkerIdSchema,
+      acquiredAt: IsoDateTimeSchema,
+      heartbeatAt: IsoDateTimeSchema,
+      expiresAt: IsoDateTimeSchema
+    }).strict().superRefine((lease, context) => {
+      if (Date.parse(lease.heartbeatAt) < Date.parse(lease.acquiredAt)) {
+        context.addIssue({
+          code: "custom",
+          message: "heartbeatAt must be after acquiredAt",
+          path: ["heartbeatAt"]
+        });
+      }
+      if (Date.parse(lease.expiresAt) <= Date.parse(lease.heartbeatAt)) {
+        context.addIssue({
+          code: "custom",
+          message: "expiresAt must be after heartbeatAt",
+          path: ["expiresAt"]
+        });
+      }
+    });
+    StageCheckpointSchema = external_exports.object({
+      name: external_exports.string().trim().min(1).max(200),
+      data: external_exports.record(external_exports.string(), external_exports.unknown()).default({}),
+      updatedAt: IsoDateTimeSchema
+    }).strict();
     StageErrorSchema = external_exports.object({
       code: external_exports.string().trim().min(1).max(100),
       message: external_exports.string().trim().min(1).max(2e3),
@@ -32382,10 +32413,14 @@ var init_stages = __esm({
       name: RunStageNameSchema,
       status: StageStatusSchema,
       attempt: external_exports.number().int().nonnegative(),
+      maxAttempts: external_exports.number().int().positive().default(3),
       owner: AgentRoleSchema.optional(),
       startedAt: IsoDateTimeSchema.optional(),
       completedAt: IsoDateTimeSchema.optional(),
+      lease: StageLeaseSchema.optional(),
+      checkpoint: StageCheckpointSchema.optional(),
       artifactIds: external_exports.array(ArtifactIdSchema).default([]),
+      gapIds: external_exports.array(GapIdSchema).default([]),
       error: StageErrorSchema.optional()
     }).strict().superRefine((stage, context) => {
       if (stage.startedAt !== void 0 && stage.completedAt !== void 0 && Date.parse(stage.completedAt) < Date.parse(stage.startedAt)) {
@@ -32393,6 +32428,20 @@ var init_stages = __esm({
           code: "custom",
           message: "completedAt must be after startedAt",
           path: ["completedAt"]
+        });
+      }
+      if (stage.status === "running" && stage.lease === void 0) {
+        context.addIssue({
+          code: "custom",
+          message: "Running stages require a lease",
+          path: ["lease"]
+        });
+      }
+      if (stage.status !== "running" && stage.lease !== void 0) {
+        context.addIssue({
+          code: "custom",
+          message: "Only running stages may include a lease",
+          path: ["lease"]
         });
       }
       if (stage.error !== void 0 && !["failed", "blocked"].includes(stage.status)) {
@@ -32407,6 +32456,20 @@ var init_stages = __esm({
           code: "custom",
           message: "Failed stages require error information",
           path: ["error"]
+        });
+      }
+      if (stage.status === "blocked" && stage.gapIds.length === 0) {
+        context.addIssue({
+          code: "custom",
+          message: "Blocked stages must reference at least one gap",
+          path: ["gapIds"]
+        });
+      }
+      if (stage.attempt > stage.maxAttempts) {
+        context.addIssue({
+          code: "custom",
+          message: "attempt cannot exceed maxAttempts",
+          path: ["attempt"]
         });
       }
     });
@@ -33128,6 +33191,14 @@ var init_run = __esm({
             });
           }
         });
+        stage.gapIds.forEach((gapId, gapIndex) => {
+          if (!gapIds.has(gapId)) {
+            addReferenceIssue(context, ["stages", stageIndex, "gapIds", gapIndex], {
+              kind: "gap",
+              id: gapId
+            });
+          }
+        });
       });
       run.agentResults.forEach((result, resultIndex) => {
         if (result.runId !== run.id) {
@@ -33323,12 +33394,515 @@ var init_run_service = __esm({
   }
 });
 
+// src/state/errors.ts
+var StageStateError, StageNotFoundError, InvalidStageTransitionError, StageLeaseMismatchError, StageLeaseExpiredError, StageRetryExhaustedError;
+var init_errors4 = __esm({
+  "src/state/errors.ts"() {
+    "use strict";
+    StageStateError = class extends Error {
+      constructor(message) {
+        super(message);
+        this.name = new.target.name;
+      }
+    };
+    StageNotFoundError = class extends StageStateError {
+      constructor(stageName) {
+        super(`Stage not found: ${stageName}`);
+      }
+    };
+    InvalidStageTransitionError = class extends StageStateError {
+      constructor(stageName, from, to) {
+        super(`Invalid transition for ${stageName}: ${from} -> ${to}`);
+        this.stageName = stageName;
+        this.from = from;
+        this.to = to;
+      }
+      stageName;
+      from;
+      to;
+    };
+    StageLeaseMismatchError = class extends StageStateError {
+      constructor(stageName) {
+        super(`Lease mismatch for stage ${stageName}`);
+      }
+    };
+    StageLeaseExpiredError = class extends StageStateError {
+      constructor(stageName) {
+        super(`Lease expired for stage ${stageName}`);
+      }
+    };
+    StageRetryExhaustedError = class extends StageStateError {
+      constructor(stageName) {
+        super(`Retry attempts exhausted for stage ${stageName}`);
+      }
+    };
+  }
+});
+
+// src/state/stage-machine.ts
+import { randomUUID as randomUUID2 } from "crypto";
+function startStage(run, command, now) {
+  const stage = findStage(run, command.stageName);
+  const nowIso = now();
+  if (stage.status === "running") {
+    if (!isLeaseExpired(stage, nowIso)) {
+      throw new InvalidStageTransitionError(stage.name, stage.status, "running");
+    }
+    return replaceStage(run, withRunningLease(stage, command, nowIso, false), nowIso);
+  }
+  assertTransition(stage, "running");
+  if (["failed", "blocked", "skipped"].includes(stage.status) && !canRetry(stage)) {
+    throw new StageRetryExhaustedError(stage.name);
+  }
+  return replaceStage(
+    run,
+    withRunningLease(stage, command, nowIso, stage.status !== "pending"),
+    nowIso
+  );
+}
+function heartbeatStage(run, command, now) {
+  const stage = findStage(run, command.stageName);
+  const nowIso = now();
+  assertCurrentLease(stage, command.leaseId, command.workerId, nowIso);
+  const next = StageStateSchema.parse({
+    ...stage,
+    lease: renewLease(stage.lease, nowIso, command.leaseTtlMs),
+    checkpoint: command.checkpoint === void 0 ? stage.checkpoint : {
+      ...command.checkpoint,
+      updatedAt: nowIso
+    }
+  });
+  return replaceStage(run, next, nowIso);
+}
+function completeStage(run, command, now) {
+  const stage = findStage(run, command.stageName);
+  const nowIso = now();
+  assertCurrentLease(stage, command.leaseId, command.workerId, nowIso);
+  assertTransition(stage, "passed");
+  const next = StageStateSchema.parse({
+    ...stage,
+    status: "passed",
+    lease: void 0,
+    completedAt: nowIso,
+    artifactIds: mergeUnique(stage.artifactIds, command.artifactIds ?? []),
+    checkpoint: command.checkpoint === void 0 ? stage.checkpoint : {
+      ...command.checkpoint,
+      updatedAt: nowIso
+    },
+    error: void 0
+  });
+  return replaceStage(run, next, nowIso);
+}
+function failStage(run, command, now) {
+  const stage = findStage(run, command.stageName);
+  const nowIso = now();
+  assertCurrentLease(stage, command.leaseId, command.workerId, nowIso);
+  assertTransition(stage, "failed");
+  const next = StageStateSchema.parse({
+    ...stage,
+    status: "failed",
+    lease: void 0,
+    completedAt: nowIso,
+    artifactIds: mergeUnique(stage.artifactIds, command.artifactIds ?? []),
+    checkpoint: command.checkpoint === void 0 ? stage.checkpoint : {
+      ...command.checkpoint,
+      updatedAt: nowIso
+    },
+    error: command.error
+  });
+  return replaceStage(run, next, nowIso);
+}
+function blockStage(run, command, now) {
+  const stage = findStage(run, command.stageName);
+  const nowIso = now();
+  assertCurrentLease(stage, command.leaseId, command.workerId, nowIso);
+  assertTransition(stage, "blocked");
+  const next = StageStateSchema.parse({
+    ...stage,
+    status: "blocked",
+    lease: void 0,
+    completedAt: nowIso,
+    gapIds: mergeUnique(stage.gapIds, command.gapIds),
+    artifactIds: mergeUnique(stage.artifactIds, command.artifactIds ?? []),
+    checkpoint: command.checkpoint === void 0 ? stage.checkpoint : {
+      ...command.checkpoint,
+      updatedAt: nowIso
+    },
+    error: command.error
+  });
+  return replaceStage(run, next, nowIso);
+}
+function skipStage(run, command, now) {
+  const stage = findStage(run, command.stageName);
+  const nowIso = now();
+  assertCurrentLease(stage, command.leaseId, command.workerId, nowIso);
+  assertTransition(stage, "skipped");
+  const next = StageStateSchema.parse({
+    ...stage,
+    status: "skipped",
+    lease: void 0,
+    completedAt: nowIso,
+    artifactIds: mergeUnique(stage.artifactIds, command.artifactIds ?? []),
+    checkpoint: {
+      name: "skipped",
+      data: {
+        reason: command.reason
+      },
+      updatedAt: nowIso
+    },
+    error: void 0
+  });
+  return replaceStage(run, next, nowIso);
+}
+function isLeaseExpired(stage, nowIso) {
+  if (stage.lease === void 0) {
+    return false;
+  }
+  return Date.parse(stage.lease.expiresAt) <= Date.parse(nowIso);
+}
+function canRetry(stage) {
+  return stage.attempt + 1 <= stage.maxAttempts;
+}
+function findStage(run, stageName) {
+  const parsedStageName = RunStageNameSchema.parse(stageName);
+  const stage = run.stages.find((item) => item.name === parsedStageName);
+  if (stage === void 0) {
+    throw new StageNotFoundError(parsedStageName);
+  }
+  return stage;
+}
+function assertTransition(stage, to) {
+  const allowed = ALLOWED_TRANSITIONS.get(stage.status) ?? [];
+  if (!allowed.includes(to)) {
+    throw new InvalidStageTransitionError(stage.name, stage.status, to);
+  }
+}
+function assertCurrentLease(stage, leaseId, workerId, nowIso) {
+  if (stage.status !== "running" || stage.lease === void 0) {
+    throw new InvalidStageTransitionError(stage.name, stage.status, "running-update");
+  }
+  if (stage.lease.id !== leaseId || stage.lease.workerId !== workerId) {
+    throw new StageLeaseMismatchError(stage.name);
+  }
+  if (isLeaseExpired(stage, nowIso)) {
+    throw new StageLeaseExpiredError(stage.name);
+  }
+}
+function withRunningLease(stage, command, nowIso, isRetry) {
+  return StageStateSchema.parse({
+    ...stage,
+    status: "running",
+    attempt: isRetry ? stage.attempt + 1 : stage.attempt,
+    owner: command.owner ?? stage.owner,
+    startedAt: nowIso,
+    completedAt: void 0,
+    lease: createLease(command.workerId, nowIso, command.leaseTtlMs),
+    error: void 0
+  });
+}
+function createLease(workerId, nowIso, ttlMs = DEFAULT_LEASE_TTL_MS) {
+  return StageLeaseSchema.parse({
+    id: createLeaseId(),
+    workerId,
+    acquiredAt: nowIso,
+    heartbeatAt: nowIso,
+    expiresAt: new Date(Date.parse(nowIso) + ttlMs).toISOString()
+  });
+}
+function renewLease(lease, nowIso, ttlMs = DEFAULT_LEASE_TTL_MS) {
+  return StageLeaseSchema.parse({
+    ...lease,
+    heartbeatAt: nowIso,
+    expiresAt: new Date(Date.parse(nowIso) + ttlMs).toISOString()
+  });
+}
+function replaceStage(run, stage, nowIso) {
+  const nextRun = {
+    ...run,
+    updatedAt: nowIso,
+    revision: run.revision + 1,
+    status: computeRunStatus(run, stage),
+    stages: run.stages.map((item) => item.name === stage.name ? stage : item)
+  };
+  return {
+    run: RunManifestSchema.parse(nextRun),
+    stage
+  };
+}
+function computeRunStatus(run, changedStage) {
+  const stages = run.stages.map((item) => item.name === changedStage.name ? changedStage : item);
+  if (stages.some((stage) => stage.status === "blocked")) {
+    return "blocked";
+  }
+  if (stages.some((stage) => stage.status === "failed")) {
+    return "failed";
+  }
+  if (stages.some((stage) => stage.status === "running")) {
+    return "running";
+  }
+  if (stages.every((stage) => ["passed", "skipped", "waived"].includes(stage.status))) {
+    return "completed";
+  }
+  return "running";
+}
+function mergeUnique(left, right) {
+  return [.../* @__PURE__ */ new Set([...left, ...right])];
+}
+function createLeaseId() {
+  return LeaseIdSchema.parse(`lease_${randomUUID2().replaceAll("-", "")}`);
+}
+var DEFAULT_LEASE_TTL_MS, ALLOWED_TRANSITIONS;
+var init_stage_machine = __esm({
+  "src/state/stage-machine.ts"() {
+    "use strict";
+    init_run();
+    init_stages();
+    init_errors4();
+    DEFAULT_LEASE_TTL_MS = 5 * 60 * 1e3;
+    ALLOWED_TRANSITIONS = /* @__PURE__ */ new Map([
+      ["pending", ["running"]],
+      ["running", ["passed", "failed", "blocked", "skipped"]],
+      ["failed", ["running"]],
+      ["blocked", ["running"]],
+      ["skipped", ["running"]],
+      ["passed", []],
+      ["waived", []]
+    ]);
+  }
+});
+
+// src/state/resume-plan.ts
+function createResumePlan(run, nowIso) {
+  const expiredLeases = run.stages.filter((stage) => stage.status === "running" && isLeaseExpired(stage, nowIso)).map((stage) => stage.name);
+  const runningStages = run.stages.filter((stage) => stage.status === "running" && !isLeaseExpired(stage, nowIso)).map((stage) => stage.name);
+  const blockedStages = run.stages.filter((stage) => stage.status === "blocked").map((stage) => stage.name);
+  const failedRetryableStages = run.stages.filter((stage) => stage.status === "failed" && canRetry(stage)).map((stage) => stage.name);
+  const completedStages = run.stages.filter((stage) => ["passed", "skipped", "waived"].includes(stage.status)).map((stage) => stage.name);
+  return {
+    runId: run.id,
+    status: run.status,
+    nextStages: computeNextStages(run.stages, expiredLeases),
+    runningStages,
+    expiredLeases,
+    blockedStages,
+    failedRetryableStages,
+    completedStages
+  };
+}
+function computeNextStages(stages, expiredLeases) {
+  if (expiredLeases.length > 0) {
+    return expiredLeases;
+  }
+  const retryableFailure = stages.find((stage) => stage.status === "failed" && canRetry(stage));
+  if (retryableFailure !== void 0) {
+    return [retryableFailure.name];
+  }
+  const retryableBlocked = stages.find((stage) => stage.status === "blocked" && canRetry(stage));
+  if (retryableBlocked !== void 0) {
+    return [retryableBlocked.name];
+  }
+  const pending = stages.find((stage) => stage.status === "pending");
+  return pending === void 0 ? [] : [pending.name];
+}
+var init_resume_plan = __esm({
+  "src/state/resume-plan.ts"() {
+    "use strict";
+    init_stage_machine();
+  }
+});
+
+// src/application/stage-service.ts
+var CheckpointInputSchema, StartStageInputSchema, HeartbeatStageInputSchema, CompleteStageInputSchema, FailStageInputSchema, BlockStageInputSchema, SkipStageInputSchema, GetResumePlanInputSchema, StageService;
+var init_stage_service = __esm({
+  "src/application/stage-service.ts"() {
+    "use strict";
+    init_zod();
+    init_run();
+    init_stages();
+    init_ids();
+    init_resume_plan();
+    init_stage_machine();
+    CheckpointInputSchema = external_exports.object({
+      name: external_exports.string().trim().min(1).max(200),
+      data: external_exports.record(external_exports.string(), external_exports.unknown()).default({})
+    }).strict();
+    StartStageInputSchema = external_exports.object({
+      runId: RunIdSchema,
+      stageName: RunStageNameSchema,
+      workerId: WorkerIdSchema,
+      leaseTtlMs: external_exports.number().int().positive().max(60 * 60 * 1e3).optional()
+    }).strict();
+    HeartbeatStageInputSchema = external_exports.object({
+      runId: RunIdSchema,
+      stageName: RunStageNameSchema,
+      leaseId: LeaseIdSchema,
+      workerId: WorkerIdSchema,
+      leaseTtlMs: external_exports.number().int().positive().max(60 * 60 * 1e3).optional(),
+      checkpoint: CheckpointInputSchema.optional()
+    }).strict();
+    CompleteStageInputSchema = external_exports.object({
+      runId: RunIdSchema,
+      stageName: RunStageNameSchema,
+      leaseId: LeaseIdSchema,
+      workerId: WorkerIdSchema,
+      artifactIds: external_exports.array(ArtifactIdSchema).default([]),
+      checkpoint: CheckpointInputSchema.optional()
+    }).strict();
+    FailStageInputSchema = external_exports.object({
+      runId: RunIdSchema,
+      stageName: RunStageNameSchema,
+      leaseId: LeaseIdSchema,
+      workerId: WorkerIdSchema,
+      error: StageErrorSchema,
+      artifactIds: external_exports.array(ArtifactIdSchema).default([]),
+      checkpoint: CheckpointInputSchema.optional()
+    }).strict();
+    BlockStageInputSchema = external_exports.object({
+      runId: RunIdSchema,
+      stageName: RunStageNameSchema,
+      leaseId: LeaseIdSchema,
+      workerId: WorkerIdSchema,
+      error: StageErrorSchema,
+      gapIds: external_exports.array(GapIdSchema).min(1),
+      artifactIds: external_exports.array(ArtifactIdSchema).default([]),
+      checkpoint: CheckpointInputSchema.optional()
+    }).strict();
+    SkipStageInputSchema = external_exports.object({
+      runId: RunIdSchema,
+      stageName: RunStageNameSchema,
+      leaseId: LeaseIdSchema,
+      workerId: WorkerIdSchema,
+      reason: external_exports.string().trim().min(1).max(1e3),
+      artifactIds: external_exports.array(ArtifactIdSchema).default([])
+    }).strict();
+    GetResumePlanInputSchema = external_exports.object({
+      runId: RunIdSchema
+    }).strict();
+    StageService = class {
+      constructor(store, now = () => (/* @__PURE__ */ new Date()).toISOString()) {
+        this.store = store;
+        this.now = now;
+      }
+      store;
+      now;
+      async start(rawInput) {
+        const input = StartStageInputSchema.parse(rawInput);
+        const run = await this.store.get(input.runId);
+        const result = startStage(
+          run,
+          {
+            stageName: input.stageName,
+            workerId: input.workerId,
+            ...input.leaseTtlMs === void 0 ? {} : { leaseTtlMs: input.leaseTtlMs }
+          },
+          this.now
+        );
+        await this.store.save(result.run, run.revision);
+        return result;
+      }
+      async heartbeat(rawInput) {
+        const input = HeartbeatStageInputSchema.parse(rawInput);
+        const run = await this.store.get(input.runId);
+        const result = heartbeatStage(
+          run,
+          {
+            stageName: input.stageName,
+            leaseId: input.leaseId,
+            workerId: input.workerId,
+            ...input.leaseTtlMs === void 0 ? {} : { leaseTtlMs: input.leaseTtlMs },
+            ...input.checkpoint === void 0 ? {} : { checkpoint: input.checkpoint }
+          },
+          this.now
+        );
+        await this.store.save(result.run, run.revision);
+        return result;
+      }
+      async complete(rawInput) {
+        const input = CompleteStageInputSchema.parse(rawInput);
+        const run = await this.store.get(input.runId);
+        const result = completeStage(
+          run,
+          {
+            stageName: input.stageName,
+            leaseId: input.leaseId,
+            workerId: input.workerId,
+            artifactIds: input.artifactIds,
+            ...input.checkpoint === void 0 ? {} : { checkpoint: input.checkpoint }
+          },
+          this.now
+        );
+        await this.store.save(result.run, run.revision);
+        return result;
+      }
+      async fail(rawInput) {
+        const input = FailStageInputSchema.parse(rawInput);
+        const run = await this.store.get(input.runId);
+        const result = failStage(
+          run,
+          {
+            stageName: input.stageName,
+            leaseId: input.leaseId,
+            workerId: input.workerId,
+            error: input.error,
+            artifactIds: input.artifactIds,
+            ...input.checkpoint === void 0 ? {} : { checkpoint: input.checkpoint }
+          },
+          this.now
+        );
+        await this.store.save(result.run, run.revision);
+        return result;
+      }
+      async block(rawInput) {
+        const input = BlockStageInputSchema.parse(rawInput);
+        const run = await this.store.get(input.runId);
+        const result = blockStage(
+          run,
+          {
+            stageName: input.stageName,
+            leaseId: input.leaseId,
+            workerId: input.workerId,
+            error: input.error,
+            gapIds: input.gapIds,
+            artifactIds: input.artifactIds,
+            ...input.checkpoint === void 0 ? {} : { checkpoint: input.checkpoint }
+          },
+          this.now
+        );
+        await this.store.save(result.run, run.revision);
+        return result;
+      }
+      async skip(rawInput) {
+        const input = SkipStageInputSchema.parse(rawInput);
+        const run = await this.store.get(input.runId);
+        const result = skipStage(
+          run,
+          {
+            stageName: input.stageName,
+            leaseId: input.leaseId,
+            workerId: input.workerId,
+            reason: input.reason,
+            artifactIds: input.artifactIds
+          },
+          this.now
+        );
+        await this.store.save(result.run, run.revision);
+        return result;
+      }
+      async getResumePlan(rawInput) {
+        const input = GetResumePlanInputSchema.parse(rawInput);
+        const run = RunManifestSchema.parse(await this.store.get(input.runId));
+        return createResumePlan(run, this.now());
+      }
+    };
+  }
+});
+
 // src/mcp/create-server.ts
 var create_server_exports = {};
 __export(create_server_exports, {
   createKernelServer: () => createKernelServer
 });
-function createKernelServer(runServiceProvider) {
+function createKernelServer(servicesProvider) {
   const metadata = packageMetadata();
   const server = new McpServer({
     name: SERVER_NAME,
@@ -33356,7 +33930,7 @@ function createKernelServer(runServiceProvider) {
           name: "node",
           minimumMajor: MINIMUM_NODE_MAJOR
         },
-        tools: ["kernel_info", "kernel_ping", "create_run", "get_run", "list_runs"]
+        tools: TOOL_NAMES
       });
       return {
         text: `spec-to-pr kernel ${structuredContent.pluginVersion} is available over stdio.`,
@@ -33404,8 +33978,8 @@ function createKernelServer(runServiceProvider) {
       }
     },
     async (input) => handleTool(async () => {
-      const service = await runServiceProvider();
-      const structuredContent = await service.createRun(input);
+      const { runService } = await servicesProvider();
+      const structuredContent = await runService.createRun(input);
       return {
         text: `Created run ${structuredContent.id} for ${structuredContent.projectRoot}.`,
         structuredContent
@@ -33425,8 +33999,8 @@ function createKernelServer(runServiceProvider) {
       }
     },
     async (input) => handleTool(async () => {
-      const service = await runServiceProvider();
-      const structuredContent = await service.getRun(input);
+      const { runService } = await servicesProvider();
+      const structuredContent = await runService.getRun(input);
       return {
         text: `Loaded run ${structuredContent.id}.`,
         structuredContent
@@ -33446,11 +34020,157 @@ function createKernelServer(runServiceProvider) {
       }
     },
     async (input) => handleTool(async () => {
-      const service = await runServiceProvider();
-      const runs = await service.listRuns(input);
+      const { runService } = await servicesProvider();
+      const runs = await runService.listRuns(input);
       const structuredContent = ListRunsOutputSchema.parse({ runs });
       return {
         text: `Loaded ${structuredContent.runs.length} run summaries.`,
+        structuredContent
+      };
+    })
+  );
+  server.registerTool(
+    "start_stage",
+    {
+      title: "Start stage",
+      description: "Transition a Run stage to running and acquire a lease.",
+      inputSchema: StartStageInputSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { stageService } = await servicesProvider();
+      const result = await stageService.start(input);
+      return {
+        text: `Started stage ${result.stage.name} with lease ${result.stage.lease?.id}.`,
+        structuredContent: result
+      };
+    })
+  );
+  server.registerTool(
+    "heartbeat_stage",
+    {
+      title: "Heartbeat stage",
+      description: "Renew the current lease for a running stage and optionally update checkpoint.",
+      inputSchema: HeartbeatStageInputSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { stageService } = await servicesProvider();
+      const result = await stageService.heartbeat(input);
+      return {
+        text: `Heartbeat accepted for stage ${result.stage.name}.`,
+        structuredContent: result
+      };
+    })
+  );
+  server.registerTool(
+    "complete_stage",
+    {
+      title: "Complete stage",
+      description: "Transition a running stage to passed.",
+      inputSchema: CompleteStageInputSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { stageService } = await servicesProvider();
+      const result = await stageService.complete(input);
+      return {
+        text: `Completed stage ${result.stage.name}.`,
+        structuredContent: result
+      };
+    })
+  );
+  server.registerTool(
+    "fail_stage",
+    {
+      title: "Fail stage",
+      description: "Transition a running stage to failed.",
+      inputSchema: FailStageInputSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { stageService } = await servicesProvider();
+      const result = await stageService.fail(input);
+      return {
+        text: `Failed stage ${result.stage.name}.`,
+        structuredContent: result
+      };
+    })
+  );
+  server.registerTool(
+    "block_stage",
+    {
+      title: "Block stage",
+      description: "Transition a running stage to blocked and attach gap references.",
+      inputSchema: BlockStageInputSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { stageService } = await servicesProvider();
+      const result = await stageService.block(input);
+      return {
+        text: `Blocked stage ${result.stage.name}.`,
+        structuredContent: result
+      };
+    })
+  );
+  server.registerTool(
+    "skip_stage",
+    {
+      title: "Skip stage",
+      description: "Transition a running stage to skipped.",
+      inputSchema: SkipStageInputSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { stageService } = await servicesProvider();
+      const result = await stageService.skip(input);
+      return {
+        text: `Skipped stage ${result.stage.name}.`,
+        structuredContent: result
+      };
+    })
+  );
+  server.registerTool(
+    "get_resume_plan",
+    {
+      title: "Get resume plan",
+      description: "Inspect a Run and return the next resumable stages.",
+      inputSchema: GetResumePlanInputSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { stageService } = await servicesProvider();
+      const structuredContent = await stageService.getResumePlan(input);
+      return {
+        text: `Resume plan for run ${structuredContent.runId}.`,
         structuredContent
       };
     })
@@ -33489,7 +34209,7 @@ function packageMetadata() {
     version: package_default.version
   });
 }
-var CONTRACT_VERSION, SERVER_NAME, MINIMUM_NODE_MAJOR, PackageMetadataSchema, KernelInfoSchema, KernelPingInputSchema, KernelPingOutputSchema, ListRunsOutputSchema;
+var CONTRACT_VERSION, SERVER_NAME, MINIMUM_NODE_MAJOR, PackageMetadataSchema, KernelInfoSchema, KernelPingInputSchema, KernelPingOutputSchema, ListRunsOutputSchema, TOOL_NAMES;
 var init_create_server = __esm({
   "src/mcp/create-server.ts"() {
     "use strict";
@@ -33497,6 +34217,7 @@ var init_create_server = __esm({
     init_mcp();
     init_zod();
     init_run_service();
+    init_stage_service();
     init_run2();
     CONTRACT_VERSION = "0.2.0";
     SERVER_NAME = "spec-to-pr-kernel";
@@ -33529,12 +34250,26 @@ var init_create_server = __esm({
     ListRunsOutputSchema = external_exports.object({
       runs: external_exports.array(RunSummarySchema)
     });
+    TOOL_NAMES = [
+      "kernel_info",
+      "kernel_ping",
+      "create_run",
+      "get_run",
+      "list_runs",
+      "start_stage",
+      "heartbeat_stage",
+      "complete_stage",
+      "fail_stage",
+      "block_stage",
+      "skip_stage",
+      "get_resume_plan"
+    ];
   }
 });
 
 // src/store/errors.ts
 var RunStoreError, RunAlreadyExistsError, RunNotFoundError, RevisionConflictError;
-var init_errors4 = __esm({
+var init_errors5 = __esm({
   "src/store/errors.ts"() {
     "use strict";
     RunStoreError = class extends Error {
@@ -33608,7 +34343,7 @@ var init_sqlite_run_store = __esm({
     "use strict";
     init_run2();
     init_ids();
-    init_errors4();
+    init_errors5();
     require2 = createRequire(import.meta.url);
     SqliteRunStore = class {
       database;
@@ -33846,23 +34581,25 @@ var init_sqlite_run_store = __esm({
 // src/mcp/run-service-provider.ts
 var run_service_provider_exports = {};
 __export(run_service_provider_exports, {
-  createLazyRunServiceProvider: () => createLazyRunServiceProvider
+  createLazyServicesProvider: () => createLazyServicesProvider
 });
 import os from "os";
 import path3 from "path";
-function createLazyRunServiceProvider() {
-  let service;
-  let store;
+function createLazyServicesProvider() {
+  let services;
   return async () => {
-    if (service !== void 0) {
-      return service;
+    if (services !== void 0) {
+      return services;
     }
     const { SqliteRunStore: SqliteRunStore2 } = await Promise.resolve().then(() => (init_sqlite_run_store(), sqlite_run_store_exports));
-    store = new SqliteRunStore2(resolveDatabasePath());
-    service = new RunService(store, {
-      pluginVersion: package_default.version
-    });
-    return service;
+    const store = new SqliteRunStore2(resolveDatabasePath());
+    services = {
+      runService: new RunService(store, {
+        pluginVersion: package_default.version
+      }),
+      stageService: new StageService(store)
+    };
+    return services;
   };
 }
 function resolveDatabasePath() {
@@ -33874,6 +34611,7 @@ var init_run_service_provider = __esm({
     "use strict";
     init_package();
     init_run_service();
+    init_stage_service();
   }
 });
 
@@ -33885,12 +34623,12 @@ var MINIMUM_NODE_MAJOR2 = 22;
 var zodWarmup = external_exports.string();
 async function main() {
   assertSupportedNodeVersion();
-  const [{ StdioServerTransport: StdioServerTransport2 }, { createKernelServer: createKernelServer2 }, { createLazyRunServiceProvider: createLazyRunServiceProvider2 }] = await Promise.all([
+  const [{ StdioServerTransport: StdioServerTransport2 }, { createKernelServer: createKernelServer2 }, { createLazyServicesProvider: createLazyServicesProvider2 }] = await Promise.all([
     Promise.resolve().then(() => (init_stdio2(), stdio_exports)),
     Promise.resolve().then(() => (init_create_server(), create_server_exports)),
     Promise.resolve().then(() => (init_run_service_provider(), run_service_provider_exports))
   ]);
-  const server = createKernelServer2(createLazyRunServiceProvider2());
+  const server = createKernelServer2(createLazyServicesProvider2());
   const transport = new StdioServerTransport2();
   await server.connect(transport);
   console.error(`[spec-to-pr] ${SERVER_NAME2} ${package_default.version} connected over stdio`);
