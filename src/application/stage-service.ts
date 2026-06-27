@@ -31,7 +31,12 @@ export const StartStageInputSchema = z
     runId: RunIdSchema,
     stageName: RunStageNameSchema,
     workerId: WorkerIdSchema,
-    leaseTtlMs: z.number().int().positive().max(60 * 60 * 1000).optional(),
+    leaseTtlMs: z
+      .number()
+      .int()
+      .positive()
+      .max(60 * 60 * 1000)
+      .optional(),
   })
   .strict();
 
@@ -41,7 +46,12 @@ export const HeartbeatStageInputSchema = z
     stageName: RunStageNameSchema,
     leaseId: LeaseIdSchema,
     workerId: WorkerIdSchema,
-    leaseTtlMs: z.number().int().positive().max(60 * 60 * 1000).optional(),
+    leaseTtlMs: z
+      .number()
+      .int()
+      .positive()
+      .max(60 * 60 * 1000)
+      .optional(),
     checkpoint: CheckpointInputSchema.optional(),
   })
   .strict();

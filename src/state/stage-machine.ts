@@ -346,11 +346,7 @@ function createLease(workerId: WorkerId, nowIso: string, ttlMs = DEFAULT_LEASE_T
   });
 }
 
-function renewLease(
-  lease: StageLease,
-  nowIso: string,
-  ttlMs = DEFAULT_LEASE_TTL_MS,
-): StageLease {
+function renewLease(lease: StageLease, nowIso: string, ttlMs = DEFAULT_LEASE_TTL_MS): StageLease {
   return StageLeaseSchema.parse({
     ...lease,
     heartbeatAt: nowIso,

@@ -95,3 +95,37 @@ Expired leases may be reclaimed by starting the stage again.
 - Retry attempt increments when failed or blocked stages restart
 - Resume plan identifies next stages and expired leases
 - MCP stage tools work through stdio integration tests
+
+## Verification
+
+Run:
+
+```bash
+pnpm format:check
+pnpm typecheck
+pnpm schemas:build
+pnpm build
+pnpm test
+pnpm audit
+```
+
+Expected:
+
+- Stage transition unit tests pass
+- Resume planner tests pass
+- SQLite persistence tests still pass
+- MCP stdio integration test calls:
+  - `create_run`
+  - `start_stage`
+  - `heartbeat_stage`
+  - `complete_stage`
+  - `get_resume_plan`
+
+## Known Limitations
+
+- Stage transitions do not execute real agents.
+- Resume plan is advisory and does not automatically run stages.
+- Lease expiry depends on local clock.
+- Checkpoints are metadata only.
+- Retry policy is basic `maxAttempts` logic.
+- Artifact and Gap IDs must already exist in Run to attach them.
