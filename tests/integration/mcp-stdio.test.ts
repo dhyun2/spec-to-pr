@@ -50,6 +50,7 @@ describe("spec-to-pr MCP stdio server", () => {
 
     expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
       "block_stage",
+      "classify_command",
       "complete_stage",
       "create_run",
       "fail_stage",
@@ -59,8 +60,11 @@ describe("spec-to-pr MCP stdio server", () => {
       "kernel_info",
       "kernel_ping",
       "list_runs",
+      "policy_info",
+      "redact_text",
       "skip_stage",
       "start_stage",
+      "validate_path",
     ]);
 
     const info = await client.callTool({
@@ -72,6 +76,56 @@ describe("spec-to-pr MCP stdio server", () => {
       pluginName: "spec-to-pr",
       serverName: "spec-to-pr-kernel",
       transport: "stdio",
+    });
+
+    const policyInfo = await client.callTool({
+      name: "policy_info",
+      arguments: {},
+    });
+
+    expect(policyInfo.structuredContent).toMatchObject({
+      policyVersion: "0.5.0",
+    });
+
+    const pathPolicy = await client.callTool({
+      name: "validate_path",
+      arguments: {
+        workspaceRoot: projectDirectory,
+        candidatePath: ".",
+        mode: "read",
+      },
+    });
+
+    expect(pathPolicy.structuredContent).toMatchObject({
+      decision: {
+        verdict: "allow",
+      },
+    });
+
+    const commandPolicy = await client.callTool({
+      name: "classify_command",
+      arguments: {
+        command: "bash",
+        args: ["-lc", "echo hi"],
+        intent: "unknown",
+      },
+    });
+
+    expect(commandPolicy.structuredContent).toMatchObject({
+      decision: {
+        verdict: "deny",
+      },
+    });
+
+    const redacted = await client.callTool({
+      name: "redact_text",
+      arguments: {
+        text: "Authorization: Bearer abcdefghijklmnopqrstuvwxyz123456",
+      },
+    });
+
+    expect(redacted.structuredContent).toMatchObject({
+      redactionCount: 1,
     });
 
     const created = await client.callTool({
