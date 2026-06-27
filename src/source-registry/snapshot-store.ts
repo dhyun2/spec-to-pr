@@ -82,6 +82,14 @@ export class SourceSnapshotStore {
 
     return SourceSnapshotMetadataSchema.parse(JSON.parse(await readFile(metadataPath, "utf8")));
   }
+
+  public async readContent(rawDigest: Sha256Digest): Promise<Buffer> {
+    const digest = Sha256DigestSchema.parse(rawDigest);
+    const { prefix, hex } = digestPathSegments(digest);
+    const contentPath = path.join(this.rootDirectory, "sha256", prefix, hex, "content");
+
+    return readFile(contentPath);
+  }
 }
 
 async function writeIfMissing(filePath: string, content: Buffer): Promise<void> {
