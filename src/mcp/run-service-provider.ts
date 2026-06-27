@@ -2,6 +2,7 @@ import os from "node:os";
 import path from "node:path";
 
 import packageJson from "../../package.json" with { type: "json" };
+import { BriefAdapterService } from "../application/brief-adapter-service.js";
 import { PolicyService } from "../application/policy-service.js";
 import { ProjectProfileService } from "../application/profile-service.js";
 import { RunService } from "../application/run-service.js";
@@ -17,6 +18,7 @@ export type Services = {
   policyService: PolicyService;
   profileService: ProjectProfileService;
   sourceRegistryService: SourceRegistryService;
+  briefAdapterService: BriefAdapterService;
 };
 
 export type ServicesProvider = () => Promise<Services>;
@@ -33,6 +35,7 @@ export function createLazyServicesProvider(): ServicesProvider {
 
     const dataDirectory = resolveDataDirectory();
     const store: RunStore = new SqliteRunStore(path.join(dataDirectory, "runs.sqlite3"));
+    const snapshotStore = new SourceSnapshotStore(path.join(dataDirectory, "source-snapshots"));
 
     services = {
       runService: new RunService(store, {
@@ -43,10 +46,8 @@ export function createLazyServicesProvider(): ServicesProvider {
       profileService: new ProjectProfileService(
         new JsonProfileStore(path.join(dataDirectory, "profiles")),
       ),
-      sourceRegistryService: new SourceRegistryService(
-        store,
-        new SourceSnapshotStore(path.join(dataDirectory, "source-snapshots")),
-      ),
+      sourceRegistryService: new SourceRegistryService(store, snapshotStore),
+      briefAdapterService: new BriefAdapterService(store, snapshotStore),
     };
 
     return services;

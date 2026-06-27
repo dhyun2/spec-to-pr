@@ -2,6 +2,7 @@ import packageJson from "../../package.json" with { type: "json" };
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
+import { AnalyzeBriefSourceInputSchema } from "../application/brief-adapter-service.js";
 import { RedactTextInputSchema } from "../application/policy-service.js";
 import {
   CreateIntakeManifestInputSchema,
@@ -18,6 +19,7 @@ import {
   RegisterFileSourceInputSchema,
   SourceRegistrationResultSchema,
 } from "../application/source-registry-service.js";
+import { BriefAnalysisResultSchema } from "../brief/brief-analysis.js";
 import {
   BlockStageInputSchema,
   CompleteStageInputSchema,
@@ -107,6 +109,7 @@ const TOOL_NAMES = [
   "list_project_profiles",
   "register_file_source",
   "get_source_snapshot",
+  "analyze_brief_source",
 ] as const;
 
 export function createKernelServer(servicesProvider: ServicesProvider): McpServer {
@@ -426,6 +429,36 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
 
         return {
           text: `Loaded source snapshot ${structuredContent.canonicalDigest}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "analyze_brief_source",
+    {
+      title: "Analyze brief source",
+      description:
+        "Analyze a registered brief Source snapshot and extract requirement Evidence and Gaps.",
+      inputSchema: AnalyzeBriefSourceInputSchema.shape,
+      outputSchema: BriefAnalysisResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { briefAdapterService } = await servicesProvider();
+        const structuredContent = BriefAnalysisResultSchema.parse(
+          await briefAdapterService.analyzeBriefSource(input),
+        );
+
+        return {
+          text: structuredContent.duplicate
+            ? `Brief source ${structuredContent.sourceId} was already analyzed.`
+            : `Analyzed brief source ${structuredContent.sourceId}: ${structuredContent.evidenceAdded} evidence, ${structuredContent.gapsAdded} gaps.`,
           structuredContent,
         };
       }),
