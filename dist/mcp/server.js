@@ -333,10 +333,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path6) {
-  if (!path6)
+function getElementAtPath(obj, path8) {
+  if (!path8)
     return obj;
-  return path6.reduce((acc, key) => acc?.[key], obj);
+  return path8.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -664,11 +664,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path6, issues) {
+function prefixIssues(path8, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path6);
+    iss.path.unshift(path8);
     return iss;
   });
 }
@@ -886,16 +886,16 @@ function flattenError(error51, mapper = (issue2) => issue2.message) {
 }
 function formatError(error51, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error52, path6 = []) => {
+  const processError = (error52, path8 = []) => {
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path6, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path8, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
       } else {
-        const fullpath = [...path6, ...issue2.path];
+        const fullpath = [...path8, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -922,17 +922,17 @@ function formatError(error51, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error51, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error52, path6 = []) => {
+  const processError = (error52, path8 = []) => {
     var _a3, _b;
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path6, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path8, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
       } else {
-        const fullpath = [...path6, ...issue2.path];
+        const fullpath = [...path8, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -964,8 +964,8 @@ function treeifyError(error51, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path6 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path6) {
+  const path8 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path8) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -14468,13 +14468,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path6 = ref.slice(1).split("/").filter(Boolean);
-  if (path6.length === 0) {
+  const path8 = ref.slice(1).split("/").filter(Boolean);
+  if (path8.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path6[0] === defsKey) {
-    const key = path6[1];
+  if (path8[0] === defsKey) {
+    const key = path8[1];
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -17316,8 +17316,8 @@ var init_parseUtil = __esm({
     init_errors3();
     init_en2();
     makeIssue = (params) => {
-      const { data, path: path6, errorMaps, issueData } = params;
-      const fullPath = [...path6, ...issueData.path || []];
+      const { data, path: path8, errorMaps, issueData } = params;
+      const fullPath = [...path8, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -17600,11 +17600,11 @@ var init_types2 = __esm({
     init_parseUtil();
     init_util2();
     ParseInputLazyPath = class {
-      constructor(parent, value, path6, key) {
+      constructor(parent, value, path8, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path6;
+        this._path = path8;
         this._key = key;
       }
       get path() {
@@ -26948,8 +26948,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path6) {
-      let input = path6;
+    function removeDotSegments(path8) {
+      let input = path8;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -27201,8 +27201,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path6, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path6 && path6 !== "/" ? path6 : void 0;
+        const [path8, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path8 && path8 !== "/" ? path8 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -32997,6 +32997,814 @@ var init_scalars = __esm({
   }
 });
 
+// src/profile/contracts.ts
+var IntakeSourceKindSchema, IntakeSourceLocatorSchema, IntakeSourceInputSchema, IntakeManifestSchema, ConfidenceSchema, ProfileFindingSeveritySchema, ProfileFindingSchema, PackageManagerSchema, GitProfileSchema, PackageManagerProfileSchema, WorkspacePackageSchema, WorkspaceProfileSchema, FrameworkProfileSchema, FsdLayerSchema, FsdProfileSchema, DesignSystemProfileSchema, ApiGenerationProfileSchema, ProjectProfileSchema;
+var init_contracts = __esm({
+  "src/profile/contracts.ts"() {
+    "use strict";
+    init_zod();
+    init_ids();
+    init_scalars();
+    IntakeSourceKindSchema = external_exports.enum(["brief", "figma", "openapi"]);
+    IntakeSourceLocatorSchema = external_exports.discriminatedUnion("type", [
+      external_exports.object({
+        type: external_exports.literal("file"),
+        path: RelativePathSchema
+      }).strict(),
+      external_exports.object({
+        type: external_exports.literal("url"),
+        url: external_exports.string().url()
+      }).strict(),
+      external_exports.object({
+        type: external_exports.literal("figma"),
+        url: external_exports.string().url(),
+        fileKey: external_exports.string().trim().min(1).optional(),
+        nodeId: external_exports.string().trim().min(1).optional()
+      }).strict()
+    ]);
+    IntakeSourceInputSchema = external_exports.object({
+      kind: IntakeSourceKindSchema,
+      locator: IntakeSourceLocatorSchema,
+      required: external_exports.boolean().default(true),
+      label: external_exports.string().trim().min(1).max(200).optional()
+    }).strict();
+    IntakeManifestSchema = external_exports.object({
+      runId: RunIdSchema,
+      projectRoot: external_exports.string().trim().min(1),
+      baseCommit: GitObjectIdSchema.optional(),
+      targetWorkspace: external_exports.string().trim().min(1).optional(),
+      language: external_exports.enum(["ko", "en"]).default("ko"),
+      requestedScope: external_exports.string().trim().min(1).max(4e3).optional(),
+      sources: external_exports.array(IntakeSourceInputSchema).default([]),
+      createdAt: IsoDateTimeSchema
+    }).strict();
+    ConfidenceSchema = external_exports.enum(["high", "medium", "low", "unknown"]);
+    ProfileFindingSeveritySchema = external_exports.enum(["info", "warning", "risk", "gap"]);
+    ProfileFindingSchema = external_exports.object({
+      severity: ProfileFindingSeveritySchema,
+      code: external_exports.string().trim().min(1).max(100),
+      message: external_exports.string().trim().min(1).max(2e3),
+      evidence: external_exports.array(external_exports.string().trim().min(1)).default([])
+    }).strict();
+    PackageManagerSchema = external_exports.enum(["pnpm", "npm", "yarn", "bun", "unknown"]);
+    GitProfileSchema = external_exports.object({
+      isGitRepository: external_exports.boolean(),
+      root: external_exports.string().trim().min(1).optional(),
+      headCommit: GitObjectIdSchema.optional(),
+      currentBranch: external_exports.string().trim().min(1).optional(),
+      isDirty: external_exports.boolean().optional(),
+      isShallow: external_exports.boolean().optional()
+    }).strict();
+    PackageManagerProfileSchema = external_exports.object({
+      name: PackageManagerSchema,
+      confidence: ConfidenceSchema,
+      lockfiles: external_exports.array(RelativePathSchema).default([]),
+      packageJsonPath: RelativePathSchema.optional(),
+      packageManagerField: external_exports.string().trim().min(1).optional(),
+      installCommand: external_exports.string().trim().min(1).optional(),
+      runCommandPrefix: external_exports.string().trim().min(1).optional()
+    }).strict();
+    WorkspacePackageSchema = external_exports.object({
+      name: external_exports.string().trim().min(1).optional(),
+      path: RelativePathSchema,
+      packageJsonPath: RelativePathSchema,
+      private: external_exports.boolean().optional(),
+      scripts: external_exports.record(external_exports.string(), external_exports.string()).default({})
+    }).strict();
+    WorkspaceProfileSchema = external_exports.object({
+      isMonorepo: external_exports.boolean(),
+      rootPackageJson: RelativePathSchema.optional(),
+      patterns: external_exports.array(external_exports.string().trim().min(1)).default([]),
+      packages: external_exports.array(WorkspacePackageSchema).default([])
+    }).strict();
+    FrameworkProfileSchema = external_exports.object({
+      primary: external_exports.enum(["react", "next", "vue", "nuxt", "svelte", "angular", "node", "unknown"]).default("unknown"),
+      buildTool: external_exports.enum(["vite", "next", "webpack", "rspack", "turbo", "tsup", "unknown"]).default("unknown"),
+      testRunner: external_exports.enum(["vitest", "jest", "playwright", "cypress", "unknown"]).default("unknown"),
+      language: external_exports.enum(["typescript", "javascript", "mixed", "unknown"]).default("unknown"),
+      confidence: ConfidenceSchema,
+      evidence: external_exports.array(external_exports.string().trim().min(1)).default([])
+    }).strict();
+    FsdLayerSchema = external_exports.enum(["app", "pages", "widgets", "features", "entities", "shared"]);
+    FsdProfileSchema = external_exports.object({
+      detected: external_exports.boolean(),
+      confidence: ConfidenceSchema,
+      rootCandidates: external_exports.array(RelativePathSchema).default([]),
+      presentLayers: external_exports.array(FsdLayerSchema).default([])
+    }).strict();
+    DesignSystemProfileSchema = external_exports.object({
+      detected: external_exports.boolean(),
+      confidence: ConfidenceSchema,
+      componentRoots: external_exports.array(RelativePathSchema).default([]),
+      tokenFiles: external_exports.array(RelativePathSchema).default([]),
+      evidence: external_exports.array(external_exports.string().trim().min(1)).default([])
+    }).strict();
+    ApiGenerationProfileSchema = external_exports.object({
+      detected: external_exports.boolean(),
+      confidence: ConfidenceSchema,
+      generatorScripts: external_exports.array(external_exports.string().trim().min(1)).default([]),
+      generatedClientRoots: external_exports.array(RelativePathSchema).default([]),
+      openapiSourceCandidates: external_exports.array(RelativePathSchema).default([]),
+      evidence: external_exports.array(external_exports.string().trim().min(1)).default([])
+    }).strict();
+    ProjectProfileSchema = external_exports.object({
+      runId: RunIdSchema,
+      projectRoot: external_exports.string().trim().min(1),
+      profiledAt: IsoDateTimeSchema,
+      profileArtifactId: ArtifactIdSchema.optional(),
+      git: GitProfileSchema,
+      packageManager: PackageManagerProfileSchema,
+      workspace: WorkspaceProfileSchema,
+      framework: FrameworkProfileSchema,
+      fsd: FsdProfileSchema,
+      designSystem: DesignSystemProfileSchema,
+      apiGeneration: ApiGenerationProfileSchema,
+      findings: external_exports.array(ProfileFindingSchema).default([])
+    }).strict();
+  }
+});
+
+// src/profile/git-detector.ts
+async function detectGit(probe) {
+  const topLevel = await probe.run("git", ["rev-parse", "--show-toplevel"]);
+  if (!topLevel.ok) {
+    return GitProfileSchema.parse({
+      isGitRepository: false
+    });
+  }
+  const head = await probe.run("git", ["rev-parse", "HEAD"]);
+  const branch = await probe.run("git", ["branch", "--show-current"]);
+  const dirty = await probe.run("git", ["status", "--porcelain"]);
+  const shallow = await probe.run("git", ["rev-parse", "--is-shallow-repository"]);
+  return GitProfileSchema.parse({
+    isGitRepository: true,
+    root: topLevel.stdout.trim(),
+    ...head.ok ? { headCommit: head.stdout.trim() } : {},
+    ...branch.ok && branch.stdout.trim() !== "" ? { currentBranch: branch.stdout.trim() } : {},
+    ...dirty.ok ? { isDirty: dirty.stdout.trim().length > 0 } : {},
+    ...shallow.ok ? { isShallow: shallow.stdout.trim() === "true" } : {}
+  });
+}
+var init_git_detector = __esm({
+  "src/profile/git-detector.ts"() {
+    "use strict";
+    init_contracts();
+  }
+});
+
+// src/profile/package-manager-detector.ts
+async function detectPackageManager(probe, findings) {
+  const presentLockfiles = [];
+  for (const [, lockfile] of LOCKFILES) {
+    if (await probe.exists(lockfile)) {
+      presentLockfiles.push(lockfile);
+    }
+  }
+  const packageJson = await readPackageJson(probe, "package.json");
+  const packageManagerField = typeof packageJson?.packageManager === "string" ? packageJson.packageManager : void 0;
+  const detectedByField = detectFromPackageManagerField(packageManagerField);
+  const detectedByLockfile = detectFromLockfiles(presentLockfiles);
+  const candidates = new Set(
+    [detectedByField, detectedByLockfile].filter(
+      (value) => value !== void 0
+    )
+  );
+  if (candidates.size > 1) {
+    findings.push({
+      severity: "warning",
+      code: "PACKAGE_MANAGER_CONFLICT",
+      message: "Multiple package manager signals were found.",
+      evidence: [
+        `packageManager=${packageManagerField ?? "none"}`,
+        `lockfiles=${presentLockfiles.join(", ")}`
+      ]
+    });
+  }
+  const name = detectedByField ?? detectedByLockfile ?? "unknown";
+  return PackageManagerProfileSchema.parse({
+    name,
+    confidence: name === "unknown" ? "unknown" : candidates.size > 1 ? "medium" : "high",
+    lockfiles: presentLockfiles,
+    ...packageJson === void 0 ? {} : { packageJsonPath: "package.json" },
+    ...packageManagerField === void 0 ? {} : { packageManagerField },
+    ...installCommand(name) === void 0 ? {} : { installCommand: installCommand(name) },
+    ...runCommandPrefix(name) === void 0 ? {} : { runCommandPrefix: runCommandPrefix(name) }
+  });
+}
+async function readPackageJson(probe, relativePath) {
+  const value = await probe.readJson(relativePath);
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return void 0;
+  }
+  return value;
+}
+function detectFromPackageManagerField(value) {
+  if (value === void 0) {
+    return void 0;
+  }
+  if (value.startsWith("pnpm@")) return "pnpm";
+  if (value.startsWith("npm@")) return "npm";
+  if (value.startsWith("yarn@")) return "yarn";
+  if (value.startsWith("bun@")) return "bun";
+  return void 0;
+}
+function detectFromLockfiles(lockfiles) {
+  if (lockfiles.includes("pnpm-lock.yaml")) return "pnpm";
+  if (lockfiles.includes("package-lock.json")) return "npm";
+  if (lockfiles.includes("yarn.lock")) return "yarn";
+  if (lockfiles.includes("bun.lockb") || lockfiles.includes("bun.lock")) return "bun";
+  return void 0;
+}
+function installCommand(name) {
+  switch (name) {
+    case "pnpm":
+      return "pnpm install";
+    case "npm":
+      return "npm install";
+    case "yarn":
+      return "yarn install";
+    case "bun":
+      return "bun install";
+    default:
+      return void 0;
+  }
+}
+function runCommandPrefix(name) {
+  switch (name) {
+    case "pnpm":
+      return "pnpm";
+    case "npm":
+      return "npm run";
+    case "yarn":
+      return "yarn";
+    case "bun":
+      return "bun run";
+    default:
+      return void 0;
+  }
+}
+var LOCKFILES;
+var init_package_manager_detector = __esm({
+  "src/profile/package-manager-detector.ts"() {
+    "use strict";
+    init_contracts();
+    LOCKFILES = [
+      ["pnpm", "pnpm-lock.yaml"],
+      ["npm", "package-lock.json"],
+      ["yarn", "yarn.lock"],
+      ["bun", "bun.lockb"],
+      ["bun", "bun.lock"]
+    ];
+  }
+});
+
+// src/profile/probe.ts
+import { execFile } from "child_process";
+import { access, readdir, readFile, realpath as realpath2, stat as stat2 } from "fs/promises";
+import path3 from "path";
+import { promisify } from "util";
+async function createProjectProbe(projectRoot) {
+  const realRoot = await realpath2(projectRoot);
+  const metadata = await stat2(realRoot);
+  if (!metadata.isDirectory()) {
+    throw new Error(`Project root is not a directory: ${realRoot}`);
+  }
+  async function resolveInside(relativePath) {
+    const candidate = path3.resolve(realRoot, relativePath);
+    const realCandidate = await realpathOrParent(candidate);
+    if (!isInside(realRoot, realCandidate)) {
+      throw new Error(`Path escapes project root: ${relativePath}`);
+    }
+    return candidate;
+  }
+  const probe = {
+    root: projectRoot,
+    realRoot,
+    async exists(relativePath) {
+      const absolute = await resolveInside(relativePath);
+      try {
+        await access(absolute);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    async readText(relativePath, maxBytes = 1024 * 1024) {
+      const absolute = await resolveInside(relativePath);
+      try {
+        const metadata2 = await stat2(absolute);
+        if (!metadata2.isFile() || metadata2.size > maxBytes) {
+          return void 0;
+        }
+        return await readFile(absolute, "utf8");
+      } catch {
+        return void 0;
+      }
+    },
+    async readJson(relativePath, maxBytes = 1024 * 1024) {
+      const text = await probe.readText(relativePath, maxBytes);
+      if (text === void 0) {
+        return void 0;
+      }
+      try {
+        return JSON.parse(text);
+      } catch {
+        return void 0;
+      }
+    },
+    async list(relativePath) {
+      const absolute = await resolveInside(relativePath);
+      try {
+        return await readdir(absolute);
+      } catch {
+        return [];
+      }
+    },
+    async run(command, args, options = {}) {
+      try {
+        const result = await execFileAsync(command, args, {
+          cwd: realRoot,
+          timeout: options.timeoutMs ?? 5e3,
+          maxBuffer: 1024 * 1024,
+          shell: false
+        });
+        return {
+          ok: true,
+          stdout: result.stdout,
+          stderr: result.stderr
+        };
+      } catch (error51) {
+        const err = error51;
+        return {
+          ok: false,
+          stdout: err.stdout ?? "",
+          stderr: err.stderr ?? "",
+          ...typeof err.code === "number" ? { exitCode: err.code } : {}
+        };
+      }
+    },
+    toRelative(absolutePath) {
+      return normalizeRelative(path3.relative(realRoot, absolutePath));
+    },
+    resolveInside
+  };
+  return probe;
+}
+function normalizeRelative(value) {
+  return value.split(path3.sep).join("/");
+}
+function isInside(root, candidate) {
+  const relative = path3.relative(root, candidate);
+  return relative === "" || !relative.startsWith("..") && !path3.isAbsolute(relative);
+}
+async function realpathOrParent(candidate) {
+  try {
+    return await realpath2(candidate);
+  } catch {
+    return await realpath2(path3.dirname(candidate));
+  }
+}
+var execFileAsync;
+var init_probe = __esm({
+  "src/profile/probe.ts"() {
+    "use strict";
+    execFileAsync = promisify(execFile);
+  }
+});
+
+// src/profile/workspace-detector.ts
+async function detectWorkspace(probe, findings) {
+  const rootPackageJson = await readPackageJson2(probe, "package.json");
+  const patterns = /* @__PURE__ */ new Set();
+  const workspaceField = rootPackageJson?.workspaces;
+  if (Array.isArray(workspaceField)) {
+    workspaceField.forEach((item) => {
+      if (typeof item === "string") {
+        patterns.add(item);
+      }
+    });
+  }
+  if (typeof workspaceField === "object" && workspaceField !== null && !Array.isArray(workspaceField) && Array.isArray(workspaceField.packages)) {
+    workspaceField.packages.forEach((item) => {
+      if (typeof item === "string") {
+        patterns.add(item);
+      }
+    });
+  }
+  const pnpmWorkspace = await probe.readText("pnpm-workspace.yaml");
+  if (pnpmWorkspace !== void 0) {
+    extractPnpmWorkspacePatterns(pnpmWorkspace).forEach((pattern) => patterns.add(pattern));
+  }
+  const packages = await discoverWorkspacePackages(probe, [...patterns]);
+  if (patterns.size > 0 && packages.length === 0) {
+    findings.push({
+      severity: "warning",
+      code: "WORKSPACE_PATTERNS_WITH_NO_PACKAGES",
+      message: "Workspace patterns were detected but no package.json files were found.",
+      evidence: [...patterns]
+    });
+  }
+  return WorkspaceProfileSchema.parse({
+    isMonorepo: patterns.size > 0 || packages.length > 1,
+    ...rootPackageJson === void 0 ? {} : { rootPackageJson: "package.json" },
+    patterns: [...patterns],
+    packages
+  });
+}
+async function readPackageJson2(probe, relativePath) {
+  const value = await probe.readJson(relativePath);
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return void 0;
+  }
+  return value;
+}
+function extractPnpmWorkspacePatterns(text) {
+  const result = [];
+  const lines = text.split(/\r?\n/);
+  let inPackages = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed === "packages:") {
+      inPackages = true;
+      continue;
+    }
+    if (inPackages && trimmed.startsWith("-")) {
+      result.push(trimmed.replace(/^-/, "").trim().replace(/^["']|["']$/g, ""));
+      continue;
+    }
+    if (inPackages && trimmed !== "" && !line.startsWith(" ")) {
+      break;
+    }
+  }
+  return result;
+}
+async function discoverWorkspacePackages(probe, patterns) {
+  const roots = /* @__PURE__ */ new Set();
+  for (const pattern of patterns) {
+    const normalized = pattern.replace(/\/\*+$/, "");
+    if (normalized.includes("*") || normalized.startsWith("!")) {
+      continue;
+    }
+    roots.add(normalized);
+  }
+  ["apps", "packages"].forEach((item) => roots.add(item));
+  const packages = [];
+  for (const root of roots) {
+    const children = await probe.list(root);
+    for (const child of children) {
+      const packageJsonPath = `${root}/${child}/package.json`;
+      const value = await probe.readJson(packageJsonPath);
+      if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+        const object3 = value;
+        const scripts = object3.scripts;
+        packages.push({
+          ...typeof object3.name === "string" ? { name: object3.name } : {},
+          path: `${root}/${child}`,
+          packageJsonPath,
+          ...typeof object3.private === "boolean" ? { private: object3.private } : {},
+          scripts: typeof scripts === "object" && scripts !== null && !Array.isArray(scripts) ? Object.fromEntries(
+            Object.entries(scripts).filter(
+              (entry) => typeof entry[1] === "string"
+            )
+          ) : {}
+        });
+      }
+    }
+  }
+  return packages;
+}
+var init_workspace_detector = __esm({
+  "src/profile/workspace-detector.ts"() {
+    "use strict";
+    init_contracts();
+  }
+});
+
+// src/profile/project-profiler.ts
+async function profileProject(input) {
+  const probe = await createProjectProbe(input.projectRoot);
+  const findings = [];
+  const git = await detectGit(probe);
+  const packageManager = await detectPackageManager(probe, findings);
+  const workspace = await detectWorkspace(probe, findings);
+  const framework = await detectFramework(probe);
+  const fsd = await detectFsd(probe);
+  const designSystem = await detectDesignSystem(probe);
+  const apiGeneration = await detectApiGeneration(probe);
+  return ProjectProfileSchema.parse({
+    runId: input.runId,
+    projectRoot: probe.realRoot,
+    profiledAt: input.now,
+    git,
+    packageManager,
+    workspace,
+    framework,
+    fsd,
+    designSystem,
+    apiGeneration,
+    findings
+  });
+}
+async function detectFramework(probe) {
+  const rootPackage = await readPackageJson3(probe, "package.json");
+  const deps = dependencyNames(rootPackage);
+  const evidence = [];
+  const hasNext = deps.has("next") || await probe.exists("next.config.js") || await probe.exists("next.config.mjs");
+  const hasReact = deps.has("react");
+  const hasVue = deps.has("vue");
+  const hasVite = deps.has("vite") || await probe.exists("vite.config.ts") || await probe.exists("vite.config.js") || await probe.exists("vite.config.mts");
+  const hasVitest = deps.has("vitest") || await probe.exists("vitest.config.ts");
+  const hasJest = deps.has("jest") || await probe.exists("jest.config.js") || await probe.exists("jest.config.ts");
+  const hasPlaywright = deps.has("@playwright/test") || await probe.exists("playwright.config.ts");
+  const hasTsconfig = await probe.exists("tsconfig.json");
+  if (hasNext) evidence.push("next dependency or config detected");
+  if (hasReact) evidence.push("react dependency detected");
+  if (hasVue) evidence.push("vue dependency detected");
+  if (hasVite) evidence.push("vite dependency or config detected");
+  if (hasVitest) evidence.push("vitest dependency or config detected");
+  if (hasJest) evidence.push("jest dependency or config detected");
+  if (hasPlaywright) evidence.push("playwright dependency or config detected");
+  if (hasTsconfig) evidence.push("tsconfig.json detected");
+  return FrameworkProfileSchema.parse({
+    primary: hasNext ? "next" : hasReact ? "react" : hasVue ? "vue" : "unknown",
+    buildTool: hasNext ? "next" : hasVite ? "vite" : deps.has("webpack") ? "webpack" : "unknown",
+    testRunner: hasVitest ? "vitest" : hasJest ? "jest" : hasPlaywright ? "playwright" : "unknown",
+    language: hasTsconfig ? "typescript" : "unknown",
+    confidence: evidence.length === 0 ? "unknown" : "medium",
+    evidence
+  });
+}
+async function detectFsd(probe) {
+  const rootCandidates = ["src", "apps/web/src", "apps/rangepro/src"];
+  const layers = ["app", "pages", "widgets", "features", "entities", "shared"];
+  const detectedRoots = [];
+  const presentLayers = /* @__PURE__ */ new Set();
+  for (const root of rootCandidates) {
+    let count = 0;
+    for (const layer of layers) {
+      if (await probe.exists(`${root}/${layer}`)) {
+        count += 1;
+        presentLayers.add(layer);
+      }
+    }
+    if (count >= 3) {
+      detectedRoots.push(root);
+    }
+  }
+  return FsdProfileSchema.parse({
+    detected: detectedRoots.length > 0,
+    confidence: detectedRoots.length > 0 ? "medium" : "unknown",
+    rootCandidates: detectedRoots,
+    presentLayers: [...presentLayers]
+  });
+}
+async function detectDesignSystem(probe) {
+  const componentRoots = [
+    "src/shared/ui",
+    "src/components",
+    "packages/ui/src",
+    "apps/rangepro/src/shared/ui"
+  ];
+  const tokenFiles = [
+    "src/shared/config/tokens.ts",
+    "src/shared/styles/tokens.css",
+    "src/styles/tokens.css",
+    "tailwind.config.ts",
+    "tailwind.config.js"
+  ];
+  const existingComponentRoots = [];
+  const existingTokenFiles = [];
+  for (const candidate of componentRoots) {
+    if (await probe.exists(candidate)) {
+      existingComponentRoots.push(candidate);
+    }
+  }
+  for (const candidate of tokenFiles) {
+    if (await probe.exists(candidate)) {
+      existingTokenFiles.push(candidate);
+    }
+  }
+  return DesignSystemProfileSchema.parse({
+    detected: existingComponentRoots.length > 0 || existingTokenFiles.length > 0,
+    confidence: existingComponentRoots.length > 0 ? "medium" : existingTokenFiles.length > 0 ? "low" : "unknown",
+    componentRoots: existingComponentRoots,
+    tokenFiles: existingTokenFiles,
+    evidence: [...existingComponentRoots, ...existingTokenFiles]
+  });
+}
+async function detectApiGeneration(probe) {
+  const rootPackage = await readPackageJson3(probe, "package.json");
+  const scripts = typeof rootPackage?.scripts === "object" && rootPackage.scripts !== null && !Array.isArray(rootPackage.scripts) ? rootPackage.scripts : {};
+  const generatorScripts = Object.entries(scripts).filter(([name, value]) => {
+    const text = `${name} ${String(value)}`.toLowerCase();
+    return text.includes("openapi") || text.includes("api:generate") || text.includes("swagger") || text.includes("orval");
+  }).map(([name]) => name);
+  const generatedClientCandidates = [
+    "src/shared/api/generated",
+    "apps/rangepro/src/shared/api/generated",
+    "src/api/generated",
+    "packages/api-client/src/generated"
+  ];
+  const openapiCandidates = [
+    "openapi.yaml",
+    "openapi.yml",
+    "openapi.json",
+    "docs/openapi.yaml",
+    "apps/rangepro/openapi.yaml"
+  ];
+  const generatedClientRoots = [];
+  const openapiSourceCandidates = [];
+  for (const candidate of generatedClientCandidates) {
+    if (await probe.exists(candidate)) {
+      generatedClientRoots.push(candidate);
+    }
+  }
+  for (const candidate of openapiCandidates) {
+    if (await probe.exists(candidate)) {
+      openapiSourceCandidates.push(candidate);
+    }
+  }
+  return ApiGenerationProfileSchema.parse({
+    detected: generatorScripts.length > 0 || generatedClientRoots.length > 0 || openapiSourceCandidates.length > 0,
+    confidence: generatorScripts.length > 0 ? "medium" : generatedClientRoots.length > 0 ? "low" : "unknown",
+    generatorScripts,
+    generatedClientRoots,
+    openapiSourceCandidates,
+    evidence: [...generatorScripts, ...generatedClientRoots, ...openapiSourceCandidates]
+  });
+}
+async function readPackageJson3(probe, relativePath) {
+  const value = await probe.readJson(relativePath);
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return void 0;
+  }
+  return value;
+}
+function dependencyNames(packageJson) {
+  const names = /* @__PURE__ */ new Set();
+  if (packageJson === void 0) {
+    return names;
+  }
+  for (const field of [
+    "dependencies",
+    "devDependencies",
+    "peerDependencies",
+    "optionalDependencies"
+  ]) {
+    const value = packageJson[field];
+    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+      Object.keys(value).forEach((name) => names.add(name));
+    }
+  }
+  return names;
+}
+var init_project_profiler = __esm({
+  "src/profile/project-profiler.ts"() {
+    "use strict";
+    init_contracts();
+    init_git_detector();
+    init_package_manager_detector();
+    init_probe();
+    init_workspace_detector();
+  }
+});
+
+// src/profile/profile-store.ts
+import { mkdir, readdir as readdir2, readFile as readFile2, writeFile } from "fs/promises";
+import path4 from "path";
+var JsonProfileStore;
+var init_profile_store = __esm({
+  "src/profile/profile-store.ts"() {
+    "use strict";
+    init_contracts();
+    JsonProfileStore = class {
+      constructor(directory) {
+        this.directory = directory;
+      }
+      directory;
+      async saveManifest(manifest) {
+        await mkdir(this.directory, {
+          recursive: true,
+          mode: 448
+        });
+        await writeFile(
+          path4.join(this.directory, `${manifest.runId}.intake.json`),
+          `${JSON.stringify(IntakeManifestSchema.parse(manifest), null, 2)}
+`,
+          {
+            encoding: "utf8",
+            mode: 384
+          }
+        );
+      }
+      async getManifest(runId) {
+        const text = await readFile2(path4.join(this.directory, `${runId}.intake.json`), "utf8");
+        return IntakeManifestSchema.parse(JSON.parse(text));
+      }
+      async saveProfile(profile) {
+        await mkdir(this.directory, {
+          recursive: true,
+          mode: 448
+        });
+        await writeFile(
+          path4.join(this.directory, `${profile.runId}.profile.json`),
+          `${JSON.stringify(ProjectProfileSchema.parse(profile), null, 2)}
+`,
+          {
+            encoding: "utf8",
+            mode: 384
+          }
+        );
+      }
+      async getProfile(runId) {
+        const text = await readFile2(path4.join(this.directory, `${runId}.profile.json`), "utf8");
+        return ProjectProfileSchema.parse(JSON.parse(text));
+      }
+      async listProfiles() {
+        await mkdir(this.directory, {
+          recursive: true,
+          mode: 448
+        });
+        const files = await readdir2(this.directory);
+        const profileFiles = files.filter((file2) => file2.endsWith(".profile.json"));
+        const profiles = await Promise.all(
+          profileFiles.map(async (file2) => {
+            const text = await readFile2(path4.join(this.directory, file2), "utf8");
+            return ProjectProfileSchema.parse(JSON.parse(text));
+          })
+        );
+        return profiles.sort((left, right) => right.profiledAt.localeCompare(left.profiledAt));
+      }
+    };
+  }
+});
+
+// src/application/profile-service.ts
+var CreateIntakeManifestInputSchema, InspectProjectInputSchema, GetProjectProfileInputSchema, ProjectProfileService;
+var init_profile_service = __esm({
+  "src/application/profile-service.ts"() {
+    "use strict";
+    init_zod();
+    init_contracts();
+    init_project_profiler();
+    init_profile_store();
+    init_ids();
+    init_scalars();
+    CreateIntakeManifestInputSchema = external_exports.object({
+      runId: RunIdSchema,
+      projectRoot: external_exports.string().trim().min(1),
+      baseCommit: GitObjectIdSchema.optional(),
+      targetWorkspace: external_exports.string().trim().min(1).optional(),
+      language: external_exports.enum(["ko", "en"]).default("ko"),
+      requestedScope: external_exports.string().trim().min(1).max(4e3).optional(),
+      sources: external_exports.array(IntakeSourceInputSchema).default([])
+    }).strict();
+    InspectProjectInputSchema = external_exports.object({
+      runId: RunIdSchema,
+      projectRoot: external_exports.string().trim().min(1)
+    }).strict();
+    GetProjectProfileInputSchema = external_exports.object({
+      runId: RunIdSchema
+    }).strict();
+    ProjectProfileService = class {
+      constructor(store, now = () => (/* @__PURE__ */ new Date()).toISOString()) {
+        this.store = store;
+        this.now = now;
+      }
+      store;
+      now;
+      async createIntakeManifest(rawInput) {
+        const input = CreateIntakeManifestInputSchema.parse(rawInput);
+        const manifest = IntakeManifestSchema.parse({
+          ...input,
+          createdAt: this.now()
+        });
+        await this.store.saveManifest(manifest);
+        return manifest;
+      }
+      async inspectProject(rawInput) {
+        const input = InspectProjectInputSchema.parse(rawInput);
+        const profile = ProjectProfileSchema.parse(
+          await profileProject({
+            runId: input.runId,
+            projectRoot: input.projectRoot,
+            now: this.now()
+          })
+        );
+        await this.store.saveProfile(profile);
+        return profile;
+      }
+      async getProjectProfile(rawInput) {
+        const input = GetProjectProfileInputSchema.parse(rawInput);
+        return this.store.getProfile(input.runId);
+      }
+      async listProjectProfiles() {
+        return this.store.listProfiles();
+      }
+    };
+  }
+});
+
 // src/run/stages.ts
 function createInitialStageStates() {
   return RUN_STAGE_NAMES.map(
@@ -33737,11 +34545,11 @@ function addUniqueValueIssues(collectionName, values, context) {
     seen.add(value);
   });
 }
-function addReferenceIssue(context, path6, reference) {
+function addReferenceIssue(context, path8, reference) {
   context.addIssue({
     code: "custom",
     message: `Unknown ${reference.kind} reference ${reference.id}`,
-    path: path6
+    path: path8
   });
 }
 var RunStatusSchema, RunManifestSchema, RunSummarySchema, CreateInitialRunInputSchema;
@@ -33990,15 +34798,15 @@ var init_run2 = __esm({
 
 // src/application/run-service.ts
 import { randomUUID } from "crypto";
-import { realpath as realpath2, stat as stat2 } from "fs/promises";
-import path3 from "path";
+import { realpath as realpath3, stat as stat3 } from "fs/promises";
+import path5 from "path";
 function createRunId() {
   return RunIdSchema.parse(`run_${randomUUID().replaceAll("-", "")}`);
 }
 async function canonicalDirectory(rawPath) {
-  const absolute = path3.resolve(rawPath);
-  const canonical = await realpath2(absolute);
-  const metadata = await stat2(canonical);
+  const absolute = path5.resolve(rawPath);
+  const canonical = await realpath3(absolute);
+  const metadata = await stat3(canonical);
   if (!metadata.isDirectory()) {
     throw new Error(`Project root is not a directory: ${canonical}`);
   }
@@ -34732,6 +35540,92 @@ function createKernelServer(servicesProvider) {
     })
   );
   server.registerTool(
+    "create_intake_manifest",
+    {
+      title: "Create intake manifest",
+      description: "Normalize user-provided brief, Figma, OpenAPI, and project inputs into an IntakeManifest.",
+      inputSchema: CreateIntakeManifestInputSchema.shape,
+      outputSchema: IntakeManifestSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { profileService } = await servicesProvider();
+      const structuredContent = await profileService.createIntakeManifest(input);
+      return {
+        text: `Created intake manifest for run ${structuredContent.runId}.`,
+        structuredContent
+      };
+    })
+  );
+  server.registerTool(
+    "inspect_project",
+    {
+      title: "Inspect project",
+      description: "Inspect the target repository and create a ProjectProfile.",
+      inputSchema: InspectProjectInputSchema.shape,
+      outputSchema: ProjectProfileSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: false
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { profileService } = await servicesProvider();
+      const structuredContent = await profileService.inspectProject(input);
+      return {
+        text: `Created project profile for run ${structuredContent.runId}.`,
+        structuredContent
+      };
+    })
+  );
+  server.registerTool(
+    "get_project_profile",
+    {
+      title: "Get project profile",
+      description: "Load a previously created ProjectProfile.",
+      inputSchema: GetProjectProfileInputSchema.shape,
+      outputSchema: ProjectProfileSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { profileService } = await servicesProvider();
+      const structuredContent = await profileService.getProjectProfile(input);
+      return {
+        text: `Loaded project profile for run ${structuredContent.runId}.`,
+        structuredContent
+      };
+    })
+  );
+  server.registerTool(
+    "list_project_profiles",
+    {
+      title: "List project profiles",
+      description: "List stored ProjectProfile records.",
+      inputSchema: external_exports.object({}).strict().shape,
+      outputSchema: ListProjectProfilesOutputSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true
+      }
+    },
+    async () => handleTool(async () => {
+      const { profileService } = await servicesProvider();
+      const profiles = await profileService.listProjectProfiles();
+      const structuredContent = ListProjectProfilesOutputSchema.parse({ profiles });
+      return {
+        text: `Loaded ${structuredContent.profiles.length} project profiles.`,
+        structuredContent
+      };
+    })
+  );
+  server.registerTool(
     "create_run",
     {
       title: "Create run",
@@ -34976,7 +35870,7 @@ function packageMetadata() {
     version: package_default.version
   });
 }
-var CONTRACT_VERSION, SERVER_NAME, MINIMUM_NODE_MAJOR, PackageMetadataSchema, KernelInfoSchema, KernelPingInputSchema, KernelPingOutputSchema, ListRunsOutputSchema, PolicyInfoOutputSchema, TOOL_NAMES;
+var CONTRACT_VERSION, SERVER_NAME, MINIMUM_NODE_MAJOR, PackageMetadataSchema, KernelInfoSchema, KernelPingInputSchema, KernelPingOutputSchema, ListRunsOutputSchema, PolicyInfoOutputSchema, ListProjectProfilesOutputSchema, TOOL_NAMES;
 var init_create_server = __esm({
   "src/mcp/create-server.ts"() {
     "use strict";
@@ -34984,8 +35878,10 @@ var init_create_server = __esm({
     init_mcp();
     init_zod();
     init_policy_service();
+    init_profile_service();
     init_run_service();
     init_stage_service();
+    init_contracts();
     init_run2();
     init_command_policy();
     init_path_policy();
@@ -35024,6 +35920,9 @@ var init_create_server = __esm({
       policyVersion: external_exports.literal("0.5.0"),
       capabilities: external_exports.array(external_exports.string())
     });
+    ListProjectProfilesOutputSchema = external_exports.object({
+      profiles: external_exports.array(ProjectProfileSchema)
+    });
     TOOL_NAMES = [
       "kernel_info",
       "kernel_ping",
@@ -35040,7 +35939,11 @@ var init_create_server = __esm({
       "policy_info",
       "validate_path",
       "classify_command",
-      "redact_text"
+      "redact_text",
+      "create_intake_manifest",
+      "inspect_project",
+      "get_project_profile",
+      "list_project_profiles"
     ];
   }
 });
@@ -35084,7 +35987,7 @@ __export(sqlite_run_store_exports, {
   SqliteRunStore: () => SqliteRunStore
 });
 import { mkdirSync } from "fs";
-import path4 from "path";
+import path6 from "path";
 import { createRequire } from "module";
 function loadSqliteModule() {
   return require2("node:sqlite");
@@ -35126,7 +36029,7 @@ var init_sqlite_run_store = __esm({
     SqliteRunStore = class {
       database;
       constructor(databasePath) {
-        mkdirSync(path4.dirname(databasePath), {
+        mkdirSync(path6.dirname(databasePath), {
           recursive: true,
           mode: 448
         });
@@ -35362,7 +36265,7 @@ __export(run_service_provider_exports, {
   createLazyServicesProvider: () => createLazyServicesProvider
 });
 import os from "os";
-import path5 from "path";
+import path7 from "path";
 function createLazyServicesProvider() {
   let services;
   return async () => {
@@ -35370,28 +36273,33 @@ function createLazyServicesProvider() {
       return services;
     }
     const { SqliteRunStore: SqliteRunStore2 } = await Promise.resolve().then(() => (init_sqlite_run_store(), sqlite_run_store_exports));
-    const store = new SqliteRunStore2(resolveDatabasePath());
+    const dataDirectory = resolveDataDirectory();
+    const store = new SqliteRunStore2(path7.join(dataDirectory, "runs.sqlite3"));
     services = {
       runService: new RunService(store, {
         pluginVersion: package_default.version
       }),
       stageService: new StageService(store),
-      policyService: new PolicyService()
+      policyService: new PolicyService(),
+      profileService: new ProjectProfileService(
+        new JsonProfileStore(path7.join(dataDirectory, "profiles"))
+      )
     };
     return services;
   };
 }
-function resolveDatabasePath() {
-  const dataDirectory = process.env.SPEC_TO_PR_DATA_DIR ?? path5.join(os.tmpdir(), "spec-to-pr-plugin-data");
-  return path5.join(dataDirectory, "runs.sqlite3");
+function resolveDataDirectory() {
+  return process.env.SPEC_TO_PR_DATA_DIR ?? path7.join(os.tmpdir(), "spec-to-pr-plugin-data");
 }
 var init_run_service_provider = __esm({
   "src/mcp/run-service-provider.ts"() {
     "use strict";
     init_package();
     init_policy_service();
+    init_profile_service();
     init_run_service();
     init_stage_service();
+    init_profile_store();
   }
 });
 

@@ -4,6 +4,11 @@ import { z } from "zod";
 
 import { RedactTextInputSchema } from "../application/policy-service.js";
 import {
+  CreateIntakeManifestInputSchema,
+  GetProjectProfileInputSchema,
+  InspectProjectInputSchema,
+} from "../application/profile-service.js";
+import {
   CreateRunInputSchema,
   GetRunInputSchema,
   ListRunsInputSchema,
@@ -17,6 +22,7 @@ import {
   SkipStageInputSchema,
   StartStageInputSchema,
 } from "../application/stage-service.js";
+import { IntakeManifestSchema, ProjectProfileSchema } from "../profile/contracts.js";
 import { RunManifestSchema, RunSummarySchema } from "../run/index.js";
 import { CommandInvocationSchema } from "../security/command-policy.js";
 import { ValidateWorkspacePathInputSchema } from "../security/path-policy.js";
@@ -64,6 +70,10 @@ const PolicyInfoOutputSchema = z.object({
   capabilities: z.array(z.string()),
 });
 
+const ListProjectProfilesOutputSchema = z.object({
+  profiles: z.array(ProjectProfileSchema),
+});
+
 type ToolResult<TStructuredContent> = {
   text: string;
   structuredContent: TStructuredContent;
@@ -86,6 +96,10 @@ const TOOL_NAMES = [
   "validate_path",
   "classify_command",
   "redact_text",
+  "create_intake_manifest",
+  "inspect_project",
+  "get_project_profile",
+  "list_project_profiles",
 ] as const;
 
 export function createKernelServer(servicesProvider: ServicesProvider): McpServer {
@@ -254,6 +268,105 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
 
         return {
           text: `Redacted ${structuredContent.redactionCount} secret-like value(s).`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "create_intake_manifest",
+    {
+      title: "Create intake manifest",
+      description:
+        "Normalize user-provided brief, Figma, OpenAPI, and project inputs into an IntakeManifest.",
+      inputSchema: CreateIntakeManifestInputSchema.shape,
+      outputSchema: IntakeManifestSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { profileService } = await servicesProvider();
+        const structuredContent = await profileService.createIntakeManifest(input);
+
+        return {
+          text: `Created intake manifest for run ${structuredContent.runId}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "inspect_project",
+    {
+      title: "Inspect project",
+      description: "Inspect the target repository and create a ProjectProfile.",
+      inputSchema: InspectProjectInputSchema.shape,
+      outputSchema: ProjectProfileSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { profileService } = await servicesProvider();
+        const structuredContent = await profileService.inspectProject(input);
+
+        return {
+          text: `Created project profile for run ${structuredContent.runId}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "get_project_profile",
+    {
+      title: "Get project profile",
+      description: "Load a previously created ProjectProfile.",
+      inputSchema: GetProjectProfileInputSchema.shape,
+      outputSchema: ProjectProfileSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { profileService } = await servicesProvider();
+        const structuredContent = await profileService.getProjectProfile(input);
+
+        return {
+          text: `Loaded project profile for run ${structuredContent.runId}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "list_project_profiles",
+    {
+      title: "List project profiles",
+      description: "List stored ProjectProfile records.",
+      inputSchema: z.object({}).strict().shape,
+      outputSchema: ListProjectProfilesOutputSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async () =>
+      handleTool(async () => {
+        const { profileService } = await servicesProvider();
+        const profiles = await profileService.listProjectProfiles();
+        const structuredContent = ListProjectProfilesOutputSchema.parse({ profiles });
+
+        return {
+          text: `Loaded ${structuredContent.profiles.length} project profiles.`,
           structuredContent,
         };
       }),
