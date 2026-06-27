@@ -14,6 +14,11 @@ import {
   ListRunsInputSchema,
 } from "../application/run-service.js";
 import {
+  GetSourceSnapshotInputSchema,
+  RegisterFileSourceInputSchema,
+  SourceRegistrationResultSchema,
+} from "../application/source-registry-service.js";
+import {
   BlockStageInputSchema,
   CompleteStageInputSchema,
   FailStageInputSchema,
@@ -100,6 +105,8 @@ const TOOL_NAMES = [
   "inspect_project",
   "get_project_profile",
   "list_project_profiles",
+  "register_file_source",
+  "get_source_snapshot",
 ] as const;
 
 export function createKernelServer(servicesProvider: ServicesProvider): McpServer {
@@ -367,6 +374,58 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
 
         return {
           text: `Loaded ${structuredContent.profiles.length} project profiles.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "register_file_source",
+    {
+      title: "Register file source",
+      description:
+        "Snapshot a project file, compute its digest, and attach it as a SourceRef to a Run.",
+      inputSchema: RegisterFileSourceInputSchema.shape,
+      outputSchema: SourceRegistrationResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { sourceRegistryService } = await servicesProvider();
+        const result = await sourceRegistryService.registerFileSource(input);
+        const structuredContent = SourceRegistrationResultSchema.parse(result);
+
+        return {
+          text: result.duplicate
+            ? `Source ${result.source.id} was already registered.`
+            : `Registered source ${result.source.id}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "get_source_snapshot",
+    {
+      title: "Get source snapshot",
+      description: "Return metadata for a content-addressed source snapshot.",
+      inputSchema: GetSourceSnapshotInputSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { sourceRegistryService } = await servicesProvider();
+        const structuredContent = await sourceRegistryService.getSourceSnapshotMetadata(input);
+
+        return {
+          text: `Loaded source snapshot ${structuredContent.canonicalDigest}.`,
           structuredContent,
         };
       }),

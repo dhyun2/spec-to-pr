@@ -333,10 +333,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path8) {
-  if (!path8)
+function getElementAtPath(obj, path10) {
+  if (!path10)
     return obj;
-  return path8.reduce((acc, key) => acc?.[key], obj);
+  return path10.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -664,11 +664,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path8, issues) {
+function prefixIssues(path10, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path8);
+    iss.path.unshift(path10);
     return iss;
   });
 }
@@ -886,16 +886,16 @@ function flattenError(error51, mapper = (issue2) => issue2.message) {
 }
 function formatError(error51, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error52, path8 = []) => {
+  const processError = (error52, path10 = []) => {
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path8, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path10, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path10, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path10, ...issue2.path]);
       } else {
-        const fullpath = [...path8, ...issue2.path];
+        const fullpath = [...path10, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -922,17 +922,17 @@ function formatError(error51, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error51, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error52, path8 = []) => {
+  const processError = (error52, path10 = []) => {
     var _a3, _b;
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path8, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path10, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path10, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path10, ...issue2.path]);
       } else {
-        const fullpath = [...path8, ...issue2.path];
+        const fullpath = [...path10, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -964,8 +964,8 @@ function treeifyError(error51, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path8 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path8) {
+  const path10 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path10) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -14468,13 +14468,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path8 = ref.slice(1).split("/").filter(Boolean);
-  if (path8.length === 0) {
+  const path10 = ref.slice(1).split("/").filter(Boolean);
+  if (path10.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path8[0] === defsKey) {
-    const key = path8[1];
+  if (path10[0] === defsKey) {
+    const key = path10[1];
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -17316,8 +17316,8 @@ var init_parseUtil = __esm({
     init_errors3();
     init_en2();
     makeIssue = (params) => {
-      const { data, path: path8, errorMaps, issueData } = params;
-      const fullPath = [...path8, ...issueData.path || []];
+      const { data, path: path10, errorMaps, issueData } = params;
+      const fullPath = [...path10, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -17600,11 +17600,11 @@ var init_types2 = __esm({
     init_parseUtil();
     init_util2();
     ParseInputLazyPath = class {
-      constructor(parent, value, path8, key) {
+      constructor(parent, value, path10, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path8;
+        this._path = path10;
         this._key = key;
       }
       get path() {
@@ -26948,8 +26948,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path8) {
-      let input = path8;
+    function removeDotSegments(path10) {
+      let input = path10;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -27201,8 +27201,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path8, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path8 && path8 !== "/" ? path8 : void 0;
+        const [path10, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path10 && path10 !== "/" ? path10 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -33974,6 +33974,21 @@ var init_stages = __esm({
   }
 });
 
+// src/runtime/id-factory.ts
+import { randomUUID } from "crypto";
+function compactUuid() {
+  return randomUUID().replaceAll("-", "");
+}
+function createSourceId() {
+  return SourceIdSchema.parse(`src_${compactUuid()}`);
+}
+var init_id_factory = __esm({
+  "src/runtime/id-factory.ts"() {
+    "use strict";
+    init_ids();
+  }
+});
+
 // src/runtime/source.ts
 var SourceKindSchema, FileSourceLocatorSchema, UrlSourceLocatorSchema, FigmaSourceLocatorSchema, RepositorySourceLocatorSchema, SourceLocatorSchema, SourceRefSchema, FileLinesEvidenceLocationSchema, JsonPointerEvidenceLocationSchema, FigmaNodeEvidenceLocationSchema, UrlFragmentEvidenceLocationSchema, GitFileEvidenceLocationSchema, EvidenceLocationSchema, EvidenceRefSchema;
 var init_source = __esm({
@@ -34492,6 +34507,7 @@ var init_runtime = __esm({
     "use strict";
     init_constants();
     init_ids();
+    init_id_factory();
     init_scalars();
     init_source();
     init_artifact();
@@ -34555,11 +34571,11 @@ function addUniqueValueIssues(collectionName, values, context) {
     seen.add(value);
   });
 }
-function addReferenceIssue(context, path8, reference) {
+function addReferenceIssue(context, path10, reference) {
   context.addIssue({
     code: "custom",
     message: `Unknown ${reference.kind} reference ${reference.id}`,
-    path: path8
+    path: path10
   });
 }
 var RunStatusSchema, RunManifestSchema, RunSummarySchema, CreateInitialRunInputSchema;
@@ -34807,11 +34823,11 @@ var init_run2 = __esm({
 });
 
 // src/application/run-service.ts
-import { randomUUID } from "crypto";
+import { randomUUID as randomUUID2 } from "crypto";
 import { realpath as realpath3, stat as stat3 } from "fs/promises";
 import path5 from "path";
 function createRunId() {
-  return RunIdSchema.parse(`run_${randomUUID().replaceAll("-", "")}`);
+  return RunIdSchema.parse(`run_${randomUUID2().replaceAll("-", "")}`);
 }
 async function canonicalDirectory(rawPath) {
   const absolute = path5.resolve(rawPath);
@@ -34892,6 +34908,345 @@ var init_run_service = __esm({
   }
 });
 
+// src/source-registry/content-hash.ts
+import { createHash as createHash2 } from "crypto";
+function sha256Digest(input) {
+  const hex3 = createHash2("sha256").update(input).digest("hex");
+  return Sha256DigestSchema.parse(`sha256:${hex3}`);
+}
+function digestHex(digest) {
+  return digest.replace(/^sha256:/, "");
+}
+function digestPathSegments(digest) {
+  const hex3 = digestHex(digest);
+  return {
+    prefix: hex3.slice(0, 2),
+    hex: hex3
+  };
+}
+var init_content_hash = __esm({
+  "src/source-registry/content-hash.ts"() {
+    "use strict";
+    init_scalars();
+  }
+});
+
+// src/source-registry/canonical-content.ts
+function canonicalizeFileContent(input) {
+  const mode = isTextLike(input.path, input.mediaType) ? "text" : "binary";
+  const rawDigest = sha256Digest(input.rawContent);
+  if (mode === "binary") {
+    return {
+      mode,
+      rawDigest,
+      canonicalDigest: rawDigest,
+      rawByteLength: input.rawContent.byteLength,
+      canonicalByteLength: input.rawContent.byteLength,
+      canonicalContent: input.rawContent
+    };
+  }
+  const rawText = input.rawContent.toString("utf8");
+  const canonicalText = rawText.normalize("NFC").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const canonicalContent = Buffer.from(canonicalText, "utf8");
+  return {
+    mode,
+    rawDigest,
+    canonicalDigest: sha256Digest(canonicalContent),
+    rawByteLength: input.rawContent.byteLength,
+    canonicalByteLength: canonicalContent.byteLength,
+    lineCount: canonicalText.length === 0 ? 0 : canonicalText.split("\n").length,
+    canonicalContent
+  };
+}
+function isTextLike(filePath, mediaType) {
+  if (mediaType !== void 0) {
+    if (mediaType.startsWith("text/")) {
+      return true;
+    }
+    if (mediaType === "application/json" || mediaType === "application/yaml" || mediaType === "application/x-yaml" || mediaType === "application/xml") {
+      return true;
+    }
+  }
+  const lowerPath = filePath.toLowerCase();
+  for (const extension of TEXT_EXTENSIONS) {
+    if (lowerPath.endsWith(extension)) {
+      return true;
+    }
+  }
+  return false;
+}
+var TEXT_EXTENSIONS;
+var init_canonical_content = __esm({
+  "src/source-registry/canonical-content.ts"() {
+    "use strict";
+    init_content_hash();
+    TEXT_EXTENSIONS = /* @__PURE__ */ new Set([
+      ".txt",
+      ".md",
+      ".mdx",
+      ".json",
+      ".jsonc",
+      ".yaml",
+      ".yml",
+      ".toml",
+      ".xml",
+      ".html",
+      ".css",
+      ".scss",
+      ".ts",
+      ".tsx",
+      ".js",
+      ".jsx",
+      ".mjs",
+      ".cjs",
+      ".feature"
+    ]);
+  }
+});
+
+// src/source-registry/path-scope.ts
+import { realpath as realpath4, stat as stat4 } from "fs/promises";
+import path6 from "path";
+async function resolveFileInsideRoot(input) {
+  const projectRoot = await realpath4(input.projectRoot);
+  const candidate = path6.resolve(projectRoot, input.filePath);
+  const absolutePath = await realpath4(candidate);
+  const relative = path6.relative(projectRoot, absolutePath);
+  if (relative === "" || relative.startsWith("..") || path6.isAbsolute(relative)) {
+    throw new Error(`File is outside project root: ${input.filePath}`);
+  }
+  const metadata = await stat4(absolutePath);
+  if (!metadata.isFile()) {
+    throw new Error(`Source path is not a file: ${input.filePath}`);
+  }
+  return {
+    projectRoot,
+    absolutePath,
+    relativePath: RelativePathSchema.parse(toPosixPath(relative))
+  };
+}
+function toPosixPath(value) {
+  return value.split(path6.sep).join("/");
+}
+var init_path_scope = __esm({
+  "src/source-registry/path-scope.ts"() {
+    "use strict";
+    init_scalars();
+  }
+});
+
+// src/source-registry/snapshot-store.ts
+import { mkdir as mkdir2, readFile as readFile3, writeFile as writeFile2 } from "fs/promises";
+import path7 from "path";
+async function writeIfMissing(filePath, content) {
+  try {
+    await writeFile2(filePath, content, {
+      flag: "wx",
+      mode: 384
+    });
+  } catch (error51) {
+    if (isAlreadyExistsError(error51)) {
+      return;
+    }
+    throw error51;
+  }
+}
+function isAlreadyExistsError(error51) {
+  return error51 instanceof Error && "code" in error51 && error51.code === "EEXIST";
+}
+var SourceSnapshotMetadataSchema, SourceSnapshotStore;
+var init_snapshot_store = __esm({
+  "src/source-registry/snapshot-store.ts"() {
+    "use strict";
+    init_zod();
+    init_scalars();
+    init_source();
+    init_content_hash();
+    SourceSnapshotMetadataSchema = external_exports.object({
+      source: SourceRefSchema,
+      rawDigest: Sha256DigestSchema,
+      canonicalDigest: Sha256DigestSchema,
+      mode: external_exports.enum(["text", "binary"]),
+      rawByteLength: external_exports.number().int().nonnegative(),
+      canonicalByteLength: external_exports.number().int().nonnegative(),
+      lineCount: external_exports.number().int().nonnegative().optional(),
+      storedAt: external_exports.string().datetime({ offset: true })
+    }).strict();
+    SourceSnapshotStore = class {
+      constructor(rootDirectory) {
+        this.rootDirectory = rootDirectory;
+      }
+      rootDirectory;
+      async writeSnapshot(input) {
+        const digest = input.canonical.canonicalDigest;
+        const { prefix, hex: hex3 } = digestPathSegments(digest);
+        const directory = path7.join(this.rootDirectory, "sha256", prefix, hex3);
+        const contentPath = path7.join(directory, "content");
+        const metadataPath = path7.join(directory, "metadata.json");
+        await mkdir2(directory, {
+          recursive: true,
+          mode: 448
+        });
+        await writeIfMissing(contentPath, input.canonical.canonicalContent);
+        const metadata = SourceSnapshotMetadataSchema.parse({
+          source: input.source,
+          rawDigest: input.canonical.rawDigest,
+          canonicalDigest: input.canonical.canonicalDigest,
+          mode: input.canonical.mode,
+          rawByteLength: input.canonical.rawByteLength,
+          canonicalByteLength: input.canonical.canonicalByteLength,
+          ...input.canonical.lineCount === void 0 ? {} : { lineCount: input.canonical.lineCount },
+          storedAt: input.storedAt
+        });
+        await writeIfMissing(
+          metadataPath,
+          Buffer.from(`${JSON.stringify(metadata, null, 2)}
+`, "utf8")
+        );
+        return {
+          digest,
+          contentPath,
+          metadataPath,
+          metadata
+        };
+      }
+      async readMetadata(rawDigest) {
+        const digest = Sha256DigestSchema.parse(rawDigest);
+        const { prefix, hex: hex3 } = digestPathSegments(digest);
+        const metadataPath = path7.join(this.rootDirectory, "sha256", prefix, hex3, "metadata.json");
+        return SourceSnapshotMetadataSchema.parse(JSON.parse(await readFile3(metadataPath, "utf8")));
+      }
+    };
+  }
+});
+
+// src/source-registry/index.ts
+var init_source_registry = __esm({
+  "src/source-registry/index.ts"() {
+    "use strict";
+    init_canonical_content();
+    init_content_hash();
+    init_path_scope();
+    init_snapshot_store();
+  }
+});
+
+// src/application/source-registry-service.ts
+import { readFile as readFile4 } from "fs/promises";
+function parseSourceRegistrationResult(result) {
+  SourceRegistrationResultSchema.parse(result);
+  return result;
+}
+var RegisterFileSourceInputSchema, GetSourceSnapshotInputSchema, SourceRegistrationResultSchema, SourceRegistryService;
+var init_source_registry_service = __esm({
+  "src/application/source-registry-service.ts"() {
+    "use strict";
+    init_zod();
+    init_run2();
+    init_id_factory();
+    init_ids();
+    init_scalars();
+    init_source();
+    init_source_registry();
+    RegisterFileSourceInputSchema = external_exports.object({
+      runId: RunIdSchema,
+      kind: SourceKindSchema,
+      path: external_exports.string().trim().min(1),
+      mediaType: external_exports.string().trim().min(1).optional()
+    }).strict();
+    GetSourceSnapshotInputSchema = external_exports.object({
+      digest: Sha256DigestSchema
+    }).strict();
+    SourceRegistrationResultSchema = external_exports.object({
+      run: RunSummarySchema,
+      source: SourceRefSchema,
+      snapshot: external_exports.object({
+        digest: Sha256DigestSchema,
+        contentPath: external_exports.string(),
+        metadataPath: external_exports.string(),
+        metadata: SourceSnapshotMetadataSchema
+      }),
+      duplicate: external_exports.boolean()
+    }).strict();
+    SourceRegistryService = class {
+      constructor(runStore, snapshotStore, now = () => (/* @__PURE__ */ new Date()).toISOString()) {
+        this.runStore = runStore;
+        this.snapshotStore = snapshotStore;
+        this.now = now;
+      }
+      runStore;
+      snapshotStore;
+      now;
+      async registerFileSource(rawInput) {
+        const input = RegisterFileSourceInputSchema.parse(rawInput);
+        const run = await this.runStore.get(input.runId);
+        const scopedPath = await resolveFileInsideRoot({
+          projectRoot: run.projectRoot,
+          filePath: input.path
+        });
+        const rawContent = await readFile4(scopedPath.absolutePath);
+        const canonical = canonicalizeFileContent({
+          path: scopedPath.relativePath,
+          ...input.mediaType === void 0 ? {} : { mediaType: input.mediaType },
+          rawContent
+        });
+        const capturedAt = IsoDateTimeSchema.parse(this.now());
+        const existingSource = run.sources.find(
+          (source2) => source2.kind === input.kind && source2.locator.type === "file" && source2.locator.path === scopedPath.relativePath && source2.digest === canonical.canonicalDigest
+        );
+        const source = existingSource ?? SourceRefSchema.parse({
+          id: createSourceId(),
+          kind: input.kind,
+          locator: {
+            type: "file",
+            path: scopedPath.relativePath,
+            ...input.mediaType === void 0 ? {} : { mediaType: input.mediaType }
+          },
+          digest: canonical.canonicalDigest,
+          capturedAt,
+          metadata: {
+            rawDigest: canonical.rawDigest,
+            mode: canonical.mode,
+            rawByteLength: canonical.rawByteLength,
+            canonicalByteLength: canonical.canonicalByteLength,
+            ...canonical.lineCount === void 0 ? {} : { lineCount: canonical.lineCount }
+          }
+        });
+        const snapshot = await this.snapshotStore.writeSnapshot({
+          source,
+          canonical,
+          storedAt: capturedAt
+        });
+        if (existingSource !== void 0) {
+          return parseSourceRegistrationResult({
+            run: summarizeRun(run),
+            source,
+            snapshot,
+            duplicate: true
+          });
+        }
+        const nextRun = RunManifestSchema.parse({
+          ...run,
+          revision: run.revision + 1,
+          updatedAt: capturedAt,
+          sources: [...run.sources, source]
+        });
+        await this.runStore.save(nextRun, run.revision);
+        return parseSourceRegistrationResult({
+          run: summarizeRun(nextRun),
+          source,
+          snapshot,
+          duplicate: false
+        });
+      }
+      async getSourceSnapshotMetadata(rawInput) {
+        const input = GetSourceSnapshotInputSchema.parse(rawInput);
+        return this.snapshotStore.readMetadata(input.digest);
+      }
+    };
+  }
+});
+
 // src/state/errors.ts
 var StageStateError, StageNotFoundError, InvalidStageTransitionError, StageLeaseMismatchError, StageLeaseExpiredError, StageRetryExhaustedError;
 var init_errors4 = __esm({
@@ -34938,7 +35293,7 @@ var init_errors4 = __esm({
 });
 
 // src/state/stage-machine.ts
-import { randomUUID as randomUUID2 } from "crypto";
+import { randomUUID as randomUUID3 } from "crypto";
 function startStage(run, command, now) {
   const stage = findStage(run, command.stageName);
   const nowIso = now();
@@ -35147,7 +35502,7 @@ function mergeUnique(left, right) {
   return [.../* @__PURE__ */ new Set([...left, ...right])];
 }
 function createLeaseId() {
-  return LeaseIdSchema.parse(`lease_${randomUUID2().replaceAll("-", "")}`);
+  return LeaseIdSchema.parse(`lease_${randomUUID3().replaceAll("-", "")}`);
 }
 var DEFAULT_LEASE_TTL_MS, ALLOWED_TRANSITIONS;
 var init_stage_machine = __esm({
@@ -35636,6 +35991,49 @@ function createKernelServer(servicesProvider) {
     })
   );
   server.registerTool(
+    "register_file_source",
+    {
+      title: "Register file source",
+      description: "Snapshot a project file, compute its digest, and attach it as a SourceRef to a Run.",
+      inputSchema: RegisterFileSourceInputSchema.shape,
+      outputSchema: SourceRegistrationResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { sourceRegistryService } = await servicesProvider();
+      const result = await sourceRegistryService.registerFileSource(input);
+      const structuredContent = SourceRegistrationResultSchema.parse(result);
+      return {
+        text: result.duplicate ? `Source ${result.source.id} was already registered.` : `Registered source ${result.source.id}.`,
+        structuredContent
+      };
+    })
+  );
+  server.registerTool(
+    "get_source_snapshot",
+    {
+      title: "Get source snapshot",
+      description: "Return metadata for a content-addressed source snapshot.",
+      inputSchema: GetSourceSnapshotInputSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { sourceRegistryService } = await servicesProvider();
+      const structuredContent = await sourceRegistryService.getSourceSnapshotMetadata(input);
+      return {
+        text: `Loaded source snapshot ${structuredContent.canonicalDigest}.`,
+        structuredContent
+      };
+    })
+  );
+  server.registerTool(
     "create_run",
     {
       title: "Create run",
@@ -35890,6 +36288,7 @@ var init_create_server = __esm({
     init_policy_service();
     init_profile_service();
     init_run_service();
+    init_source_registry_service();
     init_stage_service();
     init_contracts();
     init_run2();
@@ -35953,7 +36352,9 @@ var init_create_server = __esm({
       "create_intake_manifest",
       "inspect_project",
       "get_project_profile",
-      "list_project_profiles"
+      "list_project_profiles",
+      "register_file_source",
+      "get_source_snapshot"
     ];
   }
 });
@@ -35997,7 +36398,7 @@ __export(sqlite_run_store_exports, {
   SqliteRunStore: () => SqliteRunStore
 });
 import { mkdirSync } from "fs";
-import path6 from "path";
+import path8 from "path";
 import { createRequire } from "module";
 function loadSqliteModule() {
   return require2("node:sqlite");
@@ -36039,7 +36440,7 @@ var init_sqlite_run_store = __esm({
     SqliteRunStore = class {
       database;
       constructor(databasePath) {
-        mkdirSync(path6.dirname(databasePath), {
+        mkdirSync(path8.dirname(databasePath), {
           recursive: true,
           mode: 448
         });
@@ -36275,7 +36676,7 @@ __export(run_service_provider_exports, {
   createLazyServicesProvider: () => createLazyServicesProvider
 });
 import os from "os";
-import path7 from "path";
+import path9 from "path";
 function createLazyServicesProvider() {
   let services;
   return async () => {
@@ -36284,7 +36685,7 @@ function createLazyServicesProvider() {
     }
     const { SqliteRunStore: SqliteRunStore2 } = await Promise.resolve().then(() => (init_sqlite_run_store(), sqlite_run_store_exports));
     const dataDirectory = resolveDataDirectory();
-    const store = new SqliteRunStore2(path7.join(dataDirectory, "runs.sqlite3"));
+    const store = new SqliteRunStore2(path9.join(dataDirectory, "runs.sqlite3"));
     services = {
       runService: new RunService(store, {
         pluginVersion: package_default.version
@@ -36292,14 +36693,18 @@ function createLazyServicesProvider() {
       stageService: new StageService(store),
       policyService: new PolicyService(),
       profileService: new ProjectProfileService(
-        new JsonProfileStore(path7.join(dataDirectory, "profiles"))
+        new JsonProfileStore(path9.join(dataDirectory, "profiles"))
+      ),
+      sourceRegistryService: new SourceRegistryService(
+        store,
+        new SourceSnapshotStore(path9.join(dataDirectory, "source-snapshots"))
       )
     };
     return services;
   };
 }
 function resolveDataDirectory() {
-  return process.env.SPEC_TO_PR_DATA_DIR ?? path7.join(os.tmpdir(), "spec-to-pr-plugin-data");
+  return process.env.SPEC_TO_PR_DATA_DIR ?? path9.join(os.tmpdir(), "spec-to-pr-plugin-data");
 }
 var init_run_service_provider = __esm({
   "src/mcp/run-service-provider.ts"() {
@@ -36308,8 +36713,10 @@ var init_run_service_provider = __esm({
     init_policy_service();
     init_profile_service();
     init_run_service();
+    init_source_registry_service();
     init_stage_service();
     init_profile_store();
+    init_snapshot_store();
   }
 });
 

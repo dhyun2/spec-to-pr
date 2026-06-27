@@ -5,8 +5,10 @@ import packageJson from "../../package.json" with { type: "json" };
 import { PolicyService } from "../application/policy-service.js";
 import { ProjectProfileService } from "../application/profile-service.js";
 import { RunService } from "../application/run-service.js";
+import { SourceRegistryService } from "../application/source-registry-service.js";
 import { StageService } from "../application/stage-service.js";
 import { JsonProfileStore } from "../profile/profile-store.js";
+import { SourceSnapshotStore } from "../source-registry/snapshot-store.js";
 import type { RunStore } from "../store/run-store.js";
 
 export type Services = {
@@ -14,6 +16,7 @@ export type Services = {
   stageService: StageService;
   policyService: PolicyService;
   profileService: ProjectProfileService;
+  sourceRegistryService: SourceRegistryService;
 };
 
 export type ServicesProvider = () => Promise<Services>;
@@ -39,6 +42,10 @@ export function createLazyServicesProvider(): ServicesProvider {
       policyService: new PolicyService(),
       profileService: new ProjectProfileService(
         new JsonProfileStore(path.join(dataDirectory, "profiles")),
+      ),
+      sourceRegistryService: new SourceRegistryService(
+        store,
+        new SourceSnapshotStore(path.join(dataDirectory, "source-snapshots")),
       ),
     };
 
