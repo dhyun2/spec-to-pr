@@ -45,3 +45,47 @@ Before generating OpenSpec, API wrappers, Figma UI, or tests, the plugin must kn
   - `inspect_project`
   - `get_project_profile`
   - `list_project_profiles`
+
+## Verification
+
+Run:
+
+```bash
+pnpm format:check
+pnpm typecheck
+pnpm schemas:build
+pnpm build
+pnpm test
+pnpm audit
+```
+
+Expected:
+
+- IntakeManifest contract exists.
+- ProjectProfile contract exists.
+- safe ProjectProbe exists.
+- Git detector exists.
+- package manager detector exists.
+- workspace detector exists.
+- framework/tooling detector exists.
+- FSD detector exists.
+- design-system detector exists.
+- API generation detector exists.
+- ProjectProfileService exists.
+- `create_intake_manifest` MCP tool exists.
+- `inspect_project` MCP tool exists.
+- `get_project_profile` MCP tool exists.
+- `list_project_profiles` MCP tool exists.
+- fixture based profiler test passes.
+- MCP stdio integration test passes.
+
+## Known Limitations
+
+- No source content snapshot yet.
+- No SHA-256 digest calculation yet.
+- No brief requirement extraction.
+- No Figma node analysis.
+- No OpenAPI parsing or bundling.
+- No OpenSpec or Gherkin generation.
+- No API wrapper or UI implementation.
+- No agent execution.

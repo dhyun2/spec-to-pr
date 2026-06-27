@@ -87,7 +87,12 @@ function extractPnpmWorkspacePatterns(text: string): string[] {
     }
 
     if (inPackages && trimmed.startsWith("-")) {
-      result.push(trimmed.replace(/^-/, "").trim().replace(/^["']|["']$/g, ""));
+      result.push(
+        trimmed
+          .replace(/^-/, "")
+          .trim()
+          .replace(/^["']|["']$/g, ""),
+      );
       continue;
     }
 
