@@ -1,0 +1,1615 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "0.1.0"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^run_[a-f0-9]{32}$"
+    },
+    "pluginVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "projectRoot": {
+      "type": "string",
+      "minLength": 1
+    },
+    "baseCommit": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{7,64}$"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "created",
+        "running",
+        "blocked",
+        "failed",
+        "completed",
+        "cancelled"
+      ]
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    },
+    "sources": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^src_[a-f0-9]{32}$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "brief",
+              "figma",
+              "openapi",
+              "repository",
+              "generated",
+              "test-report",
+              "other"
+            ]
+          },
+          "locator": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "file"
+                  },
+                  "path": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "mediaType": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "type",
+                  "path"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "url"
+                  },
+                  "url": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "mediaType": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "type",
+                  "url"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "figma"
+                  },
+                  "url": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "fileKey": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "nodeId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "type",
+                  "url"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "repository"
+                  },
+                  "root": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "commit": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{7,64}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "root"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^sha256:[a-f0-9]{64}$"
+          },
+          "capturedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "metadata": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "locator",
+          "capturedAt",
+          "metadata"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "evidence": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^ev_[a-f0-9]{32}$"
+          },
+          "sourceId": {
+            "type": "string",
+            "pattern": "^src_[a-f0-9]{32}$"
+          },
+          "location": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "file-lines"
+                  },
+                  "path": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "startLine": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "endLine": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "type",
+                  "path",
+                  "startLine",
+                  "endLine"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "json-pointer"
+                  },
+                  "document": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "pointer": {
+                    "type": "string",
+                    "pattern": "^\\/.*"
+                  }
+                },
+                "required": [
+                  "type",
+                  "document",
+                  "pointer"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "figma-node"
+                  },
+                  "fileKey": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "nodeId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "propertyPath": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": [
+                  "type",
+                  "fileKey",
+                  "nodeId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "url-fragment"
+                  },
+                  "url": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "fragment": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "type",
+                  "url",
+                  "fragment"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "git-file"
+                  },
+                  "commit": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{7,64}$"
+                  },
+                  "path": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "startLine": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "endLine": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "type",
+                  "commit",
+                  "path"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "excerpt": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^sha256:[a-f0-9]{64}$"
+          },
+          "capturedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "metadata": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "id",
+          "sourceId",
+          "location",
+          "summary",
+          "digest",
+          "capturedAt",
+          "metadata"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "artifacts": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^art_[a-f0-9]{32}$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "project-profile",
+              "source-snapshot",
+              "requirement-graph",
+              "openspec",
+              "gherkin",
+              "test-matrix",
+              "source-code",
+              "generated-code",
+              "api-contract-report",
+              "test-report",
+              "coverage-report",
+              "screenshot",
+              "visual-diff",
+              "visual-report",
+              "accessibility-report",
+              "performance-report",
+              "telemetry-config",
+              "pr-report",
+              "log",
+              "other"
+            ]
+          },
+          "uri": {
+            "type": "string",
+            "minLength": 1
+          },
+          "mediaType": {
+            "type": "string",
+            "minLength": 1
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^sha256:[a-f0-9]{64}$"
+          },
+          "producedBy": {
+            "type": "string",
+            "enum": [
+              "orchestrator",
+              "spec-bdd",
+              "api-contract",
+              "design-ui",
+              "integrator",
+              "review-council",
+              "evidence-verifier",
+              "pr-publisher"
+            ]
+          },
+          "evidenceIds": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^ev_[a-f0-9]{32}$"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "metadata": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "uri",
+          "mediaType",
+          "digest",
+          "producedBy",
+          "evidenceIds",
+          "createdAt",
+          "metadata"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "gaps": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^gap_[a-f0-9]{32}$"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "requirement",
+              "design",
+              "api",
+              "implementation",
+              "test",
+              "visual",
+              "accessibility",
+              "performance",
+              "observability",
+              "security",
+              "architecture"
+            ]
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "blocker",
+              "major",
+              "minor",
+              "info"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "assumed",
+              "waived",
+              "resolved"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "expected": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          },
+          "observed": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          },
+          "impact": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "sourceEvidenceIds": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^ev_[a-f0-9]{32}$"
+            }
+          },
+          "owner": {
+            "type": "string",
+            "enum": [
+              "orchestrator",
+              "spec-bdd",
+              "api-contract",
+              "design-ui",
+              "integrator",
+              "review-council",
+              "evidence-verifier",
+              "pr-publisher"
+            ]
+          },
+          "resolutionArtifactIds": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^art_[a-f0-9]{32}$"
+            }
+          },
+          "assumption": {
+            "type": "object",
+            "properties": {
+              "statement": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              },
+              "risk": {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              },
+              "expiresAt": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              }
+            },
+            "required": [
+              "statement",
+              "risk"
+            ],
+            "additionalProperties": false
+          },
+          "waiver": {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              },
+              "approvedBy": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "approvedAt": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              }
+            },
+            "required": [
+              "reason",
+              "approvedBy",
+              "approvedAt"
+            ],
+            "additionalProperties": false
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        "required": [
+          "id",
+          "category",
+          "severity",
+          "status",
+          "title",
+          "expected",
+          "observed",
+          "impact",
+          "sourceEvidenceIds",
+          "resolutionArtifactIds",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "agentResults": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "schemaVersion": {
+                "type": "string",
+                "const": "0.1.0"
+              },
+              "id": {
+                "type": "string",
+                "pattern": "^ar_[a-f0-9]{32}$"
+              },
+              "runId": {
+                "type": "string",
+                "pattern": "^run_[a-f0-9]{32}$"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "passed",
+                  "failed",
+                  "blocked"
+                ]
+              },
+              "baseSha": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{7,64}$"
+              },
+              "evidenceIds": {
+                "default": [],
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^ev_[a-f0-9]{32}$"
+                }
+              },
+              "artifactIds": {
+                "default": [],
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^art_[a-f0-9]{32}$"
+                }
+              },
+              "gapIds": {
+                "default": [],
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^gap_[a-f0-9]{32}$"
+                }
+              },
+              "checks": {
+                "default": [],
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^chk_[a-f0-9]{32}$"
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "lint",
+                        "typecheck",
+                        "unit",
+                        "component",
+                        "contract",
+                        "acceptance",
+                        "e2e",
+                        "visual",
+                        "accessibility",
+                        "performance",
+                        "security",
+                        "openspec",
+                        "architecture",
+                        "build",
+                        "other"
+                      ]
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "passed",
+                        "failed",
+                        "skipped"
+                      ]
+                    },
+                    "command": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "workingDirectory": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "exitCode": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "startedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "completedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "durationMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "reportArtifactId": {
+                      "type": "string",
+                      "pattern": "^art_[a-f0-9]{32}$"
+                    },
+                    "stdoutArtifactId": {
+                      "type": "string",
+                      "pattern": "^art_[a-f0-9]{32}$"
+                    },
+                    "stderrArtifactId": {
+                      "type": "string",
+                      "pattern": "^art_[a-f0-9]{32}$"
+                    },
+                    "summary": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000
+                    },
+                    "failureReason": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000
+                    },
+                    "skipReason": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "kind",
+                    "status",
+                    "summary"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "decisions": {
+                "default": [],
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^dec_[a-f0-9]{32}$"
+                    },
+                    "statement": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000
+                    },
+                    "rationale": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4000
+                    },
+                    "risk": {
+                      "type": "string",
+                      "enum": [
+                        "low",
+                        "medium",
+                        "high"
+                      ]
+                    },
+                    "evidenceIds": {
+                      "default": [],
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^ev_[a-f0-9]{32}$"
+                      }
+                    },
+                    "madeAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "statement",
+                    "rationale",
+                    "risk",
+                    "evidenceIds",
+                    "madeAt"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "startedAt": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              "completedAt": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              "kind": {
+                "type": "string",
+                "const": "implementation"
+              },
+              "agent": {
+                "type": "string",
+                "enum": [
+                  "spec-bdd",
+                  "api-contract",
+                  "design-ui",
+                  "integrator"
+                ]
+              },
+              "commitSha": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{7,64}$"
+              },
+              "changedFiles": {
+                "default": [],
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "required": [
+              "schemaVersion",
+              "id",
+              "runId",
+              "status",
+              "baseSha",
+              "evidenceIds",
+              "artifactIds",
+              "gapIds",
+              "checks",
+              "decisions",
+              "startedAt",
+              "completedAt",
+              "kind",
+              "agent",
+              "changedFiles"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "schemaVersion": {
+                "type": "string",
+                "const": "0.1.0"
+              },
+              "id": {
+                "type": "string",
+                "pattern": "^ar_[a-f0-9]{32}$"
+              },
+              "runId": {
+                "type": "string",
+                "pattern": "^run_[a-f0-9]{32}$"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "passed",
+                  "failed",
+                  "blocked"
+                ]
+              },
+              "baseSha": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{7,64}$"
+              },
+              "evidenceIds": {
+                "default": [],
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^ev_[a-f0-9]{32}$"
+                }
+              },
+              "artifactIds": {
+                "default": [],
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^art_[a-f0-9]{32}$"
+                }
+              },
+              "gapIds": {
+                "default": [],
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^gap_[a-f0-9]{32}$"
+                }
+              },
+              "checks": {
+                "default": [],
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^chk_[a-f0-9]{32}$"
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "lint",
+                        "typecheck",
+                        "unit",
+                        "component",
+                        "contract",
+                        "acceptance",
+                        "e2e",
+                        "visual",
+                        "accessibility",
+                        "performance",
+                        "security",
+                        "openspec",
+                        "architecture",
+                        "build",
+                        "other"
+                      ]
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "passed",
+                        "failed",
+                        "skipped"
+                      ]
+                    },
+                    "command": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "workingDirectory": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "exitCode": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "startedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "completedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "durationMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "reportArtifactId": {
+                      "type": "string",
+                      "pattern": "^art_[a-f0-9]{32}$"
+                    },
+                    "stdoutArtifactId": {
+                      "type": "string",
+                      "pattern": "^art_[a-f0-9]{32}$"
+                    },
+                    "stderrArtifactId": {
+                      "type": "string",
+                      "pattern": "^art_[a-f0-9]{32}$"
+                    },
+                    "summary": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000
+                    },
+                    "failureReason": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000
+                    },
+                    "skipReason": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "kind",
+                    "status",
+                    "summary"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "decisions": {
+                "default": [],
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^dec_[a-f0-9]{32}$"
+                    },
+                    "statement": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000
+                    },
+                    "rationale": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4000
+                    },
+                    "risk": {
+                      "type": "string",
+                      "enum": [
+                        "low",
+                        "medium",
+                        "high"
+                      ]
+                    },
+                    "evidenceIds": {
+                      "default": [],
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^ev_[a-f0-9]{32}$"
+                      }
+                    },
+                    "madeAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "statement",
+                    "rationale",
+                    "risk",
+                    "evidenceIds",
+                    "madeAt"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "startedAt": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              "completedAt": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              "kind": {
+                "type": "string",
+                "const": "verification"
+              },
+              "agent": {
+                "type": "string",
+                "enum": [
+                  "review-council",
+                  "evidence-verifier"
+                ]
+              },
+              "changedFiles": {
+                "default": [],
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "required": [
+              "schemaVersion",
+              "id",
+              "runId",
+              "status",
+              "baseSha",
+              "evidenceIds",
+              "artifactIds",
+              "gapIds",
+              "checks",
+              "decisions",
+              "startedAt",
+              "completedAt",
+              "kind",
+              "agent",
+              "changedFiles"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "schemaVersion": {
+                "type": "string",
+                "const": "0.1.0"
+              },
+              "id": {
+                "type": "string",
+                "pattern": "^ar_[a-f0-9]{32}$"
+              },
+              "runId": {
+                "type": "string",
+                "pattern": "^run_[a-f0-9]{32}$"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "passed",
+                  "failed",
+                  "blocked"
+                ]
+              },
+              "baseSha": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{7,64}$"
+              },
+              "evidenceIds": {
+                "default": [],
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^ev_[a-f0-9]{32}$"
+                }
+              },
+              "artifactIds": {
+                "default": [],
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^art_[a-f0-9]{32}$"
+                }
+              },
+              "gapIds": {
+                "default": [],
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^gap_[a-f0-9]{32}$"
+                }
+              },
+              "checks": {
+                "default": [],
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^chk_[a-f0-9]{32}$"
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "lint",
+                        "typecheck",
+                        "unit",
+                        "component",
+                        "contract",
+                        "acceptance",
+                        "e2e",
+                        "visual",
+                        "accessibility",
+                        "performance",
+                        "security",
+                        "openspec",
+                        "architecture",
+                        "build",
+                        "other"
+                      ]
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "passed",
+                        "failed",
+                        "skipped"
+                      ]
+                    },
+                    "command": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "workingDirectory": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "exitCode": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "startedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "completedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "durationMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "reportArtifactId": {
+                      "type": "string",
+                      "pattern": "^art_[a-f0-9]{32}$"
+                    },
+                    "stdoutArtifactId": {
+                      "type": "string",
+                      "pattern": "^art_[a-f0-9]{32}$"
+                    },
+                    "stderrArtifactId": {
+                      "type": "string",
+                      "pattern": "^art_[a-f0-9]{32}$"
+                    },
+                    "summary": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000
+                    },
+                    "failureReason": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000
+                    },
+                    "skipReason": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "kind",
+                    "status",
+                    "summary"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "decisions": {
+                "default": [],
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^dec_[a-f0-9]{32}$"
+                    },
+                    "statement": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000
+                    },
+                    "rationale": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4000
+                    },
+                    "risk": {
+                      "type": "string",
+                      "enum": [
+                        "low",
+                        "medium",
+                        "high"
+                      ]
+                    },
+                    "evidenceIds": {
+                      "default": [],
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^ev_[a-f0-9]{32}$"
+                      }
+                    },
+                    "madeAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "statement",
+                    "rationale",
+                    "risk",
+                    "evidenceIds",
+                    "madeAt"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "startedAt": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              "completedAt": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              "kind": {
+                "type": "string",
+                "const": "publishing"
+              },
+              "agent": {
+                "type": "string",
+                "enum": [
+                  "pr-publisher"
+                ]
+              },
+              "target": {
+                "type": "string",
+                "enum": [
+                  "github",
+                  "gitlab"
+                ]
+              },
+              "prUrl": {
+                "type": "string",
+                "format": "uri"
+              },
+              "prNumber": {
+                "type": "string",
+                "minLength": 1
+              },
+              "draft": {
+                "type": "boolean"
+              },
+              "reportArtifactId": {
+                "type": "string",
+                "pattern": "^art_[a-f0-9]{32}$"
+              }
+            },
+            "required": [
+              "schemaVersion",
+              "id",
+              "runId",
+              "status",
+              "baseSha",
+              "evidenceIds",
+              "artifactIds",
+              "gapIds",
+              "checks",
+              "decisions",
+              "startedAt",
+              "completedAt",
+              "kind",
+              "agent",
+              "target",
+              "draft"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "stages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": [
+              "intake",
+              "project-profile",
+              "source-registry",
+              "brief-adapter",
+              "figma-adapter",
+              "openapi-adapter",
+              "evidence-graph",
+              "openspec",
+              "gherkin-test-matrix",
+              "api-contract",
+              "design-contract",
+              "agent-runtime",
+              "spec-bdd",
+              "api-agent",
+              "design-ui",
+              "review-council",
+              "integration",
+              "fsd-guard",
+              "quality-gates",
+              "visual-regression",
+              "accessibility",
+              "performance",
+              "observability",
+              "pr-report",
+              "publisher",
+              "openspec-archive"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "passed",
+              "failed",
+              "blocked",
+              "waived",
+              "skipped"
+            ]
+          },
+          "attempt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "owner": {
+            "type": "string",
+            "enum": [
+              "orchestrator",
+              "spec-bdd",
+              "api-contract",
+              "design-ui",
+              "integrator",
+              "review-council",
+              "evidence-verifier",
+              "pr-publisher"
+            ]
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "completedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "artifactIds": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^art_[a-f0-9]{32}$"
+            }
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "retryable"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "name",
+          "status",
+          "attempt",
+          "artifactIds"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "id",
+    "pluginVersion",
+    "projectRoot",
+    "status",
+    "revision",
+    "createdAt",
+    "updatedAt",
+    "sources",
+    "evidence",
+    "artifacts",
+    "gaps",
+    "agentResults",
+    "stages"
+  ],
+  "additionalProperties": false,
+  "$id": "https://spec-to-pr.local/schemas/runtime/run-manifest.schema.json"
+}

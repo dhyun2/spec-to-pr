@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "0.1.0",
+  "dialect": "https://json-schema.org/draft/2020-12/schema",
+  "files": [
+    "agent-result.schema.json",
+    "artifact-ref.schema.json",
+    "check-result.schema.json",
+    "decision.schema.json",
+    "evidence-ref.schema.json",
+    "gap.schema.json",
+    "run-manifest.schema.json",
+    "run-summary.schema.json",
+    "source-ref.schema.json"
+  ]
+}

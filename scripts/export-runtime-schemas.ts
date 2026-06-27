@@ -1,4 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
+import { RunManifestSchema, RunSummarySchema } from "../src/run/index.js";
 
 import { z } from "zod";
 
@@ -23,6 +24,8 @@ const schemas = {
   "evidence-ref.schema.json": EvidenceRefSchema,
   "gap.schema.json": GapSchema,
   "source-ref.schema.json": SourceRefSchema,
+  "run-manifest.schema.json": RunManifestSchema,
+  "run-summary.schema.json": RunSummarySchema,
 } as const;
 
 await mkdir(outputDirectory, { recursive: true });

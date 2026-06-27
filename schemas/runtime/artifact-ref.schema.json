@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^art_[a-f0-9]{32}$"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "project-profile",
+        "source-snapshot",
+        "requirement-graph",
+        "openspec",
+        "gherkin",
+        "test-matrix",
+        "source-code",
+        "generated-code",
+        "api-contract-report",
+        "test-report",
+        "coverage-report",
+        "screenshot",
+        "visual-diff",
+        "visual-report",
+        "accessibility-report",
+        "performance-report",
+        "telemetry-config",
+        "pr-report",
+        "log",
+        "other"
+      ]
+    },
+    "uri": {
+      "type": "string",
+      "minLength": 1
+    },
+    "mediaType": {
+      "type": "string",
+      "minLength": 1
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "producedBy": {
+      "type": "string",
+      "enum": [
+        "orchestrator",
+        "spec-bdd",
+        "api-contract",
+        "design-ui",
+        "integrator",
+        "review-council",
+        "evidence-verifier",
+        "pr-publisher"
+      ]
+    },
+    "evidenceIds": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^ev_[a-f0-9]{32}$"
+      }
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    },
+    "metadata": {
+      "default": {},
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {}
+    }
+  },
+  "required": [
+    "id",
+    "kind",
+    "uri",
+    "mediaType",
+    "digest",
+    "producedBy",
+    "evidenceIds",
+    "createdAt",
+    "metadata"
+  ],
+  "additionalProperties": false,
+  "$id": "https://spec-to-pr.local/schemas/runtime/artifact-ref.schema.json"
+}

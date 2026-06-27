@@ -1,0 +1,173 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^gap_[a-f0-9]{32}$"
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "requirement",
+        "design",
+        "api",
+        "implementation",
+        "test",
+        "visual",
+        "accessibility",
+        "performance",
+        "observability",
+        "security",
+        "architecture"
+      ]
+    },
+    "severity": {
+      "type": "string",
+      "enum": [
+        "blocker",
+        "major",
+        "minor",
+        "info"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "open",
+        "assumed",
+        "waived",
+        "resolved"
+      ]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "expected": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "observed": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "impact": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "sourceEvidenceIds": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^ev_[a-f0-9]{32}$"
+      }
+    },
+    "owner": {
+      "type": "string",
+      "enum": [
+        "orchestrator",
+        "spec-bdd",
+        "api-contract",
+        "design-ui",
+        "integrator",
+        "review-council",
+        "evidence-verifier",
+        "pr-publisher"
+      ]
+    },
+    "resolutionArtifactIds": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^art_[a-f0-9]{32}$"
+      }
+    },
+    "assumption": {
+      "type": "object",
+      "properties": {
+        "statement": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "risk": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        }
+      },
+      "required": [
+        "statement",
+        "risk"
+      ],
+      "additionalProperties": false
+    },
+    "waiver": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "approvedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "approvedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        }
+      },
+      "required": [
+        "reason",
+        "approvedBy",
+        "approvedAt"
+      ],
+      "additionalProperties": false
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    }
+  },
+  "required": [
+    "id",
+    "category",
+    "severity",
+    "status",
+    "title",
+    "expected",
+    "observed",
+    "impact",
+    "sourceEvidenceIds",
+    "resolutionArtifactIds",
+    "createdAt",
+    "updatedAt"
+  ],
+  "additionalProperties": false,
+  "$id": "https://spec-to-pr.local/schemas/runtime/gap.schema.json"
+}
