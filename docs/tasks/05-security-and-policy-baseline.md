@@ -44,3 +44,34 @@ The system must treat external content as untrusted data and must validate all p
 - Untrusted source excerpts are wrapped with explicit instruction boundaries.
 - Policy decisions can be audited as JSONL.
 - MCP policy tools work through stdio integration tests.
+
+## Verification
+
+Run:
+
+```bash
+pnpm format:check
+pnpm typecheck
+pnpm schemas:build
+pnpm build
+pnpm test
+pnpm audit
+```
+
+Expected:
+
+- path policy tests pass
+- command policy tests pass
+- secret redaction tests pass
+- untrusted content tests pass
+- MCP policy tools are visible over stdio
+- existing Task 01-04 tests still pass
+
+## Known Limitations
+
+- No real command execution yet.
+- Approval workflow is represented as a policy verdict only.
+- Secret redaction is best-effort and pattern-based.
+- Path policy depends on filesystem behavior and symlink support.
+- Untrusted content wrappers reduce prompt injection risk but do not fully solve it.
+- Sandbox isolation is not implemented in this Task.

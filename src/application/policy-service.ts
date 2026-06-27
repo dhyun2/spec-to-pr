@@ -1,9 +1,15 @@
 import { z } from "zod";
 
 import { classifyCommand, CommandInvocationSchema } from "../security/command-policy.js";
-import { validateWorkspacePath, ValidateWorkspacePathInputSchema } from "../security/path-policy.js";
+import {
+  validateWorkspacePath,
+  ValidateWorkspacePathInputSchema,
+} from "../security/path-policy.js";
 import { redactEnv, redactText } from "../security/secret-redactor.js";
-import { UntrustedContentInputSchema, wrapUntrustedContent } from "../security/untrusted-content.js";
+import {
+  UntrustedContentInputSchema,
+  wrapUntrustedContent,
+} from "../security/untrusted-content.js";
 
 export const RedactTextInputSchema = z
   .object({
