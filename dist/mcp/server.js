@@ -333,10 +333,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path10) {
-  if (!path10)
+function getElementAtPath(obj, path11) {
+  if (!path11)
     return obj;
-  return path10.reduce((acc, key) => acc?.[key], obj);
+  return path11.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -664,11 +664,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path10, issues) {
+function prefixIssues(path11, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path10);
+    iss.path.unshift(path11);
     return iss;
   });
 }
@@ -886,16 +886,16 @@ function flattenError(error51, mapper = (issue2) => issue2.message) {
 }
 function formatError(error51, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error52, path10 = []) => {
+  const processError = (error52, path11 = []) => {
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path10, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path11, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path10, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path11, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path10, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path11, ...issue2.path]);
       } else {
-        const fullpath = [...path10, ...issue2.path];
+        const fullpath = [...path11, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -922,17 +922,17 @@ function formatError(error51, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error51, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error52, path10 = []) => {
+  const processError = (error52, path11 = []) => {
     var _a3, _b;
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path10, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path11, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path10, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path11, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path10, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path11, ...issue2.path]);
       } else {
-        const fullpath = [...path10, ...issue2.path];
+        const fullpath = [...path11, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -964,8 +964,8 @@ function treeifyError(error51, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path10 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path10) {
+  const path11 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path11) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -14468,13 +14468,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path10 = ref.slice(1).split("/").filter(Boolean);
-  if (path10.length === 0) {
+  const path11 = ref.slice(1).split("/").filter(Boolean);
+  if (path11.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path10[0] === defsKey) {
-    const key = path10[1];
+  if (path11[0] === defsKey) {
+    const key = path11[1];
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -17316,8 +17316,8 @@ var init_parseUtil = __esm({
     init_errors3();
     init_en2();
     makeIssue = (params) => {
-      const { data, path: path10, errorMaps, issueData } = params;
-      const fullPath = [...path10, ...issueData.path || []];
+      const { data, path: path11, errorMaps, issueData } = params;
+      const fullPath = [...path11, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -17600,11 +17600,11 @@ var init_types2 = __esm({
     init_parseUtil();
     init_util2();
     ParseInputLazyPath = class {
-      constructor(parent, value, path10, key) {
+      constructor(parent, value, path11, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path10;
+        this._path = path11;
         this._key = key;
       }
       get path() {
@@ -26948,8 +26948,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path10) {
-      let input = path10;
+    function removeDotSegments(path11) {
+      let input = path11;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -27201,8 +27201,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path10, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path10 && path10 !== "/" ? path10 : void 0;
+        const [path11, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path11 && path11 !== "/" ? path11 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -32331,6 +32331,162 @@ var init_scalars = __esm({
   }
 });
 
+// src/runtime/source.ts
+var SourceKindSchema, FileSourceLocatorSchema, UrlSourceLocatorSchema, FigmaSourceLocatorSchema, RepositorySourceLocatorSchema, TicketProviderSchema, TicketSourceLocatorSchema, SourceLocatorSchema, SourceRefSchema, FileLinesEvidenceLocationSchema, JsonPointerEvidenceLocationSchema, FigmaNodeEvidenceLocationSchema, UrlFragmentEvidenceLocationSchema, PdfPageEvidenceLocationSchema, PdfTextBlockEvidenceLocationSchema, TicketFieldEvidenceLocationSchema, GitFileEvidenceLocationSchema, EvidenceLocationSchema, EvidenceRefSchema;
+var init_source = __esm({
+  "src/runtime/source.ts"() {
+    "use strict";
+    init_zod();
+    init_ids();
+    init_scalars();
+    SourceKindSchema = external_exports.enum([
+      "brief",
+      "figma",
+      "openapi",
+      "repository",
+      "generated",
+      "test-report",
+      "other"
+    ]);
+    FileSourceLocatorSchema = external_exports.object({
+      type: external_exports.literal("file"),
+      path: RelativePathSchema,
+      mediaType: external_exports.string().trim().min(1).optional()
+    }).strict();
+    UrlSourceLocatorSchema = external_exports.object({
+      type: external_exports.literal("url"),
+      url: external_exports.string().url(),
+      mediaType: external_exports.string().trim().min(1).optional()
+    }).strict();
+    FigmaSourceLocatorSchema = external_exports.object({
+      type: external_exports.literal("figma"),
+      url: external_exports.string().url(),
+      fileKey: external_exports.string().trim().min(1).optional(),
+      nodeId: external_exports.string().trim().min(1).optional()
+    }).strict();
+    RepositorySourceLocatorSchema = external_exports.object({
+      type: external_exports.literal("repository"),
+      root: external_exports.string().trim().min(1),
+      commit: GitObjectIdSchema.optional()
+    }).strict();
+    TicketProviderSchema = external_exports.enum(["jira", "gitlab", "github", "notion", "linear"]);
+    TicketSourceLocatorSchema = external_exports.object({
+      type: external_exports.literal("ticket"),
+      provider: TicketProviderSchema,
+      url: external_exports.string().url(),
+      externalId: external_exports.string().trim().min(1).optional(),
+      mediaType: external_exports.string().trim().min(1).optional()
+    }).strict();
+    SourceLocatorSchema = external_exports.discriminatedUnion("type", [
+      FileSourceLocatorSchema,
+      UrlSourceLocatorSchema,
+      FigmaSourceLocatorSchema,
+      RepositorySourceLocatorSchema,
+      TicketSourceLocatorSchema
+    ]);
+    SourceRefSchema = external_exports.object({
+      id: SourceIdSchema,
+      kind: SourceKindSchema,
+      locator: SourceLocatorSchema,
+      digest: Sha256DigestSchema.optional(),
+      capturedAt: IsoDateTimeSchema,
+      metadata: external_exports.record(external_exports.string(), external_exports.unknown()).default({})
+    }).strict();
+    FileLinesEvidenceLocationSchema = external_exports.object({
+      type: external_exports.literal("file-lines"),
+      path: RelativePathSchema,
+      startLine: external_exports.number().int().positive(),
+      endLine: external_exports.number().int().positive()
+    }).strict().superRefine((location, context) => {
+      if (location.endLine < location.startLine) {
+        context.addIssue({
+          code: "custom",
+          message: "endLine must be greater than or equal to startLine",
+          path: ["endLine"]
+        });
+      }
+    });
+    JsonPointerEvidenceLocationSchema = external_exports.object({
+      type: external_exports.literal("json-pointer"),
+      document: RelativePathSchema,
+      pointer: external_exports.string().startsWith("/")
+    }).strict();
+    FigmaNodeEvidenceLocationSchema = external_exports.object({
+      type: external_exports.literal("figma-node"),
+      fileKey: external_exports.string().trim().min(1),
+      nodeId: external_exports.string().trim().min(1),
+      propertyPath: external_exports.array(external_exports.string().trim().min(1)).optional()
+    }).strict();
+    UrlFragmentEvidenceLocationSchema = external_exports.object({
+      type: external_exports.literal("url-fragment"),
+      url: external_exports.string().url(),
+      fragment: external_exports.string().trim().min(1)
+    }).strict();
+    PdfPageEvidenceLocationSchema = external_exports.object({
+      type: external_exports.literal("pdf-page"),
+      path: RelativePathSchema,
+      page: external_exports.number().int().positive()
+    }).strict();
+    PdfTextBlockEvidenceLocationSchema = external_exports.object({
+      type: external_exports.literal("pdf-text-block"),
+      path: RelativePathSchema,
+      page: external_exports.number().int().positive(),
+      blockIndex: external_exports.number().int().nonnegative()
+    }).strict();
+    TicketFieldEvidenceLocationSchema = external_exports.object({
+      type: external_exports.literal("ticket-field"),
+      provider: TicketProviderSchema,
+      url: external_exports.string().url(),
+      field: external_exports.string().trim().min(1),
+      commentId: external_exports.string().trim().min(1).optional()
+    }).strict();
+    GitFileEvidenceLocationSchema = external_exports.object({
+      type: external_exports.literal("git-file"),
+      commit: GitObjectIdSchema,
+      path: RelativePathSchema,
+      startLine: external_exports.number().int().positive().optional(),
+      endLine: external_exports.number().int().positive().optional()
+    }).strict().superRefine((location, context) => {
+      const hasStartLine = location.startLine !== void 0;
+      const hasEndLine = location.endLine !== void 0;
+      if (hasStartLine !== hasEndLine) {
+        context.addIssue({
+          code: "custom",
+          message: "startLine and endLine must be provided together",
+          path: ["startLine"]
+        });
+      }
+      if (location.startLine !== void 0 && location.endLine !== void 0 && location.endLine < location.startLine) {
+        context.addIssue({
+          code: "custom",
+          message: "endLine must be greater than or equal to startLine",
+          path: ["endLine"]
+        });
+      }
+    });
+    EvidenceLocationSchema = external_exports.discriminatedUnion("type", [
+      FileLinesEvidenceLocationSchema,
+      JsonPointerEvidenceLocationSchema,
+      FigmaNodeEvidenceLocationSchema,
+      UrlFragmentEvidenceLocationSchema,
+      PdfPageEvidenceLocationSchema,
+      PdfTextBlockEvidenceLocationSchema,
+      TicketFieldEvidenceLocationSchema,
+      GitFileEvidenceLocationSchema
+    ]);
+    EvidenceRefSchema = external_exports.object({
+      id: EvidenceIdSchema,
+      sourceId: SourceIdSchema,
+      location: EvidenceLocationSchema,
+      summary: external_exports.string().trim().min(1).max(2e3),
+      excerpt: external_exports.string().max(4e3).optional(),
+      digest: Sha256DigestSchema,
+      capturedAt: IsoDateTimeSchema,
+      metadata: external_exports.record(external_exports.string(), external_exports.unknown()).default({})
+    }).strict();
+  }
+});
+
 // src/brief/brief-classifier.ts
 function classifyBriefBlocks(blocks) {
   return blocks.filter((block) => block.kind !== "heading").map(classifyBlock).filter((candidate) => candidate !== void 0);
@@ -32347,8 +32503,11 @@ function classifyBlock(block) {
   }
   return BriefCandidateSchema.parse({
     itemType,
-    lineStart: block.lineStart,
-    lineEnd: block.lineEnd,
+    location: block.location,
+    ...block.location.type === "file-lines" ? {
+      lineStart: block.location.startLine,
+      lineEnd: block.location.endLine
+    } : {},
     text,
     summary: summarizeText(text),
     headingPath: block.headingPath,
@@ -32401,6 +32560,7 @@ var init_brief_classifier = __esm({
   "src/brief/brief-classifier.ts"() {
     "use strict";
     init_zod();
+    init_source();
     BriefItemTypeSchema = external_exports.enum([
       "requirement",
       "policy",
@@ -32413,8 +32573,9 @@ var init_brief_classifier = __esm({
     BriefIssueFlagSchema = external_exports.enum(["ambiguous", "prompt-injection-like"]);
     BriefCandidateSchema = external_exports.object({
       itemType: BriefItemTypeSchema,
-      lineStart: external_exports.number().int().positive(),
-      lineEnd: external_exports.number().int().positive(),
+      location: EvidenceLocationSchema,
+      lineStart: external_exports.number().int().positive().optional(),
+      lineEnd: external_exports.number().int().positive().optional(),
       text: external_exports.string().trim().min(1),
       summary: external_exports.string().trim().min(1),
       headingPath: external_exports.array(external_exports.string()).default([]),
@@ -32545,12 +32706,14 @@ var init_brief_analysis = __esm({
     init_zod();
     init_ids();
     init_scalars();
+    init_source();
     init_brief_classifier();
     BriefExtractedItemSchema = external_exports.object({
       evidenceId: EvidenceIdSchema,
       itemType: BriefItemTypeSchema,
-      lineStart: external_exports.number().int().positive(),
-      lineEnd: external_exports.number().int().positive(),
+      location: EvidenceLocationSchema,
+      lineStart: external_exports.number().int().positive().optional(),
+      lineEnd: external_exports.number().int().positive().optional(),
       summary: external_exports.string().trim().min(1),
       headingPath: external_exports.array(external_exports.string()).default([]),
       flags: external_exports.array(BriefIssueFlagSchema).default([]),
@@ -32566,6 +32729,90 @@ var init_brief_analysis = __esm({
       gapsAdded: external_exports.number().int().nonnegative(),
       items: external_exports.array(BriefExtractedItemSchema)
     }).strict();
+  }
+});
+
+// src/brief/normalized-brief.ts
+var NormalizedBriefFormatSchema, NormalizedBriefBlockKindSchema, NormalizedBriefBlockSchema, NormalizedBriefDocumentSchema;
+var init_normalized_brief = __esm({
+  "src/brief/normalized-brief.ts"() {
+    "use strict";
+    init_zod();
+    init_ids();
+    init_source();
+    init_scalars();
+    NormalizedBriefFormatSchema = external_exports.enum([
+      "markdown",
+      "plaintext",
+      "pdf",
+      "ticket",
+      "html",
+      "unknown"
+    ]);
+    NormalizedBriefBlockKindSchema = external_exports.enum([
+      "heading",
+      "paragraph",
+      "list-item",
+      "table-row",
+      "ticket-field",
+      "pdf-text-block",
+      "unsupported"
+    ]);
+    NormalizedBriefBlockSchema = external_exports.object({
+      blockId: external_exports.string().trim().min(1),
+      kind: NormalizedBriefBlockKindSchema,
+      text: external_exports.string(),
+      location: EvidenceLocationSchema,
+      headingPath: external_exports.array(external_exports.string()).default([]),
+      metadata: external_exports.record(external_exports.string(), external_exports.unknown()).default({})
+    }).strict();
+    NormalizedBriefDocumentSchema = external_exports.object({
+      sourceId: SourceIdSchema,
+      sourceDigest: Sha256DigestSchema,
+      format: NormalizedBriefFormatSchema,
+      title: external_exports.string().trim().min(1).optional(),
+      blocks: external_exports.array(NormalizedBriefBlockSchema),
+      metadata: external_exports.record(external_exports.string(), external_exports.unknown()).default({})
+    }).strict();
+  }
+});
+
+// src/brief/brief-source-type.ts
+import path from "path";
+function detectBriefSourceType(source) {
+  const locator = source.locator;
+  if (locator.type === "ticket") {
+    return "ticket";
+  }
+  if (locator.type === "url") {
+    return isHtmlMediaType(locator.mediaType) ? "html" : "unknown";
+  }
+  if (locator.type !== "file") {
+    return "unknown";
+  }
+  const extension = path.extname(locator.path).toLowerCase();
+  const mediaType = locator.mediaType?.toLowerCase();
+  if (mediaType === "application/pdf" || extension === ".pdf") {
+    return "pdf";
+  }
+  if (mediaType === "text/markdown" || mediaType === "text/x-markdown" || extension === ".md" || extension === ".mdx") {
+    return "markdown";
+  }
+  if (mediaType === "text/plain" || extension === ".txt") {
+    return "plaintext";
+  }
+  if (isHtmlMediaType(mediaType) || extension === ".html" || extension === ".htm") {
+    return "html";
+  }
+  return "unknown";
+}
+function isHtmlMediaType(mediaType) {
+  return mediaType === "text/html" || mediaType === "application/xhtml+xml";
+}
+var init_brief_source_type = __esm({
+  "src/brief/brief-source-type.ts"() {
+    "use strict";
+    init_normalized_brief();
   }
 });
 
@@ -32709,6 +32956,180 @@ var init_markdown_lines = __esm({
       headingLevel: external_exports.number().int().positive().max(6).optional(),
       headingPath: external_exports.array(external_exports.string()).default([])
     }).strict();
+  }
+});
+
+// src/brief/markdown-brief-parser.ts
+function parseMarkdownBrief(input) {
+  const locator = input.source.locator;
+  if (locator.type !== "file") {
+    throw new Error("Markdown brief parser requires a file source");
+  }
+  const parsed = parseMarkdownLines(input.content);
+  return NormalizedBriefDocumentSchema.parse({
+    sourceId: input.source.id,
+    sourceDigest: input.sourceDigest,
+    format: "markdown",
+    title: parsed.headings[0]?.text,
+    blocks: parsed.blocks.map((block, index) => ({
+      blockId: `md-${index + 1}`,
+      kind: block.kind,
+      text: block.text,
+      location: {
+        type: "file-lines",
+        path: locator.path,
+        startLine: block.lineStart,
+        endLine: block.lineEnd
+      },
+      headingPath: block.headingPath,
+      metadata: {
+        ...block.headingLevel === void 0 ? {} : { headingLevel: block.headingLevel }
+      }
+    })),
+    metadata: {
+      lineCount: parsed.lineCount
+    }
+  });
+}
+var init_markdown_brief_parser = __esm({
+  "src/brief/markdown-brief-parser.ts"() {
+    "use strict";
+    init_normalized_brief();
+    init_markdown_lines();
+  }
+});
+
+// src/brief/plaintext-brief-parser.ts
+function parsePlainTextBrief(input) {
+  const locator = input.source.locator;
+  if (locator.type !== "file") {
+    throw new Error("Plain-text brief parser requires a file source");
+  }
+  const paragraphs = parseParagraphs(input.content);
+  return NormalizedBriefDocumentSchema.parse({
+    sourceId: input.source.id,
+    sourceDigest: input.sourceDigest,
+    format: "plaintext",
+    blocks: paragraphs.map((paragraph, index) => ({
+      blockId: `txt-${index + 1}`,
+      kind: "paragraph",
+      text: paragraph.lines.join(" ").trim(),
+      location: {
+        type: "file-lines",
+        path: locator.path,
+        startLine: paragraph.lineStart,
+        endLine: paragraph.lineEnd
+      },
+      headingPath: []
+    })),
+    metadata: {
+      lineCount: input.content.split("\n").length
+    }
+  });
+}
+function parseParagraphs(content) {
+  const paragraphs = [];
+  let current;
+  content.split("\n").forEach((line, index) => {
+    const lineNumber = index + 1;
+    const trimmed = line.trim();
+    if (trimmed.length === 0) {
+      if (current !== void 0) {
+        paragraphs.push(current);
+        current = void 0;
+      }
+      return;
+    }
+    if (current === void 0) {
+      current = {
+        lineStart: lineNumber,
+        lineEnd: lineNumber,
+        lines: [trimmed]
+      };
+      return;
+    }
+    current.lineEnd = lineNumber;
+    current.lines.push(trimmed);
+  });
+  if (current !== void 0) {
+    paragraphs.push(current);
+  }
+  return paragraphs;
+}
+var init_plaintext_brief_parser = __esm({
+  "src/brief/plaintext-brief-parser.ts"() {
+    "use strict";
+    init_normalized_brief();
+  }
+});
+
+// src/brief/unsupported-brief-parser.ts
+function createUnsupportedBriefDocument(input) {
+  return NormalizedBriefDocumentSchema.parse({
+    sourceId: input.source.id,
+    sourceDigest: input.sourceDigest,
+    format: input.format,
+    blocks: [
+      {
+        blockId: "unsupported-1",
+        kind: "unsupported",
+        text: input.reason,
+        location: unsupportedLocation(input.source, input.format),
+        headingPath: [],
+        metadata: {
+          unsupported: true,
+          reason: input.reason
+        }
+      }
+    ],
+    metadata: {
+      unsupported: true,
+      reason: input.reason
+    }
+  });
+}
+function unsupportedLocation(source, format) {
+  const locator = source.locator;
+  if (locator.type === "file") {
+    if (format === "pdf") {
+      return {
+        type: "pdf-page",
+        path: locator.path,
+        page: 1
+      };
+    }
+    return {
+      type: "file-lines",
+      path: locator.path,
+      startLine: 1,
+      endLine: 1
+    };
+  }
+  if (locator.type === "ticket") {
+    return {
+      type: "ticket-field",
+      provider: locator.provider,
+      url: locator.url,
+      field: "source"
+    };
+  }
+  if (locator.type === "url") {
+    return {
+      type: "url-fragment",
+      url: locator.url,
+      fragment: "source"
+    };
+  }
+  return {
+    type: "json-pointer",
+    document: "source.json",
+    pointer: "/locator"
+  };
+}
+var init_unsupported_brief_parser = __esm({
+  "src/brief/unsupported-brief-parser.ts"() {
+    "use strict";
+    init_normalized_brief();
   }
 });
 
@@ -32889,132 +33310,6 @@ var init_id_factory = __esm({
   "src/runtime/id-factory.ts"() {
     "use strict";
     init_ids();
-  }
-});
-
-// src/runtime/source.ts
-var SourceKindSchema, FileSourceLocatorSchema, UrlSourceLocatorSchema, FigmaSourceLocatorSchema, RepositorySourceLocatorSchema, SourceLocatorSchema, SourceRefSchema, FileLinesEvidenceLocationSchema, JsonPointerEvidenceLocationSchema, FigmaNodeEvidenceLocationSchema, UrlFragmentEvidenceLocationSchema, GitFileEvidenceLocationSchema, EvidenceLocationSchema, EvidenceRefSchema;
-var init_source = __esm({
-  "src/runtime/source.ts"() {
-    "use strict";
-    init_zod();
-    init_ids();
-    init_scalars();
-    SourceKindSchema = external_exports.enum([
-      "brief",
-      "figma",
-      "openapi",
-      "repository",
-      "generated",
-      "test-report",
-      "other"
-    ]);
-    FileSourceLocatorSchema = external_exports.object({
-      type: external_exports.literal("file"),
-      path: RelativePathSchema,
-      mediaType: external_exports.string().trim().min(1).optional()
-    }).strict();
-    UrlSourceLocatorSchema = external_exports.object({
-      type: external_exports.literal("url"),
-      url: external_exports.string().url(),
-      mediaType: external_exports.string().trim().min(1).optional()
-    }).strict();
-    FigmaSourceLocatorSchema = external_exports.object({
-      type: external_exports.literal("figma"),
-      url: external_exports.string().url(),
-      fileKey: external_exports.string().trim().min(1).optional(),
-      nodeId: external_exports.string().trim().min(1).optional()
-    }).strict();
-    RepositorySourceLocatorSchema = external_exports.object({
-      type: external_exports.literal("repository"),
-      root: external_exports.string().trim().min(1),
-      commit: GitObjectIdSchema.optional()
-    }).strict();
-    SourceLocatorSchema = external_exports.discriminatedUnion("type", [
-      FileSourceLocatorSchema,
-      UrlSourceLocatorSchema,
-      FigmaSourceLocatorSchema,
-      RepositorySourceLocatorSchema
-    ]);
-    SourceRefSchema = external_exports.object({
-      id: SourceIdSchema,
-      kind: SourceKindSchema,
-      locator: SourceLocatorSchema,
-      digest: Sha256DigestSchema.optional(),
-      capturedAt: IsoDateTimeSchema,
-      metadata: external_exports.record(external_exports.string(), external_exports.unknown()).default({})
-    }).strict();
-    FileLinesEvidenceLocationSchema = external_exports.object({
-      type: external_exports.literal("file-lines"),
-      path: RelativePathSchema,
-      startLine: external_exports.number().int().positive(),
-      endLine: external_exports.number().int().positive()
-    }).strict().superRefine((location, context) => {
-      if (location.endLine < location.startLine) {
-        context.addIssue({
-          code: "custom",
-          message: "endLine must be greater than or equal to startLine",
-          path: ["endLine"]
-        });
-      }
-    });
-    JsonPointerEvidenceLocationSchema = external_exports.object({
-      type: external_exports.literal("json-pointer"),
-      document: RelativePathSchema,
-      pointer: external_exports.string().startsWith("/")
-    }).strict();
-    FigmaNodeEvidenceLocationSchema = external_exports.object({
-      type: external_exports.literal("figma-node"),
-      fileKey: external_exports.string().trim().min(1),
-      nodeId: external_exports.string().trim().min(1),
-      propertyPath: external_exports.array(external_exports.string().trim().min(1)).optional()
-    }).strict();
-    UrlFragmentEvidenceLocationSchema = external_exports.object({
-      type: external_exports.literal("url-fragment"),
-      url: external_exports.string().url(),
-      fragment: external_exports.string().trim().min(1)
-    }).strict();
-    GitFileEvidenceLocationSchema = external_exports.object({
-      type: external_exports.literal("git-file"),
-      commit: GitObjectIdSchema,
-      path: RelativePathSchema,
-      startLine: external_exports.number().int().positive().optional(),
-      endLine: external_exports.number().int().positive().optional()
-    }).strict().superRefine((location, context) => {
-      const hasStartLine = location.startLine !== void 0;
-      const hasEndLine = location.endLine !== void 0;
-      if (hasStartLine !== hasEndLine) {
-        context.addIssue({
-          code: "custom",
-          message: "startLine and endLine must be provided together",
-          path: ["startLine"]
-        });
-      }
-      if (location.startLine !== void 0 && location.endLine !== void 0 && location.endLine < location.startLine) {
-        context.addIssue({
-          code: "custom",
-          message: "endLine must be greater than or equal to startLine",
-          path: ["endLine"]
-        });
-      }
-    });
-    EvidenceLocationSchema = external_exports.discriminatedUnion("type", [
-      FileLinesEvidenceLocationSchema,
-      JsonPointerEvidenceLocationSchema,
-      FigmaNodeEvidenceLocationSchema,
-      UrlFragmentEvidenceLocationSchema,
-      GitFileEvidenceLocationSchema
-    ]);
-    EvidenceRefSchema = external_exports.object({
-      id: EvidenceIdSchema,
-      sourceId: SourceIdSchema,
-      location: EvidenceLocationSchema,
-      summary: external_exports.string().trim().min(1).max(2e3),
-      excerpt: external_exports.string().max(4e3).optional(),
-      digest: Sha256DigestSchema,
-      capturedAt: IsoDateTimeSchema,
-      metadata: external_exports.record(external_exports.string(), external_exports.unknown()).default({})
-    }).strict();
   }
 });
 
@@ -33474,11 +33769,11 @@ function addUniqueValueIssues(collectionName, values, context) {
     seen.add(value);
   });
 }
-function addReferenceIssue(context, path10, reference) {
+function addReferenceIssue(context, path11, reference) {
   context.addIssue({
     code: "custom",
     message: `Unknown ${reference.kind} reference ${reference.id}`,
-    path: path10
+    path: path11
   });
 }
 var RunStatusSchema, RunManifestSchema, RunSummarySchema, CreateInitialRunInputSchema;
@@ -33772,12 +34067,11 @@ function existingEvidenceItem(evidence, gaps) {
   const itemType = parseMetadataItemType(evidence.metadata["itemType"]);
   const flags = parseMetadataFlags(evidence.metadata["flags"]);
   const headingPath = parseMetadataHeadingPath(evidence.metadata["headingPath"]);
-  const location = evidence.location.type === "file-lines" ? evidence.location : { startLine: 1, endLine: 1 };
   return {
     evidenceId: evidence.id,
     itemType,
-    lineStart: location.startLine,
-    lineEnd: location.endLine,
+    location: evidence.location,
+    ...fileLineFields(evidence.location),
     summary: evidence.summary,
     headingPath,
     flags,
@@ -33813,14 +34107,90 @@ function parseMetadataHeadingPath(value) {
   }
   return value.filter((item) => typeof item === "string");
 }
+function createEvidenceFromBlock(input) {
+  return EvidenceRefSchema.parse({
+    id: createEvidenceId(),
+    sourceId: input.source.id,
+    location: input.block.location,
+    summary: summarizeEvidence(input.block.text),
+    excerpt: input.block.text,
+    digest: sha256Digest(Buffer.from(input.block.text, "utf8")),
+    capturedAt: input.timestamp,
+    metadata: {
+      adapter: BRIEF_ADAPTER_VERSION,
+      sourceDigest: input.sourceDigest,
+      itemType: input.itemType,
+      headingPath: input.block.headingPath,
+      flags: input.flags,
+      blockId: input.block.blockId,
+      blockKind: input.block.kind,
+      ...input.block.metadata["unsupported"] === true ? { unsupported: true } : {}
+    }
+  });
+}
+function createUnsupportedGap(input) {
+  return GapSchema.parse({
+    id: createGapId(),
+    category: "requirement",
+    severity: "major",
+    status: "open",
+    title: "Unsupported brief source format",
+    expected: "Brief sources should be normalized by a supported adapter before extraction.",
+    observed: input.block.text,
+    impact: "The brief could contain requirements, but this source format cannot be extracted deterministically yet.",
+    sourceEvidenceIds: [input.evidence.id],
+    owner: "spec-bdd",
+    createdAt: input.timestamp,
+    updatedAt: input.timestamp
+  });
+}
+function isUnsupportedDocument(document) {
+  return document.metadata["unsupported"] === true;
+}
+function countDocumentSections(document) {
+  return document.blocks.filter((block) => block.kind === "heading").length;
+}
+function fileLineFields(location) {
+  if (location.type !== "file-lines") {
+    return {};
+  }
+  return {
+    lineStart: location.startLine,
+    lineEnd: location.endLine
+  };
+}
+function summarizeEvidence(text) {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= 160) {
+    return normalized;
+  }
+  return `${normalized.slice(0, 157)}...`;
+}
+function unsupportedReason(format) {
+  switch (format) {
+    case "pdf":
+      return "PDF brief extraction is not implemented yet.";
+    case "ticket":
+      return "Ticket brief connector extraction is not implemented yet.";
+    case "html":
+      return "HTML brief extraction is not implemented yet.";
+    case "unknown":
+      return "Brief source format could not be detected.";
+    default:
+      return `Brief source format is not supported yet: ${format}.`;
+  }
+}
 var AnalyzeBriefSourceInputSchema, BRIEF_ADAPTER_VERSION, BriefAdapterService;
 var init_brief_adapter_service = __esm({
   "src/application/brief-adapter-service.ts"() {
     "use strict";
     init_zod();
     init_brief_analysis();
+    init_brief_source_type();
     init_brief_classifier();
-    init_markdown_lines();
+    init_markdown_brief_parser();
+    init_plaintext_brief_parser();
+    init_unsupported_brief_parser();
     init_run2();
     init_id_factory();
     init_ids();
@@ -33862,38 +34232,55 @@ var init_brief_adapter_service = __esm({
             items: existingEvidence.map((evidence) => existingEvidenceItem(evidence, run.gaps))
           });
         }
-        if (source.locator.type !== "file") {
-          throw new Error("Task 08 only supports file brief sources");
-        }
-        const snapshotContent = await this.snapshotStore.readContent(sourceDigest);
-        const content = snapshotContent.toString("utf8");
-        const parsed = parseMarkdownLines(content);
-        const candidates = classifyBriefBlocks(parsed.blocks);
+        const document = await this.normalizeBriefSource(source, sourceDigest);
         const timestamp = IsoDateTimeSchema.parse(this.now());
         const evidenceToAdd = [];
         const gapsToAdd = [];
         const items = [];
+        if (isUnsupportedDocument(document)) {
+          const unsupportedBlock = document.blocks[0];
+          const evidence = createEvidenceFromBlock({
+            source,
+            sourceDigest,
+            block: unsupportedBlock,
+            timestamp,
+            itemType: "note",
+            flags: []
+          });
+          const gap = createUnsupportedGap({
+            evidence,
+            block: unsupportedBlock,
+            timestamp
+          });
+          evidenceToAdd.push(evidence);
+          gapsToAdd.push(gap);
+          items.push({
+            evidenceId: evidence.id,
+            itemType: "note",
+            location: evidence.location,
+            ...fileLineFields(evidence.location),
+            summary: evidence.summary,
+            headingPath: [],
+            flags: [],
+            gapIds: [gap.id]
+          });
+        }
+        const candidates = isUnsupportedDocument(document) ? [] : classifyBriefBlocks(document.blocks);
         for (const candidate of candidates) {
-          const evidence = EvidenceRefSchema.parse({
-            id: createEvidenceId(),
-            sourceId: source.id,
-            location: {
-              type: "file-lines",
-              path: source.locator.path,
-              startLine: candidate.lineStart,
-              endLine: candidate.lineEnd
-            },
-            summary: candidate.summary,
-            excerpt: candidate.text,
-            digest: sha256Digest(Buffer.from(candidate.text, "utf8")),
-            capturedAt: timestamp,
-            metadata: {
-              adapter: BRIEF_ADAPTER_VERSION,
-              sourceDigest,
-              itemType: candidate.itemType,
+          const evidence = createEvidenceFromBlock({
+            source,
+            sourceDigest,
+            block: {
+              blockId: "candidate",
+              kind: "paragraph",
+              text: candidate.text,
+              location: candidate.location,
               headingPath: candidate.headingPath,
-              flags: candidate.flags
-            }
+              metadata: {}
+            },
+            timestamp,
+            itemType: candidate.itemType,
+            flags: candidate.flags
           });
           evidenceToAdd.push(evidence);
           const gapIds = [];
@@ -33936,8 +34323,8 @@ var init_brief_adapter_service = __esm({
           items.push({
             evidenceId: evidence.id,
             itemType: candidate.itemType,
-            lineStart: candidate.lineStart,
-            lineEnd: candidate.lineEnd,
+            location: evidence.location,
+            ...fileLineFields(evidence.location),
             summary: candidate.summary,
             headingPath: candidate.headingPath,
             flags: candidate.flags,
@@ -33958,12 +34345,53 @@ var init_brief_adapter_service = __esm({
           sourceId: source.id,
           sourceDigest,
           duplicate: false,
-          sectionCount: parsed.headings.length,
+          sectionCount: countDocumentSections(document),
           candidateCount: candidates.length,
           evidenceAdded: evidenceToAdd.length,
           gapsAdded: gapsToAdd.length,
           items
         });
+      }
+      async normalizeBriefSource(source, sourceDigest) {
+        const format = detectBriefSourceType(source);
+        if (source.locator.type !== "file") {
+          return createUnsupportedBriefDocument({
+            source,
+            sourceDigest,
+            format,
+            reason: unsupportedReason(format)
+          });
+        }
+        await this.assertSnapshotMatches(sourceDigest);
+        if (format !== "markdown" && format !== "plaintext") {
+          return createUnsupportedBriefDocument({
+            source,
+            sourceDigest,
+            format,
+            reason: unsupportedReason(format)
+          });
+        }
+        const content = (await this.snapshotStore.readContent(sourceDigest)).toString("utf8");
+        if (format === "plaintext") {
+          return parsePlainTextBrief({
+            source,
+            sourceDigest,
+            content
+          });
+        }
+        return parseMarkdownBrief({
+          source,
+          sourceDigest,
+          content
+        });
+      }
+      async assertSnapshotMatches(sourceDigest) {
+        const metadata = await this.snapshotStore.readMetadata(sourceDigest);
+        if (metadata.canonicalDigest !== sourceDigest) {
+          throw new Error(
+            `Source snapshot digest mismatch: expected ${sourceDigest}, got ${metadata.canonicalDigest}`
+          );
+        }
       }
     };
   }
@@ -34034,7 +34462,7 @@ var init_policy = __esm({
 });
 
 // src/security/command-policy.ts
-import path from "path";
+import path2 from "path";
 function classifyCommand(rawCommand) {
   const command = CommandInvocationSchema.parse(rawCommand);
   const normalizedCommand = normalizeExecutable(command.command);
@@ -34228,7 +34656,7 @@ function classifyPackageManager(manager, args, intent) {
   );
 }
 function normalizeExecutable(command) {
-  return path.basename(command).toLowerCase();
+  return path2.basename(command).toLowerCase();
 }
 function findShellCharacters(parts) {
   const found = /* @__PURE__ */ new Set();
@@ -34323,14 +34751,14 @@ var init_command_policy = __esm({
 
 // src/security/path-policy.ts
 import { realpath, stat } from "fs/promises";
-import path2 from "path";
+import path3 from "path";
 async function validateWorkspacePath(rawInput) {
   const input = ValidateWorkspacePathInputSchema.parse(rawInput);
   if (hasNullByte(input.candidatePath) || hasNullByte(input.workspaceRoot)) {
     return deniedPath(input, "NULL_BYTE", "Paths must not contain null bytes.");
   }
-  const workspaceRootRealPath = await realpath(path2.resolve(input.workspaceRoot));
-  const candidateAbsolutePath = path2.resolve(workspaceRootRealPath, input.candidatePath);
+  const workspaceRootRealPath = await realpath(path3.resolve(input.workspaceRoot));
+  const candidateAbsolutePath = path3.resolve(workspaceRootRealPath, input.candidatePath);
   if (!isInsideOrEqual(workspaceRootRealPath, candidateAbsolutePath)) {
     return {
       workspaceRoot: input.workspaceRoot,
@@ -34410,7 +34838,7 @@ async function validateWorkspacePath(rawInput) {
   }
 }
 async function validateCreatePath(input, workspaceRootRealPath, candidateAbsolutePath) {
-  const parentPath = path2.dirname(candidateAbsolutePath);
+  const parentPath = path3.dirname(candidateAbsolutePath);
   try {
     const parentRealPath = await realpath(parentPath);
     if (!isInsideOrEqual(workspaceRootRealPath, parentRealPath)) {
@@ -34459,9 +34887,9 @@ async function validateCreatePath(input, workspaceRootRealPath, candidateAbsolut
 function deniedPath(input, code, message) {
   return {
     workspaceRoot: input.workspaceRoot,
-    workspaceRootRealPath: path2.resolve(input.workspaceRoot),
+    workspaceRootRealPath: path3.resolve(input.workspaceRoot),
     candidatePath: input.candidatePath,
-    candidateAbsolutePath: path2.resolve(input.workspaceRoot, input.candidatePath),
+    candidateAbsolutePath: path3.resolve(input.workspaceRoot, input.candidatePath),
     mode: input.mode,
     decision: deny(code, message, "critical", ["path"])
   };
@@ -34470,8 +34898,8 @@ function hasNullByte(value) {
   return value.includes("\0");
 }
 function isInsideOrEqual(root, candidate) {
-  const relative = path2.relative(root, candidate);
-  return relative === "" || !relative.startsWith("..") && !path2.isAbsolute(relative);
+  const relative = path3.relative(root, candidate);
+  return relative === "" || !relative.startsWith("..") && !path3.isAbsolute(relative);
 }
 var PathAccessModeSchema, ValidateWorkspacePathInputSchema, ValidatedWorkspacePathSchema;
 var init_path_policy = __esm({
@@ -34899,7 +35327,7 @@ var init_package_manager_detector = __esm({
 // src/profile/probe.ts
 import { execFile } from "child_process";
 import { access, readdir, readFile, realpath as realpath2, stat as stat2 } from "fs/promises";
-import path3 from "path";
+import path4 from "path";
 import { promisify } from "util";
 async function createProjectProbe(projectRoot) {
   const realRoot = await realpath2(projectRoot);
@@ -34908,7 +35336,7 @@ async function createProjectProbe(projectRoot) {
     throw new Error(`Project root is not a directory: ${realRoot}`);
   }
   async function resolveInside(relativePath) {
-    const candidate = path3.resolve(realRoot, relativePath);
+    const candidate = path4.resolve(realRoot, relativePath);
     const realCandidate = await realpathOrParent(candidate);
     if (!isInside(realRoot, realCandidate)) {
       throw new Error(`Path escapes project root: ${relativePath}`);
@@ -34982,26 +35410,26 @@ async function createProjectProbe(projectRoot) {
       }
     },
     toRelative(absolutePath) {
-      return normalizeRelative(path3.relative(realRoot, absolutePath));
+      return normalizeRelative(path4.relative(realRoot, absolutePath));
     },
     resolveInside
   };
   return probe;
 }
 function normalizeRelative(value) {
-  return value.split(path3.sep).join("/");
+  return value.split(path4.sep).join("/");
 }
 function isInside(root, candidate) {
-  const relative = path3.relative(root, candidate);
-  return relative === "" || !relative.startsWith("..") && !path3.isAbsolute(relative);
+  const relative = path4.relative(root, candidate);
+  return relative === "" || !relative.startsWith("..") && !path4.isAbsolute(relative);
 }
 async function realpathOrParent(candidate) {
   let current = candidate;
-  while (current !== path3.dirname(current)) {
+  while (current !== path4.dirname(current)) {
     try {
       return await realpath2(current);
     } catch {
-      current = path3.dirname(current);
+      current = path4.dirname(current);
     }
   }
   try {
@@ -35319,7 +35747,7 @@ var init_project_profiler = __esm({
 
 // src/profile/profile-store.ts
 import { mkdir, readdir as readdir2, readFile as readFile2, writeFile } from "fs/promises";
-import path4 from "path";
+import path5 from "path";
 var JsonProfileStore;
 var init_profile_store = __esm({
   "src/profile/profile-store.ts"() {
@@ -35336,7 +35764,7 @@ var init_profile_store = __esm({
           mode: 448
         });
         await writeFile(
-          path4.join(this.directory, `${manifest.runId}.intake.json`),
+          path5.join(this.directory, `${manifest.runId}.intake.json`),
           `${JSON.stringify(IntakeManifestSchema.parse(manifest), null, 2)}
 `,
           {
@@ -35346,7 +35774,7 @@ var init_profile_store = __esm({
         );
       }
       async getManifest(runId) {
-        const text = await readFile2(path4.join(this.directory, `${runId}.intake.json`), "utf8");
+        const text = await readFile2(path5.join(this.directory, `${runId}.intake.json`), "utf8");
         return IntakeManifestSchema.parse(JSON.parse(text));
       }
       async saveProfile(profile) {
@@ -35355,7 +35783,7 @@ var init_profile_store = __esm({
           mode: 448
         });
         await writeFile(
-          path4.join(this.directory, `${profile.runId}.profile.json`),
+          path5.join(this.directory, `${profile.runId}.profile.json`),
           `${JSON.stringify(ProjectProfileSchema.parse(profile), null, 2)}
 `,
           {
@@ -35365,7 +35793,7 @@ var init_profile_store = __esm({
         );
       }
       async getProfile(runId) {
-        const text = await readFile2(path4.join(this.directory, `${runId}.profile.json`), "utf8");
+        const text = await readFile2(path5.join(this.directory, `${runId}.profile.json`), "utf8");
         return ProjectProfileSchema.parse(JSON.parse(text));
       }
       async listProfiles() {
@@ -35377,7 +35805,7 @@ var init_profile_store = __esm({
         const profileFiles = files.filter((file2) => file2.endsWith(".profile.json"));
         const profiles = await Promise.all(
           profileFiles.map(async (file2) => {
-            const text = await readFile2(path4.join(this.directory, file2), "utf8");
+            const text = await readFile2(path5.join(this.directory, file2), "utf8");
             return ProjectProfileSchema.parse(JSON.parse(text));
           })
         );
@@ -35456,12 +35884,12 @@ var init_profile_service = __esm({
 // src/application/run-service.ts
 import { randomUUID as randomUUID2 } from "crypto";
 import { realpath as realpath3, stat as stat3 } from "fs/promises";
-import path5 from "path";
+import path6 from "path";
 function createRunId() {
   return RunIdSchema.parse(`run_${randomUUID2().replaceAll("-", "")}`);
 }
 async function canonicalDirectory(rawPath) {
-  const absolute = path5.resolve(rawPath);
+  const absolute = path6.resolve(rawPath);
   const canonical = await realpath3(absolute);
   const metadata = await stat3(canonical);
   if (!metadata.isDirectory()) {
@@ -35614,13 +36042,13 @@ var init_canonical_content = __esm({
 
 // src/source-registry/path-scope.ts
 import { realpath as realpath4, stat as stat4 } from "fs/promises";
-import path6 from "path";
+import path7 from "path";
 async function resolveFileInsideRoot(input) {
   const projectRoot = await realpath4(input.projectRoot);
-  const candidate = path6.resolve(projectRoot, input.filePath);
+  const candidate = path7.resolve(projectRoot, input.filePath);
   const absolutePath = await realpath4(candidate);
-  const relative = path6.relative(projectRoot, absolutePath);
-  if (relative === "" || relative.startsWith("..") || path6.isAbsolute(relative)) {
+  const relative = path7.relative(projectRoot, absolutePath);
+  if (relative === "" || relative.startsWith("..") || path7.isAbsolute(relative)) {
     throw new Error(`File is outside project root: ${input.filePath}`);
   }
   const metadata = await stat4(absolutePath);
@@ -35634,7 +36062,7 @@ async function resolveFileInsideRoot(input) {
   };
 }
 function toPosixPath(value) {
-  return value.split(path6.sep).join("/");
+  return value.split(path7.sep).join("/");
 }
 var init_path_scope = __esm({
   "src/source-registry/path-scope.ts"() {
@@ -35645,7 +36073,7 @@ var init_path_scope = __esm({
 
 // src/source-registry/snapshot-store.ts
 import { mkdir as mkdir2, readFile as readFile3, writeFile as writeFile2 } from "fs/promises";
-import path7 from "path";
+import path8 from "path";
 async function writeIfMissing(filePath, content) {
   try {
     await writeFile2(filePath, content, {
@@ -35688,9 +36116,9 @@ var init_snapshot_store = __esm({
       async writeSnapshot(input) {
         const digest = input.canonical.canonicalDigest;
         const { prefix, hex: hex3 } = digestPathSegments(digest);
-        const directory = path7.join(this.rootDirectory, "sha256", prefix, hex3);
-        const contentPath = path7.join(directory, "content");
-        const metadataPath = path7.join(directory, "metadata.json");
+        const directory = path8.join(this.rootDirectory, "sha256", prefix, hex3);
+        const contentPath = path8.join(directory, "content");
+        const metadataPath = path8.join(directory, "metadata.json");
         await mkdir2(directory, {
           recursive: true,
           mode: 448
@@ -35721,13 +36149,13 @@ var init_snapshot_store = __esm({
       async readMetadata(rawDigest) {
         const digest = Sha256DigestSchema.parse(rawDigest);
         const { prefix, hex: hex3 } = digestPathSegments(digest);
-        const metadataPath = path7.join(this.rootDirectory, "sha256", prefix, hex3, "metadata.json");
+        const metadataPath = path8.join(this.rootDirectory, "sha256", prefix, hex3, "metadata.json");
         return SourceSnapshotMetadataSchema.parse(JSON.parse(await readFile3(metadataPath, "utf8")));
       }
       async readContent(rawDigest) {
         const digest = Sha256DigestSchema.parse(rawDigest);
         const { prefix, hex: hex3 } = digestPathSegments(digest);
-        const contentPath = path7.join(this.rootDirectory, "sha256", prefix, hex3, "content");
+        const contentPath = path8.join(this.rootDirectory, "sha256", prefix, hex3, "content");
         return readFile3(contentPath);
       }
     };
@@ -37039,7 +37467,7 @@ __export(sqlite_run_store_exports, {
   SqliteRunStore: () => SqliteRunStore
 });
 import { mkdirSync } from "fs";
-import path8 from "path";
+import path9 from "path";
 import { createRequire } from "module";
 function loadSqliteModule() {
   return require2("node:sqlite");
@@ -37081,7 +37509,7 @@ var init_sqlite_run_store = __esm({
     SqliteRunStore = class {
       database;
       constructor(databasePath) {
-        mkdirSync(path8.dirname(databasePath), {
+        mkdirSync(path9.dirname(databasePath), {
           recursive: true,
           mode: 448
         });
@@ -37317,7 +37745,7 @@ __export(run_service_provider_exports, {
   createLazyServicesProvider: () => createLazyServicesProvider
 });
 import os from "os";
-import path9 from "path";
+import path10 from "path";
 function createLazyServicesProvider() {
   let services;
   return async () => {
@@ -37326,8 +37754,8 @@ function createLazyServicesProvider() {
     }
     const { SqliteRunStore: SqliteRunStore2 } = await Promise.resolve().then(() => (init_sqlite_run_store(), sqlite_run_store_exports));
     const dataDirectory = resolveDataDirectory();
-    const store = new SqliteRunStore2(path9.join(dataDirectory, "runs.sqlite3"));
-    const snapshotStore = new SourceSnapshotStore(path9.join(dataDirectory, "source-snapshots"));
+    const store = new SqliteRunStore2(path10.join(dataDirectory, "runs.sqlite3"));
+    const snapshotStore = new SourceSnapshotStore(path10.join(dataDirectory, "source-snapshots"));
     services = {
       runService: new RunService(store, {
         pluginVersion: package_default.version
@@ -37335,7 +37763,7 @@ function createLazyServicesProvider() {
       stageService: new StageService(store),
       policyService: new PolicyService(),
       profileService: new ProjectProfileService(
-        new JsonProfileStore(path9.join(dataDirectory, "profiles"))
+        new JsonProfileStore(path10.join(dataDirectory, "profiles"))
       ),
       sourceRegistryService: new SourceRegistryService(store, snapshotStore),
       briefAdapterService: new BriefAdapterService(store, snapshotStore)
@@ -37344,7 +37772,7 @@ function createLazyServicesProvider() {
   };
 }
 function resolveDataDirectory() {
-  return process.env.SPEC_TO_PR_DATA_DIR ?? path9.join(os.tmpdir(), "spec-to-pr-plugin-data");
+  return process.env.SPEC_TO_PR_DATA_DIR ?? path10.join(os.tmpdir(), "spec-to-pr-plugin-data");
 }
 var init_run_service_provider = __esm({
   "src/mcp/run-service-provider.ts"() {
