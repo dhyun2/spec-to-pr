@@ -101,6 +101,56 @@ describe("source and evidence contracts", () => {
     expect(evidence.location.type).toBe("file-lines");
   });
 
+  it("models a ticket source", () => {
+    const source = SourceRefSchema.parse({
+      id: sourceId,
+      kind: "brief",
+      locator: {
+        type: "ticket",
+        provider: "gitlab",
+        url: "https://gitlab.example.com/group/project/-/issues/123",
+        externalId: "123",
+      },
+      digest,
+      capturedAt: now,
+    });
+
+    expect(source.locator.type).toBe("ticket");
+  });
+
+  it("models pdf and ticket evidence locations", () => {
+    const pdfEvidence = EvidenceRefSchema.parse({
+      id: evidenceId,
+      sourceId,
+      location: {
+        type: "pdf-text-block",
+        path: "docs/brief.pdf",
+        page: 3,
+        blockIndex: 7,
+      },
+      summary: "PDF brief text block",
+      digest,
+      capturedAt: now,
+    });
+
+    const ticketEvidence = EvidenceRefSchema.parse({
+      id: "ev_22222222222222222222222222222222",
+      sourceId,
+      location: {
+        type: "ticket-field",
+        provider: "github",
+        url: "https://github.com/example/project/issues/123",
+        field: "description",
+      },
+      summary: "Ticket description",
+      digest,
+      capturedAt: now,
+    });
+
+    expect(pdfEvidence.location.type).toBe("pdf-text-block");
+    expect(ticketEvidence.location.type).toBe("ticket-field");
+  });
+
   it("rejects reversed file-line evidence ranges", () => {
     const result = EvidenceRefSchema.safeParse({
       id: evidenceId,

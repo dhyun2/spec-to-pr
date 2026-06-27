@@ -51,11 +51,24 @@ export const RepositorySourceLocatorSchema = z
   })
   .strict();
 
+export const TicketProviderSchema = z.enum(["jira", "gitlab", "github", "notion", "linear"]);
+
+export const TicketSourceLocatorSchema = z
+  .object({
+    type: z.literal("ticket"),
+    provider: TicketProviderSchema,
+    url: z.string().url(),
+    externalId: z.string().trim().min(1).optional(),
+    mediaType: z.string().trim().min(1).optional(),
+  })
+  .strict();
+
 export const SourceLocatorSchema = z.discriminatedUnion("type", [
   FileSourceLocatorSchema,
   UrlSourceLocatorSchema,
   FigmaSourceLocatorSchema,
   RepositorySourceLocatorSchema,
+  TicketSourceLocatorSchema,
 ]);
 
 export const SourceRefSchema = z
@@ -112,6 +125,33 @@ export const UrlFragmentEvidenceLocationSchema = z
   })
   .strict();
 
+export const PdfPageEvidenceLocationSchema = z
+  .object({
+    type: z.literal("pdf-page"),
+    path: RelativePathSchema,
+    page: z.number().int().positive(),
+  })
+  .strict();
+
+export const PdfTextBlockEvidenceLocationSchema = z
+  .object({
+    type: z.literal("pdf-text-block"),
+    path: RelativePathSchema,
+    page: z.number().int().positive(),
+    blockIndex: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export const TicketFieldEvidenceLocationSchema = z
+  .object({
+    type: z.literal("ticket-field"),
+    provider: TicketProviderSchema,
+    url: z.string().url(),
+    field: z.string().trim().min(1),
+    commentId: z.string().trim().min(1).optional(),
+  })
+  .strict();
+
 export const GitFileEvidenceLocationSchema = z
   .object({
     type: z.literal("git-file"),
@@ -151,6 +191,9 @@ export const EvidenceLocationSchema = z.discriminatedUnion("type", [
   JsonPointerEvidenceLocationSchema,
   FigmaNodeEvidenceLocationSchema,
   UrlFragmentEvidenceLocationSchema,
+  PdfPageEvidenceLocationSchema,
+  PdfTextBlockEvidenceLocationSchema,
+  TicketFieldEvidenceLocationSchema,
   GitFileEvidenceLocationSchema,
 ]);
 
@@ -167,6 +210,7 @@ export const EvidenceRefSchema = z
   })
   .strict();
 
+export type TicketProvider = z.infer<typeof TicketProviderSchema>;
 export type SourceKind = z.infer<typeof SourceKindSchema>;
 export type SourceLocator = z.infer<typeof SourceLocatorSchema>;
 export type SourceRef = z.infer<typeof SourceRefSchema>;
