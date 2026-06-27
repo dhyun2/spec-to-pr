@@ -79,3 +79,37 @@ rawDigest is stored in SourceRef.metadata and snapshot metadata.
 - Duplicate source registration is idempotent
 - MCP tools can register and inspect source snapshots
 - Existing Run and Stage tests still pass
+
+## Verification
+
+Run:
+
+```bash
+pnpm format:check
+pnpm typecheck
+pnpm schemas:build
+pnpm build
+pnpm test
+pnpm audit
+```
+
+Expected:
+
+- content hash tests pass
+- canonicalization tests pass
+- path scope tests pass
+- snapshot store tests pass
+- SourceRegistryService tests pass
+- MCP stdio integration test calls:
+  - `create_run`
+  - `register_file_source`
+  - `get_source_snapshot`
+
+## Known Limitations
+
+- URL sources are not fetched yet.
+- Figma sources are not fetched yet.
+- Repository tree snapshots are not implemented yet.
+- Evidence extraction is not implemented yet.
+- SourceRef.digest uses canonical digest for text-like files.
+- Raw digest is preserved in metadata.
