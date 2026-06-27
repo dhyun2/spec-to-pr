@@ -159,6 +159,15 @@ export const RunManifestSchema = z
           });
         }
       });
+
+      stage.gapIds.forEach((gapId, gapIndex) => {
+        if (!gapIds.has(gapId)) {
+          addReferenceIssue(context, ["stages", stageIndex, "gapIds", gapIndex], {
+            kind: "gap",
+            id: gapId,
+          });
+        }
+      });
     });
 
     run.agentResults.forEach((result, resultIndex) => {
