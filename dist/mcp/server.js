@@ -33358,10 +33358,18 @@ function isInside(root, candidate) {
   return relative === "" || !relative.startsWith("..") && !path3.isAbsolute(relative);
 }
 async function realpathOrParent(candidate) {
+  let current = candidate;
+  while (current !== path3.dirname(current)) {
+    try {
+      return await realpath2(current);
+    } catch {
+      current = path3.dirname(current);
+    }
+  }
   try {
-    return await realpath2(candidate);
+    return await realpath2(current);
   } catch {
-    return await realpath2(path3.dirname(candidate));
+    return current;
   }
 }
 var execFileAsync;

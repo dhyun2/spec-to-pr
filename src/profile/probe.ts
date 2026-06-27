@@ -149,9 +149,19 @@ function isInside(root: string, candidate: string): boolean {
 }
 
 async function realpathOrParent(candidate: string): Promise<string> {
+  let current = candidate;
+
+  while (current !== path.dirname(current)) {
+    try {
+      return await realpath(current);
+    } catch {
+      current = path.dirname(current);
+    }
+  }
+
   try {
-    return await realpath(candidate);
+    return await realpath(current);
   } catch {
-    return await realpath(path.dirname(candidate));
+    return current;
   }
 }

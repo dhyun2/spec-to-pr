@@ -52,13 +52,17 @@ describe("spec-to-pr MCP stdio server", () => {
       "block_stage",
       "classify_command",
       "complete_stage",
+      "create_intake_manifest",
       "create_run",
       "fail_stage",
+      "get_project_profile",
       "get_resume_plan",
       "get_run",
       "heartbeat_stage",
+      "inspect_project",
       "kernel_info",
       "kernel_ping",
+      "list_project_profiles",
       "list_runs",
       "policy_info",
       "redact_text",
@@ -156,6 +160,66 @@ describe("spec-to-pr MCP stdio server", () => {
       status: "created",
       revision: 0,
     });
+
+    const intake = await client.callTool({
+      name: "create_intake_manifest",
+      arguments: {
+        runId,
+        projectRoot: projectDirectory,
+        language: "ko",
+        sources: [
+          {
+            kind: "brief",
+            locator: {
+              type: "file",
+              path: "docs/brief.md",
+            },
+            required: true,
+          },
+        ],
+      },
+    });
+
+    expect(intake.structuredContent).toMatchObject({
+      runId,
+      projectRoot: projectDirectory,
+      language: "ko",
+    });
+
+    const profile = await client.callTool({
+      name: "inspect_project",
+      arguments: {
+        runId,
+        projectRoot: projectDirectory,
+      },
+    });
+
+    expect(profile.structuredContent).toMatchObject({
+      runId,
+      projectRoot: canonicalProjectDirectory,
+    });
+
+    const loadedProfile = await client.callTool({
+      name: "get_project_profile",
+      arguments: {
+        runId,
+      },
+    });
+
+    expect(loadedProfile.structuredContent).toMatchObject({
+      runId,
+      projectRoot: canonicalProjectDirectory,
+    });
+
+    const listedProfiles = await client.callTool({
+      name: "list_project_profiles",
+      arguments: {},
+    });
+
+    const profiles = (listedProfiles.structuredContent as { profiles: Array<{ runId: string }> })
+      .profiles;
+
+    expect(profiles.map((item) => item.runId)).toContain(runId);
 
     const started = await client.callTool({
       name: "start_stage",
