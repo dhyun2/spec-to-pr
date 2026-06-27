@@ -1,4 +1,4 @@
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -58,6 +58,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "get_project_profile",
       "get_resume_plan",
       "get_run",
+      "get_source_snapshot",
       "heartbeat_stage",
       "inspect_project",
       "kernel_info",
@@ -66,6 +67,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "list_runs",
       "policy_info",
       "redact_text",
+      "register_file_source",
       "skip_stage",
       "start_stage",
       "validate_path",
@@ -159,6 +161,49 @@ describe("spec-to-pr MCP stdio server", () => {
       id: runId,
       status: "created",
       revision: 0,
+    });
+
+    await mkdir(path.join(projectDirectory, "docs"), {
+      recursive: true,
+    });
+
+    await writeFile(path.join(projectDirectory, "docs", "brief.md"), "# Brief\nHello\n");
+
+    const registered = await client.callTool({
+      name: "register_file_source",
+      arguments: {
+        runId,
+        kind: "brief",
+        path: "docs/brief.md",
+        mediaType: "text/markdown",
+      },
+    });
+
+    expect(registered.structuredContent).toMatchObject({
+      source: {
+        kind: "brief",
+        locator: {
+          type: "file",
+          path: "docs/brief.md",
+        },
+      },
+      duplicate: false,
+    });
+
+    const digest = (registered.structuredContent as { source: { digest: string } }).source.digest;
+
+    const snapshot = await client.callTool({
+      name: "get_source_snapshot",
+      arguments: {
+        digest,
+      },
+    });
+
+    expect(snapshot.structuredContent).toMatchObject({
+      canonicalDigest: digest,
+      source: {
+        kind: "brief",
+      },
     });
 
     const intake = await client.callTool({
