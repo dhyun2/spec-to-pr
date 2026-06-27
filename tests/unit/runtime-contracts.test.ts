@@ -11,7 +11,7 @@ import {
   RunIdSchema,
   Sha256DigestSchema,
   SourceRefSchema,
-} from "../../src/rumtime/index.js";
+} from "../../src/runtime/index.js";
 
 const now = "2026-06-23T00:00:00.000Z";
 const later = "2026-06-23T00:00:01.000Z";

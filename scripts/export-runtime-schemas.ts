@@ -11,7 +11,7 @@ import {
   GapSchema,
   RUNTIME_CONTRACT_VERSION,
   SourceRefSchema,
-} from "../src/rumtime/index.ts";
+} from "../src/runtime/index.ts";
 
 const outputDirectory = new URL("../schemas/runtime/", import.meta.url);
 
