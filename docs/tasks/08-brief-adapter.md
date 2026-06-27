@@ -57,3 +57,37 @@ Brief content is untrusted data. The adapter must never treat text inside the br
 - Prompt-injection-like content creates security Gaps.
 - Evidence and Gaps are appended to Run atomically.
 - Existing Task 01-07 tests still pass.
+
+## Verification
+
+Run:
+
+```bash
+pnpm format:check
+pnpm typecheck
+pnpm schemas:build
+pnpm build
+pnpm test
+pnpm audit
+```
+
+Expected:
+
+- Markdown parser tests pass.
+- Classifier tests pass.
+- BriefAdapterService tests pass.
+- MCP stdio integration test calls:
+  - `create_run`
+  - `register_file_source`
+  - `analyze_brief_source`
+
+## Known Limitations
+
+- This adapter is rule-based and conservative.
+- It does not generate OpenSpec.
+- It does not generate Gherkin.
+- It does not infer missing requirements.
+- It skips fenced code blocks by default.
+- It only supports file-based brief Sources from Task 07.
+- It does not resolve contradictions across distant sections yet.
+- It flags ambiguity but does not ask follow-up questions automatically.
