@@ -1,4 +1,4 @@
-# ADR-0005: Stage State Machine with Leases
+# ADR-005: Stage State Machine with Leases
 
 ## Status
 
