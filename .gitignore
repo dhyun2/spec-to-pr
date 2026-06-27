@@ -1,0 +1,67 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Package manager
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build output
+dist/
+build/
+out/
+.turbo/
+.next/
+.vite/
+coverage/
+
+# TypeScript
+*.tsbuildinfo
+
+# Test output
+test-results/
+playwright-report/
+blob-report/
+
+# Runtime / plugin data
+.claude/
+.claude-data/
+.spec-to-pr/
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+
+# Generated artifacts
+artifacts/
+tmp/
+temp/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+*.log
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Package artifacts
+*.tgz
+*.zip
+*.bundle
+
+# Local caches
+.cache/
+.eslintcache

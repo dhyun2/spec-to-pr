@@ -1,0 +1,26 @@
+# Dependencies
+node_modules
+
+# Build output
+dist
+coverage
+
+# Plugin/runtime data
+.claude
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+
+# Generated artifacts
+artifacts
+schemas/runtime/*.schema.json
+
+# Package artifacts
+*.zip
+*.tgz
+*.bundle
+
+# Logs
+*.log
