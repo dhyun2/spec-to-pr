@@ -33437,7 +33437,9 @@ function extractPnpmWorkspacePatterns(text) {
       continue;
     }
     if (inPackages && trimmed.startsWith("-")) {
-      result.push(trimmed.replace(/^-/, "").trim().replace(/^["']|["']$/g, ""));
+      result.push(
+        trimmed.replace(/^-/, "").trim().replace(/^["']|["']$/g, "")
+      );
       continue;
     }
     if (inPackages && trimmed !== "" && !line.startsWith(" ")) {
