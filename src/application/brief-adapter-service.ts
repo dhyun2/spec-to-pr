@@ -222,9 +222,7 @@ function existingEvidenceItem(evidence: EvidenceRef, gaps: Gap[]): BriefExtracte
   const flags = parseMetadataFlags(evidence.metadata["flags"]);
   const headingPath = parseMetadataHeadingPath(evidence.metadata["headingPath"]);
   const location =
-    evidence.location.type === "file-lines"
-      ? evidence.location
-      : { startLine: 1, endLine: 1 };
+    evidence.location.type === "file-lines" ? evidence.location : { startLine: 1, endLine: 1 };
 
   return {
     evidenceId: evidence.id,
@@ -234,9 +232,7 @@ function existingEvidenceItem(evidence: EvidenceRef, gaps: Gap[]): BriefExtracte
     summary: evidence.summary,
     headingPath,
     flags,
-    gapIds: gaps
-      .filter((gap) => gap.sourceEvidenceIds.includes(evidence.id))
-      .map((gap) => gap.id),
+    gapIds: gaps.filter((gap) => gap.sourceEvidenceIds.includes(evidence.id)).map((gap) => gap.id),
   };
 }
 
