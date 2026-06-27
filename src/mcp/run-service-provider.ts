@@ -2,6 +2,7 @@ import os from "node:os";
 import path from "node:path";
 
 import packageJson from "../../package.json" with { type: "json" };
+import { PolicyService } from "../application/policy-service.js";
 import { RunService } from "../application/run-service.js";
 import { StageService } from "../application/stage-service.js";
 import type { RunStore } from "../store/run-store.js";
@@ -9,6 +10,7 @@ import type { RunStore } from "../store/run-store.js";
 export type Services = {
   runService: RunService;
   stageService: StageService;
+  policyService: PolicyService;
 };
 
 export type ServicesProvider = () => Promise<Services>;
@@ -30,6 +32,7 @@ export function createLazyServicesProvider(): ServicesProvider {
         pluginVersion: packageJson.version,
       }),
       stageService: new StageService(store),
+      policyService: new PolicyService(),
     };
 
     return services;

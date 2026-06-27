@@ -2,6 +2,7 @@ import packageJson from "../../package.json" with { type: "json" };
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
+import { RedactTextInputSchema } from "../application/policy-service.js";
 import {
   CreateRunInputSchema,
   GetRunInputSchema,
@@ -17,6 +18,8 @@ import {
   StartStageInputSchema,
 } from "../application/stage-service.js";
 import { RunManifestSchema, RunSummarySchema } from "../run/index.js";
+import { CommandInvocationSchema } from "../security/command-policy.js";
+import { ValidateWorkspacePathInputSchema } from "../security/path-policy.js";
 import type { ServicesProvider } from "./run-service-provider.js";
 
 const CONTRACT_VERSION = "0.2.0" as const;
@@ -56,6 +59,11 @@ const ListRunsOutputSchema = z.object({
   runs: z.array(RunSummarySchema),
 });
 
+const PolicyInfoOutputSchema = z.object({
+  policyVersion: z.literal("0.5.0"),
+  capabilities: z.array(z.string()),
+});
+
 type ToolResult<TStructuredContent> = {
   text: string;
   structuredContent: TStructuredContent;
@@ -74,6 +82,10 @@ const TOOL_NAMES = [
   "block_stage",
   "skip_stage",
   "get_resume_plan",
+  "policy_info",
+  "validate_path",
+  "classify_command",
+  "redact_text",
 ] as const;
 
 export function createKernelServer(servicesProvider: ServicesProvider): McpServer {
@@ -143,6 +155,105 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
 
         return {
           text: `pong: ${structuredContent.echo}`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "policy_info",
+    {
+      title: "Policy information",
+      description: "Return the installed security policy capabilities.",
+      outputSchema: PolicyInfoOutputSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async () =>
+      handleTool(() => {
+        const structuredContent = PolicyInfoOutputSchema.parse({
+          policyVersion: "0.5.0",
+          capabilities: [
+            "workspace-path-validation",
+            "command-classification",
+            "secret-redaction",
+            "untrusted-content-wrapping",
+          ],
+        });
+
+        return {
+          text: "Security policy baseline is available.",
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "validate_path",
+    {
+      title: "Validate workspace path",
+      description: "Validate that a path stays inside a workspace boundary.",
+      inputSchema: ValidateWorkspacePathInputSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { policyService } = await servicesProvider();
+        const structuredContent = await policyService.validatePath(input);
+
+        return {
+          text: `Path policy verdict: ${structuredContent.decision.verdict}`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "classify_command",
+    {
+      title: "Classify command",
+      description: "Classify a command invocation as allow, approval-required, or deny.",
+      inputSchema: CommandInvocationSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { policyService } = await servicesProvider();
+        const structuredContent = policyService.classifyCommand(input);
+
+        return {
+          text: `Command policy verdict: ${structuredContent.decision.verdict}`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "redact_text",
+    {
+      title: "Redact text",
+      description: "Redact likely secrets from text.",
+      inputSchema: RedactTextInputSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { policyService } = await servicesProvider();
+        const structuredContent = policyService.redactText(input);
+
+        return {
+          text: `Redacted ${structuredContent.redactionCount} secret-like value(s).`,
           structuredContent,
         };
       }),
