@@ -44,3 +44,15 @@ Tradeoffs:
 - The agent can only work within allowed paths.
 - Some implementation requests may be blocked until API/design gaps are resolved.
 - Visual scoring is deferred to a later task.
+
+## Implementation Notes
+
+The lane records a durable context pack artifact so a later agent or operator can reload the same Design/UI instructions by Run ID and change name. The prepare step derives default artifacts from the Run when explicit artifact IDs are not provided, while still accepting explicit IDs for deterministic orchestration.
+
+The result recorder validates Design/UI `AgentResult` payloads before appending them to the Run. It rejects changes outside UI-owned globs and scans changed files for direct generated-client, HTTP-client, OpenAPI, or `fetch` usage.
+
+## Deferred Decisions
+
+- Visual evidence comparison remains outside this lane.
+- Repair loops and merge orchestration remain outside this lane.
+- Final UI acceptance should be handled by later verification and integration tasks.

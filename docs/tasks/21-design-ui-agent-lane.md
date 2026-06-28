@@ -77,3 +77,39 @@ This agent reads the context pack and writes UI code according to the policy.
   - get_design_ui_agent_context
   - record_design_ui_agent_result
 - Tests cover context pack generation and result validation.
+
+## Implemented Components
+
+- `agents/design-ui.md` defines the Design/UI implementation subagent contract.
+- `skills/run-design-ui/SKILL.md` prepares the lane and delegates implementation to that subagent.
+- `src/design-ui/design-ui-context-builder.ts` writes the context pack files and policy artifacts.
+- `src/design-ui/design-ui-result-validator.ts` rejects forbidden files and forbidden imports.
+- `src/application/design-ui-agent-lane-service.ts` prepares, loads, and records Design/UI agent context and results.
+- MCP exposes `prepare_design_ui_agent`, `get_design_ui_agent_context`, and `record_design_ui_agent_result`.
+
+## Verification
+
+Expected verification commands:
+
+```bash
+pnpm format:check
+pnpm typecheck
+pnpm schemas:build
+pnpm build
+pnpm test
+pnpm audit
+```
+
+Focused coverage includes:
+
+- context pack builder tests
+- forbidden file and forbidden import validator tests
+- DesignUiAgentLaneService prepare/get/record tests
+- MCP stdio tool-list and tool-call coverage
+
+## Known Limitations
+
+- Visual regression, pixel diff, accessibility scoring, and Lighthouse gates are not implemented here.
+- The lane does not merge the Design/UI worktree or publish a PR.
+- Context pack metadata is persisted as an `agent-context-pack` artifact, but visual proof is not scored in this task.
+- Actual UI quality still depends on the subagent execution and later review lanes.
