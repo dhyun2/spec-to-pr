@@ -335,10 +335,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path30) {
-  if (!path30)
+function getElementAtPath(obj, path33) {
+  if (!path33)
     return obj;
-  return path30.reduce((acc, key) => acc?.[key], obj);
+  return path33.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -666,11 +666,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path30, issues) {
+function prefixIssues(path33, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path30);
+    iss.path.unshift(path33);
     return iss;
   });
 }
@@ -888,16 +888,16 @@ function flattenError(error51, mapper = (issue2) => issue2.message) {
 }
 function formatError(error51, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error52, path30 = []) => {
+  const processError = (error52, path33 = []) => {
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path30, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path33, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path30, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path33, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path30, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path33, ...issue2.path]);
       } else {
-        const fullpath = [...path30, ...issue2.path];
+        const fullpath = [...path33, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -924,17 +924,17 @@ function formatError(error51, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error51, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error52, path30 = []) => {
+  const processError = (error52, path33 = []) => {
     var _a3, _b;
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path30, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path33, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path30, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path33, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path30, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path33, ...issue2.path]);
       } else {
-        const fullpath = [...path30, ...issue2.path];
+        const fullpath = [...path33, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -966,8 +966,8 @@ function treeifyError(error51, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path30 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path30) {
+  const path33 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path33) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -14470,13 +14470,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path30 = ref.slice(1).split("/").filter(Boolean);
-  if (path30.length === 0) {
+  const path33 = ref.slice(1).split("/").filter(Boolean);
+  if (path33.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path30[0] === defsKey) {
-    const key = path30[1];
+  if (path33[0] === defsKey) {
+    const key = path33[1];
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -17318,8 +17318,8 @@ var init_parseUtil = __esm({
     init_errors3();
     init_en2();
     makeIssue = (params) => {
-      const { data, path: path30, errorMaps, issueData } = params;
-      const fullPath = [...path30, ...issueData.path || []];
+      const { data, path: path33, errorMaps, issueData } = params;
+      const fullPath = [...path33, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -17602,11 +17602,11 @@ var init_types2 = __esm({
     init_parseUtil();
     init_util2();
     ParseInputLazyPath = class {
-      constructor(parent, value, path30, key) {
+      constructor(parent, value, path33, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path30;
+        this._path = path33;
         this._key = key;
       }
       get path() {
@@ -26950,8 +26950,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path30) {
-      let input = path30;
+    function removeDotSegments(path33) {
+      let input = path33;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -27203,8 +27203,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path30, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path30 && path30 !== "/" ? path30 : void 0;
+        const [path33, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path33 && path33 !== "/" ? path33 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -33888,11 +33888,11 @@ function addUniqueValueIssues(collectionName, values, context) {
     seen.add(value);
   });
 }
-function addReferenceIssue(context, path30, reference) {
+function addReferenceIssue(context, path33, reference) {
   context.addIssue({
     code: "custom",
     message: `Unknown ${reference.kind} reference ${reference.id}`,
-    path: path30
+    path: path33
   });
 }
 var RunStatusSchema, RunManifestSchema, RunSummarySchema, CreateInitialRunInputSchema;
@@ -35383,7 +35383,7 @@ function generateFeatureWrappers(input) {
 }
 function renderWrapper(input) {
   const method = input.operation.method.toUpperCase();
-  const path30 = input.operation.path;
+  const path33 = input.operation.path;
   return `// AUTO-GENERATED wrapper skeleton by spec-to-pr.
 // Review and adapt the generated client import to the target project's actual API client.
 // Do not import generated clients directly from UI components.
@@ -35398,7 +35398,7 @@ export type ${capitalize(input.wrapperName)}Input = {
 export async function ${input.wrapperName}(input: ${capitalize(input.wrapperName)}Input = {}) {
   return apiClient.request({
     method: ${JSON.stringify(method)},
-    path: ${JSON.stringify(path30)},
+    path: ${JSON.stringify(path33)},
     params: input.params,
     body: input.body,
   });
@@ -35450,8 +35450,8 @@ ${indent(handlers, 2)}
 }
 function renderHandler(operation) {
   const mswMethod = operation.method.toLowerCase();
-  const path30 = operation.path.replace(/{([^}]+)}/g, ":$1");
-  return `http.${mswMethod}(${JSON.stringify(path30)}, () => {
+  const path33 = operation.path.replace(/{([^}]+)}/g, ":$1");
+  return `http.${mswMethod}(${JSON.stringify(path33)}, () => {
   return HttpResponse.json({});
 }),`;
 }
@@ -38477,14 +38477,14 @@ function findDesignContractArtifact(artifacts, changeName) {
   );
 }
 async function readRepoArtifact(projectRoot, relativePath) {
-  const { readFile: readFile20 } = await import("fs/promises");
-  const path30 = await import("path");
-  const absolutePath = path30.join(projectRoot, relativePath);
-  const relative = path30.relative(projectRoot, absolutePath);
-  if (relative.startsWith("..") || path30.isAbsolute(relative)) {
+  const { readFile: readFile21 } = await import("fs/promises");
+  const path33 = await import("path");
+  const absolutePath = path33.join(projectRoot, relativePath);
+  const relative = path33.relative(projectRoot, absolutePath);
+  if (relative.startsWith("..") || path33.isAbsolute(relative)) {
     throw new Error(`Refusing to read outside project root: ${absolutePath}`);
   }
-  return readFile20(absolutePath, "utf8");
+  return readFile21(absolutePath, "utf8");
 }
 function metadataString(value) {
   return typeof value === "string" && value.trim().length > 0 ? value : void 0;
@@ -41219,6 +41219,1560 @@ var init_figma_intake_service = __esm({
   }
 });
 
+// src/gherkin/gherkin-model.ts
+var GherkinStepKeywordSchema, GherkinTagSchema, GherkinStepSchema, GherkinScenarioStatusSchema, GherkinScenarioSchema, GherkinRuleSchema, GherkinFeatureSchema, GherkinBundleSchema;
+var init_gherkin_model = __esm({
+  "src/gherkin/gherkin-model.ts"() {
+    "use strict";
+    init_zod();
+    init_ids();
+    GherkinStepKeywordSchema = external_exports.enum(["Given", "When", "Then", "And", "But"]);
+    GherkinTagSchema = external_exports.string().trim().min(2).regex(/^@[A-Za-z0-9_:.~-]+$/, "Expected a Gherkin tag such as @REQ:REQ-001");
+    GherkinStepSchema = external_exports.object({
+      keyword: GherkinStepKeywordSchema,
+      text: external_exports.string().trim().min(1)
+    }).strict();
+    GherkinScenarioStatusSchema = external_exports.enum([
+      "automated-candidate",
+      "review-needed",
+      "manual",
+      "blocked"
+    ]);
+    GherkinScenarioSchema = external_exports.object({
+      id: external_exports.string().trim().min(1),
+      name: external_exports.string().trim().min(1),
+      requirementId: external_exports.string().trim().min(1),
+      status: GherkinScenarioStatusSchema,
+      tags: external_exports.array(GherkinTagSchema).default([]),
+      steps: external_exports.array(GherkinStepSchema).min(1),
+      briefEvidenceIds: external_exports.array(EvidenceIdSchema).default([]),
+      figmaEvidenceIds: external_exports.array(EvidenceIdSchema).default([]),
+      openApiEvidenceIds: external_exports.array(EvidenceIdSchema).default([]),
+      gapIds: external_exports.array(GapIdSchema).default([])
+    }).strict();
+    GherkinRuleSchema = external_exports.object({
+      name: external_exports.string().trim().min(1),
+      description: external_exports.string().trim().optional(),
+      scenarios: external_exports.array(GherkinScenarioSchema).default([])
+    }).strict();
+    GherkinFeatureSchema = external_exports.object({
+      area: external_exports.string().trim().min(1),
+      name: external_exports.string().trim().min(1),
+      description: external_exports.string().trim().optional(),
+      tags: external_exports.array(GherkinTagSchema).default([]),
+      rules: external_exports.array(GherkinRuleSchema).default([])
+    }).strict();
+    GherkinBundleSchema = external_exports.object({
+      changeName: external_exports.string().trim().min(1),
+      generatedAt: external_exports.string().datetime({ offset: true }),
+      features: external_exports.array(GherkinFeatureSchema)
+    }).strict();
+  }
+});
+
+// src/gherkin/test-matrix.ts
+function inferTestLayer(input) {
+  if (input.hasGaps) {
+    return "manual";
+  }
+  if (input.hasOpenApi && /api|request|response|endpoint|schema|operation/i.test(input.requirementText)) {
+    return "contract";
+  }
+  if (input.hasFigma && input.hasOpenApi) {
+    return "acceptance";
+  }
+  if (input.hasFigma) {
+    return "component";
+  }
+  if (input.hasOpenApi) {
+    return "contract";
+  }
+  if (/format|mapper|policy|status|state|validation|계산|정책|상태|검증/.test(input.requirementText)) {
+    return "unit";
+  }
+  return "manual";
+}
+function inferAutomationStatus(input) {
+  if (input.requirementStatus === "blocked" || input.hasBlockerGap) {
+    return "blocked";
+  }
+  if (input.requirementStatus === "gap-only") {
+    return "manual";
+  }
+  if (input.hasGaps || input.requirementStatus === "partial") {
+    return "review-needed";
+  }
+  return "automated-candidate";
+}
+var TestLayerSchema, TestAutomationStatusSchema, TestMatrixRequirementStatusSchema, TestMatrixRowSchema, TestMatrixSchema;
+var init_test_matrix = __esm({
+  "src/gherkin/test-matrix.ts"() {
+    "use strict";
+    init_zod();
+    init_ids();
+    TestLayerSchema = external_exports.enum([
+      "unit",
+      "component",
+      "contract",
+      "acceptance",
+      "e2e",
+      "visual",
+      "manual"
+    ]);
+    TestAutomationStatusSchema = external_exports.enum([
+      "automated-candidate",
+      "manual",
+      "blocked",
+      "review-needed"
+    ]);
+    TestMatrixRequirementStatusSchema = external_exports.enum([
+      "ready",
+      "partial",
+      "blocked",
+      "gap-only"
+    ]);
+    TestMatrixRowSchema = external_exports.object({
+      requirementId: external_exports.string().trim().min(1),
+      scenarioId: external_exports.string().trim().min(1),
+      scenarioName: external_exports.string().trim().min(1),
+      featureFile: external_exports.string().trim().min(1),
+      area: external_exports.string().trim().min(1),
+      layer: TestLayerSchema,
+      automation: TestAutomationStatusSchema,
+      status: TestMatrixRequirementStatusSchema,
+      reason: external_exports.string().trim().min(1),
+      briefEvidenceIds: external_exports.array(EvidenceIdSchema).default([]),
+      figmaEvidenceIds: external_exports.array(EvidenceIdSchema).default([]),
+      openApiEvidenceIds: external_exports.array(EvidenceIdSchema).default([]),
+      gapIds: external_exports.array(GapIdSchema).default([]),
+      sourceArtifactIds: external_exports.array(ArtifactIdSchema).default([])
+    }).strict();
+    TestMatrixSchema = external_exports.object({
+      changeName: external_exports.string().trim().min(1),
+      generatedAt: external_exports.string().datetime({ offset: true }),
+      requirementCount: external_exports.number().int().nonnegative(),
+      scenarioCount: external_exports.number().int().nonnegative(),
+      automatedCandidateCount: external_exports.number().int().nonnegative(),
+      blockedCount: external_exports.number().int().nonnegative(),
+      reviewNeededCount: external_exports.number().int().nonnegative(),
+      rows: external_exports.array(TestMatrixRowSchema)
+    }).strict();
+  }
+});
+
+// src/gherkin/gherkin-generator.ts
+function generateGherkinAndTestMatrix(input) {
+  const gapById = new Map(input.gaps.map((gap2) => [gap2.id, gap2]));
+  const featureMap = /* @__PURE__ */ new Map();
+  const matrixRows = [];
+  for (const requirement of input.model.requirements) {
+    const requirementGaps = requirement.gapIds.map((gapId) => gapById.get(gapId)).filter((gap2) => gap2 !== void 0);
+    const hasBlockerGap = requirementGaps.some((gap2) => gap2.severity === "blocker");
+    const hasGaps = requirementGaps.length > 0;
+    const automation = inferAutomationStatus({
+      requirementStatus: requirement.status,
+      hasGaps,
+      hasBlockerGap
+    });
+    const layer = inferTestLayer({
+      hasFigma: requirement.figmaEvidenceIds.length > 0,
+      hasOpenApi: requirement.openApiEvidenceIds.length > 0,
+      hasGaps,
+      requirementText: `${requirement.title} ${requirement.summary}`
+    });
+    const scenario = createScenario({
+      requirement,
+      automation,
+      layer
+    });
+    const feature = getOrCreateFeature(featureMap, requirement.area);
+    const rule = getOrCreateRule(feature, requirement.title);
+    if (automation !== "blocked") {
+      rule.scenarios.push(scenario);
+    }
+    matrixRows.push({
+      requirementId: requirement.id,
+      scenarioId: scenario.id,
+      scenarioName: scenario.name,
+      featureFile: featureFileName(requirement.area),
+      area: requirement.area,
+      layer,
+      automation,
+      status: requirement.status,
+      reason: reasonFor(requirement, automation, layer, requirementGaps),
+      briefEvidenceIds: requirement.briefEvidenceIds,
+      figmaEvidenceIds: requirement.figmaEvidenceIds,
+      openApiEvidenceIds: requirement.openApiEvidenceIds,
+      gapIds: requirement.gapIds,
+      sourceArtifactIds: input.model.sourceArtifactIds
+    });
+  }
+  const features = [...featureMap.values()].sort(
+    (left, right) => left.area.localeCompare(right.area)
+  );
+  const bundle = GherkinBundleSchema.parse({
+    changeName: input.model.changeName,
+    generatedAt: input.model.generatedAt,
+    features
+  });
+  const matrix = TestMatrixSchema.parse({
+    changeName: input.model.changeName,
+    generatedAt: input.model.generatedAt,
+    requirementCount: input.model.requirements.length,
+    scenarioCount: matrixRows.length,
+    automatedCandidateCount: matrixRows.filter((row) => row.automation === "automated-candidate").length,
+    blockedCount: matrixRows.filter((row) => row.automation === "blocked").length,
+    reviewNeededCount: matrixRows.filter((row) => row.automation === "review-needed").length,
+    rows: matrixRows
+  });
+  return {
+    bundle,
+    matrix
+  };
+}
+function createScenario(input) {
+  const { requirement } = input;
+  const tags = [
+    `@REQ:${sanitizeTagValue(requirement.id)}`,
+    `@AREA:${sanitizeTagValue(requirement.area)}`,
+    `@LAYER:${input.layer}`,
+    `@AUTO:${input.automation}`,
+    ...requirement.briefEvidenceIds.map((id) => `@BRIEF:${id}`),
+    ...requirement.figmaEvidenceIds.map((id) => `@FIGMA:${id}`),
+    ...requirement.openApiEvidenceIds.map((id) => `@API:${id}`),
+    ...requirement.gapIds.map((id) => `@GAP:${id}`)
+  ];
+  const scenarioId = scenarioIdFor(requirement.id);
+  return {
+    id: scenarioId,
+    name: `${requirement.id} ${requirement.title}`,
+    requirementId: requirement.id,
+    status: input.automation,
+    tags,
+    briefEvidenceIds: requirement.briefEvidenceIds,
+    figmaEvidenceIds: requirement.figmaEvidenceIds,
+    openApiEvidenceIds: requirement.openApiEvidenceIds,
+    gapIds: requirement.gapIds,
+    steps: [
+      {
+        keyword: "Given",
+        text: `the "${requirement.area}" capability is available`
+      },
+      {
+        keyword: "And",
+        text: `requirement evidence "${requirement.id}" is available`
+      },
+      {
+        keyword: "When",
+        text: `the user performs the "${humanizeRequirement(requirement.title)}" workflow`
+      },
+      {
+        keyword: "Then",
+        text: `the system satisfies "${requirement.id}"`
+      },
+      {
+        keyword: "And",
+        text: "verification evidence must be recorded"
+      }
+    ]
+  };
+}
+function getOrCreateFeature(featureMap, area) {
+  const existing = featureMap.get(area);
+  if (existing !== void 0) {
+    return existing;
+  }
+  const feature = {
+    area,
+    name: titleFromArea(area),
+    description: `Generated feature scenarios for ${area}.`,
+    tags: [`@AREA:${sanitizeTagValue(area)}`],
+    rules: []
+  };
+  featureMap.set(area, feature);
+  return feature;
+}
+function getOrCreateRule(feature, ruleName) {
+  const existing = feature.rules.find((rule2) => rule2.name === ruleName);
+  if (existing !== void 0) {
+    return existing;
+  }
+  const rule = {
+    name: ruleName,
+    scenarios: []
+  };
+  feature.rules.push(rule);
+  return rule;
+}
+function scenarioIdFor(requirementId) {
+  return `SCN-${requirementId.replace(/[^A-Za-z0-9]+/g, "-")}-001`;
+}
+function featureFileName(area) {
+  return `${area}.feature`;
+}
+function titleFromArea(area) {
+  return area.split("-").map((part) => part.slice(0, 1).toUpperCase() + part.slice(1)).join(" ");
+}
+function humanizeRequirement(value) {
+  return value.replace(/\s+/g, " ").trim();
+}
+function reasonFor(requirement, automation, layer, gaps) {
+  if (automation === "blocked") {
+    return `Blocked by ${gaps.length} gap(s).`;
+  }
+  if (automation === "review-needed") {
+    return `Review needed because requirement status is ${requirement.status} or linked gaps exist.`;
+  }
+  return `Assigned to ${layer} layer from available Figma/OpenAPI evidence.`;
+}
+function sanitizeTagValue(value) {
+  return value.replace(/[^A-Za-z0-9_:.~-]/g, "-");
+}
+var init_gherkin_generator = __esm({
+  "src/gherkin/gherkin-generator.ts"() {
+    "use strict";
+    init_gherkin_model();
+    init_test_matrix();
+  }
+});
+
+// src/gherkin/gherkin-renderer.ts
+function renderGherkinArtifacts(input) {
+  return {
+    featureFiles: input.bundle.features.map((feature) => ({
+      fileName: `${feature.area}.feature`,
+      content: renderFeature(feature)
+    })),
+    gherkinIndexJson: `${JSON.stringify(input.bundle, null, 2)}
+`,
+    testMatrixJson: `${JSON.stringify(input.matrix, null, 2)}
+`,
+    testMatrixMd: renderTestMatrixMarkdown(input.matrix)
+  };
+}
+function renderFeature(feature) {
+  const lines = [];
+  lines.push(...feature.tags);
+  lines.push(`Feature: ${feature.name}`);
+  if (feature.description !== void 0) {
+    lines.push("");
+    lines.push(indent3(feature.description, 2));
+  }
+  for (const rule of feature.rules) {
+    lines.push("");
+    lines.push(`  Rule: ${rule.name}`);
+    if (rule.description !== void 0) {
+      lines.push("");
+      lines.push(indent3(rule.description, 4));
+    }
+    for (const scenario of rule.scenarios) {
+      lines.push("");
+      lines.push(renderScenario(scenario));
+    }
+  }
+  return `${lines.join("\n").trimEnd()}
+`;
+}
+function renderScenario(scenario) {
+  const lines = [];
+  if (scenario.tags.length > 0) {
+    lines.push(`    ${scenario.tags.join(" ")}`);
+  }
+  lines.push(`    Scenario: ${scenario.name}`);
+  for (const step of scenario.steps) {
+    lines.push(renderStep(step));
+  }
+  return lines.join("\n");
+}
+function renderStep(step) {
+  return `      ${step.keyword} ${step.text}`;
+}
+function renderTestMatrixMarkdown(matrix) {
+  const lines = [
+    `# Test Matrix \u2014 ${matrix.changeName}`,
+    "",
+    "## Summary",
+    "",
+    `- Requirements: ${matrix.requirementCount}`,
+    `- Scenarios: ${matrix.scenarioCount}`,
+    `- Automated candidates: ${matrix.automatedCandidateCount}`,
+    `- Review needed: ${matrix.reviewNeededCount}`,
+    `- Blocked: ${matrix.blockedCount}`,
+    "",
+    "## Matrix",
+    "",
+    "| Requirement | Scenario | Area | Layer | Automation | Status | Brief | Figma | API | Gaps | Reason |",
+    "|---|---|---|---|---|---|---|---|---|---|---|",
+    ...matrix.rows.map(renderMatrixRow),
+    ""
+  ];
+  return `${lines.join("\n").trimEnd()}
+`;
+}
+function renderMatrixRow(row) {
+  return [
+    row.requirementId,
+    row.scenarioId,
+    row.area,
+    row.layer,
+    row.automation,
+    row.status,
+    joinIds(row.briefEvidenceIds),
+    joinIds(row.figmaEvidenceIds),
+    joinIds(row.openApiEvidenceIds),
+    joinIds(row.gapIds),
+    escapeTableCell2(row.reason)
+  ].join(" | ");
+}
+function joinIds(ids) {
+  return ids.length === 0 ? "-" : ids.join("<br>");
+}
+function escapeTableCell2(value) {
+  return value.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
+}
+function indent3(value, spaces) {
+  const prefix = " ".repeat(spaces);
+  return value.split("\n").map((line) => `${prefix}${line}`).join("\n");
+}
+var init_gherkin_renderer = __esm({
+  "src/gherkin/gherkin-renderer.ts"() {
+    "use strict";
+  }
+});
+
+// src/gherkin/gherkin-writer.ts
+import { mkdir as mkdir8, readFile as readFile10, writeFile as writeFile8 } from "fs/promises";
+import path15 from "path";
+async function writeGherkinArtifacts(input) {
+  const changePaths = resolveOpenSpecChangePaths({
+    projectRoot: input.projectRoot,
+    changeName: input.changeName
+  });
+  const gherkinRoot = path15.join(changePaths.artifactsRoot, "gherkin");
+  const files = [
+    ...input.rendered.featureFiles.map((file2) => ({
+      absolutePath: path15.join(gherkinRoot, file2.fileName),
+      content: file2.content,
+      mediaType: "text/x-gherkin",
+      kind: "gherkin"
+    })),
+    {
+      absolutePath: path15.join(changePaths.artifactsRoot, "gherkin-index.json"),
+      content: input.rendered.gherkinIndexJson,
+      mediaType: "application/json",
+      kind: "gherkin"
+    },
+    {
+      absolutePath: path15.join(changePaths.artifactsRoot, "test-matrix.json"),
+      content: input.rendered.testMatrixJson,
+      mediaType: "application/json",
+      kind: "test-matrix"
+    },
+    {
+      absolutePath: path15.join(changePaths.artifactsRoot, "test-matrix.md"),
+      content: input.rendered.testMatrixMd,
+      mediaType: "text/markdown",
+      kind: "test-matrix"
+    }
+  ];
+  const writtenFiles = [];
+  for (const file2 of files) {
+    assertInsideProjectRoot3(input.projectRoot, file2.absolutePath);
+    const changed = await writeWithConflictPolicy2({
+      absolutePath: file2.absolutePath,
+      content: file2.content,
+      force: input.force === true
+    });
+    writtenFiles.push({
+      absolutePath: file2.absolutePath,
+      relativePath: toRepoRelativePath(input.projectRoot, file2.absolutePath),
+      digest: sha256Digest(Buffer.from(file2.content, "utf8")),
+      changed,
+      content: file2.content,
+      kind: file2.kind,
+      mediaType: file2.mediaType
+    });
+  }
+  const artifactRefs = writtenFiles.map(
+    (file2) => ArtifactRefSchema.parse({
+      id: createArtifactId(),
+      kind: file2.kind,
+      uri: `repo://${file2.relativePath}`,
+      mediaType: file2.mediaType,
+      digest: file2.digest,
+      producedBy: "orchestrator",
+      evidenceIds: [],
+      createdAt: input.generatedAt,
+      metadata: {
+        changeName: input.changeName,
+        relativePath: file2.relativePath,
+        changed: file2.changed
+      }
+    })
+  );
+  return {
+    files: writtenFiles.map((file2) => ({
+      absolutePath: file2.absolutePath,
+      relativePath: file2.relativePath,
+      digest: file2.digest,
+      changed: file2.changed
+    })),
+    artifactRefs
+  };
+}
+async function writeWithConflictPolicy2(input) {
+  await mkdir8(path15.dirname(input.absolutePath), {
+    recursive: true,
+    mode: 448
+  });
+  const existing = await readExisting2(input.absolutePath);
+  if (existing !== void 0) {
+    if (existing === input.content) {
+      return false;
+    }
+    if (!input.force) {
+      throw new Error(`Generated Gherkin artifact already exists: ${input.absolutePath}`);
+    }
+  }
+  await writeFile8(input.absolutePath, input.content, {
+    encoding: "utf8",
+    mode: 384
+  });
+  return true;
+}
+async function readExisting2(absolutePath) {
+  try {
+    return await readFile10(absolutePath, "utf8");
+  } catch (error51) {
+    if (error51 instanceof Error && "code" in error51 && error51.code === "ENOENT") {
+      return void 0;
+    }
+    throw error51;
+  }
+}
+function assertInsideProjectRoot3(projectRoot, absolutePath) {
+  const relative = path15.relative(projectRoot, absolutePath);
+  if (relative.startsWith("..") || path15.isAbsolute(relative)) {
+    throw new Error(`Refusing to write outside project root: ${absolutePath}`);
+  }
+}
+var init_gherkin_writer = __esm({
+  "src/gherkin/gherkin-writer.ts"() {
+    "use strict";
+    init_openspec_paths();
+    init_artifact();
+    init_id_factory();
+    init_content_hash();
+  }
+});
+
+// src/openspec/openspec-model.ts
+var OpenSpecRequirementStatusSchema, OpenSpecRequirementModelSchema, OpenSpecChangeModelSchema;
+var init_openspec_model = __esm({
+  "src/openspec/openspec-model.ts"() {
+    "use strict";
+    init_zod();
+    init_ids();
+    init_openspec_paths();
+    OpenSpecRequirementStatusSchema = external_exports.enum(["ready", "blocked", "partial", "gap-only"]);
+    OpenSpecRequirementModelSchema = external_exports.object({
+      id: external_exports.string().trim().min(1),
+      area: OpenSpecSpecAreaSchema,
+      title: external_exports.string().trim().min(1),
+      summary: external_exports.string().trim().min(1),
+      status: OpenSpecRequirementStatusSchema,
+      briefEvidenceIds: external_exports.array(EvidenceIdSchema).default([]),
+      figmaEvidenceIds: external_exports.array(EvidenceIdSchema).default([]),
+      openApiEvidenceIds: external_exports.array(EvidenceIdSchema).default([]),
+      gapIds: external_exports.array(GapIdSchema).default([]),
+      tags: external_exports.array(external_exports.string().trim().min(1)).default([])
+    }).strict();
+    OpenSpecChangeModelSchema = external_exports.object({
+      runId: RunIdSchema,
+      changeName: OpenSpecChangeNameSchema,
+      title: external_exports.string().trim().min(1),
+      summary: external_exports.string().trim().min(1),
+      generatedAt: external_exports.string().datetime({ offset: true }),
+      sourceArtifactIds: external_exports.array(ArtifactIdSchema).default([]),
+      requirements: external_exports.array(OpenSpecRequirementModelSchema),
+      gapIds: external_exports.array(GapIdSchema).default([]),
+      specAreas: external_exports.array(OpenSpecSpecAreaSchema)
+    }).strict();
+  }
+});
+
+// src/application/gherkin-test-matrix-service.ts
+import { readFile as readFile11 } from "fs/promises";
+var GenerateGherkinTestMatrixInputSchema, GenerateGherkinTestMatrixResultSchema, GherkinTestMatrixService;
+var init_gherkin_test_matrix_service = __esm({
+  "src/application/gherkin-test-matrix-service.ts"() {
+    "use strict";
+    init_zod();
+    init_gherkin_generator();
+    init_gherkin_renderer();
+    init_gherkin_writer();
+    init_openspec_model();
+    init_openspec_paths();
+    init_run2();
+    init_ids();
+    init_scalars();
+    GenerateGherkinTestMatrixInputSchema = external_exports.object({
+      runId: RunIdSchema,
+      changeName: external_exports.string().trim().min(3),
+      force: external_exports.boolean().default(false)
+    }).strict();
+    GenerateGherkinTestMatrixResultSchema = external_exports.object({
+      duplicate: external_exports.boolean(),
+      run: external_exports.custom(),
+      changeName: OpenSpecChangeNameSchema,
+      artifactIds: external_exports.array(ArtifactIdSchema),
+      changedFiles: external_exports.array(external_exports.string()),
+      requirementCount: external_exports.number().int().nonnegative(),
+      scenarioCount: external_exports.number().int().nonnegative(),
+      automatedCandidateCount: external_exports.number().int().nonnegative(),
+      blockedCount: external_exports.number().int().nonnegative()
+    }).strict();
+    GherkinTestMatrixService = class {
+      constructor(runStore, now = () => (/* @__PURE__ */ new Date()).toISOString()) {
+        this.runStore = runStore;
+        this.now = now;
+      }
+      runStore;
+      now;
+      async generate(rawInput) {
+        const input = GenerateGherkinTestMatrixInputSchema.parse(rawInput);
+        const run = await this.runStore.get(input.runId);
+        const timestamp = IsoDateTimeSchema.parse(this.now());
+        const changeName = toOpenSpecChangeName(input.changeName);
+        const existingMatrix = run.artifacts.find(
+          (artifact) => artifact.kind === "test-matrix" && artifact.metadata["changeName"] === changeName && artifact.metadata["relativePath"] === `openspec/changes/${changeName}/artifacts/test-matrix.json`
+        );
+        if (existingMatrix !== void 0 && !input.force) {
+          return GenerateGherkinTestMatrixResultSchema.parse({
+            duplicate: true,
+            run: summarizeRun(run),
+            changeName,
+            artifactIds: [existingMatrix.id],
+            changedFiles: [],
+            requirementCount: 0,
+            scenarioCount: 0,
+            automatedCandidateCount: 0,
+            blockedCount: 0
+          });
+        }
+        const model = await this.readOpenSpecChangeModel(run.projectRoot, changeName);
+        const generated = generateGherkinAndTestMatrix({
+          model,
+          gaps: run.gaps
+        });
+        const rendered = renderGherkinArtifacts(generated);
+        const writeResult = await writeGherkinArtifacts({
+          projectRoot: run.projectRoot,
+          changeName,
+          rendered,
+          generatedAt: timestamp,
+          force: input.force
+        });
+        const nextRun = RunManifestSchema.parse({
+          ...run,
+          revision: run.revision + 1,
+          updatedAt: timestamp,
+          artifacts: [...run.artifacts, ...writeResult.artifactRefs]
+        });
+        await this.runStore.save(nextRun, run.revision);
+        return GenerateGherkinTestMatrixResultSchema.parse({
+          duplicate: false,
+          run: summarizeRun(nextRun),
+          changeName,
+          artifactIds: writeResult.artifactRefs.map((artifact) => artifact.id),
+          changedFiles: writeResult.files.filter((file2) => file2.changed).map((file2) => file2.relativePath),
+          requirementCount: generated.matrix.requirementCount,
+          scenarioCount: generated.matrix.scenarioCount,
+          automatedCandidateCount: generated.matrix.automatedCandidateCount,
+          blockedCount: generated.matrix.blockedCount
+        });
+      }
+      async readOpenSpecChangeModel(projectRoot, changeName) {
+        const paths = resolveOpenSpecChangePaths({
+          projectRoot,
+          changeName: OpenSpecChangeNameSchema.parse(changeName)
+        });
+        const raw = await readFile11(paths.manifestPath, "utf8");
+        return OpenSpecChangeModelSchema.parse(JSON.parse(raw));
+      }
+    };
+  }
+});
+
+// src/integration/integration-contracts.ts
+var IntegrationStrategySchema, IntegrationStatusSchema, IntegratedAgentKindSchema, IntegrationCandidateSchema, IntegrationPlanSchema, IntegrationConflictFileSchema, IntegrationConflictReportSchema, RepairAttemptStatusSchema, RepairAttemptSchema, IntegrationResultSchema;
+var init_integration_contracts = __esm({
+  "src/integration/integration-contracts.ts"() {
+    "use strict";
+    init_zod();
+    init_ids();
+    init_scalars();
+    IntegrationStrategySchema = external_exports.enum(["cherry-pick", "merge"]);
+    IntegrationStatusSchema = external_exports.enum([
+      "planned",
+      "applying",
+      "conflicted",
+      "repairing",
+      "passed",
+      "failed",
+      "blocked"
+    ]);
+    IntegratedAgentKindSchema = external_exports.enum([
+      "spec-bdd",
+      "api-contract",
+      "design-ui",
+      "integrator"
+    ]);
+    IntegrationCandidateSchema = external_exports.object({
+      agentResultId: AgentResultIdSchema,
+      agent: IntegratedAgentKindSchema,
+      commitSha: GitObjectIdSchema,
+      baseSha: GitObjectIdSchema,
+      order: external_exports.number().int().nonnegative(),
+      approvedByReviewCouncil: external_exports.boolean(),
+      changedFiles: external_exports.array(external_exports.string()).default([])
+    }).strict();
+    IntegrationPlanSchema = external_exports.object({
+      runId: RunIdSchema,
+      status: external_exports.literal("planned"),
+      strategy: IntegrationStrategySchema,
+      baseCommit: GitObjectIdSchema,
+      integrationBranch: external_exports.string().trim().min(1),
+      integrationWorktreePath: external_exports.string().trim().min(1),
+      candidates: external_exports.array(IntegrationCandidateSchema),
+      maxRepairAttempts: external_exports.number().int().nonnegative(),
+      repairPolicyArtifactId: ArtifactIdSchema.optional(),
+      createdAt: IsoDateTimeSchema
+    }).strict();
+    IntegrationConflictFileSchema = external_exports.object({
+      path: external_exports.string().trim().min(1),
+      reason: external_exports.string().trim().min(1),
+      conflictMarkersDetected: external_exports.boolean()
+    }).strict();
+    IntegrationConflictReportSchema = external_exports.object({
+      runId: RunIdSchema,
+      candidate: IntegrationCandidateSchema.optional(),
+      command: external_exports.string().trim().min(1),
+      exitCode: external_exports.number().int(),
+      stdoutArtifactId: ArtifactIdSchema.optional(),
+      stderrArtifactId: ArtifactIdSchema.optional(),
+      conflictedFiles: external_exports.array(IntegrationConflictFileSchema),
+      createdAt: IsoDateTimeSchema
+    }).strict();
+    RepairAttemptStatusSchema = external_exports.enum(["planned", "applied", "failed", "rejected"]);
+    RepairAttemptSchema = external_exports.object({
+      attempt: external_exports.number().int().positive(),
+      status: RepairAttemptStatusSchema,
+      trigger: external_exports.string().trim().min(1),
+      changedFiles: external_exports.array(external_exports.string()).default([]),
+      artifactIds: external_exports.array(ArtifactIdSchema).default([]),
+      gapIds: external_exports.array(GapIdSchema).default([]),
+      startedAt: IsoDateTimeSchema,
+      completedAt: IsoDateTimeSchema.optional(),
+      summary: external_exports.string().trim().min(1)
+    }).strict();
+    IntegrationResultSchema = external_exports.object({
+      runId: RunIdSchema,
+      status: IntegrationStatusSchema,
+      integrationBranch: external_exports.string().trim().min(1),
+      integrationWorktreePath: external_exports.string().trim().min(1),
+      headSha: GitObjectIdSchema.optional(),
+      appliedCandidates: external_exports.array(IntegrationCandidateSchema).default([]),
+      skippedCandidates: external_exports.array(IntegrationCandidateSchema).default([]),
+      conflictReportArtifactIds: external_exports.array(ArtifactIdSchema).default([]),
+      repairAttempts: external_exports.array(RepairAttemptSchema).default([]),
+      artifactIds: external_exports.array(ArtifactIdSchema).default([]),
+      gapIds: external_exports.array(GapIdSchema).default([]),
+      startedAt: IsoDateTimeSchema,
+      completedAt: IsoDateTimeSchema.optional()
+    }).strict();
+  }
+});
+
+// src/integration/git-integration-runner.ts
+import { execFile as execFile2 } from "child_process";
+import { readFile as readFile12 } from "fs/promises";
+import path16 from "path";
+import { promisify as promisify2 } from "util";
+async function detectConflictedFiles(cwd, git) {
+  const result = await git.exec({
+    cwd,
+    args: ["diff", "--name-only", "--diff-filter=U"],
+    allowFailure: true
+  });
+  const files = result.stdout.split("\n").map((line) => line.trim()).filter(Boolean);
+  const reports = [];
+  for (const file2 of files) {
+    const content = await readFile12(path16.join(cwd, file2), "utf8").catch(() => "");
+    const conflictMarkersDetected = content.includes("<<<<<<<") && content.includes("=======") && content.includes(">>>>>>>");
+    reports.push({
+      path: file2,
+      reason: "git-conflict",
+      conflictMarkersDetected
+    });
+  }
+  return reports;
+}
+var execFileAsync2, GitCommandRunner;
+var init_git_integration_runner = __esm({
+  "src/integration/git-integration-runner.ts"() {
+    "use strict";
+    execFileAsync2 = promisify2(execFile2);
+    GitCommandRunner = class {
+      async exec(input) {
+        const command = `git ${input.args.join(" ")}`;
+        try {
+          const { stdout, stderr } = await execFileAsync2("git", input.args, {
+            cwd: input.cwd,
+            encoding: "utf8",
+            maxBuffer: 10 * 1024 * 1024
+          });
+          return {
+            command,
+            cwd: input.cwd,
+            exitCode: 0,
+            stdout,
+            stderr
+          };
+        } catch (error51) {
+          const execError = error51;
+          const result = {
+            command,
+            cwd: input.cwd,
+            exitCode: typeof execError.code === "number" ? execError.code : 1,
+            stdout: execError.stdout ?? "",
+            stderr: execError.stderr ?? ""
+          };
+          if (input.allowFailure === true) {
+            return result;
+          }
+          throw new Error(`Git command failed: ${command}
+${result.stderr}`);
+        }
+      }
+    };
+  }
+});
+
+// src/integration/cherry-pick-runner.ts
+var CherryPickIntegrationRunner;
+var init_cherry_pick_runner = __esm({
+  "src/integration/cherry-pick-runner.ts"() {
+    "use strict";
+    init_integration_contracts();
+    init_git_integration_runner();
+    CherryPickIntegrationRunner = class {
+      constructor(git) {
+        this.git = git;
+      }
+      git;
+      async applyCandidate(input) {
+        const result = await this.git.exec({
+          cwd: input.worktreePath,
+          args: ["cherry-pick", input.candidate.commitSha],
+          allowFailure: true
+        });
+        if (result.exitCode === 0) {
+          return {
+            ok: true,
+            stdout: result.stdout,
+            stderr: result.stderr
+          };
+        }
+        const conflictedFiles = await detectConflictedFiles(input.worktreePath, this.git);
+        return {
+          ok: false,
+          conflictReport: IntegrationConflictReportSchema.parse({
+            runId: input.runId,
+            candidate: input.candidate,
+            command: result.command,
+            exitCode: result.exitCode,
+            conflictedFiles,
+            createdAt: input.now
+          })
+        };
+      }
+    };
+  }
+});
+
+// src/integration/integration-order.ts
+function buildIntegrationCandidates(input) {
+  const approvedIds = new Set(input.approvedAgentResultIds);
+  return input.agentResults.filter((result) => approvedIds.has(result.id)).filter((result) => result.kind === "implementation").filter((result) => result.status === "passed").map((result) => {
+    if (result.kind !== "implementation") {
+      throw new Error("Expected implementation result");
+    }
+    if (result.commitSha === void 0) {
+      throw new Error(`Passed implementation result is missing commitSha: ${result.id}`);
+    }
+    const order = AGENT_ORDER.get(result.agent);
+    if (order === void 0) {
+      throw new Error(`Unsupported integration agent: ${result.agent}`);
+    }
+    return IntegrationCandidateSchema.parse({
+      agentResultId: result.id,
+      agent: result.agent,
+      commitSha: result.commitSha,
+      baseSha: result.baseSha,
+      order,
+      approvedByReviewCouncil: true,
+      changedFiles: result.changedFiles
+    });
+  }).sort((left, right) => {
+    if (left.order !== right.order) {
+      return left.order - right.order;
+    }
+    return left.commitSha.localeCompare(right.commitSha);
+  });
+}
+var AGENT_ORDER;
+var init_integration_order = __esm({
+  "src/integration/integration-order.ts"() {
+    "use strict";
+    init_integration_contracts();
+    AGENT_ORDER = /* @__PURE__ */ new Map([
+      ["spec-bdd", 0],
+      ["api-contract", 1],
+      ["design-ui", 2],
+      ["integrator", 3]
+    ]);
+  }
+});
+
+// src/integration/integration-worktree.ts
+import { mkdir as mkdir9 } from "fs/promises";
+import path17 from "path";
+function integrationBranchName(runId) {
+  const shortRunId = runId.replace(/^run_/, "").slice(0, 12);
+  return `spec-to-pr/${shortRunId}/integration`;
+}
+function integrationWorktreePath(input) {
+  return path17.join(input.projectRoot, ".spec-to-pr", "worktrees", input.runId, "integration");
+}
+var IntegrationWorktreeManager;
+var init_integration_worktree = __esm({
+  "src/integration/integration-worktree.ts"() {
+    "use strict";
+    init_scalars();
+    IntegrationWorktreeManager = class {
+      constructor(git) {
+        this.git = git;
+      }
+      git;
+      async ensureIntegrationWorktree(run) {
+        const branch = integrationBranchName(run.id);
+        const worktreePath = integrationWorktreePath({
+          projectRoot: run.projectRoot,
+          runId: run.id
+        });
+        const baseCommit = GitObjectIdSchema.parse(
+          run.baseCommit ?? await this.currentHead(run.projectRoot)
+        );
+        await mkdir9(path17.dirname(worktreePath), {
+          recursive: true,
+          mode: 448
+        });
+        await this.git.exec({
+          cwd: run.projectRoot,
+          args: ["worktree", "add", "-B", branch, worktreePath, baseCommit],
+          allowFailure: false
+        });
+        return {
+          branch,
+          path: worktreePath,
+          baseCommit
+        };
+      }
+      async currentHead(projectRoot) {
+        const result = await this.git.exec({
+          cwd: projectRoot,
+          args: ["rev-parse", "HEAD"]
+        });
+        return result.stdout.trim();
+      }
+    };
+  }
+});
+
+// src/integration/repair-policy.ts
+function defaultRepairPolicy(maxAttempts = 2) {
+  return RepairPolicySchema.parse({
+    maxAttempts
+  });
+}
+var RepairPolicySchema;
+var init_repair_policy = __esm({
+  "src/integration/repair-policy.ts"() {
+    "use strict";
+    init_zod();
+    RepairPolicySchema = external_exports.object({
+      maxAttempts: external_exports.number().int().nonnegative().default(2),
+      allowedChangePatterns: external_exports.array(external_exports.string()).default([
+        "resolve-conflict-markers",
+        "fix-import-paths",
+        "fix-type-references",
+        "formatting",
+        "source-guard-import-correction"
+      ]),
+      forbiddenActions: external_exports.array(external_exports.string()).default([
+        "add-undocumented-endpoint",
+        "invent-figma-state",
+        "delete-tests",
+        "remove-gaps-without-evidence",
+        "disable-quality-gates",
+        "change-openspec-scope"
+      ])
+    }).strict();
+  }
+});
+
+// src/integration/repair-history.ts
+var RepairHistorySchema;
+var init_repair_history = __esm({
+  "src/integration/repair-history.ts"() {
+    "use strict";
+    init_zod();
+    init_ids();
+    init_integration_contracts();
+    RepairHistorySchema = external_exports.object({
+      runId: RunIdSchema,
+      policy: external_exports.record(external_exports.string(), external_exports.unknown()),
+      conflictReports: external_exports.array(IntegrationConflictReportSchema).default([]),
+      attempts: external_exports.array(RepairAttemptSchema).default([])
+    }).strict();
+  }
+});
+
+// src/application/integration-service.ts
+import { mkdir as mkdir10, writeFile as writeFile9 } from "fs/promises";
+import path18 from "path";
+function assertReviewCouncilAllowsIntegration(run) {
+  const reviewResult = [...run.agentResults].reverse().find((result) => result.agent === "review-council");
+  if (reviewResult === void 0) {
+    throw new Error("Review Council result is required before integration");
+  }
+  if (reviewResult.status !== "passed") {
+    throw new Error(
+      `Review Council result must be passed before integration: ${reviewResult.status}`
+    );
+  }
+  const openBlockerGap = run.gaps.find(
+    (gap2) => gap2.status === "open" && gap2.severity === "blocker"
+  );
+  if (openBlockerGap !== void 0) {
+    throw new Error(`Open blocker gap prevents integration: ${openBlockerGap.id}`);
+  }
+}
+function findIntegrationArtifact(run, input) {
+  const candidates = run.artifacts.filter(
+    (artifact2) => artifact2.metadata["adapter"] === "integration-v1" && artifact2.metadata["artifactRole"] === input.artifactRole
+  );
+  const artifact = input.artifactId === void 0 ? candidates.at(-1) : candidates.find((item) => item.id === input.artifactId);
+  if (artifact === void 0) {
+    throw new Error(
+      input.artifactId === void 0 ? `Integration artifact not found for role: ${input.artifactRole}` : `Integration artifact not found: ${input.artifactId}`
+    );
+  }
+  return artifact;
+}
+async function currentHead(worktreePath, git) {
+  const result = await git.exec({
+    cwd: worktreePath,
+    args: ["rev-parse", "HEAD"]
+  });
+  return GitObjectIdSchema.parse(result.stdout.trim());
+}
+async function writeIntegrationContextPack(input) {
+  const contextDirectory = path18.join(
+    input.dataDirectory,
+    "agent-contexts",
+    "integration",
+    input.runId
+  );
+  await mkdir10(contextDirectory, {
+    recursive: true,
+    mode: 448
+  });
+  await Promise.all([
+    writeJsonFile(path18.join(contextDirectory, "integration-plan.json"), input.plan),
+    writeJsonFile(
+      path18.join(contextDirectory, "review-council-result.json"),
+      input.reviewCouncilResult
+    ),
+    writeJsonFile(
+      path18.join(contextDirectory, "approved-agent-results.json"),
+      input.approvedAgentResults
+    ),
+    writeJsonFile(path18.join(contextDirectory, "repair-policy.json"), input.repairPolicy),
+    writeJsonFile(path18.join(contextDirectory, "allowed-files.json"), {
+      changedFiles: unique(input.plan.candidates.flatMap((candidate) => candidate.changedFiles))
+    }),
+    writeJsonFile(path18.join(contextDirectory, "forbidden-actions.json"), {
+      forbiddenActions: typeof input.repairPolicy === "object" && input.repairPolicy !== null && "forbiddenActions" in input.repairPolicy ? input.repairPolicy.forbiddenActions : []
+    }),
+    writeJsonFile(path18.join(contextDirectory, "conflict-report.json"), {
+      reports: []
+    }),
+    writeFile9(path18.join(contextDirectory, "instructions.md"), renderIntegratorInstructions(), {
+      encoding: "utf8",
+      mode: 384
+    })
+  ]);
+  return contextDirectory;
+}
+async function writeJsonFile(filePath, value) {
+  await writeFile9(filePath, `${JSON.stringify(value, null, 2)}
+`, {
+    encoding: "utf8",
+    mode: 384
+  });
+}
+function renderIntegratorInstructions() {
+  return `# Integration Repair Instructions
+
+Use this context only inside the prepared integration worktree.
+
+Allowed repair is limited to conflict markers, import paths, type references, formatting, and small glue code inconsistencies.
+
+Do not add undocumented API endpoints, invent Figma states, delete tests, close gaps without evidence, or expand OpenSpec scope.
+`;
+}
+function unique(items) {
+  return [...new Set(items)];
+}
+var PrepareIntegrationInputSchema, GetIntegrationPlanInputSchema, ApplyIntegrationInputSchema, RecordIntegrationRepairInputSchema, FinalizeIntegrationInputSchema, PrepareIntegrationResultSchema, GetIntegrationPlanResultSchema, ApplyIntegrationResultSchema, RecordIntegrationRepairResultSchema, FinalizeIntegrationResultSchema, IntegrationService;
+var init_integration_service = __esm({
+  "src/application/integration-service.ts"() {
+    "use strict";
+    init_zod();
+    init_artifact_blob_store();
+    init_cherry_pick_runner();
+    init_integration_contracts();
+    init_integration_order();
+    init_integration_worktree();
+    init_repair_policy();
+    init_repair_history();
+    init_git_integration_runner();
+    init_run2();
+    init_agent_result();
+    init_artifact();
+    init_constants();
+    init_id_factory();
+    init_ids();
+    init_scalars();
+    PrepareIntegrationInputSchema = external_exports.object({
+      runId: RunIdSchema,
+      approvedAgentResultIds: external_exports.array(AgentResultIdSchema).min(1),
+      maxRepairAttempts: external_exports.number().int().nonnegative().default(2)
+    }).strict();
+    GetIntegrationPlanInputSchema = external_exports.object({
+      runId: RunIdSchema,
+      planArtifactId: ArtifactIdSchema.optional()
+    }).strict();
+    ApplyIntegrationInputSchema = external_exports.object({
+      runId: RunIdSchema,
+      planArtifactId: ArtifactIdSchema.optional()
+    }).strict();
+    RecordIntegrationRepairInputSchema = external_exports.object({
+      runId: RunIdSchema,
+      resultArtifactId: ArtifactIdSchema.optional(),
+      attempt: RepairAttemptSchema
+    }).strict();
+    FinalizeIntegrationInputSchema = external_exports.object({
+      runId: RunIdSchema,
+      resultArtifactId: ArtifactIdSchema.optional()
+    }).strict();
+    PrepareIntegrationResultSchema = external_exports.object({
+      run: RunSummarySchema,
+      plan: IntegrationPlanSchema,
+      planArtifactId: ArtifactIdSchema,
+      repairPolicyArtifactId: ArtifactIdSchema,
+      contextDirectory: external_exports.string().trim().min(1)
+    }).strict();
+    GetIntegrationPlanResultSchema = external_exports.object({
+      runId: RunIdSchema,
+      planArtifactId: ArtifactIdSchema,
+      plan: IntegrationPlanSchema
+    }).strict();
+    ApplyIntegrationResultSchema = external_exports.object({
+      run: RunSummarySchema,
+      result: IntegrationResultSchema,
+      resultArtifactId: ArtifactIdSchema,
+      conflictReportArtifactIds: external_exports.array(ArtifactIdSchema)
+    }).strict();
+    RecordIntegrationRepairResultSchema = external_exports.object({
+      run: RunSummarySchema,
+      result: IntegrationResultSchema,
+      resultArtifactId: ArtifactIdSchema,
+      repairHistoryArtifactId: ArtifactIdSchema,
+      repairAttemptCount: external_exports.number().int().nonnegative(),
+      remainingRepairAttempts: external_exports.number().int().nonnegative()
+    }).strict();
+    FinalizeIntegrationResultSchema = external_exports.object({
+      run: RunSummarySchema,
+      result: IntegrationResultSchema,
+      resultArtifactId: ArtifactIdSchema,
+      agentResultId: AgentResultIdSchema,
+      message: external_exports.string().trim().min(1)
+    }).strict();
+    IntegrationService = class {
+      constructor(runStore, artifactStore, dataDirectory, now = () => (/* @__PURE__ */ new Date()).toISOString(), git = new GitCommandRunner()) {
+        this.runStore = runStore;
+        this.artifactStore = artifactStore;
+        this.dataDirectory = dataDirectory;
+        this.now = now;
+        this.git = git;
+        this.worktreeManager = new IntegrationWorktreeManager(this.git);
+        this.cherryPickRunner = new CherryPickIntegrationRunner(this.git);
+      }
+      runStore;
+      artifactStore;
+      dataDirectory;
+      now;
+      git;
+      worktreeManager;
+      cherryPickRunner;
+      async prepareIntegration(rawInput) {
+        const input = PrepareIntegrationInputSchema.parse(rawInput);
+        const run = await this.runStore.get(input.runId);
+        const timestamp = IsoDateTimeSchema.parse(this.now());
+        assertReviewCouncilAllowsIntegration(run);
+        const worktree = await this.worktreeManager.ensureIntegrationWorktree(run);
+        const candidates = buildIntegrationCandidates({
+          agentResults: run.agentResults,
+          approvedAgentResultIds: input.approvedAgentResultIds
+        });
+        const repairPolicy = defaultRepairPolicy(input.maxRepairAttempts);
+        const repairPolicyArtifact = await this.writeJsonArtifact({
+          label: "integration-repair-policy",
+          artifactRole: "repair-policy",
+          value: repairPolicy,
+          createdAt: timestamp
+        });
+        const plan = IntegrationPlanSchema.parse({
+          runId: run.id,
+          status: "planned",
+          strategy: "cherry-pick",
+          baseCommit: worktree.baseCommit,
+          integrationBranch: worktree.branch,
+          integrationWorktreePath: worktree.path,
+          candidates,
+          maxRepairAttempts: repairPolicy.maxAttempts,
+          repairPolicyArtifactId: repairPolicyArtifact.id,
+          createdAt: timestamp
+        });
+        const planArtifact = await this.writeJsonArtifact({
+          label: "integration-plan",
+          artifactRole: "integration-plan",
+          value: plan,
+          createdAt: timestamp
+        });
+        const contextDirectory = await writeIntegrationContextPack({
+          dataDirectory: this.dataDirectory,
+          runId: run.id,
+          plan,
+          repairPolicy,
+          approvedAgentResults: run.agentResults.filter(
+            (result) => input.approvedAgentResultIds.includes(result.id)
+          ),
+          reviewCouncilResult: await this.latestReviewCouncilStructuredResult(run)
+        });
+        const nextRun = RunManifestSchema.parse({
+          ...run,
+          revision: run.revision + 1,
+          updatedAt: timestamp,
+          artifacts: [...run.artifacts, repairPolicyArtifact, planArtifact]
+        });
+        await this.runStore.save(nextRun, run.revision);
+        return PrepareIntegrationResultSchema.parse({
+          run: summarizeRun(nextRun),
+          plan,
+          planArtifactId: planArtifact.id,
+          repairPolicyArtifactId: repairPolicyArtifact.id,
+          contextDirectory
+        });
+      }
+      async getIntegrationPlan(rawInput) {
+        const input = GetIntegrationPlanInputSchema.parse(rawInput);
+        const run = await this.runStore.get(input.runId);
+        const planArtifact = findIntegrationArtifact(run, {
+          artifactId: input.planArtifactId,
+          artifactRole: "integration-plan"
+        });
+        const plan = await this.readJsonArtifact(planArtifact.id, run, IntegrationPlanSchema);
+        return GetIntegrationPlanResultSchema.parse({
+          runId: run.id,
+          planArtifactId: planArtifact.id,
+          plan
+        });
+      }
+      async applyIntegration(rawInput) {
+        const input = ApplyIntegrationInputSchema.parse(rawInput);
+        const run = await this.runStore.get(input.runId);
+        const timestamp = IsoDateTimeSchema.parse(this.now());
+        const planArtifact = findIntegrationArtifact(run, {
+          artifactId: input.planArtifactId,
+          artifactRole: "integration-plan"
+        });
+        const plan = await this.readJsonArtifact(planArtifact.id, run, IntegrationPlanSchema);
+        const applied = [];
+        const conflictReports = [];
+        for (const candidate of plan.candidates) {
+          const result = await this.cherryPickRunner.applyCandidate({
+            runId: run.id,
+            worktreePath: plan.integrationWorktreePath,
+            candidate,
+            now: timestamp
+          });
+          if (!result.ok) {
+            conflictReports.push(result.conflictReport);
+            break;
+          }
+          applied.push(candidate);
+        }
+        const conflictArtifacts = [];
+        for (const report of conflictReports) {
+          conflictArtifacts.push(
+            await this.writeJsonArtifact({
+              label: "integration-conflict-report",
+              artifactRole: "conflict-report",
+              value: report,
+              createdAt: timestamp
+            })
+          );
+        }
+        const status = conflictReports.length > 0 ? "conflicted" : "passed";
+        const headSha = status === "passed" ? await currentHead(plan.integrationWorktreePath, this.git) : void 0;
+        const integrationResult = IntegrationResultSchema.parse({
+          runId: run.id,
+          status,
+          integrationBranch: plan.integrationBranch,
+          integrationWorktreePath: plan.integrationWorktreePath,
+          ...headSha === void 0 ? {} : { headSha },
+          appliedCandidates: applied,
+          skippedCandidates: plan.candidates.slice(applied.length),
+          conflictReportArtifactIds: conflictArtifacts.map((artifact) => artifact.id),
+          repairAttempts: [],
+          artifactIds: [planArtifact.id, ...conflictArtifacts.map((artifact) => artifact.id)],
+          startedAt: plan.createdAt,
+          ...status === "passed" ? { completedAt: timestamp } : {}
+        });
+        const resultArtifact = await this.writeJsonArtifact({
+          label: "integration-result",
+          artifactRole: "integration-result",
+          value: integrationResult,
+          createdAt: timestamp
+        });
+        const nextRun = RunManifestSchema.parse({
+          ...run,
+          revision: run.revision + 1,
+          updatedAt: timestamp,
+          artifacts: [...run.artifacts, ...conflictArtifacts, resultArtifact]
+        });
+        await this.runStore.save(nextRun, run.revision);
+        return ApplyIntegrationResultSchema.parse({
+          run: summarizeRun(nextRun),
+          result: integrationResult,
+          resultArtifactId: resultArtifact.id,
+          conflictReportArtifactIds: conflictArtifacts.map((artifact) => artifact.id)
+        });
+      }
+      async recordRepair(rawInput) {
+        const input = RecordIntegrationRepairInputSchema.parse(rawInput);
+        const run = await this.runStore.get(input.runId);
+        const timestamp = IsoDateTimeSchema.parse(this.now());
+        const resultArtifact = findIntegrationArtifact(run, {
+          artifactId: input.resultArtifactId,
+          artifactRole: "integration-result"
+        });
+        const result = await this.readJsonArtifact(resultArtifact.id, run, IntegrationResultSchema);
+        const plan = await this.planForResult(run, result);
+        if (result.repairAttempts.length >= plan.maxRepairAttempts) {
+          throw new Error("Integration repair budget exhausted");
+        }
+        if (input.attempt.attempt !== result.repairAttempts.length + 1) {
+          throw new Error(`Expected repair attempt ${result.repairAttempts.length + 1}`);
+        }
+        const policy = plan.repairPolicyArtifactId ? await this.readJsonArtifact(plan.repairPolicyArtifactId, run, RepairPolicySchema) : defaultRepairPolicy(plan.maxRepairAttempts);
+        const conflictReports = await Promise.all(
+          result.conflictReportArtifactIds.map(
+            (artifactId) => this.readJsonArtifact(artifactId, run, IntegrationConflictReportSchema)
+          )
+        );
+        const nextAttempts = [...result.repairAttempts, input.attempt];
+        const repairHistory = RepairHistorySchema.parse({
+          runId: run.id,
+          policy,
+          conflictReports,
+          attempts: nextAttempts
+        });
+        const repairHistoryArtifact = await this.writeJsonArtifact({
+          label: "integration-repair-history",
+          artifactRole: "repair-history",
+          value: repairHistory,
+          createdAt: timestamp,
+          producedBy: "integrator"
+        });
+        const nextResult = IntegrationResultSchema.parse({
+          ...result,
+          status: input.attempt.status === "applied" ? "repairing" : "failed",
+          repairAttempts: nextAttempts,
+          artifactIds: unique([...result.artifactIds, repairHistoryArtifact.id])
+        });
+        const nextResultArtifact = await this.writeJsonArtifact({
+          label: "integration-result",
+          artifactRole: "integration-result",
+          value: nextResult,
+          createdAt: timestamp,
+          producedBy: "integrator"
+        });
+        const nextRun = RunManifestSchema.parse({
+          ...run,
+          revision: run.revision + 1,
+          updatedAt: timestamp,
+          artifacts: [...run.artifacts, repairHistoryArtifact, nextResultArtifact]
+        });
+        await this.runStore.save(nextRun, run.revision);
+        return RecordIntegrationRepairResultSchema.parse({
+          run: summarizeRun(nextRun),
+          result: nextResult,
+          resultArtifactId: nextResultArtifact.id,
+          repairHistoryArtifactId: repairHistoryArtifact.id,
+          repairAttemptCount: nextAttempts.length,
+          remainingRepairAttempts: plan.maxRepairAttempts - nextAttempts.length
+        });
+      }
+      async finalizeIntegration(rawInput) {
+        const input = FinalizeIntegrationInputSchema.parse(rawInput);
+        const run = await this.runStore.get(input.runId);
+        const timestamp = IsoDateTimeSchema.parse(this.now());
+        const resultArtifact = findIntegrationArtifact(run, {
+          artifactId: input.resultArtifactId,
+          artifactRole: "integration-result"
+        });
+        const result = await this.readJsonArtifact(resultArtifact.id, run, IntegrationResultSchema);
+        const conflictedFiles = await detectConflictedFiles(result.integrationWorktreePath, this.git);
+        const headSha = await currentHead(result.integrationWorktreePath, this.git);
+        const finalStatus = result.status === "passed" || result.status === "repairing" && conflictedFiles.length === 0 ? "passed" : "failed";
+        const finalResult = IntegrationResultSchema.parse({
+          ...result,
+          status: finalStatus,
+          headSha,
+          completedAt: timestamp
+        });
+        const finalResultArtifact = await this.writeJsonArtifact({
+          label: "integration-result",
+          artifactRole: "integration-result",
+          value: finalResult,
+          createdAt: timestamp,
+          producedBy: "integrator"
+        });
+        const agentResult = AgentResultSchema.parse({
+          schemaVersion: RUNTIME_CONTRACT_VERSION,
+          id: createAgentResultId(),
+          runId: run.id,
+          kind: "implementation",
+          agent: "integrator",
+          status: finalStatus === "passed" ? "passed" : "failed",
+          baseSha: await this.baseShaForResult(run, finalResult),
+          ...finalStatus === "passed" ? { commitSha: headSha } : {},
+          changedFiles: unique([
+            ...finalResult.appliedCandidates.flatMap((candidate) => candidate.changedFiles),
+            ...finalResult.repairAttempts.flatMap((attempt) => attempt.changedFiles)
+          ]),
+          evidenceIds: [],
+          artifactIds: unique([...finalResult.artifactIds, finalResultArtifact.id]),
+          gapIds: finalResult.gapIds,
+          checks: [],
+          decisions: [],
+          startedAt: finalResult.startedAt,
+          completedAt: timestamp
+        });
+        const nextRun = RunManifestSchema.parse({
+          ...run,
+          revision: run.revision + 1,
+          updatedAt: timestamp,
+          artifacts: [...run.artifacts, finalResultArtifact],
+          agentResults: [...run.agentResults, agentResult]
+        });
+        await this.runStore.save(nextRun, run.revision);
+        return FinalizeIntegrationResultSchema.parse({
+          run: summarizeRun(nextRun),
+          result: finalResult,
+          resultArtifactId: finalResultArtifact.id,
+          agentResultId: agentResult.id,
+          message: "Integration finalize recorded integration metadata. Full quality gates run in later tasks."
+        });
+      }
+      async baseShaForResult(run, result) {
+        const planArtifactId = result.artifactIds[0];
+        if (planArtifactId !== void 0) {
+          const plan = await this.readJsonArtifact(planArtifactId, run, IntegrationPlanSchema);
+          return plan.baseCommit;
+        }
+        return GitObjectIdSchema.parse(
+          run.baseCommit ?? await currentHead(run.projectRoot, this.git)
+        );
+      }
+      async planForResult(run, result) {
+        const planArtifactId = result.artifactIds[0];
+        if (planArtifactId === void 0) {
+          throw new Error("Integration result is missing plan artifact reference");
+        }
+        return this.readJsonArtifact(planArtifactId, run, IntegrationPlanSchema);
+      }
+      async latestReviewCouncilStructuredResult(run) {
+        const artifact = [...run.artifacts].reverse().find(
+          (item) => item.metadata["adapter"] === "review-council-v1" && item.metadata["artifactRole"] === "structured-result"
+        );
+        if (artifact === void 0) {
+          return {};
+        }
+        return JSON.parse((await this.artifactStore.readContent(artifact.digest)).toString("utf8"));
+      }
+      async readJsonArtifact(artifactId, run, schema) {
+        const artifact = run.artifacts.find((item) => item.id === artifactId);
+        if (artifact === void 0) {
+          throw new Error(`Artifact not found: ${artifactId}`);
+        }
+        const content = await this.artifactStore.readContent(Sha256DigestSchema.parse(artifact.digest));
+        return schema.parse(JSON.parse(content.toString("utf8")));
+      }
+      async writeJsonArtifact(input) {
+        const content = Buffer.from(`${JSON.stringify(input.value, null, 2)}
+`, "utf8");
+        const blob = await this.artifactStore.writeBlob({
+          content,
+          mediaType: "application/json",
+          storedAt: input.createdAt,
+          label: input.label
+        });
+        return ArtifactRefSchema.parse({
+          id: createArtifactId(),
+          kind: "log",
+          uri: blob.uri,
+          mediaType: "application/json",
+          digest: blob.digest,
+          producedBy: input.producedBy ?? "orchestrator",
+          evidenceIds: [],
+          createdAt: input.createdAt,
+          metadata: {
+            adapter: "integration-v1",
+            artifactRole: input.artifactRole,
+            label: input.label
+          }
+        });
+      }
+    };
+  }
+});
+
 // src/openapi/openapi-analysis.ts
 var OpenApiAnalysisResultSchema;
 var init_openapi_analysis = __esm({
@@ -41751,41 +43305,6 @@ var init_openapi_intake_service = __esm({
   }
 });
 
-// src/openspec/openspec-model.ts
-var OpenSpecRequirementStatusSchema, OpenSpecRequirementModelSchema, OpenSpecChangeModelSchema;
-var init_openspec_model = __esm({
-  "src/openspec/openspec-model.ts"() {
-    "use strict";
-    init_zod();
-    init_ids();
-    init_openspec_paths();
-    OpenSpecRequirementStatusSchema = external_exports.enum(["ready", "blocked", "partial", "gap-only"]);
-    OpenSpecRequirementModelSchema = external_exports.object({
-      id: external_exports.string().trim().min(1),
-      area: OpenSpecSpecAreaSchema,
-      title: external_exports.string().trim().min(1),
-      summary: external_exports.string().trim().min(1),
-      status: OpenSpecRequirementStatusSchema,
-      briefEvidenceIds: external_exports.array(EvidenceIdSchema).default([]),
-      figmaEvidenceIds: external_exports.array(EvidenceIdSchema).default([]),
-      openApiEvidenceIds: external_exports.array(EvidenceIdSchema).default([]),
-      gapIds: external_exports.array(GapIdSchema).default([]),
-      tags: external_exports.array(external_exports.string().trim().min(1)).default([])
-    }).strict();
-    OpenSpecChangeModelSchema = external_exports.object({
-      runId: RunIdSchema,
-      changeName: OpenSpecChangeNameSchema,
-      title: external_exports.string().trim().min(1),
-      summary: external_exports.string().trim().min(1),
-      generatedAt: external_exports.string().datetime({ offset: true }),
-      sourceArtifactIds: external_exports.array(ArtifactIdSchema).default([]),
-      requirements: external_exports.array(OpenSpecRequirementModelSchema),
-      gapIds: external_exports.array(GapIdSchema).default([]),
-      specAreas: external_exports.array(OpenSpecSpecAreaSchema)
-    }).strict();
-  }
-});
-
 // src/openspec/openspec-model-builder.ts
 function parseTraceabilityMatrixLike(rawMatrix) {
   const direct = TraceabilityMatrixLikeSchema.safeParse(rawMatrix);
@@ -42149,7 +43668,7 @@ function renderGapSummary2(model, gapById) {
         if (gap2 === void 0) {
           return `| ${gapId} | - | - | - | Missing gap object |`;
         }
-        return `| ${gap2.id} | ${gap2.category} | ${gap2.severity} | ${gap2.status} | ${escapeTableCell2(gap2.title)} |`;
+        return `| ${gap2.id} | ${gap2.category} | ${gap2.severity} | ${gap2.status} | ${escapeTableCell3(gap2.title)} |`;
       }),
       ""
     ]
@@ -42184,7 +43703,7 @@ function renderEvidenceCell(ids, evidenceById) {
   }
   return ids.map((id) => {
     const evidence = evidenceById.get(id);
-    return evidence === void 0 ? id : `${id}<br>${escapeTableCell2(evidence.summary)}`;
+    return evidence === void 0 ? id : `${id}<br>${escapeTableCell3(evidence.summary)}`;
   }).join("<br>");
 }
 function toShallStatement(summary) {
@@ -42198,7 +43717,7 @@ function markdown2(lines) {
   return `${lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd()}
 `;
 }
-function escapeTableCell2(value) {
+function escapeTableCell3(value) {
   return value.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
 }
 var init_openspec_renderer = __esm({
@@ -42208,8 +43727,8 @@ var init_openspec_renderer = __esm({
 });
 
 // src/openspec/openspec-writer.ts
-import { mkdir as mkdir8, readFile as readFile10, writeFile as writeFile8 } from "fs/promises";
-import path15 from "path";
+import { mkdir as mkdir11, readFile as readFile13, writeFile as writeFile10 } from "fs/promises";
+import path19 from "path";
 async function writeOpenSpecChange(input) {
   const paths = resolveOpenSpecChangePaths({
     projectRoot: input.projectRoot,
@@ -42262,7 +43781,7 @@ async function writeOpenSpecChange(input) {
   ];
   const writtenFiles = [];
   for (const file2 of filesToWrite) {
-    assertInsideProjectRoot3(input.projectRoot, file2.absolutePath);
+    assertInsideProjectRoot4(input.projectRoot, file2.absolutePath);
     const content = ensureFinalNewline(file2.content);
     const changed = await writeFileWithConflictPolicy({
       absolutePath: file2.absolutePath,
@@ -42299,11 +43818,11 @@ async function writeOpenSpecChange(input) {
   };
 }
 async function writeFileWithConflictPolicy(input) {
-  await mkdir8(path15.dirname(input.absolutePath), {
+  await mkdir11(path19.dirname(input.absolutePath), {
     recursive: true,
     mode: 448
   });
-  const existing = await readExisting2(input.absolutePath);
+  const existing = await readExisting3(input.absolutePath);
   if (existing !== void 0) {
     if (existing === input.content) {
       return false;
@@ -42312,15 +43831,15 @@ async function writeFileWithConflictPolicy(input) {
       throw new Error(`OpenSpec file already exists with different content: ${input.absolutePath}`);
     }
   }
-  await writeFile8(input.absolutePath, input.content, {
+  await writeFile10(input.absolutePath, input.content, {
     encoding: "utf8",
     mode: 384
   });
   return true;
 }
-async function readExisting2(absolutePath) {
+async function readExisting3(absolutePath) {
   try {
-    return await readFile10(absolutePath, "utf8");
+    return await readFile13(absolutePath, "utf8");
   } catch (error51) {
     if (error51 instanceof Error && "code" in error51 && error51.code === "ENOENT") {
       return void 0;
@@ -42328,9 +43847,9 @@ async function readExisting2(absolutePath) {
     throw error51;
   }
 }
-function assertInsideProjectRoot3(projectRoot, absolutePath) {
-  const relative = path15.relative(projectRoot, absolutePath);
-  if (relative.startsWith("..") || path15.isAbsolute(relative)) {
+function assertInsideProjectRoot4(projectRoot, absolutePath) {
+  const relative = path19.relative(projectRoot, absolutePath);
+  if (relative.startsWith("..") || path19.isAbsolute(relative)) {
     throw new Error(`Refusing to write outside project root: ${absolutePath}`);
   }
 }
@@ -42520,7 +44039,7 @@ var init_policy = __esm({
 });
 
 // src/security/command-policy.ts
-import path16 from "path";
+import path20 from "path";
 function classifyCommand(rawCommand) {
   const command = CommandInvocationSchema.parse(rawCommand);
   const normalizedCommand = normalizeExecutable(command.command);
@@ -42714,7 +44233,7 @@ function classifyPackageManager(manager, args, intent) {
   );
 }
 function normalizeExecutable(command) {
-  return path16.basename(command).toLowerCase();
+  return path20.basename(command).toLowerCase();
 }
 function findShellCharacters(parts) {
   const found = /* @__PURE__ */ new Set();
@@ -42809,14 +44328,14 @@ var init_command_policy = __esm({
 
 // src/security/path-policy.ts
 import { realpath as realpath2, stat as stat2 } from "fs/promises";
-import path17 from "path";
+import path21 from "path";
 async function validateWorkspacePath(rawInput) {
   const input = ValidateWorkspacePathInputSchema.parse(rawInput);
   if (hasNullByte(input.candidatePath) || hasNullByte(input.workspaceRoot)) {
     return deniedPath(input, "NULL_BYTE", "Paths must not contain null bytes.");
   }
-  const workspaceRootRealPath = await realpath2(path17.resolve(input.workspaceRoot));
-  const candidateAbsolutePath = path17.resolve(workspaceRootRealPath, input.candidatePath);
+  const workspaceRootRealPath = await realpath2(path21.resolve(input.workspaceRoot));
+  const candidateAbsolutePath = path21.resolve(workspaceRootRealPath, input.candidatePath);
   if (!isInsideOrEqual(workspaceRootRealPath, candidateAbsolutePath)) {
     return {
       workspaceRoot: input.workspaceRoot,
@@ -42896,7 +44415,7 @@ async function validateWorkspacePath(rawInput) {
   }
 }
 async function validateCreatePath(input, workspaceRootRealPath, candidateAbsolutePath) {
-  const parentPath = path17.dirname(candidateAbsolutePath);
+  const parentPath = path21.dirname(candidateAbsolutePath);
   try {
     const parentRealPath = await realpath2(parentPath);
     if (!isInsideOrEqual(workspaceRootRealPath, parentRealPath)) {
@@ -42945,9 +44464,9 @@ async function validateCreatePath(input, workspaceRootRealPath, candidateAbsolut
 function deniedPath(input, code, message) {
   return {
     workspaceRoot: input.workspaceRoot,
-    workspaceRootRealPath: path17.resolve(input.workspaceRoot),
+    workspaceRootRealPath: path21.resolve(input.workspaceRoot),
     candidatePath: input.candidatePath,
-    candidateAbsolutePath: path17.resolve(input.workspaceRoot, input.candidatePath),
+    candidateAbsolutePath: path21.resolve(input.workspaceRoot, input.candidatePath),
     mode: input.mode,
     decision: deny(code, message, "critical", ["path"])
   };
@@ -42956,8 +44475,8 @@ function hasNullByte(value) {
   return value.includes("\0");
 }
 function isInsideOrEqual(root, candidate) {
-  const relative = path17.relative(root, candidate);
-  return relative === "" || !relative.startsWith("..") && !path17.isAbsolute(relative);
+  const relative = path21.relative(root, candidate);
+  return relative === "" || !relative.startsWith("..") && !path21.isAbsolute(relative);
 }
 var PathAccessModeSchema, ValidateWorkspacePathInputSchema, ValidatedWorkspacePathSchema;
 var init_path_policy = __esm({
@@ -43383,10 +44902,10 @@ var init_package_manager_detector = __esm({
 });
 
 // src/profile/probe.ts
-import { execFile as execFile2 } from "child_process";
-import { access, readdir as readdir2, readFile as readFile11, realpath as realpath3, stat as stat3 } from "fs/promises";
-import path18 from "path";
-import { promisify as promisify2 } from "util";
+import { execFile as execFile3 } from "child_process";
+import { access, readdir as readdir2, readFile as readFile14, realpath as realpath3, stat as stat3 } from "fs/promises";
+import path22 from "path";
+import { promisify as promisify3 } from "util";
 async function createProjectProbe(projectRoot) {
   const realRoot = await realpath3(projectRoot);
   const metadata = await stat3(realRoot);
@@ -43394,7 +44913,7 @@ async function createProjectProbe(projectRoot) {
     throw new Error(`Project root is not a directory: ${realRoot}`);
   }
   async function resolveInside(relativePath) {
-    const candidate = path18.resolve(realRoot, relativePath);
+    const candidate = path22.resolve(realRoot, relativePath);
     const realCandidate = await realpathOrParent(candidate);
     if (!isInside(realRoot, realCandidate)) {
       throw new Error(`Path escapes project root: ${relativePath}`);
@@ -43420,7 +44939,7 @@ async function createProjectProbe(projectRoot) {
         if (!metadata2.isFile() || metadata2.size > maxBytes) {
           return void 0;
         }
-        return await readFile11(absolute, "utf8");
+        return await readFile14(absolute, "utf8");
       } catch {
         return void 0;
       }
@@ -43446,7 +44965,7 @@ async function createProjectProbe(projectRoot) {
     },
     async run(command, args, options = {}) {
       try {
-        const result = await execFileAsync2(command, args, {
+        const result = await execFileAsync3(command, args, {
           cwd: realRoot,
           timeout: options.timeoutMs ?? 5e3,
           maxBuffer: 1024 * 1024,
@@ -43468,26 +44987,26 @@ async function createProjectProbe(projectRoot) {
       }
     },
     toRelative(absolutePath) {
-      return normalizeRelative(path18.relative(realRoot, absolutePath));
+      return normalizeRelative(path22.relative(realRoot, absolutePath));
     },
     resolveInside
   };
   return probe;
 }
 function normalizeRelative(value) {
-  return value.split(path18.sep).join("/");
+  return value.split(path22.sep).join("/");
 }
 function isInside(root, candidate) {
-  const relative = path18.relative(root, candidate);
-  return relative === "" || !relative.startsWith("..") && !path18.isAbsolute(relative);
+  const relative = path22.relative(root, candidate);
+  return relative === "" || !relative.startsWith("..") && !path22.isAbsolute(relative);
 }
 async function realpathOrParent(candidate) {
   let current = candidate;
-  while (current !== path18.dirname(current)) {
+  while (current !== path22.dirname(current)) {
     try {
       return await realpath3(current);
     } catch {
-      current = path18.dirname(current);
+      current = path22.dirname(current);
     }
   }
   try {
@@ -43496,11 +45015,11 @@ async function realpathOrParent(candidate) {
     return current;
   }
 }
-var execFileAsync2;
+var execFileAsync3;
 var init_probe = __esm({
   "src/profile/probe.ts"() {
     "use strict";
-    execFileAsync2 = promisify2(execFile2);
+    execFileAsync3 = promisify3(execFile3);
   }
 });
 
@@ -43804,8 +45323,8 @@ var init_project_profiler = __esm({
 });
 
 // src/profile/profile-store.ts
-import { mkdir as mkdir9, readdir as readdir3, readFile as readFile12, writeFile as writeFile9 } from "fs/promises";
-import path19 from "path";
+import { mkdir as mkdir12, readdir as readdir3, readFile as readFile15, writeFile as writeFile11 } from "fs/promises";
+import path23 from "path";
 var JsonProfileStore;
 var init_profile_store = __esm({
   "src/profile/profile-store.ts"() {
@@ -43817,12 +45336,12 @@ var init_profile_store = __esm({
       }
       directory;
       async saveManifest(manifest) {
-        await mkdir9(this.directory, {
+        await mkdir12(this.directory, {
           recursive: true,
           mode: 448
         });
-        await writeFile9(
-          path19.join(this.directory, `${manifest.runId}.intake.json`),
+        await writeFile11(
+          path23.join(this.directory, `${manifest.runId}.intake.json`),
           `${JSON.stringify(IntakeManifestSchema.parse(manifest), null, 2)}
 `,
           {
@@ -43832,16 +45351,16 @@ var init_profile_store = __esm({
         );
       }
       async getManifest(runId) {
-        const text = await readFile12(path19.join(this.directory, `${runId}.intake.json`), "utf8");
+        const text = await readFile15(path23.join(this.directory, `${runId}.intake.json`), "utf8");
         return IntakeManifestSchema.parse(JSON.parse(text));
       }
       async saveProfile(profile) {
-        await mkdir9(this.directory, {
+        await mkdir12(this.directory, {
           recursive: true,
           mode: 448
         });
-        await writeFile9(
-          path19.join(this.directory, `${profile.runId}.profile.json`),
+        await writeFile11(
+          path23.join(this.directory, `${profile.runId}.profile.json`),
           `${JSON.stringify(ProjectProfileSchema.parse(profile), null, 2)}
 `,
           {
@@ -43851,11 +45370,11 @@ var init_profile_store = __esm({
         );
       }
       async getProfile(runId) {
-        const text = await readFile12(path19.join(this.directory, `${runId}.profile.json`), "utf8");
+        const text = await readFile15(path23.join(this.directory, `${runId}.profile.json`), "utf8");
         return ProjectProfileSchema.parse(JSON.parse(text));
       }
       async listProfiles() {
-        await mkdir9(this.directory, {
+        await mkdir12(this.directory, {
           recursive: true,
           mode: 448
         });
@@ -43863,7 +45382,7 @@ var init_profile_store = __esm({
         const profileFiles = files.filter((file2) => file2.endsWith(".profile.json"));
         const profiles = await Promise.all(
           profileFiles.map(async (file2) => {
-            const text = await readFile12(path19.join(this.directory, file2), "utf8");
+            const text = await readFile15(path23.join(this.directory, file2), "utf8");
             return ProjectProfileSchema.parse(JSON.parse(text));
           })
         );
@@ -44122,7 +45641,7 @@ function renderFindings(findings) {
     "| Finding | Severity | Category | Status | Title |",
     "|---|---|---|---|---|",
     ...findings.map(
-      (finding) => `| ${finding.id} | ${finding.severity} | ${finding.category} | ${finding.status} | ${escapeTableCell3(finding.title)} |`
+      (finding) => `| ${finding.id} | ${finding.severity} | ${finding.category} | ${finding.status} | ${escapeTableCell4(finding.title)} |`
     )
   ];
 }
@@ -44134,7 +45653,7 @@ function renderRequirementVerdicts(verdicts) {
     "| Requirement | Verdict | Reason | Gaps | Findings |",
     "|---|---|---|---|---|",
     ...verdicts.map(
-      (verdict) => `| ${verdict.requirementId} | ${verdict.verdict} | ${escapeTableCell3(verdict.reason)} | ${joinIds(verdict.gapIds)} | ${joinIds(verdict.findingIds)} |`
+      (verdict) => `| ${verdict.requirementId} | ${verdict.verdict} | ${escapeTableCell4(verdict.reason)} | ${joinIds2(verdict.gapIds)} | ${joinIds2(verdict.findingIds)} |`
     )
   ];
 }
@@ -44146,14 +45665,14 @@ function renderContradictions(contradictions) {
     "| Contradiction | Severity | Left | Right | Explanation |",
     "|---|---|---|---|---|",
     ...contradictions.map(
-      (item) => `| ${item.id} | ${item.severity} | ${escapeTableCell3(item.left.summary)} | ${escapeTableCell3(item.right.summary)} | ${escapeTableCell3(item.explanation)} |`
+      (item) => `| ${item.id} | ${item.severity} | ${escapeTableCell4(item.left.summary)} | ${escapeTableCell4(item.right.summary)} | ${escapeTableCell4(item.explanation)} |`
     )
   ];
 }
-function joinIds(ids) {
+function joinIds2(ids) {
   return ids.length === 0 ? "-" : ids.join("<br>");
 }
-function escapeTableCell3(value) {
+function escapeTableCell4(value) {
   return value.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
 }
 function markdown3(lines) {
@@ -44315,8 +45834,8 @@ var init_review_precheck = __esm({
 });
 
 // src/application/review-council-service.ts
-import { mkdir as mkdir10, readFile as readFile13, writeFile as writeFile10 } from "fs/promises";
-import path20 from "path";
+import { mkdir as mkdir13, readFile as readFile16, writeFile as writeFile12 } from "fs/promises";
+import path24 from "path";
 function findContextArtifact2(run, contextArtifactId) {
   const candidates = run.artifacts.filter(
     (artifact2) => artifact2.metadata["adapter"] === "review-council-v1" && artifact2.metadata["artifactRole"] === "context-pack"
@@ -44457,23 +45976,23 @@ var init_review_council_service = __esm({
           storedAt: timestamp,
           label: "review-council-context"
         });
-        const contextDirectory = path20.join(
+        const contextDirectory = path24.join(
           this.dataDirectory,
           "agent-contexts",
           "review-council",
           run.id
         );
-        const contextPath = path20.join(contextDirectory, "review-council-context.json");
-        const instructionsPath = path20.join(contextDirectory, "review-instructions.md");
-        await mkdir10(contextDirectory, {
+        const contextPath = path24.join(contextDirectory, "review-council-context.json");
+        const instructionsPath = path24.join(contextDirectory, "review-instructions.md");
+        await mkdir13(contextDirectory, {
           recursive: true,
           mode: 448
         });
-        await writeFile10(contextPath, contextJson, {
+        await writeFile12(contextPath, contextJson, {
           encoding: "utf8",
           mode: 384
         });
-        await writeFile10(instructionsPath, instructions, {
+        await writeFile12(instructionsPath, instructions, {
           encoding: "utf8",
           mode: 384
         });
@@ -44521,7 +46040,7 @@ var init_review_council_service = __esm({
           throw new Error("Review Council context artifact is missing instructionsPath metadata");
         }
         const context = ReviewCouncilContextPackSchema.parse(
-          JSON.parse(await readFile13(contextPath, "utf8"))
+          JSON.parse(await readFile16(contextPath, "utf8"))
         );
         return GetReviewCouncilContextResultSchema.parse({
           contextArtifactId: contextArtifact.id,
@@ -44654,12 +46173,12 @@ var init_review_council_service = __esm({
 // src/application/run-service.ts
 import { randomUUID as randomUUID4 } from "crypto";
 import { realpath as realpath4, stat as stat4 } from "fs/promises";
-import path21 from "path";
+import path25 from "path";
 function createRunId() {
   return RunIdSchema.parse(`run_${randomUUID4().replaceAll("-", "")}`);
 }
 async function canonicalDirectory(rawPath) {
-  const absolute = path21.resolve(rawPath);
+  const absolute = path25.resolve(rawPath);
   const canonical = await realpath4(absolute);
   const metadata = await stat4(canonical);
   if (!metadata.isDirectory()) {
@@ -44812,13 +46331,13 @@ var init_canonical_content = __esm({
 
 // src/source-registry/path-scope.ts
 import { realpath as realpath5, stat as stat5 } from "fs/promises";
-import path22 from "path";
+import path26 from "path";
 async function resolveFileInsideRoot(input) {
   const projectRoot = await realpath5(input.projectRoot);
-  const candidate = path22.resolve(projectRoot, input.filePath);
+  const candidate = path26.resolve(projectRoot, input.filePath);
   const absolutePath = await realpath5(candidate);
-  const relative = path22.relative(projectRoot, absolutePath);
-  if (relative === "" || relative.startsWith("..") || path22.isAbsolute(relative)) {
+  const relative = path26.relative(projectRoot, absolutePath);
+  if (relative === "" || relative.startsWith("..") || path26.isAbsolute(relative)) {
     throw new Error(`File is outside project root: ${input.filePath}`);
   }
   const metadata = await stat5(absolutePath);
@@ -44832,7 +46351,7 @@ async function resolveFileInsideRoot(input) {
   };
 }
 function toPosixPath(value) {
-  return value.split(path22.sep).join("/");
+  return value.split(path26.sep).join("/");
 }
 var init_path_scope = __esm({
   "src/source-registry/path-scope.ts"() {
@@ -44842,11 +46361,11 @@ var init_path_scope = __esm({
 });
 
 // src/source-registry/snapshot-store.ts
-import { mkdir as mkdir11, readFile as readFile14, writeFile as writeFile11 } from "fs/promises";
-import path23 from "path";
+import { mkdir as mkdir14, readFile as readFile17, writeFile as writeFile13 } from "fs/promises";
+import path27 from "path";
 async function writeIfMissing2(filePath, content) {
   try {
-    await writeFile11(filePath, content, {
+    await writeFile13(filePath, content, {
       flag: "wx",
       mode: 384
     });
@@ -44886,10 +46405,10 @@ var init_snapshot_store = __esm({
       async writeSnapshot(input) {
         const digest = input.canonical.canonicalDigest;
         const { prefix, hex: hex3 } = digestPathSegments(digest);
-        const directory = path23.join(this.rootDirectory, "sha256", prefix, hex3);
-        const contentPath = path23.join(directory, "content");
-        const metadataPath = path23.join(directory, "metadata.json");
-        await mkdir11(directory, {
+        const directory = path27.join(this.rootDirectory, "sha256", prefix, hex3);
+        const contentPath = path27.join(directory, "content");
+        const metadataPath = path27.join(directory, "metadata.json");
+        await mkdir14(directory, {
           recursive: true,
           mode: 448
         });
@@ -44919,14 +46438,14 @@ var init_snapshot_store = __esm({
       async readMetadata(rawDigest) {
         const digest = Sha256DigestSchema.parse(rawDigest);
         const { prefix, hex: hex3 } = digestPathSegments(digest);
-        const metadataPath = path23.join(this.rootDirectory, "sha256", prefix, hex3, "metadata.json");
-        return SourceSnapshotMetadataSchema.parse(JSON.parse(await readFile14(metadataPath, "utf8")));
+        const metadataPath = path27.join(this.rootDirectory, "sha256", prefix, hex3, "metadata.json");
+        return SourceSnapshotMetadataSchema.parse(JSON.parse(await readFile17(metadataPath, "utf8")));
       }
       async readContent(rawDigest) {
         const digest = Sha256DigestSchema.parse(rawDigest);
         const { prefix, hex: hex3 } = digestPathSegments(digest);
-        const contentPath = path23.join(this.rootDirectory, "sha256", prefix, hex3, "content");
-        return readFile14(contentPath);
+        const contentPath = path27.join(this.rootDirectory, "sha256", prefix, hex3, "content");
+        return readFile17(contentPath);
       }
     };
   }
@@ -44944,7 +46463,7 @@ var init_source_registry = __esm({
 });
 
 // src/application/source-registry-service.ts
-import { readFile as readFile15 } from "fs/promises";
+import { readFile as readFile18 } from "fs/promises";
 function parseSourceRegistrationResult(result) {
   SourceRegistrationResultSchema.parse(result);
   return result;
@@ -44996,7 +46515,7 @@ var init_source_registry_service = __esm({
           projectRoot: run.projectRoot,
           filePath: input.path
         });
-        const rawContent = await readFile15(scopedPath.absolutePath);
+        const rawContent = await readFile18(scopedPath.absolutePath);
         const canonical = canonicalizeFileContent({
           path: scopedPath.relativePath,
           ...input.mediaType === void 0 ? {} : { mediaType: input.mediaType },
@@ -45059,118 +46578,28 @@ var init_source_registry_service = __esm({
   }
 });
 
-// src/gherkin/test-matrix.ts
-function inferTestLayer(input) {
-  if (input.hasGaps) {
-    return "manual";
-  }
-  if (input.hasOpenApi && /api|request|response|endpoint|schema|operation/i.test(input.requirementText)) {
-    return "contract";
-  }
-  if (input.hasFigma && input.hasOpenApi) {
-    return "acceptance";
-  }
-  if (input.hasFigma) {
-    return "component";
-  }
-  if (input.hasOpenApi) {
-    return "contract";
-  }
-  if (/format|mapper|policy|status|state|validation|계산|정책|상태|검증/.test(input.requirementText)) {
-    return "unit";
-  }
-  return "manual";
-}
-function inferAutomationStatus(input) {
-  if (input.requirementStatus === "blocked" || input.hasBlockerGap) {
-    return "blocked";
-  }
-  if (input.requirementStatus === "gap-only") {
-    return "manual";
-  }
-  if (input.hasGaps || input.requirementStatus === "partial") {
-    return "review-needed";
-  }
-  return "automated-candidate";
-}
-var TestLayerSchema, TestAutomationStatusSchema, TestMatrixRequirementStatusSchema, TestMatrixRowSchema, TestMatrixSchema;
-var init_test_matrix = __esm({
-  "src/gherkin/test-matrix.ts"() {
-    "use strict";
-    init_zod();
-    init_ids();
-    TestLayerSchema = external_exports.enum([
-      "unit",
-      "component",
-      "contract",
-      "acceptance",
-      "e2e",
-      "visual",
-      "manual"
-    ]);
-    TestAutomationStatusSchema = external_exports.enum([
-      "automated-candidate",
-      "manual",
-      "blocked",
-      "review-needed"
-    ]);
-    TestMatrixRequirementStatusSchema = external_exports.enum([
-      "ready",
-      "partial",
-      "blocked",
-      "gap-only"
-    ]);
-    TestMatrixRowSchema = external_exports.object({
-      requirementId: external_exports.string().trim().min(1),
-      scenarioId: external_exports.string().trim().min(1),
-      scenarioName: external_exports.string().trim().min(1),
-      featureFile: external_exports.string().trim().min(1),
-      area: external_exports.string().trim().min(1),
-      layer: TestLayerSchema,
-      automation: TestAutomationStatusSchema,
-      status: TestMatrixRequirementStatusSchema,
-      reason: external_exports.string().trim().min(1),
-      briefEvidenceIds: external_exports.array(EvidenceIdSchema).default([]),
-      figmaEvidenceIds: external_exports.array(EvidenceIdSchema).default([]),
-      openApiEvidenceIds: external_exports.array(EvidenceIdSchema).default([]),
-      gapIds: external_exports.array(GapIdSchema).default([]),
-      sourceArtifactIds: external_exports.array(ArtifactIdSchema).default([])
-    }).strict();
-    TestMatrixSchema = external_exports.object({
-      changeName: external_exports.string().trim().min(1),
-      generatedAt: external_exports.string().datetime({ offset: true }),
-      requirementCount: external_exports.number().int().nonnegative(),
-      scenarioCount: external_exports.number().int().nonnegative(),
-      automatedCandidateCount: external_exports.number().int().nonnegative(),
-      blockedCount: external_exports.number().int().nonnegative(),
-      reviewNeededCount: external_exports.number().int().nonnegative(),
-      rows: external_exports.array(TestMatrixRowSchema)
-    }).strict();
-  }
-});
-
 // src/spec-bdd/acceptance-skeleton-writer.ts
-import { mkdir as mkdir12, writeFile as writeFile12 } from "fs/promises";
-import path24 from "path";
+import { mkdir as mkdir15, writeFile as writeFile14 } from "fs/promises";
+import path28 from "path";
 async function writeAcceptanceSkeletons(input) {
-  const directory = path24.join(
+  const directory = path28.join(
     input.projectRoot,
     "tests",
     "acceptance",
     "generated",
     input.changeName
   );
-  assertInsideProjectRoot4(input.projectRoot, directory);
-  await mkdir12(directory, {
+  assertInsideProjectRoot5(input.projectRoot, directory);
+  await mkdir15(directory, {
     recursive: true,
     mode: 448
   });
   const files = [];
   for (const row of input.matrix.rows) {
     const fileName = `${sanitizeFileName(row.scenarioId)}.test.md`;
-    const absolutePath = path24.join(directory, fileName);
+    const absolutePath = path28.join(directory, fileName);
     const content = renderSkeleton(row);
-    await writeFile12(absolutePath, content, {
+    await writeFile14(absolutePath, content, {
       encoding: "utf8",
       mode: 384,
       flag: input.force === true ? "w" : "wx"
@@ -45180,10 +46609,10 @@ async function writeAcceptanceSkeletons(input) {
       }
       throw error51;
     });
-    files.push(path24.relative(input.projectRoot, absolutePath).split(path24.sep).join("/"));
+    files.push(path28.relative(input.projectRoot, absolutePath).split(path28.sep).join("/"));
   }
   return {
-    directory: path24.relative(input.projectRoot, directory).split(path24.sep).join("/"),
+    directory: path28.relative(input.projectRoot, directory).split(path28.sep).join("/"),
     files
   };
 }
@@ -45225,9 +46654,9 @@ Later tasks may convert this skeleton into Cucumber, Playwright, Vitest, or proj
 function sanitizeFileName(value) {
   return value.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-|-$/g, "");
 }
-function assertInsideProjectRoot4(projectRoot, absolutePath) {
-  const relative = path24.relative(projectRoot, absolutePath);
-  if (relative.startsWith("..") || path24.isAbsolute(relative)) {
+function assertInsideProjectRoot5(projectRoot, absolutePath) {
+  const relative = path28.relative(projectRoot, absolutePath);
+  if (relative.startsWith("..") || path28.isAbsolute(relative)) {
     throw new Error(`Refusing to write outside project root: ${absolutePath}`);
   }
 }
@@ -45301,18 +46730,18 @@ var init_spec_bdd_contracts = __esm({
 });
 
 // src/spec-bdd/spec-bdd-context.ts
-import { readFile as readFile16 } from "fs/promises";
-import path25 from "path";
+import { readFile as readFile19 } from "fs/promises";
+import path29 from "path";
 async function buildSpecBddContextPack(input) {
   const changeName = OpenSpecChangeNameSchema.parse(input.changeName);
   const paths = resolveOpenSpecChangePaths({
     projectRoot: input.run.projectRoot,
     changeName
   });
-  const featureDirectory = path25.join(paths.artifactsRoot, "gherkin");
-  const indexPath = path25.join(paths.artifactsRoot, "gherkin-index.json");
-  const testMatrixPath = path25.join(paths.artifactsRoot, "test-matrix.json");
-  const testMatrixMdPath = path25.join(paths.artifactsRoot, "test-matrix.md");
+  const featureDirectory = path29.join(paths.artifactsRoot, "gherkin");
+  const indexPath = path29.join(paths.artifactsRoot, "gherkin-index.json");
+  const testMatrixPath = path29.join(paths.artifactsRoot, "test-matrix.json");
+  const testMatrixMdPath = path29.join(paths.artifactsRoot, "test-matrix.md");
   await assertReadable(paths.manifestPath);
   await assertReadable(testMatrixPath);
   return SpecBddContextPackSchema.parse({
@@ -45386,7 +46815,7 @@ ${contextPack.expectedOutputs.map((item) => `- ${item}`).join("\n")}
 `;
 }
 async function assertReadable(filePath) {
-  await readFile16(filePath, "utf8");
+  await readFile19(filePath, "utf8");
 }
 var SpecBddContextPackSchema;
 var init_spec_bdd_context = __esm({
@@ -45469,16 +46898,16 @@ var init_spec_bdd_review_renderer = __esm({
 });
 
 // src/application/spec-bdd-agent-lane-service.ts
-import { mkdir as mkdir13, readFile as readFile17, writeFile as writeFile13 } from "fs/promises";
-import path26 from "path";
+import { mkdir as mkdir16, readFile as readFile20, writeFile as writeFile15 } from "fs/promises";
+import path30 from "path";
 async function readTestMatrix(projectRoot, relativePath) {
-  const absolutePath = path26.join(projectRoot, relativePath);
-  assertInsideProjectRoot5(projectRoot, absolutePath);
-  const content = await readFile17(absolutePath, "utf8");
+  const absolutePath = path30.join(projectRoot, relativePath);
+  assertInsideProjectRoot6(projectRoot, absolutePath);
+  const content = await readFile20(absolutePath, "utf8");
   return TestMatrixSchema.parse(JSON.parse(content));
 }
 function specBddContextPaths(projectRoot, runId, changeName) {
-  const contextDirectory = path26.join(
+  const contextDirectory = path30.join(
     projectRoot,
     ".spec-to-pr",
     "runs",
@@ -45489,19 +46918,19 @@ function specBddContextPaths(projectRoot, runId, changeName) {
   );
   return {
     contextDirectory,
-    contextJsonPath: path26.join(contextDirectory, "context-pack.json"),
-    contextMdPath: path26.join(contextDirectory, "context-pack.md")
+    contextJsonPath: path30.join(contextDirectory, "context-pack.json"),
+    contextMdPath: path30.join(contextDirectory, "context-pack.md")
   };
 }
 function specBddReportPaths(projectRoot, changeName) {
-  const reportDirectory = path26.join(projectRoot, "openspec", "changes", changeName, "artifacts");
+  const reportDirectory = path30.join(projectRoot, "openspec", "changes", changeName, "artifacts");
   return {
     reportDirectory,
-    reportJsonPath: path26.join(reportDirectory, "spec-bdd-review.json"),
-    reportMdPath: path26.join(reportDirectory, "spec-bdd-review.md")
+    reportJsonPath: path30.join(reportDirectory, "spec-bdd-review.json"),
+    reportMdPath: path30.join(reportDirectory, "spec-bdd-review.md")
   };
 }
-async function currentHead(projectRoot, fallback) {
+async function currentHead2(projectRoot, fallback) {
   try {
     const output = await runCommand({
       cwd: projectRoot,
@@ -45517,15 +46946,15 @@ async function currentHead(projectRoot, fallback) {
   }
 }
 function toRepoRelative(projectRoot, absolutePath) {
-  return path26.relative(projectRoot, absolutePath).split(path26.sep).join("/");
+  return path30.relative(projectRoot, absolutePath).split(path30.sep).join("/");
 }
-function assertInsideProjectRoot5(projectRoot, absolutePath) {
-  const relative = path26.relative(projectRoot, absolutePath);
-  if (relative.startsWith("..") || path26.isAbsolute(relative)) {
+function assertInsideProjectRoot6(projectRoot, absolutePath) {
+  const relative = path30.relative(projectRoot, absolutePath);
+  if (relative.startsWith("..") || path30.isAbsolute(relative)) {
     throw new Error(`Refusing to access outside project root: ${absolutePath}`);
   }
 }
-function unique(items) {
+function unique2(items) {
   return [...new Set(items)];
 }
 var PrepareSpecBddAgentInputSchema, GetSpecBddAgentContextInputSchema, RecordSpecBddAgentResultInputSchema, PrepareSpecBddAgentResultSchema, GetSpecBddAgentContextResultSchema, RecordSpecBddAgentResultSchema, SpecBddAgentLaneService;
@@ -45617,16 +47046,16 @@ var init_spec_bdd_agent_lane_service = __esm({
         const contextJson = `${JSON.stringify(contextPack, null, 2)}
 `;
         const contextMd = renderSpecBddContextPackMarkdown(contextPack);
-        assertInsideProjectRoot5(run.projectRoot, contextPaths.contextDirectory);
-        await mkdir13(contextPaths.contextDirectory, {
+        assertInsideProjectRoot6(run.projectRoot, contextPaths.contextDirectory);
+        await mkdir16(contextPaths.contextDirectory, {
           recursive: true,
           mode: 448
         });
-        await writeFile13(contextPaths.contextJsonPath, contextJson, {
+        await writeFile15(contextPaths.contextJsonPath, contextJson, {
           encoding: "utf8",
           mode: 384
         });
-        await writeFile13(contextPaths.contextMdPath, contextMd, {
+        await writeFile15(contextPaths.contextMdPath, contextMd, {
           encoding: "utf8",
           mode: 384
         });
@@ -45644,8 +47073,8 @@ var init_spec_bdd_agent_lane_service = __esm({
         const input = GetSpecBddAgentContextInputSchema.parse(rawInput);
         const run = await this.runStore.get(input.runId);
         const contextPaths = specBddContextPaths(run.projectRoot, run.id, input.changeName);
-        const rawContext = await readFile17(contextPaths.contextJsonPath, "utf8");
-        const contextPackMarkdown = await readFile17(contextPaths.contextMdPath, "utf8");
+        const rawContext = await readFile20(contextPaths.contextJsonPath, "utf8");
+        const contextPackMarkdown = await readFile20(contextPaths.contextMdPath, "utf8");
         return GetSpecBddAgentContextResultSchema.parse({
           runId: run.id,
           changeName: input.changeName,
@@ -45688,16 +47117,16 @@ var init_spec_bdd_agent_lane_service = __esm({
         const reportJson = `${JSON.stringify(report, null, 2)}
 `;
         const reportMd = renderSpecBddReviewMarkdown(report);
-        assertInsideProjectRoot5(run.projectRoot, reportPaths.reportDirectory);
-        await mkdir13(reportPaths.reportDirectory, {
+        assertInsideProjectRoot6(run.projectRoot, reportPaths.reportDirectory);
+        await mkdir16(reportPaths.reportDirectory, {
           recursive: true,
           mode: 448
         });
-        await writeFile13(reportPaths.reportJsonPath, reportJson, {
+        await writeFile15(reportPaths.reportJsonPath, reportJson, {
           encoding: "utf8",
           mode: 384
         });
-        await writeFile13(reportPaths.reportMdPath, reportMd, {
+        await writeFile15(reportPaths.reportMdPath, reportMd, {
           encoding: "utf8",
           mode: 384
         });
@@ -45733,9 +47162,9 @@ var init_spec_bdd_agent_lane_service = __esm({
             relativePath: toRepoRelative(run.projectRoot, reportPaths.reportMdPath)
           }
         });
-        const baseSha = await currentHead(run.projectRoot, run.baseCommit);
+        const baseSha = await currentHead2(run.projectRoot, run.baseCommit);
         const knownGapIds = new Set(run.gaps.map((gap2) => gap2.id));
-        const agentGapIds = unique([
+        const agentGapIds = unique2([
           ...input.gapIds,
           ...input.findings.flatMap((finding) => finding.gapIds)
         ]).filter((gapId) => knownGapIds.has(gapId));
@@ -45743,10 +47172,10 @@ var init_spec_bdd_agent_lane_service = __esm({
           throw new Error("Blocked Spec/BDD results must reference at least one existing Run gap.");
         }
         const knownEvidenceIds = new Set(run.evidence.map((evidence) => evidence.id));
-        const agentEvidenceIds = unique(
+        const agentEvidenceIds = unique2(
           input.findings.flatMap((finding) => finding.evidenceIds)
         ).filter((evidenceId) => knownEvidenceIds.has(evidenceId));
-        const changedFiles = unique([
+        const changedFiles = unique2([
           toRepoRelative(run.projectRoot, reportPaths.reportJsonPath),
           toRepoRelative(run.projectRoot, reportPaths.reportMdPath),
           ...skeletons.files
@@ -46289,566 +47718,6 @@ var init_stage_service = __esm({
         const input = GetResumePlanInputSchema.parse(rawInput);
         const run = RunManifestSchema.parse(await this.store.get(input.runId));
         return createResumePlan(run, this.now());
-      }
-    };
-  }
-});
-
-// src/gherkin/gherkin-model.ts
-var GherkinStepKeywordSchema, GherkinTagSchema, GherkinStepSchema, GherkinScenarioStatusSchema, GherkinScenarioSchema, GherkinRuleSchema, GherkinFeatureSchema, GherkinBundleSchema;
-var init_gherkin_model = __esm({
-  "src/gherkin/gherkin-model.ts"() {
-    "use strict";
-    init_zod();
-    init_ids();
-    GherkinStepKeywordSchema = external_exports.enum(["Given", "When", "Then", "And", "But"]);
-    GherkinTagSchema = external_exports.string().trim().min(2).regex(/^@[A-Za-z0-9_:.~-]+$/, "Expected a Gherkin tag such as @REQ:REQ-001");
-    GherkinStepSchema = external_exports.object({
-      keyword: GherkinStepKeywordSchema,
-      text: external_exports.string().trim().min(1)
-    }).strict();
-    GherkinScenarioStatusSchema = external_exports.enum([
-      "automated-candidate",
-      "review-needed",
-      "manual",
-      "blocked"
-    ]);
-    GherkinScenarioSchema = external_exports.object({
-      id: external_exports.string().trim().min(1),
-      name: external_exports.string().trim().min(1),
-      requirementId: external_exports.string().trim().min(1),
-      status: GherkinScenarioStatusSchema,
-      tags: external_exports.array(GherkinTagSchema).default([]),
-      steps: external_exports.array(GherkinStepSchema).min(1),
-      briefEvidenceIds: external_exports.array(EvidenceIdSchema).default([]),
-      figmaEvidenceIds: external_exports.array(EvidenceIdSchema).default([]),
-      openApiEvidenceIds: external_exports.array(EvidenceIdSchema).default([]),
-      gapIds: external_exports.array(GapIdSchema).default([])
-    }).strict();
-    GherkinRuleSchema = external_exports.object({
-      name: external_exports.string().trim().min(1),
-      description: external_exports.string().trim().optional(),
-      scenarios: external_exports.array(GherkinScenarioSchema).default([])
-    }).strict();
-    GherkinFeatureSchema = external_exports.object({
-      area: external_exports.string().trim().min(1),
-      name: external_exports.string().trim().min(1),
-      description: external_exports.string().trim().optional(),
-      tags: external_exports.array(GherkinTagSchema).default([]),
-      rules: external_exports.array(GherkinRuleSchema).default([])
-    }).strict();
-    GherkinBundleSchema = external_exports.object({
-      changeName: external_exports.string().trim().min(1),
-      generatedAt: external_exports.string().datetime({ offset: true }),
-      features: external_exports.array(GherkinFeatureSchema)
-    }).strict();
-  }
-});
-
-// src/gherkin/gherkin-generator.ts
-function generateGherkinAndTestMatrix(input) {
-  const gapById = new Map(input.gaps.map((gap2) => [gap2.id, gap2]));
-  const featureMap = /* @__PURE__ */ new Map();
-  const matrixRows = [];
-  for (const requirement of input.model.requirements) {
-    const requirementGaps = requirement.gapIds.map((gapId) => gapById.get(gapId)).filter((gap2) => gap2 !== void 0);
-    const hasBlockerGap = requirementGaps.some((gap2) => gap2.severity === "blocker");
-    const hasGaps = requirementGaps.length > 0;
-    const automation = inferAutomationStatus({
-      requirementStatus: requirement.status,
-      hasGaps,
-      hasBlockerGap
-    });
-    const layer = inferTestLayer({
-      hasFigma: requirement.figmaEvidenceIds.length > 0,
-      hasOpenApi: requirement.openApiEvidenceIds.length > 0,
-      hasGaps,
-      requirementText: `${requirement.title} ${requirement.summary}`
-    });
-    const scenario = createScenario({
-      requirement,
-      automation,
-      layer
-    });
-    const feature = getOrCreateFeature(featureMap, requirement.area);
-    const rule = getOrCreateRule(feature, requirement.title);
-    if (automation !== "blocked") {
-      rule.scenarios.push(scenario);
-    }
-    matrixRows.push({
-      requirementId: requirement.id,
-      scenarioId: scenario.id,
-      scenarioName: scenario.name,
-      featureFile: featureFileName(requirement.area),
-      area: requirement.area,
-      layer,
-      automation,
-      status: requirement.status,
-      reason: reasonFor(requirement, automation, layer, requirementGaps),
-      briefEvidenceIds: requirement.briefEvidenceIds,
-      figmaEvidenceIds: requirement.figmaEvidenceIds,
-      openApiEvidenceIds: requirement.openApiEvidenceIds,
-      gapIds: requirement.gapIds,
-      sourceArtifactIds: input.model.sourceArtifactIds
-    });
-  }
-  const features = [...featureMap.values()].sort(
-    (left, right) => left.area.localeCompare(right.area)
-  );
-  const bundle = GherkinBundleSchema.parse({
-    changeName: input.model.changeName,
-    generatedAt: input.model.generatedAt,
-    features
-  });
-  const matrix = TestMatrixSchema.parse({
-    changeName: input.model.changeName,
-    generatedAt: input.model.generatedAt,
-    requirementCount: input.model.requirements.length,
-    scenarioCount: matrixRows.length,
-    automatedCandidateCount: matrixRows.filter((row) => row.automation === "automated-candidate").length,
-    blockedCount: matrixRows.filter((row) => row.automation === "blocked").length,
-    reviewNeededCount: matrixRows.filter((row) => row.automation === "review-needed").length,
-    rows: matrixRows
-  });
-  return {
-    bundle,
-    matrix
-  };
-}
-function createScenario(input) {
-  const { requirement } = input;
-  const tags = [
-    `@REQ:${sanitizeTagValue(requirement.id)}`,
-    `@AREA:${sanitizeTagValue(requirement.area)}`,
-    `@LAYER:${input.layer}`,
-    `@AUTO:${input.automation}`,
-    ...requirement.briefEvidenceIds.map((id) => `@BRIEF:${id}`),
-    ...requirement.figmaEvidenceIds.map((id) => `@FIGMA:${id}`),
-    ...requirement.openApiEvidenceIds.map((id) => `@API:${id}`),
-    ...requirement.gapIds.map((id) => `@GAP:${id}`)
-  ];
-  const scenarioId = scenarioIdFor(requirement.id);
-  return {
-    id: scenarioId,
-    name: `${requirement.id} ${requirement.title}`,
-    requirementId: requirement.id,
-    status: input.automation,
-    tags,
-    briefEvidenceIds: requirement.briefEvidenceIds,
-    figmaEvidenceIds: requirement.figmaEvidenceIds,
-    openApiEvidenceIds: requirement.openApiEvidenceIds,
-    gapIds: requirement.gapIds,
-    steps: [
-      {
-        keyword: "Given",
-        text: `the "${requirement.area}" capability is available`
-      },
-      {
-        keyword: "And",
-        text: `requirement evidence "${requirement.id}" is available`
-      },
-      {
-        keyword: "When",
-        text: `the user performs the "${humanizeRequirement(requirement.title)}" workflow`
-      },
-      {
-        keyword: "Then",
-        text: `the system satisfies "${requirement.id}"`
-      },
-      {
-        keyword: "And",
-        text: "verification evidence must be recorded"
-      }
-    ]
-  };
-}
-function getOrCreateFeature(featureMap, area) {
-  const existing = featureMap.get(area);
-  if (existing !== void 0) {
-    return existing;
-  }
-  const feature = {
-    area,
-    name: titleFromArea(area),
-    description: `Generated feature scenarios for ${area}.`,
-    tags: [`@AREA:${sanitizeTagValue(area)}`],
-    rules: []
-  };
-  featureMap.set(area, feature);
-  return feature;
-}
-function getOrCreateRule(feature, ruleName) {
-  const existing = feature.rules.find((rule2) => rule2.name === ruleName);
-  if (existing !== void 0) {
-    return existing;
-  }
-  const rule = {
-    name: ruleName,
-    scenarios: []
-  };
-  feature.rules.push(rule);
-  return rule;
-}
-function scenarioIdFor(requirementId) {
-  return `SCN-${requirementId.replace(/[^A-Za-z0-9]+/g, "-")}-001`;
-}
-function featureFileName(area) {
-  return `${area}.feature`;
-}
-function titleFromArea(area) {
-  return area.split("-").map((part) => part.slice(0, 1).toUpperCase() + part.slice(1)).join(" ");
-}
-function humanizeRequirement(value) {
-  return value.replace(/\s+/g, " ").trim();
-}
-function reasonFor(requirement, automation, layer, gaps) {
-  if (automation === "blocked") {
-    return `Blocked by ${gaps.length} gap(s).`;
-  }
-  if (automation === "review-needed") {
-    return `Review needed because requirement status is ${requirement.status} or linked gaps exist.`;
-  }
-  return `Assigned to ${layer} layer from available Figma/OpenAPI evidence.`;
-}
-function sanitizeTagValue(value) {
-  return value.replace(/[^A-Za-z0-9_:.~-]/g, "-");
-}
-var init_gherkin_generator = __esm({
-  "src/gherkin/gherkin-generator.ts"() {
-    "use strict";
-    init_gherkin_model();
-    init_test_matrix();
-  }
-});
-
-// src/gherkin/gherkin-renderer.ts
-function renderGherkinArtifacts(input) {
-  return {
-    featureFiles: input.bundle.features.map((feature) => ({
-      fileName: `${feature.area}.feature`,
-      content: renderFeature(feature)
-    })),
-    gherkinIndexJson: `${JSON.stringify(input.bundle, null, 2)}
-`,
-    testMatrixJson: `${JSON.stringify(input.matrix, null, 2)}
-`,
-    testMatrixMd: renderTestMatrixMarkdown(input.matrix)
-  };
-}
-function renderFeature(feature) {
-  const lines = [];
-  lines.push(...feature.tags);
-  lines.push(`Feature: ${feature.name}`);
-  if (feature.description !== void 0) {
-    lines.push("");
-    lines.push(indent3(feature.description, 2));
-  }
-  for (const rule of feature.rules) {
-    lines.push("");
-    lines.push(`  Rule: ${rule.name}`);
-    if (rule.description !== void 0) {
-      lines.push("");
-      lines.push(indent3(rule.description, 4));
-    }
-    for (const scenario of rule.scenarios) {
-      lines.push("");
-      lines.push(renderScenario(scenario));
-    }
-  }
-  return `${lines.join("\n").trimEnd()}
-`;
-}
-function renderScenario(scenario) {
-  const lines = [];
-  if (scenario.tags.length > 0) {
-    lines.push(`    ${scenario.tags.join(" ")}`);
-  }
-  lines.push(`    Scenario: ${scenario.name}`);
-  for (const step of scenario.steps) {
-    lines.push(renderStep(step));
-  }
-  return lines.join("\n");
-}
-function renderStep(step) {
-  return `      ${step.keyword} ${step.text}`;
-}
-function renderTestMatrixMarkdown(matrix) {
-  const lines = [
-    `# Test Matrix \u2014 ${matrix.changeName}`,
-    "",
-    "## Summary",
-    "",
-    `- Requirements: ${matrix.requirementCount}`,
-    `- Scenarios: ${matrix.scenarioCount}`,
-    `- Automated candidates: ${matrix.automatedCandidateCount}`,
-    `- Review needed: ${matrix.reviewNeededCount}`,
-    `- Blocked: ${matrix.blockedCount}`,
-    "",
-    "## Matrix",
-    "",
-    "| Requirement | Scenario | Area | Layer | Automation | Status | Brief | Figma | API | Gaps | Reason |",
-    "|---|---|---|---|---|---|---|---|---|---|---|",
-    ...matrix.rows.map(renderMatrixRow),
-    ""
-  ];
-  return `${lines.join("\n").trimEnd()}
-`;
-}
-function renderMatrixRow(row) {
-  return [
-    row.requirementId,
-    row.scenarioId,
-    row.area,
-    row.layer,
-    row.automation,
-    row.status,
-    joinIds2(row.briefEvidenceIds),
-    joinIds2(row.figmaEvidenceIds),
-    joinIds2(row.openApiEvidenceIds),
-    joinIds2(row.gapIds),
-    escapeTableCell4(row.reason)
-  ].join(" | ");
-}
-function joinIds2(ids) {
-  return ids.length === 0 ? "-" : ids.join("<br>");
-}
-function escapeTableCell4(value) {
-  return value.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
-}
-function indent3(value, spaces) {
-  const prefix = " ".repeat(spaces);
-  return value.split("\n").map((line) => `${prefix}${line}`).join("\n");
-}
-var init_gherkin_renderer = __esm({
-  "src/gherkin/gherkin-renderer.ts"() {
-    "use strict";
-  }
-});
-
-// src/gherkin/gherkin-writer.ts
-import { mkdir as mkdir14, readFile as readFile18, writeFile as writeFile14 } from "fs/promises";
-import path27 from "path";
-async function writeGherkinArtifacts(input) {
-  const changePaths = resolveOpenSpecChangePaths({
-    projectRoot: input.projectRoot,
-    changeName: input.changeName
-  });
-  const gherkinRoot = path27.join(changePaths.artifactsRoot, "gherkin");
-  const files = [
-    ...input.rendered.featureFiles.map((file2) => ({
-      absolutePath: path27.join(gherkinRoot, file2.fileName),
-      content: file2.content,
-      mediaType: "text/x-gherkin",
-      kind: "gherkin"
-    })),
-    {
-      absolutePath: path27.join(changePaths.artifactsRoot, "gherkin-index.json"),
-      content: input.rendered.gherkinIndexJson,
-      mediaType: "application/json",
-      kind: "gherkin"
-    },
-    {
-      absolutePath: path27.join(changePaths.artifactsRoot, "test-matrix.json"),
-      content: input.rendered.testMatrixJson,
-      mediaType: "application/json",
-      kind: "test-matrix"
-    },
-    {
-      absolutePath: path27.join(changePaths.artifactsRoot, "test-matrix.md"),
-      content: input.rendered.testMatrixMd,
-      mediaType: "text/markdown",
-      kind: "test-matrix"
-    }
-  ];
-  const writtenFiles = [];
-  for (const file2 of files) {
-    assertInsideProjectRoot6(input.projectRoot, file2.absolutePath);
-    const changed = await writeWithConflictPolicy2({
-      absolutePath: file2.absolutePath,
-      content: file2.content,
-      force: input.force === true
-    });
-    writtenFiles.push({
-      absolutePath: file2.absolutePath,
-      relativePath: toRepoRelativePath(input.projectRoot, file2.absolutePath),
-      digest: sha256Digest(Buffer.from(file2.content, "utf8")),
-      changed,
-      content: file2.content,
-      kind: file2.kind,
-      mediaType: file2.mediaType
-    });
-  }
-  const artifactRefs = writtenFiles.map(
-    (file2) => ArtifactRefSchema.parse({
-      id: createArtifactId(),
-      kind: file2.kind,
-      uri: `repo://${file2.relativePath}`,
-      mediaType: file2.mediaType,
-      digest: file2.digest,
-      producedBy: "orchestrator",
-      evidenceIds: [],
-      createdAt: input.generatedAt,
-      metadata: {
-        changeName: input.changeName,
-        relativePath: file2.relativePath,
-        changed: file2.changed
-      }
-    })
-  );
-  return {
-    files: writtenFiles.map((file2) => ({
-      absolutePath: file2.absolutePath,
-      relativePath: file2.relativePath,
-      digest: file2.digest,
-      changed: file2.changed
-    })),
-    artifactRefs
-  };
-}
-async function writeWithConflictPolicy2(input) {
-  await mkdir14(path27.dirname(input.absolutePath), {
-    recursive: true,
-    mode: 448
-  });
-  const existing = await readExisting3(input.absolutePath);
-  if (existing !== void 0) {
-    if (existing === input.content) {
-      return false;
-    }
-    if (!input.force) {
-      throw new Error(`Generated Gherkin artifact already exists: ${input.absolutePath}`);
-    }
-  }
-  await writeFile14(input.absolutePath, input.content, {
-    encoding: "utf8",
-    mode: 384
-  });
-  return true;
-}
-async function readExisting3(absolutePath) {
-  try {
-    return await readFile18(absolutePath, "utf8");
-  } catch (error51) {
-    if (error51 instanceof Error && "code" in error51 && error51.code === "ENOENT") {
-      return void 0;
-    }
-    throw error51;
-  }
-}
-function assertInsideProjectRoot6(projectRoot, absolutePath) {
-  const relative = path27.relative(projectRoot, absolutePath);
-  if (relative.startsWith("..") || path27.isAbsolute(relative)) {
-    throw new Error(`Refusing to write outside project root: ${absolutePath}`);
-  }
-}
-var init_gherkin_writer = __esm({
-  "src/gherkin/gherkin-writer.ts"() {
-    "use strict";
-    init_openspec_paths();
-    init_artifact();
-    init_id_factory();
-    init_content_hash();
-  }
-});
-
-// src/application/gherkin-test-matrix-service.ts
-import { readFile as readFile19 } from "fs/promises";
-var GenerateGherkinTestMatrixInputSchema, GenerateGherkinTestMatrixResultSchema, GherkinTestMatrixService;
-var init_gherkin_test_matrix_service = __esm({
-  "src/application/gherkin-test-matrix-service.ts"() {
-    "use strict";
-    init_zod();
-    init_gherkin_generator();
-    init_gherkin_renderer();
-    init_gherkin_writer();
-    init_openspec_model();
-    init_openspec_paths();
-    init_run2();
-    init_ids();
-    init_scalars();
-    GenerateGherkinTestMatrixInputSchema = external_exports.object({
-      runId: RunIdSchema,
-      changeName: external_exports.string().trim().min(3),
-      force: external_exports.boolean().default(false)
-    }).strict();
-    GenerateGherkinTestMatrixResultSchema = external_exports.object({
-      duplicate: external_exports.boolean(),
-      run: external_exports.custom(),
-      changeName: OpenSpecChangeNameSchema,
-      artifactIds: external_exports.array(ArtifactIdSchema),
-      changedFiles: external_exports.array(external_exports.string()),
-      requirementCount: external_exports.number().int().nonnegative(),
-      scenarioCount: external_exports.number().int().nonnegative(),
-      automatedCandidateCount: external_exports.number().int().nonnegative(),
-      blockedCount: external_exports.number().int().nonnegative()
-    }).strict();
-    GherkinTestMatrixService = class {
-      constructor(runStore, now = () => (/* @__PURE__ */ new Date()).toISOString()) {
-        this.runStore = runStore;
-        this.now = now;
-      }
-      runStore;
-      now;
-      async generate(rawInput) {
-        const input = GenerateGherkinTestMatrixInputSchema.parse(rawInput);
-        const run = await this.runStore.get(input.runId);
-        const timestamp = IsoDateTimeSchema.parse(this.now());
-        const changeName = toOpenSpecChangeName(input.changeName);
-        const existingMatrix = run.artifacts.find(
-          (artifact) => artifact.kind === "test-matrix" && artifact.metadata["changeName"] === changeName && artifact.metadata["relativePath"] === `openspec/changes/${changeName}/artifacts/test-matrix.json`
-        );
-        if (existingMatrix !== void 0 && !input.force) {
-          return GenerateGherkinTestMatrixResultSchema.parse({
-            duplicate: true,
-            run: summarizeRun(run),
-            changeName,
-            artifactIds: [existingMatrix.id],
-            changedFiles: [],
-            requirementCount: 0,
-            scenarioCount: 0,
-            automatedCandidateCount: 0,
-            blockedCount: 0
-          });
-        }
-        const model = await this.readOpenSpecChangeModel(run.projectRoot, changeName);
-        const generated = generateGherkinAndTestMatrix({
-          model,
-          gaps: run.gaps
-        });
-        const rendered = renderGherkinArtifacts(generated);
-        const writeResult = await writeGherkinArtifacts({
-          projectRoot: run.projectRoot,
-          changeName,
-          rendered,
-          generatedAt: timestamp,
-          force: input.force
-        });
-        const nextRun = RunManifestSchema.parse({
-          ...run,
-          revision: run.revision + 1,
-          updatedAt: timestamp,
-          artifacts: [...run.artifacts, ...writeResult.artifactRefs]
-        });
-        await this.runStore.save(nextRun, run.revision);
-        return GenerateGherkinTestMatrixResultSchema.parse({
-          duplicate: false,
-          run: summarizeRun(nextRun),
-          changeName,
-          artifactIds: writeResult.artifactRefs.map((artifact) => artifact.id),
-          changedFiles: writeResult.files.filter((file2) => file2.changed).map((file2) => file2.relativePath),
-          requirementCount: generated.matrix.requirementCount,
-          scenarioCount: generated.matrix.scenarioCount,
-          automatedCandidateCount: generated.matrix.automatedCandidateCount,
-          blockedCount: generated.matrix.blockedCount
-        });
-      }
-      async readOpenSpecChangeModel(projectRoot, changeName) {
-        const paths = resolveOpenSpecChangePaths({
-          projectRoot,
-          changeName: OpenSpecChangeNameSchema.parse(changeName)
-        });
-        const raw = await readFile19(paths.manifestPath, "utf8");
-        return OpenSpecChangeModelSchema.parse(JSON.parse(raw));
       }
     };
   }
@@ -47717,6 +48586,115 @@ function createKernelServer(servicesProvider) {
     })
   );
   server.registerTool(
+    "prepare_integration",
+    {
+      title: "Prepare integration",
+      description: "Create an integration worktree and integration plan from approved AgentResults.",
+      inputSchema: PrepareIntegrationInputSchema.shape,
+      outputSchema: PrepareIntegrationResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { integrationService } = await servicesProvider();
+      const structuredContent = await integrationService.prepareIntegration(input);
+      return {
+        text: `Prepared integration plan ${structuredContent.planArtifactId}.`,
+        structuredContent
+      };
+    })
+  );
+  server.registerTool(
+    "get_integration_plan",
+    {
+      title: "Get integration plan",
+      description: "Load a prepared integration plan artifact.",
+      inputSchema: GetIntegrationPlanInputSchema.shape,
+      outputSchema: GetIntegrationPlanResultSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { integrationService } = await servicesProvider();
+      const structuredContent = await integrationService.getIntegrationPlan(input);
+      return {
+        text: `Loaded integration plan ${structuredContent.planArtifactId}.`,
+        structuredContent
+      };
+    })
+  );
+  server.registerTool(
+    "apply_integration",
+    {
+      title: "Apply integration",
+      description: "Apply integration plan commits into the integration worktree using bounded integration policy.",
+      inputSchema: ApplyIntegrationInputSchema.shape,
+      outputSchema: ApplyIntegrationResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { integrationService } = await servicesProvider();
+      const structuredContent = await integrationService.applyIntegration(input);
+      return {
+        text: `Integration apply result: ${structuredContent.result.status}.`,
+        structuredContent
+      };
+    })
+  );
+  server.registerTool(
+    "record_integration_repair",
+    {
+      title: "Record integration repair",
+      description: "Record one bounded integrator repair attempt and update repair history.",
+      inputSchema: RecordIntegrationRepairInputSchema.shape,
+      outputSchema: RecordIntegrationRepairResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { integrationService } = await servicesProvider();
+      const structuredContent = await integrationService.recordRepair(input);
+      return {
+        text: `Recorded integration repair attempt ${structuredContent.repairAttemptCount}.`,
+        structuredContent
+      };
+    })
+  );
+  server.registerTool(
+    "finalize_integration",
+    {
+      title: "Finalize integration",
+      description: "Finalize integration stage metadata. Full quality gates run in later tasks.",
+      inputSchema: FinalizeIntegrationInputSchema.shape,
+      outputSchema: FinalizeIntegrationResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { integrationService } = await servicesProvider();
+      const structuredContent = await integrationService.finalizeIntegration(input);
+      return {
+        text: structuredContent.message,
+        structuredContent
+      };
+    })
+  );
+  server.registerTool(
     "prepare_spec_bdd_agent",
     {
       title: "Prepare Spec/BDD agent",
@@ -48157,6 +49135,8 @@ var init_create_server = __esm({
     init_figma_capability_service();
     init_figma_design_inventory_service();
     init_figma_intake_service();
+    init_gherkin_test_matrix_service();
+    init_integration_service();
     init_openapi_intake_service();
     init_openspec_change_service();
     init_policy_service();
@@ -48172,7 +49152,6 @@ var init_create_server = __esm({
     init_run2();
     init_command_policy();
     init_path_policy();
-    init_gherkin_test_matrix_service();
     CONTRACT_VERSION = "0.2.0";
     SERVER_NAME = "spec-to-pr-kernel";
     MINIMUM_NODE_MAJOR = 22;
@@ -48268,6 +49247,11 @@ var init_create_server = __esm({
       "prepare_review_council",
       "get_review_council_context",
       "record_review_council_result",
+      "prepare_integration",
+      "get_integration_plan",
+      "apply_integration",
+      "record_integration_repair",
+      "finalize_integration",
       "prepare_spec_bdd_agent",
       "record_spec_bdd_agent_result",
       "get_spec_bdd_agent_context"
@@ -48314,7 +49298,7 @@ __export(sqlite_run_store_exports, {
   SqliteRunStore: () => SqliteRunStore
 });
 import { mkdirSync } from "fs";
-import path28 from "path";
+import path31 from "path";
 import { createRequire } from "module";
 function loadSqliteModule() {
   return require2("node:sqlite");
@@ -48356,7 +49340,7 @@ var init_sqlite_run_store = __esm({
     SqliteRunStore = class {
       database;
       constructor(databasePath) {
-        mkdirSync(path28.dirname(databasePath), {
+        mkdirSync(path31.dirname(databasePath), {
           recursive: true,
           mode: 448
         });
@@ -48592,7 +49576,7 @@ __export(run_service_provider_exports, {
   createLazyServicesProvider: () => createLazyServicesProvider
 });
 import os from "os";
-import path29 from "path";
+import path32 from "path";
 function createLazyServicesProvider() {
   let services;
   return async () => {
@@ -48601,9 +49585,9 @@ function createLazyServicesProvider() {
     }
     const { SqliteRunStore: SqliteRunStore2 } = await Promise.resolve().then(() => (init_sqlite_run_store(), sqlite_run_store_exports));
     const dataDirectory = resolveDataDirectory();
-    const store = new SqliteRunStore2(path29.join(dataDirectory, "runs.sqlite3"));
-    const snapshotStore = new SourceSnapshotStore(path29.join(dataDirectory, "source-snapshots"));
-    const artifactStore = new ArtifactBlobStore(path29.join(dataDirectory, "artifacts"));
+    const store = new SqliteRunStore2(path32.join(dataDirectory, "runs.sqlite3"));
+    const snapshotStore = new SourceSnapshotStore(path32.join(dataDirectory, "source-snapshots"));
+    const artifactStore = new ArtifactBlobStore(path32.join(dataDirectory, "artifacts"));
     services = {
       runService: new RunService(store, {
         pluginVersion: package_default.version
@@ -48611,7 +49595,7 @@ function createLazyServicesProvider() {
       stageService: new StageService(store),
       policyService: new PolicyService(),
       profileService: new ProjectProfileService(
-        new JsonProfileStore(path29.join(dataDirectory, "profiles"))
+        new JsonProfileStore(path32.join(dataDirectory, "profiles"))
       ),
       sourceRegistryService: new SourceRegistryService(store, snapshotStore),
       briefAdapterService: new BriefAdapterService(store, snapshotStore),
@@ -48622,6 +49606,7 @@ function createLazyServicesProvider() {
       openApiIntakeService: new OpenApiIntakeService(store, snapshotStore, artifactStore),
       openSpecChangeService: new OpenSpecChangeService(store, artifactStore),
       gherkinTestMatrixService: new GherkinTestMatrixService(store),
+      integrationService: new IntegrationService(store, artifactStore, dataDirectory),
       apiPipelineService: new ApiPipelineService(store, artifactStore),
       apiContractAgentService: new ApiContractAgentService(store, dataDirectory),
       designContractService: new DesignContractService(store, artifactStore),
@@ -48634,7 +49619,7 @@ function createLazyServicesProvider() {
   };
 }
 function resolveDataDirectory() {
-  return process.env.SPEC_TO_PR_DATA_DIR ?? path29.join(os.tmpdir(), "spec-to-pr-plugin-data");
+  return process.env.SPEC_TO_PR_DATA_DIR ?? path32.join(os.tmpdir(), "spec-to-pr-plugin-data");
 }
 var init_run_service_provider = __esm({
   "src/mcp/run-service-provider.ts"() {
@@ -48652,6 +49637,7 @@ var init_run_service_provider = __esm({
     init_figma_design_inventory_service();
     init_figma_intake_service();
     init_gherkin_test_matrix_service();
+    init_integration_service();
     init_openapi_intake_service();
     init_openspec_change_service();
     init_policy_service();
