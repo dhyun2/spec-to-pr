@@ -5,3 +5,4 @@ export * from "./profile-service.js";
 export * from "./source-registry-service.js";
 export * from "./brief-adapter-service.js";
 export * from "./figma-capability-service.js";
+export * from "./figma-intake-service.js";
