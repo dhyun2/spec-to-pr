@@ -92,3 +92,11 @@ Expected:
 - If OpenSpec CLI is unavailable, execution failure is recorded instead of hidden.
 - Archive may require a follow-up commit.
 - Provider live merge-state lookup is intentionally not required in default tests.
+
+## Failure Policy
+
+- Failed archive execution is recorded as an OpenSpec archive result artifact.
+- Blocked archive execution is recorded when merge or preconditions are not satisfied.
+- The service does not automatically revert OpenSpec files.
+- The service does not waive blocker gaps.
+- Follow-up repair or rollback remains a user or release-process decision.
