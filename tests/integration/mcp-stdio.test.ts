@@ -39,6 +39,10 @@ describe("spec-to-pr MCP stdio server", () => {
       env: {
         ...process.env,
         SPEC_TO_PR_DATA_DIR: dataDirectory,
+        GITHUB_TOKEN: "",
+        GH_TOKEN: "",
+        GITLAB_TOKEN: "",
+        GITLAB_PRIVATE_TOKEN: "",
       },
       stderr: "pipe",
     });
@@ -68,6 +72,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "create_agent_worktree",
       "create_intake_manifest",
       "create_run",
+      "detect_publish_target",
       "fail_stage",
       "finalize_integration",
       "generate_api_pipeline",
@@ -89,6 +94,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "get_performance_report",
       "get_pr_report",
       "get_project_profile",
+      "get_publish_result",
       "get_resume_plan",
       "get_review_council_context",
       "get_run",
@@ -107,6 +113,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "plan_accessibility_gate",
       "plan_observability",
       "plan_performance_gate",
+      "plan_review_request_publish",
       "plan_visual_regression",
       "policy_info",
       "prepare_agent_runtime",
@@ -115,6 +122,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "prepare_integration",
       "prepare_review_council",
       "prepare_spec_bdd_agent",
+      "publish_review_request",
       "record_accessibility_review",
       "record_api_contract_agent_result",
       "record_design_ui_agent_result",
@@ -128,6 +136,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "record_observability_review",
       "record_performance_review",
       "record_pr_report_review",
+      "record_publish_review",
       "record_review_council_result",
       "record_spec_bdd_agent_result",
       "record_visual_review_result",
@@ -139,6 +148,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "run_quality_gates",
       "skip_stage",
       "start_stage",
+      "update_review_request_body",
       "validate_path",
     ]);
 
@@ -555,6 +565,121 @@ describe("spec-to-pr MCP stdio server", () => {
     });
 
     expect(prReportReview.structuredContent).toMatchObject({
+      reviewArtifactId: expect.any(String),
+    });
+
+    const publishTarget = await client.callTool({
+      name: "detect_publish_target",
+      arguments: {
+        runId,
+        remoteUrl: "git@github.com:acme/spec-to-pr.git",
+      },
+    });
+
+    expect(publishTarget.structuredContent).toMatchObject({
+      target: {
+        host: "github",
+        owner: "acme",
+        repo: "spec-to-pr",
+      },
+    });
+
+    const publishPlan = await client.callTool({
+      name: "plan_review_request_publish",
+      arguments: {
+        runId,
+        reportArtifactId: prReportArtifactId,
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        remoteUrl: "git@github.com:acme/spec-to-pr.git",
+        pushBranch: false,
+      },
+    });
+
+    expect(publishPlan.structuredContent).toMatchObject({
+      target: {
+        host: "github",
+      },
+      payload: {
+        mode: "draft",
+        reportArtifactId: prReportArtifactId,
+      },
+    });
+
+    const publishResult = await client.callTool({
+      name: "publish_review_request",
+      arguments: {
+        runId,
+        reportArtifactId: prReportArtifactId,
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        remoteUrl: "git@github.com:acme/spec-to-pr.git",
+        pushBranch: false,
+        confirm: true,
+      },
+    });
+
+    expect(publishResult.structuredContent).toMatchObject({
+      result: {
+        status: "failed",
+        errorCode: "PUBLISH_FAILED",
+      },
+      publishResultArtifactId: expect.any(String),
+    });
+
+    const publishResultArtifactId = (
+      publishResult.structuredContent as {
+        publishResultArtifactId: string;
+      }
+    ).publishResultArtifactId;
+
+    const loadedPublishResult = await client.callTool({
+      name: "get_publish_result",
+      arguments: {
+        runId,
+        artifactId: publishResultArtifactId,
+      },
+    });
+
+    expect(loadedPublishResult.structuredContent).toMatchObject({
+      result: {
+        status: "failed",
+      },
+    });
+
+    const updateResult = await client.callTool({
+      name: "update_review_request_body",
+      arguments: {
+        runId,
+        reportArtifactId: prReportArtifactId,
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        requestNumber: "123",
+        remoteUrl: "git@github.com:acme/spec-to-pr.git",
+        pushBranch: false,
+        confirm: true,
+      },
+    });
+
+    expect(updateResult.structuredContent).toMatchObject({
+      result: {
+        status: "failed",
+      },
+    });
+
+    const publishReview = await client.callTool({
+      name: "record_publish_review",
+      arguments: {
+        runId,
+        publishResultArtifactId,
+        review: {
+          status: "warning",
+          findings: [],
+        },
+      },
+    });
+
+    expect(publishReview.structuredContent).toMatchObject({
       reviewArtifactId: expect.any(String),
     });
 

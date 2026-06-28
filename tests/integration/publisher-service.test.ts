@@ -1,0 +1,189 @@
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+import { ArtifactBlobStore } from "../../src/artifact-registry/artifact-blob-store.js";
+import { PrReportService } from "../../src/application/pr-report-service.js";
+import { PublisherService } from "../../src/application/publisher-service.js";
+import { RunService } from "../../src/application/run-service.js";
+import type {
+  PublishedReviewRequest,
+  PublishTarget,
+  ReviewRequestPayload,
+  ReviewRequestPublisher,
+} from "../../src/publisher/index.js";
+import { SqliteRunStore } from "../../src/store/sqlite-run-store.js";
+
+let directory: string;
+let projectRoot: string;
+let store: SqliteRunStore;
+let runService: RunService;
+let prReportService: PrReportService;
+let publisherService: PublisherService;
+let originalGithubToken: string | undefined;
+
+beforeEach(async () => {
+  directory = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-publisher-"));
+  projectRoot = path.join(directory, "project");
+
+  await mkdir(projectRoot, {
+    recursive: true,
+  });
+
+  originalGithubToken = process.env["GITHUB_TOKEN"];
+  process.env["GITHUB_TOKEN"] = "ghp_test_token";
+
+  store = new SqliteRunStore(path.join(directory, "runs.sqlite3"));
+  const artifactStore = new ArtifactBlobStore(path.join(directory, "artifacts"));
+
+  runService = new RunService(store, {
+    pluginVersion: "0.1.0",
+    now: () => "2026-06-23T00:00:00.000Z",
+  });
+  prReportService = new PrReportService(store, artifactStore, () => "2026-06-23T00:00:01.000Z");
+  publisherService = new PublisherService(
+    store,
+    artifactStore,
+    () => "2026-06-23T00:00:02.000Z",
+    {
+      github: new FakePublisher("github"),
+      gitlab: new FakePublisher("gitlab"),
+    },
+    async () => ({
+      stdout: "https://github.com/acme/spec-to-pr.git\n",
+      stderr: "",
+    }),
+  );
+});
+
+afterEach(async () => {
+  if (originalGithubToken === undefined) {
+    delete process.env["GITHUB_TOKEN"];
+  } else {
+    process.env["GITHUB_TOKEN"] = originalGithubToken;
+  }
+
+  await store.close();
+  await rm(directory, {
+    recursive: true,
+    force: true,
+  });
+});
+
+describe("PublisherService", () => {
+  it("plans publishes records result and stores publisher review", async () => {
+    const run = await runService.createRun({
+      projectRoot,
+    });
+    const report = await prReportService.generatePrReport({
+      runId: run.id,
+    });
+    const plan = await publisherService.plan({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      pushBranch: false,
+    });
+
+    expect(plan.target).toMatchObject({
+      host: "github",
+      owner: "acme",
+      repo: "spec-to-pr",
+    });
+    expect(plan.payload.mode).toBe("draft");
+
+    const published = await publisherService.publish({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      pushBranch: false,
+      confirm: true,
+    });
+
+    expect(published.result).toMatchObject({
+      status: "passed",
+      request: {
+        url: "https://github.com/acme/spec-to-pr/pull/123",
+        draft: true,
+      },
+    });
+    expect(published.agentResultId).toMatch(/^ar_/);
+
+    const loadedResult = await publisherService.getResult({
+      runId: run.id,
+      artifactId: published.publishResultArtifactId,
+    });
+
+    expect(loadedResult.result.status).toBe("passed");
+
+    const review = await publisherService.recordReview({
+      runId: run.id,
+      publishResultArtifactId: published.publishResultArtifactId,
+      review: {
+        status: "passed",
+        findings: [],
+      },
+    });
+
+    expect(review.findingCount).toBe(0);
+
+    const loadedRun = await store.get(run.id);
+
+    expect(loadedRun.agentResults.some((result) => result.kind === "publishing")).toBe(true);
+  });
+});
+
+class FakePublisher implements ReviewRequestPublisher {
+  public constructor(private readonly host: "github" | "gitlab") {}
+
+  public async findExisting(): Promise<PublishedReviewRequest | undefined> {
+    return undefined;
+  }
+
+  public async create(input: {
+    target: PublishTarget;
+    payload: ReviewRequestPayload;
+    token: string;
+  }): Promise<PublishedReviewRequest> {
+    return {
+      host: this.host,
+      url:
+        this.host === "github"
+          ? "https://github.com/acme/spec-to-pr/pull/123"
+          : "https://gitlab.com/acme/spec-to-pr/-/merge_requests/123",
+      number: "123",
+      id: "123",
+      draft: input.payload.mode === "draft",
+      sourceBranch: input.payload.sourceBranch,
+      targetBranch: input.payload.targetBranch,
+      created: true,
+      updated: false,
+    };
+  }
+
+  public async updateBody(input: {
+    target: PublishTarget;
+    requestNumber: string;
+    body: string;
+    token: string;
+  }): Promise<PublishedReviewRequest> {
+    return {
+      host: this.host,
+      url:
+        this.host === "github"
+          ? `https://github.com/acme/spec-to-pr/pull/${input.requestNumber}`
+          : `https://gitlab.com/acme/spec-to-pr/-/merge_requests/${input.requestNumber}`,
+      number: input.requestNumber,
+      id: input.requestNumber,
+      draft: true,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      created: false,
+      updated: true,
+    };
+  }
+}
