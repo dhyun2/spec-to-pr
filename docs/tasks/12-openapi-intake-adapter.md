@@ -128,3 +128,10 @@ Expected:
 - Feature wrappers are not implemented.
 - Contract tests are not generated.
 - Full OpenAPI linting with external tools is deferred.
+
+## Implemented MCP surface
+
+- `register_file_source` records the OpenAPI document as a content-addressed `openapi` Source.
+- `analyze_openapi_source` reads the Source snapshot and stores normalized OpenAPI intake evidence.
+- The analysis stores `openapi-normalized-document` and `openapi-intake-report` artifacts.
+- The analysis records operation and schema `EvidenceRef` entries plus deterministic API/security gaps.
