@@ -54,7 +54,9 @@ function getAuditNumericValue(audits: Record<string, unknown>, key: string): num
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value) ? value : {};
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
 function getString(record: Record<string, unknown>, key: string): string | undefined {

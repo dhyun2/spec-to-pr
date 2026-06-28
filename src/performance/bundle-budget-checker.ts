@@ -8,7 +8,7 @@ export type AssetSummary = {
   path: string;
   type: "script" | "stylesheet" | "image" | "font" | "document" | "other";
   transferBytes: number;
-  initial?: boolean;
+  initial?: boolean | undefined;
 };
 
 export function checkBundleBudget(input: {
