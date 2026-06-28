@@ -70,6 +70,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "generate_gherkin_test_matrix",
       "generate_openspec_change",
       "get_agent_context_pack",
+      "get_api_contract_agent_context",
       "get_figma_design_contract_summary",
       "get_figma_design_inventory",
       "get_figma_provider_policy",
@@ -89,7 +90,9 @@ describe("spec-to-pr MCP stdio server", () => {
       "list_runs",
       "policy_info",
       "prepare_agent_runtime",
+      "prepare_api_contract_agent",
       "prepare_spec_bdd_agent",
+      "record_api_contract_agent_result",
       "record_figma_code_connect_map",
       "record_figma_design_context",
       "record_figma_mcp_capabilities",
@@ -654,6 +657,81 @@ components:
           agent: "api-contract",
         },
       ],
+    });
+
+    const apiWorktree = (
+      createdWorktree.structuredContent as {
+        worktrees: Array<{
+          worktreePath: string;
+          baseCommit: string;
+        }>;
+      }
+    ).worktrees[0]!;
+
+    const preparedApiContract = await client.callTool({
+      name: "prepare_api_contract_agent",
+      arguments: {
+        runId,
+        worktreePath: apiWorktree.worktreePath,
+        baseSha: apiWorktree.baseCommit,
+      },
+    });
+
+    expect(preparedApiContract.structuredContent).toMatchObject({
+      context: {
+        runId,
+        worktreePath: apiWorktree.worktreePath,
+      },
+    });
+
+    const apiContextArtifactId = (
+      preparedApiContract.structuredContent as {
+        contextArtifactId: string;
+      }
+    ).contextArtifactId;
+
+    const loadedApiContext = await client.callTool({
+      name: "get_api_contract_agent_context",
+      arguments: {
+        runId,
+        contextArtifactId: apiContextArtifactId,
+      },
+    });
+
+    expect(loadedApiContext.structuredContent).toMatchObject({
+      runId,
+      worktreePath: apiWorktree.worktreePath,
+    });
+
+    const recordedApiContract = await client.callTool({
+      name: "record_api_contract_agent_result",
+      arguments: {
+        runId,
+        contextArtifactId: apiContextArtifactId,
+        result: {
+          schemaVersion: "0.1.0",
+          id: "ar_11111111111111111111111111111111",
+          runId,
+          kind: "implementation",
+          agent: "api-contract",
+          status: "passed",
+          baseSha: apiWorktree.baseCommit,
+          commitSha: apiWorktree.baseCommit,
+          changedFiles: ["src/features/reservation/api/fetch-reservations.ts"],
+          evidenceIds: [],
+          artifactIds: [],
+          gapIds: [],
+          checks: [],
+          decisions: [],
+          startedAt: "2026-06-23T00:00:00.000Z",
+          completedAt: "2026-06-23T00:00:01.000Z",
+        },
+      },
+    });
+
+    expect(recordedApiContract.structuredContent).toMatchObject({
+      runId,
+      status: "passed",
     });
 
     const contextPack = await client.callTool({
