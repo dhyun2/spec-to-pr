@@ -332,7 +332,9 @@ function mapAsset(input: {
     const normalizedComponent = normalizeName(component.name);
     const normalizedAsset = normalizeName(figmaName);
 
-    return normalizedComponent.includes(normalizedAsset) || normalizedAsset.includes(normalizedComponent);
+    return (
+      normalizedComponent.includes(normalizedAsset) || normalizedAsset.includes(normalizedComponent)
+    );
   });
 
   if (componentCandidate !== undefined) {
@@ -351,7 +353,8 @@ function mapAsset(input: {
 
   const gap = createDesignGap({
     title: `Unmapped Figma asset: ${figmaName}`,
-    expected: "Figma vector/image assets should map to existing icon components or exported asset files.",
+    expected:
+      "Figma vector/image assets should map to existing icon components or exported asset files.",
     observed: `No asset mapping was found for Figma node ${figmaNodeId} (${figmaName}).`,
     impact: "UI Agent may recreate the asset incorrectly or omit it.",
     evidenceIds: evidenceForNode(input.evidence, figmaNodeId),

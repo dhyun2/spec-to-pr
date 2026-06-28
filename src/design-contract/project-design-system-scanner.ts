@@ -122,7 +122,10 @@ function extractExportedComponentNames(content: string, filePath: string): strin
     const parts = match[1]!.split(",").map((part) => part.trim());
 
     for (const part of parts) {
-      const name = part.split(/\s+as\s+/i).pop()?.trim();
+      const name = part
+        .split(/\s+as\s+/i)
+        .pop()
+        ?.trim();
 
       if (name !== undefined && /^[A-Z][A-Za-z0-9_]*$/.test(name)) {
         names.add(name);

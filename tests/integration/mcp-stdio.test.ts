@@ -60,8 +60,10 @@ describe("spec-to-pr MCP stdio server", () => {
       "create_run",
       "fail_stage",
       "generate_api_pipeline",
+      "generate_figma_design_contract",
       "generate_gherkin_test_matrix",
       "generate_openspec_change",
+      "get_figma_design_contract_summary",
       "get_figma_design_inventory",
       "get_figma_provider_policy",
       "get_project_profile",
@@ -456,6 +458,43 @@ components:
         sourceId: (figmaSource.structuredContent as { source: { id: string } }).source.id,
       },
     });
+
+    const figmaInventoryArtifactId = (
+      loadedFigmaInventory.structuredContent as {
+        artifact: {
+          id: string;
+        };
+      }
+    ).artifact.id;
+
+    const designContract = await client.callTool({
+      name: "generate_figma_design_contract",
+      arguments: {
+        runId,
+        changeName: "deliver-reservation-management",
+        figmaInventoryArtifactId,
+      },
+    });
+
+    expect(designContract.structuredContent).toMatchObject({
+      duplicate: false,
+      changeName: "deliver-reservation-management",
+    });
+
+    const designContractSummary = await client.callTool({
+      name: "get_figma_design_contract_summary",
+      arguments: {
+        runId,
+        changeName: "deliver-reservation-management",
+      },
+    });
+
+    expect(designContractSummary.structuredContent).toMatchObject({
+      changeName: "deliver-reservation-management",
+    });
+    expect(
+      (designContractSummary.structuredContent as { componentMappings: number }).componentMappings,
+    ).toBeGreaterThanOrEqual(0);
 
     const graph = await client.callTool({
       name: "build_evidence_graph",

@@ -141,9 +141,7 @@ export class DesignContractService {
       changeName,
       artifactIds: written.artifactRefs.map((artifact) => artifact.id),
       gapIds: built.gaps.map((gap) => gap.id),
-      changedFiles: written.files
-        .filter((file) => file.changed)
-        .map((file) => file.relativePath),
+      changedFiles: written.files.filter((file) => file.changed).map((file) => file.relativePath),
       componentMappings: built.contract.componentMappings.length,
       tokenMappings: built.contract.tokenMappings.length,
       typographyMappings: built.contract.typographyMappings.length,
