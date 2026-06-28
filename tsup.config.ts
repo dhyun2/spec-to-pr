@@ -13,7 +13,7 @@ export default defineConfig({
   clean: true,
   dts: false,
   minify: false,
-  noExternal: [/@modelcontextprotocol\/sdk/, /zod/],
+  noExternal: [/@modelcontextprotocol\/sdk/, /zod/, /typescript/],
   banner: {
     js: "#!/usr/bin/env node",
   },
