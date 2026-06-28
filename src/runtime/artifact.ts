@@ -13,6 +13,8 @@ export const ArtifactKindSchema = z.enum([
   "figma-screenshot",
   "figma-variable-defs",
   "figma-code-connect-map",
+  "figma-design-inventory",
+  "figma-provider-comparison",
   "requirement-graph",
   "openspec",
   "gherkin",
