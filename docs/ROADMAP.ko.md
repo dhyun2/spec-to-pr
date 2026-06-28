@@ -212,7 +212,7 @@ Figma는 여러 단계에서 다시 검증합니다.
 |   30 | Evidence-Driven PR Report                      | Pending     | 최종 PR/MR body 생성                                                |
 |   31 | GitHub and GitLab Publishers                   | Pending     | draft PR/MR 및 artifact 발행                                        |
 |   32 | OpenSpec Archive and Post-Merge Lifecycle      | Pending     | merge 후 OpenSpec change archive                                    |
-|   33 | Evals, Hardening and Release                   | Pending     | 평가, 보안 강화, 패키징, 릴리즈                                     |
+|   33 | Evals, Hardening and Release                   | Pending     | 평가, 보안 강화, 패키징, 릴리즈 후보 준비                           |
 
 ## Phase A — 실행 기반
 
@@ -817,7 +817,7 @@ merge 이후 OpenSpec change를 archive합니다.
 
 목표:
 
-플러그인을 평가하고, 보안 강화하고, 패키징하고, 릴리즈합니다.
+플러그인을 평가하고, 보안 강화하고, 패키징하고, 릴리즈 후보를 준비합니다.
 
 주요 산출물:
 
@@ -827,6 +827,7 @@ merge 이후 OpenSpec change를 archive합니다.
 - benchmark report
 - deterministic ZIP
 - SHA-256 checksums
+- release manifest
 - release notes
 
 ## 의존성 그래프
@@ -917,6 +918,7 @@ pnpm typecheck
 pnpm schemas:build
 pnpm build
 pnpm test
+pnpm release:build 0.1.0 --dry-run
 pnpm plugin:validate
 pnpm audit
 ```

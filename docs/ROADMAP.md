@@ -214,7 +214,7 @@ Figma is rechecked at multiple stages:
 |   30 | Evidence-Driven PR Report                      | Pending     | Generate final PR/MR body                                                |
 |   31 | GitHub and GitLab Publishers                   | Pending     | Publish draft PR/MR and artifacts                                        |
 |   32 | OpenSpec Archive and Post-Merge Lifecycle      | Pending     | Archive OpenSpec changes after merge                                     |
-|   33 | Evals, Hardening and Release                   | Pending     | Evaluate, harden, package, and release                                   |
+|   33 | Evals, Hardening and Release                   | Pending     | Evaluate, harden, package, and prepare a release candidate               |
 
 ## Phase A — Execution Foundation
 
@@ -819,7 +819,7 @@ Primary outputs:
 
 Goal:
 
-Evaluate, harden, package, and release the plugin.
+Evaluate, harden, package, and prepare a release candidate for the plugin.
 
 Primary outputs:
 
@@ -829,6 +829,7 @@ Primary outputs:
 - benchmark report
 - deterministic ZIP
 - SHA-256 checksums
+- release manifest
 - release notes
 
 ## Dependency Graph
@@ -919,6 +920,7 @@ pnpm typecheck
 pnpm schemas:build
 pnpm build
 pnpm test
+pnpm release:build 0.1.0 --dry-run
 pnpm plugin:validate
 pnpm audit
 ```
