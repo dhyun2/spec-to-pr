@@ -51,3 +51,37 @@ Task 13 connects them into a graph and produces a traceability matrix.
 - Missing API/Figma support creates reviewable gaps.
 - Orphan API/Figma evidence is reported.
 - MCP tools can build and retrieve traceability matrix.
+
+## Verification
+
+Run:
+
+```bash
+pnpm format:check
+pnpm typecheck
+pnpm schemas:build
+pnpm build
+pnpm test
+pnpm audit
+```
+
+Expected:
+
+- traceability contract tests pass
+- keyword extraction tests pass
+- graph node builder tests pass
+- deterministic linker tests pass
+- traceability gap detector tests pass
+- EvidenceGraphService tests pass
+- MCP stdio integration calls:
+  - build_evidence_graph
+  - get_traceability_matrix
+
+## Known limitations
+
+- Matching is deterministic and conservative.
+- No LLM semantic linking is performed.
+- Requirement type is not yet refined enough to know whether API/Figma is mandatory.
+- Missing API/Figma gaps may need later review adjustment.
+- Orphan API/Figma nodes are reports, not automatic blockers.
+- No OpenSpec/Gherkin/test/code is generated here.
