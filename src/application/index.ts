@@ -1,3 +1,4 @@
+export * from "./accessibility-gate-service.js";
 export * from "./run-service.js";
 export * from "./stage-service.js";
 export * from "./policy-service.js";
