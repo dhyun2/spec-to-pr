@@ -55,6 +55,7 @@ export const GapSchema = z
     waiver: GapWaiverSchema.optional(),
     createdAt: IsoDateTimeSchema,
     updatedAt: IsoDateTimeSchema,
+    metadata: z.record(z.string(), z.unknown()).default({}),
   })
   .strict()
   .superRefine((gap, context) => {
