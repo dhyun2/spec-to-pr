@@ -66,6 +66,7 @@ var init_package = __esm({
       },
       dependencies: {
         "@modelcontextprotocol/sdk": "1.29.0",
+        minimatch: "^10.2.5",
         yaml: "^2.9.0",
         zod: "^4.0.0"
       },
@@ -334,10 +335,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path24) {
-  if (!path24)
+function getElementAtPath(obj, path26) {
+  if (!path26)
     return obj;
-  return path24.reduce((acc, key) => acc?.[key], obj);
+  return path26.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -665,11 +666,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path24, issues) {
+function prefixIssues(path26, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path24);
+    iss.path.unshift(path26);
     return iss;
   });
 }
@@ -887,16 +888,16 @@ function flattenError(error51, mapper = (issue2) => issue2.message) {
 }
 function formatError(error51, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error52, path24 = []) => {
+  const processError = (error52, path26 = []) => {
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path24, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path26, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path24, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path26, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path24, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path26, ...issue2.path]);
       } else {
-        const fullpath = [...path24, ...issue2.path];
+        const fullpath = [...path26, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -923,17 +924,17 @@ function formatError(error51, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error51, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error52, path24 = []) => {
+  const processError = (error52, path26 = []) => {
     var _a3, _b;
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path24, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path26, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path24, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path26, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path24, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path26, ...issue2.path]);
       } else {
-        const fullpath = [...path24, ...issue2.path];
+        const fullpath = [...path26, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -965,8 +966,8 @@ function treeifyError(error51, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path24 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path24) {
+  const path26 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path26) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -14469,13 +14470,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path24 = ref.slice(1).split("/").filter(Boolean);
-  if (path24.length === 0) {
+  const path26 = ref.slice(1).split("/").filter(Boolean);
+  if (path26.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path24[0] === defsKey) {
-    const key = path24[1];
+  if (path26[0] === defsKey) {
+    const key = path26[1];
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -17317,8 +17318,8 @@ var init_parseUtil = __esm({
     init_errors3();
     init_en2();
     makeIssue = (params) => {
-      const { data, path: path24, errorMaps, issueData } = params;
-      const fullPath = [...path24, ...issueData.path || []];
+      const { data, path: path26, errorMaps, issueData } = params;
+      const fullPath = [...path26, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -17601,11 +17602,11 @@ var init_types2 = __esm({
     init_parseUtil();
     init_util2();
     ParseInputLazyPath = class {
-      constructor(parent, value, path24, key) {
+      constructor(parent, value, path26, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path24;
+        this._path = path26;
         this._key = key;
       }
       get path() {
@@ -26949,8 +26950,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path24) {
-      let input = path24;
+    function removeDotSegments(path26) {
+      let input = path26;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -27202,8 +27203,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path24, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path24 && path24 !== "/" ? path24 : void 0;
+        const [path26, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path26 && path26 !== "/" ? path26 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -32508,6 +32509,8 @@ var init_artifact = __esm({
       "accessibility-report",
       "performance-report",
       "telemetry-config",
+      "agent-context-pack",
+      "agent-result-report",
       "pr-report",
       "log",
       "other"
@@ -33885,11 +33888,11 @@ function addUniqueValueIssues(collectionName, values, context) {
     seen.add(value);
   });
 }
-function addReferenceIssue(context, path24, reference) {
+function addReferenceIssue(context, path26, reference) {
   context.addIssue({
     code: "custom",
     message: `Unknown ${reference.kind} reference ${reference.id}`,
-    path: path24
+    path: path26
   });
 }
 var RunStatusSchema, RunManifestSchema, RunSummarySchema, CreateInitialRunInputSchema;
@@ -34446,6 +34449,497 @@ var init_agent_runtime_service = __esm({
   }
 });
 
+// src/api-agent/api-contract-agent-contracts.ts
+var ApiContractAgentContextSchema, ApiContractContextFileSchema, ApiContractAgentRecordedResultSchema;
+var init_api_contract_agent_contracts = __esm({
+  "src/api-agent/api-contract-agent-contracts.ts"() {
+    "use strict";
+    init_zod();
+    init_ids();
+    init_scalars();
+    ApiContractAgentContextSchema = external_exports.object({
+      runId: RunIdSchema,
+      preparedAt: IsoDateTimeSchema,
+      projectRoot: external_exports.string().trim().min(1),
+      worktreePath: external_exports.string().trim().min(1),
+      baseSha: GitObjectIdSchema,
+      contextPackPath: external_exports.string().trim().min(1),
+      allowedWriteGlobs: external_exports.array(external_exports.string().trim().min(1)),
+      forbiddenWriteGlobs: external_exports.array(external_exports.string().trim().min(1)),
+      openApiIntakeArtifactIds: external_exports.array(ArtifactIdSchema).default([]),
+      apiPipelineArtifactIds: external_exports.array(ArtifactIdSchema).default([]),
+      traceabilityArtifactIds: external_exports.array(ArtifactIdSchema).default([]),
+      testMatrixArtifactIds: external_exports.array(ArtifactIdSchema).default([]),
+      evidenceIds: external_exports.array(EvidenceIdSchema).default([]),
+      gapIds: external_exports.array(GapIdSchema).default([]),
+      instructions: external_exports.array(external_exports.string().trim().min(1)).default([])
+    }).strict();
+    ApiContractContextFileSchema = external_exports.object({
+      path: external_exports.string().trim().min(1),
+      digest: Sha256DigestSchema
+    }).strict();
+    ApiContractAgentRecordedResultSchema = external_exports.object({
+      resultId: AgentResultIdSchema,
+      runId: RunIdSchema,
+      status: external_exports.enum(["passed", "failed", "blocked"]),
+      commitSha: GitObjectIdSchema.optional(),
+      changedFiles: external_exports.array(external_exports.string().trim().min(1)).default([]),
+      artifactIds: external_exports.array(ArtifactIdSchema).default([]),
+      evidenceIds: external_exports.array(EvidenceIdSchema).default([]),
+      gapIds: external_exports.array(GapIdSchema).default([]),
+      recordedAt: IsoDateTimeSchema
+    }).strict();
+  }
+});
+
+// src/api-agent/api-contract-context-builder.ts
+import { mkdir as mkdir3, writeFile as writeFile2 } from "fs/promises";
+import path4 from "path";
+async function buildApiContractAgentContext(input) {
+  const contextRoot = path4.join(input.outputRoot, "api-contract");
+  await mkdir3(contextRoot, {
+    recursive: true,
+    mode: 448
+  });
+  const openApiIntakeArtifacts = input.run.artifacts.filter(
+    (artifact) => artifact.kind === "openapi-intake-report"
+  );
+  const apiPipelineArtifacts = input.run.artifacts.filter(
+    (artifact) => ["api-contract-report", "generated-code"].includes(artifact.kind)
+  );
+  const traceabilityArtifacts = input.run.artifacts.filter(
+    (artifact) => ["traceability-graph", "traceability-matrix", "requirement-graph"].includes(artifact.kind)
+  );
+  const testMatrixArtifacts = input.run.artifacts.filter(
+    (artifact) => ["test-matrix", "gherkin"].includes(artifact.kind)
+  );
+  const apiEvidence = input.run.evidence.filter(
+    (evidence) => evidence.location.type === "json-pointer" || evidence.metadata["openapiEvidenceKind"] !== void 0
+  );
+  const apiGaps = input.run.gaps.filter((gap2) => gap2.category === "api");
+  const files = [
+    {
+      name: "README.md",
+      content: renderReadme()
+    },
+    {
+      name: "api-evidence.json",
+      content: JSON.stringify(apiEvidence, null, 2)
+    },
+    {
+      name: "api-gaps.json",
+      content: JSON.stringify(apiGaps, null, 2)
+    },
+    {
+      name: "api-artifacts.json",
+      content: JSON.stringify(
+        {
+          openApiIntakeArtifacts,
+          apiPipelineArtifacts,
+          traceabilityArtifacts,
+          testMatrixArtifacts
+        },
+        null,
+        2
+      )
+    },
+    {
+      name: "ownership-policy.json",
+      content: JSON.stringify(
+        {
+          allowedWriteGlobs: API_AGENT_ALLOWED_WRITE_GLOBS,
+          forbiddenWriteGlobs: API_AGENT_FORBIDDEN_WRITE_GLOBS
+        },
+        null,
+        2
+      )
+    },
+    {
+      name: "instructions.md",
+      content: renderInstructions()
+    }
+  ];
+  const writtenFiles = [];
+  for (const file2 of files) {
+    const filePath = path4.join(contextRoot, file2.name);
+    const content = `${file2.content.trimEnd()}
+`;
+    await writeFile2(filePath, content, {
+      encoding: "utf8",
+      mode: 384
+    });
+    writtenFiles.push(
+      ApiContractContextFileSchema.parse({
+        path: filePath,
+        digest: sha256Digest(Buffer.from(content, "utf8"))
+      })
+    );
+  }
+  const context = ApiContractAgentContextSchema.parse({
+    runId: input.run.id,
+    preparedAt: IsoDateTimeSchema.parse(input.preparedAt ?? (/* @__PURE__ */ new Date()).toISOString()),
+    projectRoot: input.run.projectRoot,
+    worktreePath: input.worktreePath,
+    baseSha: GitObjectIdSchema.parse(input.baseSha),
+    contextPackPath: contextRoot,
+    allowedWriteGlobs: API_AGENT_ALLOWED_WRITE_GLOBS,
+    forbiddenWriteGlobs: API_AGENT_FORBIDDEN_WRITE_GLOBS,
+    openApiIntakeArtifactIds: openApiIntakeArtifacts.map((artifact) => artifact.id),
+    apiPipelineArtifactIds: apiPipelineArtifacts.map((artifact) => artifact.id),
+    traceabilityArtifactIds: traceabilityArtifacts.map((artifact) => artifact.id),
+    testMatrixArtifactIds: testMatrixArtifacts.map((artifact) => artifact.id),
+    evidenceIds: apiEvidence.map((evidence) => evidence.id),
+    gapIds: apiGaps.map((gap2) => gap2.id),
+    instructions: [
+      "Use only documented OpenAPI operations.",
+      "Do not invent endpoints.",
+      "Do not edit UI files.",
+      "Do not manually edit generated code unless project policy allows it.",
+      "Record gaps when API evidence is missing."
+    ]
+  });
+  const contextJson = `${JSON.stringify(context, null, 2)}
+`;
+  const contextPath = path4.join(contextRoot, "context.json");
+  await writeFile2(contextPath, contextJson, {
+    encoding: "utf8",
+    mode: 384
+  });
+  writtenFiles.push(
+    ApiContractContextFileSchema.parse({
+      path: contextPath,
+      digest: sha256Digest(Buffer.from(contextJson, "utf8"))
+    })
+  );
+  return {
+    context,
+    files: writtenFiles
+  };
+}
+function renderReadme() {
+  return `
+# API Contract Agent Context Pack
+
+This context pack is for the API Contract Agent.
+
+Read these files before making changes:
+
+1. instructions.md
+2. ownership-policy.json
+3. api-evidence.json
+4. api-gaps.json
+5. api-artifacts.json
+6. context.json
+
+The API Contract Agent must not invent endpoints or modify UI implementation files.
+`;
+}
+function renderInstructions() {
+  return `
+# API Contract Agent Instructions
+
+You are responsible for API contract implementation only.
+
+You may work on:
+
+- generated API client verification
+- API schemas
+- feature/entity API wrappers
+- API mappers
+- API mocks
+- API contract tests
+- source guard tests
+
+You must not:
+
+- implement UI components
+- edit pages/widgets/features UI
+- invent undocumented endpoints
+- hide API gaps
+- mark failed checks as passed
+
+If OpenAPI evidence is missing, record or preserve an API gap.
+`;
+}
+var API_AGENT_ALLOWED_WRITE_GLOBS, API_AGENT_FORBIDDEN_WRITE_GLOBS;
+var init_api_contract_context_builder = __esm({
+  "src/api-agent/api-contract-context-builder.ts"() {
+    "use strict";
+    init_api_contract_agent_contracts();
+    init_scalars();
+    init_content_hash();
+    API_AGENT_ALLOWED_WRITE_GLOBS = [
+      "packages/**/api-client/**",
+      "apps/*/src/shared/api/**",
+      "apps/*/src/entities/**/api/**",
+      "apps/*/src/features/**/api/**",
+      "apps/*/src/mocks/**",
+      "apps/*/src/**/*.api.test.ts",
+      "apps/*/src/**/*.contract.test.ts",
+      "src/shared/api/generated/**",
+      "src/entities/**/api/**",
+      "src/features/**/api/**",
+      "src/shared/api/mocks/**",
+      "src/shared/api/__tests__/**",
+      "tests/contract/**"
+    ];
+    API_AGENT_FORBIDDEN_WRITE_GLOBS = [
+      "apps/*/src/pages/**",
+      "apps/*/src/widgets/**",
+      "apps/*/src/features/**/ui/**",
+      "apps/*/src/**/*.stories.*",
+      "apps/*/src/app/router/**",
+      "src/pages/**",
+      "src/widgets/**",
+      "src/features/**/ui/**",
+      "src/entities/**/ui/**",
+      "src/app/router/**"
+    ];
+  }
+});
+
+// src/api-agent/api-contract-result-validator.ts
+import { minimatch } from "minimatch";
+function validateApiContractAgentResult(input) {
+  const issues = [];
+  const parsed = AgentResultSchema.safeParse(input.result);
+  if (!parsed.success) {
+    return {
+      valid: false,
+      issues: parsed.error.issues.map((issue2) => ({
+        path: issue2.path.join("."),
+        message: issue2.message
+      }))
+    };
+  }
+  const result = parsed.data;
+  if (result.kind !== "implementation") {
+    issues.push({
+      path: "kind",
+      message: "API Contract Agent must submit an implementation result."
+    });
+    return {
+      valid: false,
+      issues
+    };
+  }
+  if (result.agent !== "api-contract") {
+    issues.push({
+      path: "agent",
+      message: "API Contract Agent result must use agent=api-contract."
+    });
+  }
+  validateChangedFiles({
+    context: input.context,
+    result,
+    issues
+  });
+  if (result.status === "passed" && result.commitSha === void 0) {
+    issues.push({
+      path: "commitSha",
+      message: "Passed API Contract Agent result requires commitSha."
+    });
+  }
+  if (result.status === "passed" && result.checks.some((check2) => check2.status === "failed")) {
+    issues.push({
+      path: "checks",
+      message: "Passed API Contract Agent result cannot include failed checks."
+    });
+  }
+  if (result.status === "blocked" && result.gapIds.length === 0) {
+    issues.push({
+      path: "gapIds",
+      message: "Blocked API Contract Agent result must reference at least one API gap."
+    });
+  }
+  return {
+    valid: issues.length === 0,
+    issues
+  };
+}
+function validateChangedFiles(input) {
+  for (const file2 of input.result.changedFiles) {
+    const allowed = input.context.allowedWriteGlobs.some(
+      (glob) => minimatch(file2, glob, { dot: true })
+    );
+    if (!allowed) {
+      input.issues.push({
+        path: `changedFiles.${file2}`,
+        message: `Changed file is outside API Contract Agent allowed globs: ${file2}`
+      });
+    }
+    const forbidden = input.context.forbiddenWriteGlobs.some(
+      (glob) => minimatch(file2, glob, { dot: true })
+    );
+    if (forbidden) {
+      input.issues.push({
+        path: `changedFiles.${file2}`,
+        message: `Changed file matches forbidden API Contract Agent glob: ${file2}`
+      });
+    }
+  }
+}
+var init_api_contract_result_validator = __esm({
+  "src/api-agent/api-contract-result-validator.ts"() {
+    "use strict";
+    init_agent_result();
+  }
+});
+
+// src/application/api-contract-agent-service.ts
+import { readFile as readFile2 } from "fs/promises";
+import path5 from "path";
+var PrepareApiContractAgentInputSchema, GetApiContractAgentContextInputSchema, RecordApiContractAgentResultInputSchema, PrepareApiContractAgentResultSchema, GetApiContractAgentContextResultSchema, RecordApiContractAgentResultSchema, ApiContractAgentService;
+var init_api_contract_agent_service = __esm({
+  "src/application/api-contract-agent-service.ts"() {
+    "use strict";
+    init_zod();
+    init_api_contract_agent_contracts();
+    init_api_contract_context_builder();
+    init_api_contract_result_validator();
+    init_run2();
+    init_agent_result();
+    init_artifact();
+    init_id_factory();
+    init_ids();
+    init_scalars();
+    PrepareApiContractAgentInputSchema = external_exports.object({
+      runId: RunIdSchema,
+      worktreePath: external_exports.string().trim().min(1),
+      baseSha: GitObjectIdSchema
+    }).strict();
+    GetApiContractAgentContextInputSchema = external_exports.object({
+      runId: RunIdSchema,
+      contextArtifactId: ArtifactIdSchema
+    }).strict();
+    RecordApiContractAgentResultInputSchema = external_exports.object({
+      runId: RunIdSchema,
+      contextArtifactId: ArtifactIdSchema,
+      result: external_exports.unknown()
+    }).strict();
+    PrepareApiContractAgentResultSchema = external_exports.object({
+      run: RunSummarySchema,
+      context: ApiContractAgentContextSchema,
+      contextArtifactId: ArtifactIdSchema,
+      files: external_exports.array(ApiContractContextFileSchema)
+    }).strict();
+    GetApiContractAgentContextResultSchema = ApiContractAgentContextSchema;
+    RecordApiContractAgentResultSchema = ApiContractAgentRecordedResultSchema;
+    ApiContractAgentService = class {
+      constructor(runStore, dataDirectory, now = () => (/* @__PURE__ */ new Date()).toISOString()) {
+        this.runStore = runStore;
+        this.dataDirectory = dataDirectory;
+        this.now = now;
+      }
+      runStore;
+      dataDirectory;
+      now;
+      async prepare(rawInput) {
+        const input = PrepareApiContractAgentInputSchema.parse(rawInput);
+        const run = await this.runStore.get(input.runId);
+        const timestamp = IsoDateTimeSchema.parse(this.now());
+        const outputRoot = path5.join(this.dataDirectory, "agent-contexts", run.id);
+        const built = await buildApiContractAgentContext({
+          run,
+          worktreePath: input.worktreePath,
+          baseSha: input.baseSha,
+          outputRoot,
+          preparedAt: timestamp
+        });
+        const contextFile = built.files.find((file2) => path5.basename(file2.path) === "context.json");
+        if (contextFile === void 0) {
+          throw new Error("API Contract Agent context builder did not write context.json");
+        }
+        const contextArtifact = ArtifactRefSchema.parse({
+          id: createArtifactId(),
+          kind: "agent-context-pack",
+          uri: `file://${contextFile.path}`,
+          mediaType: "application/json",
+          digest: contextFile.digest,
+          producedBy: "orchestrator",
+          evidenceIds: built.context.evidenceIds,
+          createdAt: timestamp,
+          metadata: {
+            agent: "api-contract",
+            artifactRole: "agent-context-pack",
+            contextPackPath: built.context.contextPackPath
+          }
+        });
+        const nextRun = RunManifestSchema.parse({
+          ...run,
+          revision: run.revision + 1,
+          updatedAt: timestamp,
+          artifacts: [...run.artifacts, contextArtifact]
+        });
+        await this.runStore.save(nextRun, run.revision);
+        return PrepareApiContractAgentResultSchema.parse({
+          run: summarizeRun(nextRun),
+          context: built.context,
+          contextArtifactId: contextArtifact.id,
+          files: built.files
+        });
+      }
+      async getContext(rawInput) {
+        const input = GetApiContractAgentContextInputSchema.parse(rawInput);
+        const run = await this.runStore.get(input.runId);
+        const artifact = run.artifacts.find((item) => item.id === input.contextArtifactId);
+        if (artifact === void 0) {
+          throw new Error(`Context artifact not found: ${input.contextArtifactId}`);
+        }
+        if (artifact.kind !== "agent-context-pack") {
+          throw new Error(`Artifact is not an API Contract Agent context pack: ${artifact.id}`);
+        }
+        const contextPackPath = artifact.metadata["contextPackPath"];
+        if (typeof contextPackPath !== "string") {
+          throw new Error("Context artifact is missing contextPackPath metadata");
+        }
+        const rawContext = await readFile2(path5.join(contextPackPath, "context.json"), "utf8");
+        return GetApiContractAgentContextResultSchema.parse(JSON.parse(rawContext));
+      }
+      async recordResult(rawInput) {
+        const input = RecordApiContractAgentResultInputSchema.parse(rawInput);
+        const run = await this.runStore.get(input.runId);
+        const context = await this.getContext({
+          runId: input.runId,
+          contextArtifactId: input.contextArtifactId
+        });
+        const validation = validateApiContractAgentResult({
+          context,
+          result: input.result
+        });
+        if (!validation.valid) {
+          throw new Error(
+            `Invalid API Contract Agent result: ${validation.issues.map((issue2) => `${issue2.path}: ${issue2.message}`).join("; ")}`
+          );
+        }
+        const parsedResult = AgentResultSchema.parse(input.result);
+        if (parsedResult.kind !== "implementation") {
+          throw new Error("API Contract Agent result must be an implementation result.");
+        }
+        const timestamp = IsoDateTimeSchema.parse(this.now());
+        const nextRun = RunManifestSchema.parse({
+          ...run,
+          revision: run.revision + 1,
+          updatedAt: timestamp,
+          agentResults: [...run.agentResults, parsedResult]
+        });
+        await this.runStore.save(nextRun, run.revision);
+        return RecordApiContractAgentResultSchema.parse({
+          resultId: parsedResult.id,
+          runId: run.id,
+          status: parsedResult.status,
+          ...parsedResult.commitSha === void 0 ? {} : { commitSha: parsedResult.commitSha },
+          changedFiles: parsedResult.changedFiles,
+          artifactIds: parsedResult.artifactIds,
+          evidenceIds: parsedResult.evidenceIds,
+          gapIds: parsedResult.gapIds,
+          recordedAt: timestamp
+        });
+      }
+    };
+  }
+});
+
 // src/api-pipeline/api-pipeline-contracts.ts
 var ApiPipelineModeSchema, ApiGeneratedFileKindSchema, ApiOperationPipelineItemSchema, ApiGeneratedFileSchema, ApiGeneratorPlanSchema, ApiPipelineReportSchema;
 var init_api_pipeline_contracts = __esm({
@@ -34523,8 +35017,8 @@ var init_api_pipeline_contracts = __esm({
 });
 
 // src/api-pipeline/api-generator-discovery.ts
-import { readFile as readFile2 } from "fs/promises";
-import path4 from "path";
+import { readFile as readFile3 } from "fs/promises";
+import path6 from "path";
 async function discoverApiGenerator(input) {
   if (input.preferredCommand !== void 0 && input.preferredCommand.length > 0) {
     return ApiGeneratorPlanSchema.parse({
@@ -34581,7 +35075,7 @@ async function discoverApiGenerator(input) {
 }
 async function readPackageJson(projectRoot) {
   try {
-    return JSON.parse(await readFile2(path4.join(projectRoot, "package.json"), "utf8"));
+    return JSON.parse(await readFile3(path6.join(projectRoot, "package.json"), "utf8"));
   } catch {
     return {};
   }
@@ -34630,7 +35124,7 @@ async function detectKnownGeneratorConfig(projectRoot) {
   ];
   for (const candidate of candidates) {
     try {
-      await readFile2(path4.join(projectRoot, candidate.file), "utf8");
+      await readFile3(path6.join(projectRoot, candidate.file), "utf8");
       return {
         generatorName: candidate.generatorName,
         configPath: candidate.file,
@@ -34889,7 +35383,7 @@ function generateFeatureWrappers(input) {
 }
 function renderWrapper(input) {
   const method = input.operation.method.toUpperCase();
-  const path24 = input.operation.path;
+  const path26 = input.operation.path;
   return `// AUTO-GENERATED wrapper skeleton by spec-to-pr.
 // Review and adapt the generated client import to the target project's actual API client.
 // Do not import generated clients directly from UI components.
@@ -34904,7 +35398,7 @@ export type ${capitalize(input.wrapperName)}Input = {
 export async function ${input.wrapperName}(input: ${capitalize(input.wrapperName)}Input = {}) {
   return apiClient.request({
     method: ${JSON.stringify(method)},
-    path: ${JSON.stringify(path24)},
+    path: ${JSON.stringify(path26)},
     params: input.params,
     body: input.body,
   });
@@ -34956,8 +35450,8 @@ ${indent(handlers, 2)}
 }
 function renderHandler(operation) {
   const mswMethod = operation.method.toLowerCase();
-  const path24 = operation.path.replace(/{([^}]+)}/g, ":$1");
-  return `http.${mswMethod}(${JSON.stringify(path24)}, () => {
+  const path26 = operation.path.replace(/{([^}]+)}/g, ":$1");
+  return `http.${mswMethod}(${JSON.stringify(path26)}, () => {
   return HttpResponse.json({});
 }),`;
 }
@@ -35491,8 +35985,8 @@ var init_openapi_inventory = __esm({
 });
 
 // src/application/api-pipeline-service.ts
-import { mkdir as mkdir3, readFile as readFile3, writeFile as writeFile2 } from "fs/promises";
-import path5 from "path";
+import { mkdir as mkdir4, readFile as readFile4, writeFile as writeFile3 } from "fs/promises";
+import path7 from "path";
 function operationPipelineItem(operation, wrapper) {
   const base = {
     operationKey: operationKey2(operation),
@@ -35835,18 +36329,18 @@ export * from "./client";
         );
       }
       async writeProjectFile(input) {
-        const absolutePath = path5.join(input.projectRoot, input.relativePath);
-        const relative = path5.relative(input.projectRoot, absolutePath);
-        if (relative.startsWith("..") || path5.isAbsolute(relative)) {
+        const absolutePath = path7.join(input.projectRoot, input.relativePath);
+        const relative = path7.relative(input.projectRoot, absolutePath);
+        if (relative.startsWith("..") || path7.isAbsolute(relative)) {
           throw new Error(`Refusing to write outside project root: ${absolutePath}`);
         }
-        await mkdir3(path5.dirname(absolutePath), {
+        await mkdir4(path7.dirname(absolutePath), {
           recursive: true,
           mode: 448
         });
         let changed = true;
         try {
-          const existing = await readFile3(absolutePath, "utf8");
+          const existing = await readFile4(absolutePath, "utf8");
           if (existing === input.content) {
             changed = false;
           } else if (!input.force) {
@@ -35858,7 +36352,7 @@ export * from "./client";
           }
         }
         if (changed) {
-          await writeFile2(absolutePath, input.content, {
+          await writeFile3(absolutePath, input.content, {
             encoding: "utf8",
             mode: 384
           });
@@ -36235,7 +36729,7 @@ var init_normalized_brief = __esm({
 });
 
 // src/brief/brief-source-type.ts
-import path6 from "path";
+import path8 from "path";
 function detectBriefSourceType(source) {
   const locator = source.locator;
   if (locator.type === "ticket") {
@@ -36247,7 +36741,7 @@ function detectBriefSourceType(source) {
   if (locator.type !== "file") {
     return "unknown";
   }
-  const extension = path6.extname(locator.path).toLowerCase();
+  const extension = path8.extname(locator.path).toLowerCase();
   const mediaType = locator.mediaType?.toLowerCase();
   if (mediaType === "application/pdf" || extension === ".pdf") {
     return "pdf";
@@ -36945,11 +37439,11 @@ var init_brief_adapter_service = __esm({
 });
 
 // src/artifact-registry/artifact-blob-store.ts
-import { mkdir as mkdir4, readFile as readFile4, writeFile as writeFile3 } from "fs/promises";
-import path7 from "path";
+import { mkdir as mkdir5, readFile as readFile5, writeFile as writeFile4 } from "fs/promises";
+import path9 from "path";
 async function writeIfMissing(filePath, content) {
   try {
-    await writeFile3(filePath, content, {
+    await writeFile4(filePath, content, {
       flag: "wx",
       mode: 384
     });
@@ -36977,10 +37471,10 @@ var init_artifact_blob_store = __esm({
       async writeBlob(input) {
         const digest = sha256Digest(input.content);
         const { prefix, hex: hex3 } = digestPathSegments(digest);
-        const directory = path7.join(this.rootDirectory, "sha256", prefix, hex3);
-        const contentPath = path7.join(directory, "content");
-        const metadataPath = path7.join(directory, "metadata.json");
-        await mkdir4(directory, {
+        const directory = path9.join(this.rootDirectory, "sha256", prefix, hex3);
+        const contentPath = path9.join(directory, "content");
+        const metadataPath = path9.join(directory, "metadata.json");
+        await mkdir5(directory, {
           recursive: true,
           mode: 448
         });
@@ -37008,14 +37502,14 @@ var init_artifact_blob_store = __esm({
       async readMetadata(rawDigest) {
         const digest = Sha256DigestSchema.parse(rawDigest);
         const { prefix, hex: hex3 } = digestPathSegments(digest);
-        const metadataPath = path7.join(this.rootDirectory, "sha256", prefix, hex3, "metadata.json");
-        return JSON.parse(await readFile4(metadataPath, "utf8"));
+        const metadataPath = path9.join(this.rootDirectory, "sha256", prefix, hex3, "metadata.json");
+        return JSON.parse(await readFile5(metadataPath, "utf8"));
       }
       async readContent(rawDigest) {
         const digest = Sha256DigestSchema.parse(rawDigest);
         const { prefix, hex: hex3 } = digestPathSegments(digest);
-        const contentPath = path7.join(this.rootDirectory, "sha256", prefix, hex3, "content");
-        return readFile4(contentPath);
+        const contentPath = path9.join(this.rootDirectory, "sha256", prefix, hex3, "content");
+        return readFile5(contentPath);
       }
     };
   }
@@ -37612,14 +38106,14 @@ var init_design_contract_renderer = __esm({
 });
 
 // src/design-contract/design-contract-writer.ts
-import { mkdir as mkdir5, readFile as readFile5, writeFile as writeFile4 } from "fs/promises";
-import path8 from "path";
+import { mkdir as mkdir6, readFile as readFile6, writeFile as writeFile5 } from "fs/promises";
+import path10 from "path";
 async function writeDesignContractArtifacts(input) {
   const changePaths = resolveOpenSpecChangePaths({
     projectRoot: input.projectRoot,
     changeName: input.changeName
   });
-  const root = path8.join(changePaths.artifactsRoot, "design-contract");
+  const root = path10.join(changePaths.artifactsRoot, "design-contract");
   const files = [
     {
       name: "figma-design-contract.json",
@@ -37672,7 +38166,7 @@ async function writeDesignContractArtifacts(input) {
   ];
   const written = [];
   for (const file2 of files) {
-    const absolutePath = path8.join(root, file2.name);
+    const absolutePath = path10.join(root, file2.name);
     assertInsideProjectRoot2(input.projectRoot, absolutePath);
     const changed = await writeWithConflictPolicy({
       absolutePath,
@@ -37712,7 +38206,7 @@ async function writeDesignContractArtifacts(input) {
   };
 }
 async function writeWithConflictPolicy(input) {
-  await mkdir5(path8.dirname(input.absolutePath), {
+  await mkdir6(path10.dirname(input.absolutePath), {
     recursive: true,
     mode: 448
   });
@@ -37725,7 +38219,7 @@ async function writeWithConflictPolicy(input) {
       throw new Error(`Design contract file already exists: ${input.absolutePath}`);
     }
   }
-  await writeFile4(input.absolutePath, input.content, {
+  await writeFile5(input.absolutePath, input.content, {
     encoding: "utf8",
     mode: 384
   });
@@ -37733,7 +38227,7 @@ async function writeWithConflictPolicy(input) {
 }
 async function readExisting(absolutePath) {
   try {
-    return await readFile5(absolutePath, "utf8");
+    return await readFile6(absolutePath, "utf8");
   } catch (error51) {
     if (error51 instanceof Error && "code" in error51 && error51.code === "ENOENT") {
       return void 0;
@@ -37742,8 +38236,8 @@ async function readExisting(absolutePath) {
   }
 }
 function assertInsideProjectRoot2(projectRoot, absolutePath) {
-  const relative = path8.relative(projectRoot, absolutePath);
-  if (relative.startsWith("..") || path8.isAbsolute(relative)) {
+  const relative = path10.relative(projectRoot, absolutePath);
+  if (relative.startsWith("..") || path10.isAbsolute(relative)) {
     throw new Error(`Refusing to write outside project root: ${absolutePath}`);
   }
 }
@@ -37758,14 +38252,14 @@ var init_design_contract_writer = __esm({
 });
 
 // src/design-contract/project-design-system-scanner.ts
-import { readdir, readFile as readFile6, stat } from "fs/promises";
-import path9 from "path";
+import { readdir, readFile as readFile7, stat } from "fs/promises";
+import path11 from "path";
 async function scanProjectDesignSystem(projectRoot) {
   const components = [];
   const tokens = [];
   const scannedPaths = [];
   for (const relativeRoot of COMPONENT_ROOT_CANDIDATES) {
-    const absoluteRoot = path9.join(projectRoot, relativeRoot);
+    const absoluteRoot = path11.join(projectRoot, relativeRoot);
     if (!await existsDirectory(absoluteRoot)) {
       continue;
     }
@@ -37791,8 +38285,8 @@ async function scanComponentsInDirectory(projectRoot, absoluteRoot, relativeRoot
     if (!/\.(tsx|ts|jsx|js)$/.test(file2)) {
       continue;
     }
-    const content = await readFile6(file2, "utf8");
-    const relativePath = toPosix(path9.relative(projectRoot, file2));
+    const content = await readFile7(file2, "utf8");
+    const relativePath = toPosix(path11.relative(projectRoot, file2));
     const names = extractExportedComponentNames(content, file2);
     for (const name of names) {
       result.push(
@@ -37822,7 +38316,7 @@ function extractExportedComponentNames(content, filePath) {
     }
   }
   if (names.size === 0) {
-    const baseName = path9.basename(filePath).replace(/\.(tsx|ts|jsx|js)$/, "");
+    const baseName = path11.basename(filePath).replace(/\.(tsx|ts|jsx|js)$/, "");
     if (/^[A-Z][A-Za-z0-9_]*$/.test(baseName)) {
       names.add(baseName);
     }
@@ -37833,7 +38327,7 @@ async function findTokenLikeFiles(projectRoot) {
   const files = await walk2(projectRoot);
   const result = [];
   for (const file2 of files) {
-    const relativePath = toPosix(path9.relative(projectRoot, file2));
+    const relativePath = toPosix(path11.relative(projectRoot, file2));
     const lower = relativePath.toLowerCase();
     if (TOKEN_FILE_PATTERNS.some((pattern) => lower.includes(pattern)) && /\.(css|scss|ts|tsx|js|json)$/.test(lower)) {
       result.push({
@@ -37845,7 +38339,7 @@ async function findTokenLikeFiles(projectRoot) {
   return result.slice(0, 200);
 }
 async function scanTokensFromFile(filePath, relativePath) {
-  const content = await readFile6(filePath, "utf8");
+  const content = await readFile7(filePath, "utf8");
   const result = [];
   for (const match of content.matchAll(/(--[A-Za-z0-9_-]+)\s*:\s*([^;]+);/g)) {
     result.push(
@@ -37886,7 +38380,7 @@ async function walk2(root) {
     if (IGNORED_DIRECTORIES.has(entry.name)) {
       continue;
     }
-    const absolutePath = path9.join(root, entry.name);
+    const absolutePath = path11.join(root, entry.name);
     if (entry.isDirectory()) {
       result.push(...await walk2(absolutePath));
       continue;
@@ -37939,7 +38433,7 @@ function dedupeTokens(tokens) {
   return [...byKey.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 function toPosix(value) {
-  return value.split(path9.sep).join("/");
+  return value.split(path11.sep).join("/");
 }
 var CodeComponentCandidateSchema, CodeTokenCandidateSchema, ProjectDesignSystemInventorySchema, COMPONENT_ROOT_CANDIDATES, TOKEN_FILE_PATTERNS, IGNORED_DIRECTORIES;
 var init_project_design_system_scanner = __esm({
@@ -37983,14 +38477,14 @@ function findDesignContractArtifact(artifacts, changeName) {
   );
 }
 async function readRepoArtifact(projectRoot, relativePath) {
-  const { readFile: readFile16 } = await import("fs/promises");
-  const path24 = await import("path");
-  const absolutePath = path24.join(projectRoot, relativePath);
-  const relative = path24.relative(projectRoot, absolutePath);
-  if (relative.startsWith("..") || path24.isAbsolute(relative)) {
+  const { readFile: readFile17 } = await import("fs/promises");
+  const path26 = await import("path");
+  const absolutePath = path26.join(projectRoot, relativePath);
+  const relative = path26.relative(projectRoot, absolutePath);
+  if (relative.startsWith("..") || path26.isAbsolute(relative)) {
     throw new Error(`Refusing to read outside project root: ${absolutePath}`);
   }
-  return readFile16(absolutePath, "utf8");
+  return readFile17(absolutePath, "utf8");
 }
 function metadataString(value) {
   return typeof value === "string" && value.trim().length > 0 ? value : void 0;
@@ -41051,8 +41545,8 @@ var init_openspec_renderer = __esm({
 });
 
 // src/openspec/openspec-writer.ts
-import { mkdir as mkdir6, readFile as readFile7, writeFile as writeFile5 } from "fs/promises";
-import path10 from "path";
+import { mkdir as mkdir7, readFile as readFile8, writeFile as writeFile6 } from "fs/promises";
+import path12 from "path";
 async function writeOpenSpecChange(input) {
   const paths = resolveOpenSpecChangePaths({
     projectRoot: input.projectRoot,
@@ -41142,7 +41636,7 @@ async function writeOpenSpecChange(input) {
   };
 }
 async function writeFileWithConflictPolicy(input) {
-  await mkdir6(path10.dirname(input.absolutePath), {
+  await mkdir7(path12.dirname(input.absolutePath), {
     recursive: true,
     mode: 448
   });
@@ -41155,7 +41649,7 @@ async function writeFileWithConflictPolicy(input) {
       throw new Error(`OpenSpec file already exists with different content: ${input.absolutePath}`);
     }
   }
-  await writeFile5(input.absolutePath, input.content, {
+  await writeFile6(input.absolutePath, input.content, {
     encoding: "utf8",
     mode: 384
   });
@@ -41163,7 +41657,7 @@ async function writeFileWithConflictPolicy(input) {
 }
 async function readExisting2(absolutePath) {
   try {
-    return await readFile7(absolutePath, "utf8");
+    return await readFile8(absolutePath, "utf8");
   } catch (error51) {
     if (error51 instanceof Error && "code" in error51 && error51.code === "ENOENT") {
       return void 0;
@@ -41172,8 +41666,8 @@ async function readExisting2(absolutePath) {
   }
 }
 function assertInsideProjectRoot3(projectRoot, absolutePath) {
-  const relative = path10.relative(projectRoot, absolutePath);
-  if (relative.startsWith("..") || path10.isAbsolute(relative)) {
+  const relative = path12.relative(projectRoot, absolutePath);
+  if (relative.startsWith("..") || path12.isAbsolute(relative)) {
     throw new Error(`Refusing to write outside project root: ${absolutePath}`);
   }
 }
@@ -41363,7 +41857,7 @@ var init_policy = __esm({
 });
 
 // src/security/command-policy.ts
-import path11 from "path";
+import path13 from "path";
 function classifyCommand(rawCommand) {
   const command = CommandInvocationSchema.parse(rawCommand);
   const normalizedCommand = normalizeExecutable(command.command);
@@ -41557,7 +42051,7 @@ function classifyPackageManager(manager, args, intent) {
   );
 }
 function normalizeExecutable(command) {
-  return path11.basename(command).toLowerCase();
+  return path13.basename(command).toLowerCase();
 }
 function findShellCharacters(parts) {
   const found = /* @__PURE__ */ new Set();
@@ -41652,14 +42146,14 @@ var init_command_policy = __esm({
 
 // src/security/path-policy.ts
 import { realpath as realpath2, stat as stat2 } from "fs/promises";
-import path12 from "path";
+import path14 from "path";
 async function validateWorkspacePath(rawInput) {
   const input = ValidateWorkspacePathInputSchema.parse(rawInput);
   if (hasNullByte(input.candidatePath) || hasNullByte(input.workspaceRoot)) {
     return deniedPath(input, "NULL_BYTE", "Paths must not contain null bytes.");
   }
-  const workspaceRootRealPath = await realpath2(path12.resolve(input.workspaceRoot));
-  const candidateAbsolutePath = path12.resolve(workspaceRootRealPath, input.candidatePath);
+  const workspaceRootRealPath = await realpath2(path14.resolve(input.workspaceRoot));
+  const candidateAbsolutePath = path14.resolve(workspaceRootRealPath, input.candidatePath);
   if (!isInsideOrEqual(workspaceRootRealPath, candidateAbsolutePath)) {
     return {
       workspaceRoot: input.workspaceRoot,
@@ -41739,7 +42233,7 @@ async function validateWorkspacePath(rawInput) {
   }
 }
 async function validateCreatePath(input, workspaceRootRealPath, candidateAbsolutePath) {
-  const parentPath = path12.dirname(candidateAbsolutePath);
+  const parentPath = path14.dirname(candidateAbsolutePath);
   try {
     const parentRealPath = await realpath2(parentPath);
     if (!isInsideOrEqual(workspaceRootRealPath, parentRealPath)) {
@@ -41788,9 +42282,9 @@ async function validateCreatePath(input, workspaceRootRealPath, candidateAbsolut
 function deniedPath(input, code, message) {
   return {
     workspaceRoot: input.workspaceRoot,
-    workspaceRootRealPath: path12.resolve(input.workspaceRoot),
+    workspaceRootRealPath: path14.resolve(input.workspaceRoot),
     candidatePath: input.candidatePath,
-    candidateAbsolutePath: path12.resolve(input.workspaceRoot, input.candidatePath),
+    candidateAbsolutePath: path14.resolve(input.workspaceRoot, input.candidatePath),
     mode: input.mode,
     decision: deny(code, message, "critical", ["path"])
   };
@@ -41799,8 +42293,8 @@ function hasNullByte(value) {
   return value.includes("\0");
 }
 function isInsideOrEqual(root, candidate) {
-  const relative = path12.relative(root, candidate);
-  return relative === "" || !relative.startsWith("..") && !path12.isAbsolute(relative);
+  const relative = path14.relative(root, candidate);
+  return relative === "" || !relative.startsWith("..") && !path14.isAbsolute(relative);
 }
 var PathAccessModeSchema, ValidateWorkspacePathInputSchema, ValidatedWorkspacePathSchema;
 var init_path_policy = __esm({
@@ -42227,8 +42721,8 @@ var init_package_manager_detector = __esm({
 
 // src/profile/probe.ts
 import { execFile as execFile2 } from "child_process";
-import { access, readdir as readdir2, readFile as readFile8, realpath as realpath3, stat as stat3 } from "fs/promises";
-import path13 from "path";
+import { access, readdir as readdir2, readFile as readFile9, realpath as realpath3, stat as stat3 } from "fs/promises";
+import path15 from "path";
 import { promisify as promisify2 } from "util";
 async function createProjectProbe(projectRoot) {
   const realRoot = await realpath3(projectRoot);
@@ -42237,7 +42731,7 @@ async function createProjectProbe(projectRoot) {
     throw new Error(`Project root is not a directory: ${realRoot}`);
   }
   async function resolveInside(relativePath) {
-    const candidate = path13.resolve(realRoot, relativePath);
+    const candidate = path15.resolve(realRoot, relativePath);
     const realCandidate = await realpathOrParent(candidate);
     if (!isInside(realRoot, realCandidate)) {
       throw new Error(`Path escapes project root: ${relativePath}`);
@@ -42263,7 +42757,7 @@ async function createProjectProbe(projectRoot) {
         if (!metadata2.isFile() || metadata2.size > maxBytes) {
           return void 0;
         }
-        return await readFile8(absolute, "utf8");
+        return await readFile9(absolute, "utf8");
       } catch {
         return void 0;
       }
@@ -42311,26 +42805,26 @@ async function createProjectProbe(projectRoot) {
       }
     },
     toRelative(absolutePath) {
-      return normalizeRelative(path13.relative(realRoot, absolutePath));
+      return normalizeRelative(path15.relative(realRoot, absolutePath));
     },
     resolveInside
   };
   return probe;
 }
 function normalizeRelative(value) {
-  return value.split(path13.sep).join("/");
+  return value.split(path15.sep).join("/");
 }
 function isInside(root, candidate) {
-  const relative = path13.relative(root, candidate);
-  return relative === "" || !relative.startsWith("..") && !path13.isAbsolute(relative);
+  const relative = path15.relative(root, candidate);
+  return relative === "" || !relative.startsWith("..") && !path15.isAbsolute(relative);
 }
 async function realpathOrParent(candidate) {
   let current = candidate;
-  while (current !== path13.dirname(current)) {
+  while (current !== path15.dirname(current)) {
     try {
       return await realpath3(current);
     } catch {
-      current = path13.dirname(current);
+      current = path15.dirname(current);
     }
   }
   try {
@@ -42647,8 +43141,8 @@ var init_project_profiler = __esm({
 });
 
 // src/profile/profile-store.ts
-import { mkdir as mkdir7, readdir as readdir3, readFile as readFile9, writeFile as writeFile6 } from "fs/promises";
-import path14 from "path";
+import { mkdir as mkdir8, readdir as readdir3, readFile as readFile10, writeFile as writeFile7 } from "fs/promises";
+import path16 from "path";
 var JsonProfileStore;
 var init_profile_store = __esm({
   "src/profile/profile-store.ts"() {
@@ -42660,12 +43154,12 @@ var init_profile_store = __esm({
       }
       directory;
       async saveManifest(manifest) {
-        await mkdir7(this.directory, {
+        await mkdir8(this.directory, {
           recursive: true,
           mode: 448
         });
-        await writeFile6(
-          path14.join(this.directory, `${manifest.runId}.intake.json`),
+        await writeFile7(
+          path16.join(this.directory, `${manifest.runId}.intake.json`),
           `${JSON.stringify(IntakeManifestSchema.parse(manifest), null, 2)}
 `,
           {
@@ -42675,16 +43169,16 @@ var init_profile_store = __esm({
         );
       }
       async getManifest(runId) {
-        const text = await readFile9(path14.join(this.directory, `${runId}.intake.json`), "utf8");
+        const text = await readFile10(path16.join(this.directory, `${runId}.intake.json`), "utf8");
         return IntakeManifestSchema.parse(JSON.parse(text));
       }
       async saveProfile(profile) {
-        await mkdir7(this.directory, {
+        await mkdir8(this.directory, {
           recursive: true,
           mode: 448
         });
-        await writeFile6(
-          path14.join(this.directory, `${profile.runId}.profile.json`),
+        await writeFile7(
+          path16.join(this.directory, `${profile.runId}.profile.json`),
           `${JSON.stringify(ProjectProfileSchema.parse(profile), null, 2)}
 `,
           {
@@ -42694,11 +43188,11 @@ var init_profile_store = __esm({
         );
       }
       async getProfile(runId) {
-        const text = await readFile9(path14.join(this.directory, `${runId}.profile.json`), "utf8");
+        const text = await readFile10(path16.join(this.directory, `${runId}.profile.json`), "utf8");
         return ProjectProfileSchema.parse(JSON.parse(text));
       }
       async listProfiles() {
-        await mkdir7(this.directory, {
+        await mkdir8(this.directory, {
           recursive: true,
           mode: 448
         });
@@ -42706,7 +43200,7 @@ var init_profile_store = __esm({
         const profileFiles = files.filter((file2) => file2.endsWith(".profile.json"));
         const profiles = await Promise.all(
           profileFiles.map(async (file2) => {
-            const text = await readFile9(path14.join(this.directory, file2), "utf8");
+            const text = await readFile10(path16.join(this.directory, file2), "utf8");
             return ProjectProfileSchema.parse(JSON.parse(text));
           })
         );
@@ -42785,12 +43279,12 @@ var init_profile_service = __esm({
 // src/application/run-service.ts
 import { randomUUID as randomUUID3 } from "crypto";
 import { realpath as realpath4, stat as stat4 } from "fs/promises";
-import path15 from "path";
+import path17 from "path";
 function createRunId() {
   return RunIdSchema.parse(`run_${randomUUID3().replaceAll("-", "")}`);
 }
 async function canonicalDirectory(rawPath) {
-  const absolute = path15.resolve(rawPath);
+  const absolute = path17.resolve(rawPath);
   const canonical = await realpath4(absolute);
   const metadata = await stat4(canonical);
   if (!metadata.isDirectory()) {
@@ -42943,13 +43437,13 @@ var init_canonical_content = __esm({
 
 // src/source-registry/path-scope.ts
 import { realpath as realpath5, stat as stat5 } from "fs/promises";
-import path16 from "path";
+import path18 from "path";
 async function resolveFileInsideRoot(input) {
   const projectRoot = await realpath5(input.projectRoot);
-  const candidate = path16.resolve(projectRoot, input.filePath);
+  const candidate = path18.resolve(projectRoot, input.filePath);
   const absolutePath = await realpath5(candidate);
-  const relative = path16.relative(projectRoot, absolutePath);
-  if (relative === "" || relative.startsWith("..") || path16.isAbsolute(relative)) {
+  const relative = path18.relative(projectRoot, absolutePath);
+  if (relative === "" || relative.startsWith("..") || path18.isAbsolute(relative)) {
     throw new Error(`File is outside project root: ${input.filePath}`);
   }
   const metadata = await stat5(absolutePath);
@@ -42963,7 +43457,7 @@ async function resolveFileInsideRoot(input) {
   };
 }
 function toPosixPath(value) {
-  return value.split(path16.sep).join("/");
+  return value.split(path18.sep).join("/");
 }
 var init_path_scope = __esm({
   "src/source-registry/path-scope.ts"() {
@@ -42973,11 +43467,11 @@ var init_path_scope = __esm({
 });
 
 // src/source-registry/snapshot-store.ts
-import { mkdir as mkdir8, readFile as readFile10, writeFile as writeFile7 } from "fs/promises";
-import path17 from "path";
+import { mkdir as mkdir9, readFile as readFile11, writeFile as writeFile8 } from "fs/promises";
+import path19 from "path";
 async function writeIfMissing2(filePath, content) {
   try {
-    await writeFile7(filePath, content, {
+    await writeFile8(filePath, content, {
       flag: "wx",
       mode: 384
     });
@@ -43017,10 +43511,10 @@ var init_snapshot_store = __esm({
       async writeSnapshot(input) {
         const digest = input.canonical.canonicalDigest;
         const { prefix, hex: hex3 } = digestPathSegments(digest);
-        const directory = path17.join(this.rootDirectory, "sha256", prefix, hex3);
-        const contentPath = path17.join(directory, "content");
-        const metadataPath = path17.join(directory, "metadata.json");
-        await mkdir8(directory, {
+        const directory = path19.join(this.rootDirectory, "sha256", prefix, hex3);
+        const contentPath = path19.join(directory, "content");
+        const metadataPath = path19.join(directory, "metadata.json");
+        await mkdir9(directory, {
           recursive: true,
           mode: 448
         });
@@ -43050,14 +43544,14 @@ var init_snapshot_store = __esm({
       async readMetadata(rawDigest) {
         const digest = Sha256DigestSchema.parse(rawDigest);
         const { prefix, hex: hex3 } = digestPathSegments(digest);
-        const metadataPath = path17.join(this.rootDirectory, "sha256", prefix, hex3, "metadata.json");
-        return SourceSnapshotMetadataSchema.parse(JSON.parse(await readFile10(metadataPath, "utf8")));
+        const metadataPath = path19.join(this.rootDirectory, "sha256", prefix, hex3, "metadata.json");
+        return SourceSnapshotMetadataSchema.parse(JSON.parse(await readFile11(metadataPath, "utf8")));
       }
       async readContent(rawDigest) {
         const digest = Sha256DigestSchema.parse(rawDigest);
         const { prefix, hex: hex3 } = digestPathSegments(digest);
-        const contentPath = path17.join(this.rootDirectory, "sha256", prefix, hex3, "content");
-        return readFile10(contentPath);
+        const contentPath = path19.join(this.rootDirectory, "sha256", prefix, hex3, "content");
+        return readFile11(contentPath);
       }
     };
   }
@@ -43075,7 +43569,7 @@ var init_source_registry = __esm({
 });
 
 // src/application/source-registry-service.ts
-import { readFile as readFile11 } from "fs/promises";
+import { readFile as readFile12 } from "fs/promises";
 function parseSourceRegistrationResult(result) {
   SourceRegistrationResultSchema.parse(result);
   return result;
@@ -43127,7 +43621,7 @@ var init_source_registry_service = __esm({
           projectRoot: run.projectRoot,
           filePath: input.path
         });
-        const rawContent = await readFile11(scopedPath.absolutePath);
+        const rawContent = await readFile12(scopedPath.absolutePath);
         const canonical = canonicalizeFileContent({
           path: scopedPath.relativePath,
           ...input.mediaType === void 0 ? {} : { mediaType: input.mediaType },
@@ -43281,10 +43775,10 @@ var init_test_matrix = __esm({
 });
 
 // src/spec-bdd/acceptance-skeleton-writer.ts
-import { mkdir as mkdir9, writeFile as writeFile8 } from "fs/promises";
-import path18 from "path";
+import { mkdir as mkdir10, writeFile as writeFile9 } from "fs/promises";
+import path20 from "path";
 async function writeAcceptanceSkeletons(input) {
-  const directory = path18.join(
+  const directory = path20.join(
     input.projectRoot,
     "tests",
     "acceptance",
@@ -43292,16 +43786,16 @@ async function writeAcceptanceSkeletons(input) {
     input.changeName
   );
   assertInsideProjectRoot4(input.projectRoot, directory);
-  await mkdir9(directory, {
+  await mkdir10(directory, {
     recursive: true,
     mode: 448
   });
   const files = [];
   for (const row of input.matrix.rows) {
     const fileName = `${sanitizeFileName(row.scenarioId)}.test.md`;
-    const absolutePath = path18.join(directory, fileName);
+    const absolutePath = path20.join(directory, fileName);
     const content = renderSkeleton(row);
-    await writeFile8(absolutePath, content, {
+    await writeFile9(absolutePath, content, {
       encoding: "utf8",
       mode: 384,
       flag: input.force === true ? "w" : "wx"
@@ -43311,10 +43805,10 @@ async function writeAcceptanceSkeletons(input) {
       }
       throw error51;
     });
-    files.push(path18.relative(input.projectRoot, absolutePath).split(path18.sep).join("/"));
+    files.push(path20.relative(input.projectRoot, absolutePath).split(path20.sep).join("/"));
   }
   return {
-    directory: path18.relative(input.projectRoot, directory).split(path18.sep).join("/"),
+    directory: path20.relative(input.projectRoot, directory).split(path20.sep).join("/"),
     files
   };
 }
@@ -43357,8 +43851,8 @@ function sanitizeFileName(value) {
   return value.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-|-$/g, "");
 }
 function assertInsideProjectRoot4(projectRoot, absolutePath) {
-  const relative = path18.relative(projectRoot, absolutePath);
-  if (relative.startsWith("..") || path18.isAbsolute(relative)) {
+  const relative = path20.relative(projectRoot, absolutePath);
+  if (relative.startsWith("..") || path20.isAbsolute(relative)) {
     throw new Error(`Refusing to write outside project root: ${absolutePath}`);
   }
 }
@@ -43432,18 +43926,18 @@ var init_spec_bdd_contracts = __esm({
 });
 
 // src/spec-bdd/spec-bdd-context.ts
-import { readFile as readFile12 } from "fs/promises";
-import path19 from "path";
+import { readFile as readFile13 } from "fs/promises";
+import path21 from "path";
 async function buildSpecBddContextPack(input) {
   const changeName = OpenSpecChangeNameSchema.parse(input.changeName);
   const paths = resolveOpenSpecChangePaths({
     projectRoot: input.run.projectRoot,
     changeName
   });
-  const featureDirectory = path19.join(paths.artifactsRoot, "gherkin");
-  const indexPath = path19.join(paths.artifactsRoot, "gherkin-index.json");
-  const testMatrixPath = path19.join(paths.artifactsRoot, "test-matrix.json");
-  const testMatrixMdPath = path19.join(paths.artifactsRoot, "test-matrix.md");
+  const featureDirectory = path21.join(paths.artifactsRoot, "gherkin");
+  const indexPath = path21.join(paths.artifactsRoot, "gherkin-index.json");
+  const testMatrixPath = path21.join(paths.artifactsRoot, "test-matrix.json");
+  const testMatrixMdPath = path21.join(paths.artifactsRoot, "test-matrix.md");
   await assertReadable(paths.manifestPath);
   await assertReadable(testMatrixPath);
   return SpecBddContextPackSchema.parse({
@@ -43517,7 +44011,7 @@ ${contextPack.expectedOutputs.map((item) => `- ${item}`).join("\n")}
 `;
 }
 async function assertReadable(filePath) {
-  await readFile12(filePath, "utf8");
+  await readFile13(filePath, "utf8");
 }
 var SpecBddContextPackSchema;
 var init_spec_bdd_context = __esm({
@@ -43600,16 +44094,16 @@ var init_spec_bdd_review_renderer = __esm({
 });
 
 // src/application/spec-bdd-agent-lane-service.ts
-import { mkdir as mkdir10, readFile as readFile13, writeFile as writeFile9 } from "fs/promises";
-import path20 from "path";
+import { mkdir as mkdir11, readFile as readFile14, writeFile as writeFile10 } from "fs/promises";
+import path22 from "path";
 async function readTestMatrix(projectRoot, relativePath) {
-  const absolutePath = path20.join(projectRoot, relativePath);
+  const absolutePath = path22.join(projectRoot, relativePath);
   assertInsideProjectRoot5(projectRoot, absolutePath);
-  const content = await readFile13(absolutePath, "utf8");
+  const content = await readFile14(absolutePath, "utf8");
   return TestMatrixSchema.parse(JSON.parse(content));
 }
 function specBddContextPaths(projectRoot, runId, changeName) {
-  const contextDirectory = path20.join(
+  const contextDirectory = path22.join(
     projectRoot,
     ".spec-to-pr",
     "runs",
@@ -43620,16 +44114,16 @@ function specBddContextPaths(projectRoot, runId, changeName) {
   );
   return {
     contextDirectory,
-    contextJsonPath: path20.join(contextDirectory, "context-pack.json"),
-    contextMdPath: path20.join(contextDirectory, "context-pack.md")
+    contextJsonPath: path22.join(contextDirectory, "context-pack.json"),
+    contextMdPath: path22.join(contextDirectory, "context-pack.md")
   };
 }
 function specBddReportPaths(projectRoot, changeName) {
-  const reportDirectory = path20.join(projectRoot, "openspec", "changes", changeName, "artifacts");
+  const reportDirectory = path22.join(projectRoot, "openspec", "changes", changeName, "artifacts");
   return {
     reportDirectory,
-    reportJsonPath: path20.join(reportDirectory, "spec-bdd-review.json"),
-    reportMdPath: path20.join(reportDirectory, "spec-bdd-review.md")
+    reportJsonPath: path22.join(reportDirectory, "spec-bdd-review.json"),
+    reportMdPath: path22.join(reportDirectory, "spec-bdd-review.md")
   };
 }
 async function currentHead(projectRoot, fallback) {
@@ -43648,11 +44142,11 @@ async function currentHead(projectRoot, fallback) {
   }
 }
 function toRepoRelative(projectRoot, absolutePath) {
-  return path20.relative(projectRoot, absolutePath).split(path20.sep).join("/");
+  return path22.relative(projectRoot, absolutePath).split(path22.sep).join("/");
 }
 function assertInsideProjectRoot5(projectRoot, absolutePath) {
-  const relative = path20.relative(projectRoot, absolutePath);
-  if (relative.startsWith("..") || path20.isAbsolute(relative)) {
+  const relative = path22.relative(projectRoot, absolutePath);
+  if (relative.startsWith("..") || path22.isAbsolute(relative)) {
     throw new Error(`Refusing to access outside project root: ${absolutePath}`);
   }
 }
@@ -43749,15 +44243,15 @@ var init_spec_bdd_agent_lane_service = __esm({
 `;
         const contextMd = renderSpecBddContextPackMarkdown(contextPack);
         assertInsideProjectRoot5(run.projectRoot, contextPaths.contextDirectory);
-        await mkdir10(contextPaths.contextDirectory, {
+        await mkdir11(contextPaths.contextDirectory, {
           recursive: true,
           mode: 448
         });
-        await writeFile9(contextPaths.contextJsonPath, contextJson, {
+        await writeFile10(contextPaths.contextJsonPath, contextJson, {
           encoding: "utf8",
           mode: 384
         });
-        await writeFile9(contextPaths.contextMdPath, contextMd, {
+        await writeFile10(contextPaths.contextMdPath, contextMd, {
           encoding: "utf8",
           mode: 384
         });
@@ -43775,8 +44269,8 @@ var init_spec_bdd_agent_lane_service = __esm({
         const input = GetSpecBddAgentContextInputSchema.parse(rawInput);
         const run = await this.runStore.get(input.runId);
         const contextPaths = specBddContextPaths(run.projectRoot, run.id, input.changeName);
-        const rawContext = await readFile13(contextPaths.contextJsonPath, "utf8");
-        const contextPackMarkdown = await readFile13(contextPaths.contextMdPath, "utf8");
+        const rawContext = await readFile14(contextPaths.contextJsonPath, "utf8");
+        const contextPackMarkdown = await readFile14(contextPaths.contextMdPath, "utf8");
         return GetSpecBddAgentContextResultSchema.parse({
           runId: run.id,
           changeName: input.changeName,
@@ -43820,15 +44314,15 @@ var init_spec_bdd_agent_lane_service = __esm({
 `;
         const reportMd = renderSpecBddReviewMarkdown(report);
         assertInsideProjectRoot5(run.projectRoot, reportPaths.reportDirectory);
-        await mkdir10(reportPaths.reportDirectory, {
+        await mkdir11(reportPaths.reportDirectory, {
           recursive: true,
           mode: 448
         });
-        await writeFile9(reportPaths.reportJsonPath, reportJson, {
+        await writeFile10(reportPaths.reportJsonPath, reportJson, {
           encoding: "utf8",
           mode: 384
         });
-        await writeFile9(reportPaths.reportMdPath, reportMd, {
+        await writeFile10(reportPaths.reportMdPath, reportMd, {
           encoding: "utf8",
           mode: 384
         });
@@ -44757,35 +45251,35 @@ var init_gherkin_renderer = __esm({
 });
 
 // src/gherkin/gherkin-writer.ts
-import { mkdir as mkdir11, readFile as readFile14, writeFile as writeFile10 } from "fs/promises";
-import path21 from "path";
+import { mkdir as mkdir12, readFile as readFile15, writeFile as writeFile11 } from "fs/promises";
+import path23 from "path";
 async function writeGherkinArtifacts(input) {
   const changePaths = resolveOpenSpecChangePaths({
     projectRoot: input.projectRoot,
     changeName: input.changeName
   });
-  const gherkinRoot = path21.join(changePaths.artifactsRoot, "gherkin");
+  const gherkinRoot = path23.join(changePaths.artifactsRoot, "gherkin");
   const files = [
     ...input.rendered.featureFiles.map((file2) => ({
-      absolutePath: path21.join(gherkinRoot, file2.fileName),
+      absolutePath: path23.join(gherkinRoot, file2.fileName),
       content: file2.content,
       mediaType: "text/x-gherkin",
       kind: "gherkin"
     })),
     {
-      absolutePath: path21.join(changePaths.artifactsRoot, "gherkin-index.json"),
+      absolutePath: path23.join(changePaths.artifactsRoot, "gherkin-index.json"),
       content: input.rendered.gherkinIndexJson,
       mediaType: "application/json",
       kind: "gherkin"
     },
     {
-      absolutePath: path21.join(changePaths.artifactsRoot, "test-matrix.json"),
+      absolutePath: path23.join(changePaths.artifactsRoot, "test-matrix.json"),
       content: input.rendered.testMatrixJson,
       mediaType: "application/json",
       kind: "test-matrix"
     },
     {
-      absolutePath: path21.join(changePaths.artifactsRoot, "test-matrix.md"),
+      absolutePath: path23.join(changePaths.artifactsRoot, "test-matrix.md"),
       content: input.rendered.testMatrixMd,
       mediaType: "text/markdown",
       kind: "test-matrix"
@@ -44837,7 +45331,7 @@ async function writeGherkinArtifacts(input) {
   };
 }
 async function writeWithConflictPolicy2(input) {
-  await mkdir11(path21.dirname(input.absolutePath), {
+  await mkdir12(path23.dirname(input.absolutePath), {
     recursive: true,
     mode: 448
   });
@@ -44850,7 +45344,7 @@ async function writeWithConflictPolicy2(input) {
       throw new Error(`Generated Gherkin artifact already exists: ${input.absolutePath}`);
     }
   }
-  await writeFile10(input.absolutePath, input.content, {
+  await writeFile11(input.absolutePath, input.content, {
     encoding: "utf8",
     mode: 384
   });
@@ -44858,7 +45352,7 @@ async function writeWithConflictPolicy2(input) {
 }
 async function readExisting3(absolutePath) {
   try {
-    return await readFile14(absolutePath, "utf8");
+    return await readFile15(absolutePath, "utf8");
   } catch (error51) {
     if (error51 instanceof Error && "code" in error51 && error51.code === "ENOENT") {
       return void 0;
@@ -44867,8 +45361,8 @@ async function readExisting3(absolutePath) {
   }
 }
 function assertInsideProjectRoot6(projectRoot, absolutePath) {
-  const relative = path21.relative(projectRoot, absolutePath);
-  if (relative.startsWith("..") || path21.isAbsolute(relative)) {
+  const relative = path23.relative(projectRoot, absolutePath);
+  if (relative.startsWith("..") || path23.isAbsolute(relative)) {
     throw new Error(`Refusing to write outside project root: ${absolutePath}`);
   }
 }
@@ -44883,7 +45377,7 @@ var init_gherkin_writer = __esm({
 });
 
 // src/application/gherkin-test-matrix-service.ts
-import { readFile as readFile15 } from "fs/promises";
+import { readFile as readFile16 } from "fs/promises";
 var GenerateGherkinTestMatrixInputSchema, GenerateGherkinTestMatrixResultSchema, GherkinTestMatrixService;
 var init_gherkin_test_matrix_service = __esm({
   "src/application/gherkin-test-matrix-service.ts"() {
@@ -44978,7 +45472,7 @@ var init_gherkin_test_matrix_service = __esm({
           projectRoot,
           changeName: OpenSpecChangeNameSchema.parse(changeName)
         });
-        const raw = await readFile15(paths.manifestPath, "utf8");
+        const raw = await readFile16(paths.manifestPath, "utf8");
         return OpenSpecChangeModelSchema.parse(JSON.parse(raw));
       }
     };
@@ -45612,6 +46106,71 @@ function createKernelServer(servicesProvider) {
     })
   );
   server.registerTool(
+    "prepare_api_contract_agent",
+    {
+      title: "Prepare API Contract Agent",
+      description: "Prepare the API Contract Agent context pack and record it as a Run artifact.",
+      inputSchema: PrepareApiContractAgentInputSchema.shape,
+      outputSchema: PrepareApiContractAgentResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { apiContractAgentService } = await servicesProvider();
+      const structuredContent = await apiContractAgentService.prepare(input);
+      return {
+        text: `Prepared API Contract Agent context at ${structuredContent.context.contextPackPath}.`,
+        structuredContent
+      };
+    })
+  );
+  server.registerTool(
+    "get_api_contract_agent_context",
+    {
+      title: "Get API Contract Agent context",
+      description: "Load a prepared API Contract Agent context pack.",
+      inputSchema: GetApiContractAgentContextInputSchema.shape,
+      outputSchema: GetApiContractAgentContextResultSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { apiContractAgentService } = await servicesProvider();
+      const structuredContent = await apiContractAgentService.getContext(input);
+      return {
+        text: `Loaded API Contract Agent context for run ${structuredContent.runId}.`,
+        structuredContent
+      };
+    })
+  );
+  server.registerTool(
+    "record_api_contract_agent_result",
+    {
+      title: "Record API Contract Agent result",
+      description: "Validate and record an API Contract Agent implementation result.",
+      inputSchema: RecordApiContractAgentResultInputSchema.shape,
+      outputSchema: RecordApiContractAgentResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { apiContractAgentService } = await servicesProvider();
+      const structuredContent = await apiContractAgentService.recordResult(input);
+      return {
+        text: `Recorded API Contract Agent result ${structuredContent.resultId}.`,
+        structuredContent
+      };
+    })
+  );
+  server.registerTool(
     "generate_figma_design_contract",
     {
       title: "Generate Figma design contract",
@@ -46084,6 +46643,7 @@ var init_create_server = __esm({
     init_zod();
     init_agent_runtime_report();
     init_agent_runtime_service();
+    init_api_contract_agent_service();
     init_api_pipeline_service();
     init_brief_adapter_service();
     init_design_contract_service();
@@ -46190,6 +46750,9 @@ var init_create_server = __esm({
       "generate_openspec_change",
       "generate_gherkin_test_matrix",
       "generate_api_pipeline",
+      "prepare_api_contract_agent",
+      "get_api_contract_agent_context",
+      "record_api_contract_agent_result",
       "generate_figma_design_contract",
       "get_figma_design_contract_summary",
       "prepare_spec_bdd_agent",
@@ -46238,7 +46801,7 @@ __export(sqlite_run_store_exports, {
   SqliteRunStore: () => SqliteRunStore
 });
 import { mkdirSync } from "fs";
-import path22 from "path";
+import path24 from "path";
 import { createRequire } from "module";
 function loadSqliteModule() {
   return require2("node:sqlite");
@@ -46280,7 +46843,7 @@ var init_sqlite_run_store = __esm({
     SqliteRunStore = class {
       database;
       constructor(databasePath) {
-        mkdirSync(path22.dirname(databasePath), {
+        mkdirSync(path24.dirname(databasePath), {
           recursive: true,
           mode: 448
         });
@@ -46516,7 +47079,7 @@ __export(run_service_provider_exports, {
   createLazyServicesProvider: () => createLazyServicesProvider
 });
 import os from "os";
-import path23 from "path";
+import path25 from "path";
 function createLazyServicesProvider() {
   let services;
   return async () => {
@@ -46525,9 +47088,9 @@ function createLazyServicesProvider() {
     }
     const { SqliteRunStore: SqliteRunStore2 } = await Promise.resolve().then(() => (init_sqlite_run_store(), sqlite_run_store_exports));
     const dataDirectory = resolveDataDirectory();
-    const store = new SqliteRunStore2(path23.join(dataDirectory, "runs.sqlite3"));
-    const snapshotStore = new SourceSnapshotStore(path23.join(dataDirectory, "source-snapshots"));
-    const artifactStore = new ArtifactBlobStore(path23.join(dataDirectory, "artifacts"));
+    const store = new SqliteRunStore2(path25.join(dataDirectory, "runs.sqlite3"));
+    const snapshotStore = new SourceSnapshotStore(path25.join(dataDirectory, "source-snapshots"));
+    const artifactStore = new ArtifactBlobStore(path25.join(dataDirectory, "artifacts"));
     services = {
       runService: new RunService(store, {
         pluginVersion: package_default.version
@@ -46535,7 +47098,7 @@ function createLazyServicesProvider() {
       stageService: new StageService(store),
       policyService: new PolicyService(),
       profileService: new ProjectProfileService(
-        new JsonProfileStore(path23.join(dataDirectory, "profiles"))
+        new JsonProfileStore(path25.join(dataDirectory, "profiles"))
       ),
       sourceRegistryService: new SourceRegistryService(store, snapshotStore),
       briefAdapterService: new BriefAdapterService(store, snapshotStore),
@@ -46547,6 +47110,7 @@ function createLazyServicesProvider() {
       openSpecChangeService: new OpenSpecChangeService(store, artifactStore),
       gherkinTestMatrixService: new GherkinTestMatrixService(store),
       apiPipelineService: new ApiPipelineService(store, artifactStore),
+      apiContractAgentService: new ApiContractAgentService(store, dataDirectory),
       designContractService: new DesignContractService(store, artifactStore),
       agentRuntimeService: new AgentRuntimeService(store),
       specBddAgentLaneService: new SpecBddAgentLaneService(store)
@@ -46555,7 +47119,7 @@ function createLazyServicesProvider() {
   };
 }
 function resolveDataDirectory() {
-  return process.env.SPEC_TO_PR_DATA_DIR ?? path23.join(os.tmpdir(), "spec-to-pr-plugin-data");
+  return process.env.SPEC_TO_PR_DATA_DIR ?? path25.join(os.tmpdir(), "spec-to-pr-plugin-data");
 }
 var init_run_service_provider = __esm({
   "src/mcp/run-service-provider.ts"() {
@@ -46563,6 +47127,7 @@ var init_run_service_provider = __esm({
     init_package();
     init_artifact_blob_store();
     init_agent_runtime_service();
+    init_api_contract_agent_service();
     init_api_pipeline_service();
     init_brief_adapter_service();
     init_design_contract_service();
