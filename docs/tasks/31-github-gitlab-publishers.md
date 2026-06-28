@@ -58,3 +58,36 @@ Task 31 connects the verified Run ledger to repository hosting services.
 - PublishingAgentResult validates with prUrl and reportArtifactId.
 - Skill `/spec-to-pr:publish-review-request` exists.
 - Publisher reviewer agent exists.
+
+## Verification
+
+Run:
+
+```bash
+pnpm format:check
+pnpm typecheck
+pnpm schemas:build
+pnpm build
+pnpm test
+pnpm audit
+```
+
+Manual live verification requires configured tokens:
+
+```bash
+GITHUB_TOKEN=... pnpm test:publisher:github
+GITLAB_TOKEN=... pnpm test:publisher:gitlab
+```
+
+Do not run live publisher tests in default CI.
+
+## Known Limitations
+
+- GitHub Enterprise and self-hosted GitLab require explicit host config.
+- Git push is implemented only for the source branch.
+- Publisher does not merge.
+- Publisher does not approve.
+- Artifact upload to host is not implemented.
+- Labels/reviewers support is basic.
+- Token storage is not implemented by design.
+- Existing PR/MR matching is source branch based.
