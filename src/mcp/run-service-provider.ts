@@ -20,6 +20,7 @@ import { OpenApiIntakeService } from "../application/openapi-intake-service.js";
 import { OpenSpecChangeService } from "../application/openspec-change-service.js";
 import { PolicyService } from "../application/policy-service.js";
 import { ProjectProfileService } from "../application/profile-service.js";
+import { QualityGateService } from "../application/quality-gate-service.js";
 import { ReviewCouncilService } from "../application/review-council-service.js";
 import { RunService } from "../application/run-service.js";
 import { SourceRegistryService } from "../application/source-registry-service.js";
@@ -35,6 +36,7 @@ export type Services = {
   stageService: StageService;
   policyService: PolicyService;
   architectureGuardService: ArchitectureGuardService;
+  qualityGateService: QualityGateService;
   profileService: ProjectProfileService;
   sourceRegistryService: SourceRegistryService;
   briefAdapterService: BriefAdapterService;
@@ -79,6 +81,7 @@ export function createLazyServicesProvider(): ServicesProvider {
       stageService: new StageService(store),
       policyService: new PolicyService(),
       architectureGuardService: new ArchitectureGuardService(store, artifactStore),
+      qualityGateService: new QualityGateService(store, artifactStore),
       profileService: new ProjectProfileService(
         new JsonProfileStore(path.join(dataDirectory, "profiles")),
       ),

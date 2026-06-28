@@ -82,6 +82,10 @@ import {
   InspectProjectInputSchema,
 } from "../application/profile-service.js";
 import {
+  RunQualityGatesInputSchema,
+  RunQualityGatesResultSchema,
+} from "../application/quality-gate-service.js";
+import {
   GetReviewCouncilContextInputSchema,
   GetReviewCouncilContextResultSchema,
   PrepareReviewCouncilInputSchema,
@@ -180,6 +184,7 @@ const TOOL_NAMES = [
   "kernel_ping",
   "analyze_architecture_boundaries",
   "generate_source_guard_tests",
+  "run_quality_gates",
   "create_run",
   "get_run",
   "list_runs",
@@ -391,6 +396,32 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
 
         return {
           text: `Generated source guard test at ${structuredContent.relativePath}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "run_quality_gates",
+    {
+      title: "Run quality gates",
+      description:
+        "Run deterministic package quality gates and record CheckResult evidence in the Run ledger.",
+      inputSchema: RunQualityGatesInputSchema.shape,
+      outputSchema: RunQualityGatesResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { qualityGateService } = await servicesProvider();
+        const structuredContent = await qualityGateService.run(input);
+
+        return {
+          text: `Quality gates ${structuredContent.status}: ${structuredContent.passedCount} passed, ${structuredContent.failedCount} failed, ${structuredContent.skippedCount} skipped.`,
           structuredContent,
         };
       }),
