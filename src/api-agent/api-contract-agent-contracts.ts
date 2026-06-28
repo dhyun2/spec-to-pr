@@ -52,6 +52,4 @@ export const ApiContractAgentRecordedResultSchema = z
 
 export type ApiContractAgentContext = z.infer<typeof ApiContractAgentContextSchema>;
 export type ApiContractContextFile = z.infer<typeof ApiContractContextFileSchema>;
-export type ApiContractAgentRecordedResult = z.infer<
-  typeof ApiContractAgentRecordedResultSchema
->;
+export type ApiContractAgentRecordedResult = z.infer<typeof ApiContractAgentRecordedResultSchema>;

@@ -937,8 +937,7 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
     "prepare_api_contract_agent",
     {
       title: "Prepare API Contract Agent",
-      description:
-        "Prepare the API Contract Agent context pack and record it as a Run artifact.",
+      description: "Prepare the API Contract Agent context pack and record it as a Run artifact.",
       inputSchema: PrepareApiContractAgentInputSchema.shape,
       outputSchema: PrepareApiContractAgentResultSchema.shape,
       annotations: {
