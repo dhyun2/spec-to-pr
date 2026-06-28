@@ -26389,18 +26389,18 @@ var require_validate = __commonJS({
         const { schemaCode } = this;
         this.fail((0, codegen_1._)`${schemaCode} !== undefined && (${(0, codegen_1.or)(this.invalid$data(), condition)})`);
       }
-      error(append, errorParams, errorPaths) {
+      error(append2, errorParams, errorPaths) {
         if (errorParams) {
           this.setParams(errorParams);
-          this._error(append, errorPaths);
+          this._error(append2, errorPaths);
           this.setParams({});
           return;
         }
-        this._error(append, errorPaths);
+        this._error(append2, errorPaths);
       }
-      _error(append, errorPaths) {
+      _error(append2, errorPaths) {
         ;
-        (append ? errors_1.reportExtraError : errors_1.reportError)(this, this.def.error, errorPaths);
+        (append2 ? errors_1.reportExtraError : errors_1.reportError)(this, this.def.error, errorPaths);
       }
       $dataError() {
         (0, errors_1.reportError)(this, this.def.$dataError || errors_1.keyword$DataError);
@@ -33343,6 +33343,8 @@ var init_artifact = __esm({
       "openapi-security-inventory",
       "openapi-ref-inventory",
       "openapi-intake-report",
+      "traceability-graph",
+      "traceability-matrix",
       "requirement-graph",
       "openspec",
       "gherkin",
@@ -34494,6 +34496,751 @@ var init_artifact_blob_store = __esm({
   }
 });
 
+// src/traceability/traceability-contracts.ts
+var TraceNodeIdSchema, TraceEdgeIdSchema, TraceNodeKindSchema, TraceEdgeKindSchema, TraceLinkConfidenceSchema, TraceNodeSchema, TraceEdgeSchema, TraceabilityMatrixRowSchema, EvidenceGraphSchema;
+var init_traceability_contracts = __esm({
+  "src/traceability/traceability-contracts.ts"() {
+    "use strict";
+    init_zod();
+    init_ids();
+    init_scalars();
+    TraceNodeIdSchema = external_exports.string().regex(/^tn_[a-f0-9]{32}$/, "Expected tn_<32 lowercase hex characters>");
+    TraceEdgeIdSchema = external_exports.string().regex(/^te_[a-f0-9]{32}$/, "Expected te_<32 lowercase hex characters>");
+    TraceNodeKindSchema = external_exports.enum([
+      "requirement",
+      "api-operation",
+      "api-schema",
+      "figma-node",
+      "figma-component",
+      "figma-token",
+      "gap",
+      "artifact"
+    ]);
+    TraceEdgeKindSchema = external_exports.enum([
+      "derived-from",
+      "mentions",
+      "requires-api",
+      "requires-design",
+      "matches-api",
+      "matches-figma",
+      "blocked-by-gap",
+      "supported-by-artifact"
+    ]);
+    TraceLinkConfidenceSchema = external_exports.number().min(0).max(1);
+    TraceNodeSchema = external_exports.object({
+      id: TraceNodeIdSchema,
+      kind: TraceNodeKindSchema,
+      label: external_exports.string().trim().min(1).max(300),
+      summary: external_exports.string().trim().min(1).max(2e3),
+      evidenceIds: external_exports.array(EvidenceIdSchema).default([]),
+      artifactIds: external_exports.array(ArtifactIdSchema).default([]),
+      gapIds: external_exports.array(GapIdSchema).default([]),
+      sourceIds: external_exports.array(SourceIdSchema).default([]),
+      keywords: external_exports.array(external_exports.string().trim().min(1)).default([]),
+      metadata: external_exports.record(external_exports.string(), external_exports.unknown()).default({})
+    }).strict();
+    TraceEdgeSchema = external_exports.object({
+      id: TraceEdgeIdSchema,
+      kind: TraceEdgeKindSchema,
+      from: TraceNodeIdSchema,
+      to: TraceNodeIdSchema,
+      confidence: TraceLinkConfidenceSchema,
+      reasons: external_exports.array(external_exports.string().trim().min(1).max(500)).default([]),
+      evidenceIds: external_exports.array(EvidenceIdSchema).default([]),
+      metadata: external_exports.record(external_exports.string(), external_exports.unknown()).default({})
+    }).strict();
+    TraceabilityMatrixRowSchema = external_exports.object({
+      requirementNodeId: TraceNodeIdSchema,
+      requirementLabel: external_exports.string().trim().min(1),
+      briefEvidenceIds: external_exports.array(EvidenceIdSchema).default([]),
+      apiNodeIds: external_exports.array(TraceNodeIdSchema).default([]),
+      figmaNodeIds: external_exports.array(TraceNodeIdSchema).default([]),
+      gapIds: external_exports.array(GapIdSchema).default([]),
+      status: external_exports.enum(["linked", "missing-api", "missing-figma", "missing-api-and-figma", "blocked"])
+    }).strict();
+    EvidenceGraphSchema = external_exports.object({
+      adapter: external_exports.literal("evidence-graph-v1"),
+      runId: RunIdSchema,
+      builtAt: IsoDateTimeSchema,
+      sourceDigest: Sha256DigestSchema.optional(),
+      nodes: external_exports.array(TraceNodeSchema),
+      edges: external_exports.array(TraceEdgeSchema),
+      matrix: external_exports.array(TraceabilityMatrixRowSchema),
+      orphanApiNodeIds: external_exports.array(TraceNodeIdSchema).default([]),
+      orphanFigmaNodeIds: external_exports.array(TraceNodeIdSchema).default([]),
+      gapIds: external_exports.array(GapIdSchema).default([])
+    }).strict().superRefine((graph, context) => {
+      const nodeIds = new Set(graph.nodes.map((node) => node.id));
+      for (const edge of graph.edges) {
+        if (!nodeIds.has(edge.from)) {
+          context.addIssue({
+            code: "custom",
+            message: `Edge references unknown from node ${edge.from}`,
+            path: ["edges"]
+          });
+        }
+        if (!nodeIds.has(edge.to)) {
+          context.addIssue({
+            code: "custom",
+            message: `Edge references unknown to node ${edge.to}`,
+            path: ["edges"]
+          });
+        }
+      }
+      for (const row of graph.matrix) {
+        if (!nodeIds.has(row.requirementNodeId)) {
+          context.addIssue({
+            code: "custom",
+            message: `Matrix row references unknown requirement node ${row.requirementNodeId}`,
+            path: ["matrix"]
+          });
+        }
+      }
+    });
+  }
+});
+
+// src/traceability/id-factory.ts
+import { randomUUID as randomUUID2 } from "crypto";
+function compactUuid2() {
+  return randomUUID2().replaceAll("-", "");
+}
+function createTraceNodeId() {
+  return TraceNodeIdSchema.parse(`tn_${compactUuid2()}`);
+}
+function createTraceEdgeId() {
+  return TraceEdgeIdSchema.parse(`te_${compactUuid2()}`);
+}
+var init_id_factory2 = __esm({
+  "src/traceability/id-factory.ts"() {
+    "use strict";
+    init_traceability_contracts();
+  }
+});
+
+// src/traceability/text-normalizer.ts
+function normalizeTraceText(input) {
+  return input.normalize("NFC").replace(CAMEL_CASE_BOUNDARY, "$1 $2").replace(/[_/{}()[\].:?-]+/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
+}
+function tokenizeTraceText(input) {
+  const normalized = normalizeTraceText(input);
+  if (normalized.length === 0) {
+    return [];
+  }
+  return normalized.split(" ").map((token) => token.trim()).filter((token) => token.length >= 2).filter((token) => !STOP_WORDS.has(token));
+}
+var CAMEL_CASE_BOUNDARY, STOP_WORDS;
+var init_text_normalizer = __esm({
+  "src/traceability/text-normalizer.ts"() {
+    "use strict";
+    CAMEL_CASE_BOUNDARY = /([a-z0-9])([A-Z])/g;
+    STOP_WORDS = /* @__PURE__ */ new Set([
+      "the",
+      "and",
+      "for",
+      "with",
+      "from",
+      "this",
+      "that",
+      "api",
+      "get",
+      "post",
+      "put",
+      "patch",
+      "delete",
+      "\uD574\uC57C",
+      "\uD55C\uB2E4",
+      "\uAC00\uB2A5",
+      "\uC81C\uACF5",
+      "\uAD00\uB9AC",
+      "\uD654\uBA74",
+      "\uAE30\uB2A5"
+    ]);
+  }
+});
+
+// src/traceability/keyword-extractor.ts
+function extractKeywords(input) {
+  const tokens = tokenizeTraceText(input);
+  const counted = /* @__PURE__ */ new Map();
+  for (const token of tokens) {
+    counted.set(token, (counted.get(token) ?? 0) + 1);
+  }
+  const keywords = [...counted.entries()].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0])).map(([token]) => token).slice(0, 20);
+  return {
+    keywords,
+    keywordSet: new Set(keywords)
+  };
+}
+function keywordOverlap(left, right) {
+  const leftSet = new Set(left);
+  const rightSet = new Set(right);
+  const shared = [...leftSet].filter((keyword) => rightSet.has(keyword));
+  const denominator = Math.max(1, Math.min(leftSet.size, rightSet.size));
+  const score = shared.length / denominator;
+  return {
+    count: shared.length,
+    shared,
+    score
+  };
+}
+var init_keyword_extractor = __esm({
+  "src/traceability/keyword-extractor.ts"() {
+    "use strict";
+    init_text_normalizer();
+  }
+});
+
+// src/traceability/node-builder.ts
+function buildTraceNodes(run) {
+  const requirementNodes = run.evidence.filter(isBriefRequirementEvidence).map((evidence) => createRequirementNode(evidence));
+  const apiNodes = run.evidence.filter(isOpenApiOperationEvidence).map((evidence) => createApiOperationNode(evidence));
+  const figmaNodes = run.evidence.filter(isFigmaNodeEvidence).map((evidence) => createFigmaNode(evidence));
+  const gapNodes = run.gaps.map((gap2) => createGapNode(gap2));
+  const artifactNodes = run.artifacts.filter(isTraceableArtifact).map((artifact) => createArtifactNode(artifact));
+  const allNodes = [...requirementNodes, ...apiNodes, ...figmaNodes, ...gapNodes, ...artifactNodes];
+  return {
+    requirementNodes,
+    apiNodes,
+    figmaNodes,
+    gapNodes,
+    artifactNodes,
+    allNodes
+  };
+}
+function isBriefRequirementEvidence(evidence) {
+  return evidence.metadata["adapter"] === "brief-adapter-v1" && ["requirement", "policy", "api", "design", "test"].includes(
+    String(evidence.metadata["itemType"] ?? "")
+  );
+}
+function isOpenApiOperationEvidence(evidence) {
+  return evidence.metadata["adapter"] === "openapi-intake-v1" && (evidence.metadata["openapiEvidenceKind"] === "operation" || evidence.metadata["evidenceType"] === "openapi-operation");
+}
+function isFigmaNodeEvidence(evidence) {
+  return evidence.location.type === "figma-node" && String(evidence.metadata["adapter"] ?? "").startsWith("figma");
+}
+function isTraceableArtifact(artifact) {
+  return [
+    "figma-design-inventory",
+    "figma-design-system-inventory",
+    "openapi-intake-report",
+    "figma-screenshot",
+    "figma-design-context",
+    "figma-variable-defs"
+  ].includes(artifact.kind);
+}
+function createRequirementNode(evidence) {
+  const label = evidence.summary;
+  const { keywords } = extractKeywords(
+    [
+      evidence.summary,
+      evidence.excerpt ?? "",
+      JSON.stringify(evidence.metadata["headingPath"] ?? [])
+    ].join(" ")
+  );
+  return TraceNodeSchema.parse({
+    id: createTraceNodeId(),
+    kind: "requirement",
+    label,
+    summary: evidence.excerpt ?? evidence.summary,
+    evidenceIds: [evidence.id],
+    sourceIds: [evidence.sourceId],
+    keywords,
+    metadata: compactMetadata({
+      itemType: evidence.metadata["itemType"],
+      headingPath: evidence.metadata["headingPath"]
+    })
+  });
+}
+function createApiOperationNode(evidence) {
+  const label = evidence.summary;
+  const pointer = evidence.location.type === "json-pointer" ? evidence.location.pointer : void 0;
+  const { keywords } = extractKeywords([evidence.summary, pointer ?? ""].join(" "));
+  return TraceNodeSchema.parse({
+    id: createTraceNodeId(),
+    kind: "api-operation",
+    label,
+    summary: evidence.summary,
+    evidenceIds: [evidence.id],
+    sourceIds: [evidence.sourceId],
+    keywords,
+    metadata: compactMetadata({
+      pointer,
+      method: evidence.metadata["method"],
+      path: evidence.metadata["path"],
+      operationId: evidence.metadata["operationId"]
+    })
+  });
+}
+function createFigmaNode(evidence) {
+  const label = evidence.summary;
+  const nodeId = evidence.location.type === "figma-node" ? evidence.location.nodeId : void 0;
+  const { keywords } = extractKeywords(
+    [evidence.summary, nodeId ?? "", JSON.stringify(evidence.metadata)].join(" ")
+  );
+  return TraceNodeSchema.parse({
+    id: createTraceNodeId(),
+    kind: "figma-node",
+    label,
+    summary: evidence.summary,
+    evidenceIds: [evidence.id],
+    sourceIds: [evidence.sourceId],
+    keywords,
+    metadata: evidence.location.type === "figma-node" ? {
+      fileKey: evidence.location.fileKey,
+      nodeId: evidence.location.nodeId
+    } : {}
+  });
+}
+function createGapNode(gap2) {
+  const { keywords } = extractKeywords(
+    [gap2.title, gap2.expected, gap2.observed, gap2.impact].join(" ")
+  );
+  return TraceNodeSchema.parse({
+    id: createTraceNodeId(),
+    kind: "gap",
+    label: gap2.title,
+    summary: gap2.impact,
+    evidenceIds: gap2.sourceEvidenceIds,
+    artifactIds: gap2.resolutionArtifactIds,
+    gapIds: [gap2.id],
+    keywords,
+    metadata: {
+      category: gap2.category,
+      severity: gap2.severity,
+      status: gap2.status
+    }
+  });
+}
+function createArtifactNode(artifact) {
+  const { keywords } = extractKeywords(
+    [artifact.kind, artifact.uri, JSON.stringify(artifact.metadata)].join(" ")
+  );
+  return TraceNodeSchema.parse({
+    id: createTraceNodeId(),
+    kind: "artifact",
+    label: artifact.kind,
+    summary: artifact.uri,
+    artifactIds: [artifact.id],
+    evidenceIds: artifact.evidenceIds,
+    keywords,
+    metadata: {
+      kind: artifact.kind,
+      uri: artifact.uri
+    }
+  });
+}
+function compactMetadata(metadata) {
+  return Object.fromEntries(
+    Object.entries(metadata).filter(([, value]) => value !== void 0)
+  );
+}
+var init_node_builder = __esm({
+  "src/traceability/node-builder.ts"() {
+    "use strict";
+    init_id_factory2();
+    init_keyword_extractor();
+    init_traceability_contracts();
+  }
+});
+
+// src/traceability/link-builder.ts
+function buildTraceLinks(input) {
+  const edges = [];
+  const requirementToApi = /* @__PURE__ */ new Map();
+  const requirementToFigma = /* @__PURE__ */ new Map();
+  for (const requirement of input.requirementNodes) {
+    const apiEdges = input.apiNodes.map((apiNode) => createCandidateEdge(requirement, apiNode, "matches-api")).filter((edge) => edge !== void 0).sort((left, right) => right.confidence - left.confidence).slice(0, 5);
+    const figmaEdges = input.figmaNodes.map((figmaNode) => createCandidateEdge(requirement, figmaNode, "matches-figma")).filter((edge) => edge !== void 0).sort((left, right) => right.confidence - left.confidence).slice(0, 5);
+    if (apiEdges.length > 0) {
+      requirementToApi.set(requirement.id, apiEdges);
+      edges.push(...apiEdges);
+    }
+    if (figmaEdges.length > 0) {
+      requirementToFigma.set(requirement.id, figmaEdges);
+      edges.push(...figmaEdges);
+    }
+  }
+  for (const requirement of input.requirementNodes) {
+    for (const gapNode of input.gapNodes) {
+      const sharedEvidence = requirement.evidenceIds.filter(
+        (evidenceId) => gapNode.evidenceIds.includes(evidenceId)
+      );
+      if (sharedEvidence.length === 0) {
+        continue;
+      }
+      edges.push(
+        TraceEdgeSchema.parse({
+          id: createTraceEdgeId(),
+          kind: "blocked-by-gap",
+          from: requirement.id,
+          to: gapNode.id,
+          confidence: 1,
+          reasons: ["shared evidence with gap"],
+          evidenceIds: sharedEvidence
+        })
+      );
+    }
+  }
+  for (const artifact of input.artifactNodes) {
+    for (const requirement of input.requirementNodes) {
+      const sharedEvidence = artifact.evidenceIds.filter(
+        (evidenceId) => requirement.evidenceIds.includes(evidenceId)
+      );
+      if (sharedEvidence.length === 0) {
+        continue;
+      }
+      edges.push(
+        TraceEdgeSchema.parse({
+          id: createTraceEdgeId(),
+          kind: "supported-by-artifact",
+          from: requirement.id,
+          to: artifact.id,
+          confidence: 1,
+          reasons: ["artifact references requirement evidence"],
+          evidenceIds: sharedEvidence
+        })
+      );
+    }
+  }
+  return {
+    edges,
+    requirementToApi,
+    requirementToFigma
+  };
+}
+function createCandidateEdge(requirement, target, kind) {
+  const overlap = keywordOverlap(requirement.keywords, target.keywords);
+  if (overlap.score < 0.25 || overlap.count === 0) {
+    return void 0;
+  }
+  const confidence = Math.min(0.95, 0.35 + overlap.score * 0.6);
+  return TraceEdgeSchema.parse({
+    id: createTraceEdgeId(),
+    kind,
+    from: requirement.id,
+    to: target.id,
+    confidence,
+    reasons: [
+      `shared keywords: ${overlap.shared.join(", ")}`,
+      `keyword overlap score: ${overlap.score.toFixed(2)}`
+    ],
+    evidenceIds: requirement.evidenceIds,
+    metadata: {
+      sharedKeywords: overlap.shared
+    }
+  });
+}
+var init_link_builder = __esm({
+  "src/traceability/link-builder.ts"() {
+    "use strict";
+    init_id_factory2();
+    init_keyword_extractor();
+    init_traceability_contracts();
+  }
+});
+
+// src/traceability/traceability-gap-detector.ts
+function detectTraceabilityGaps(input) {
+  const apiByRequirement = /* @__PURE__ */ new Map();
+  const figmaByRequirement = /* @__PURE__ */ new Map();
+  const blockedByRequirement = /* @__PURE__ */ new Map();
+  for (const edge of input.edges) {
+    if (edge.kind === "matches-api") {
+      append(apiByRequirement, edge.from, edge.to);
+    }
+    if (edge.kind === "matches-figma") {
+      append(figmaByRequirement, edge.from, edge.to);
+    }
+    if (edge.kind === "blocked-by-gap") {
+      append(blockedByRequirement, edge.from, edge.to);
+    }
+  }
+  const gaps = [];
+  const matrix = [];
+  for (const requirement of input.requirementNodes) {
+    const apiNodeIds = apiByRequirement.get(requirement.id) ?? [];
+    const figmaNodeIds = figmaByRequirement.get(requirement.id) ?? [];
+    const blockedNodeIds = blockedByRequirement.get(requirement.id) ?? [];
+    const missingApi = apiNodeIds.length === 0;
+    const missingFigma = figmaNodeIds.length === 0;
+    const gapIds = [...requirement.gapIds];
+    if (missingApi) {
+      const gap2 = GapSchema.parse({
+        id: createGapId(),
+        category: "api",
+        severity: "major",
+        status: "open",
+        title: `Requirement has no linked API evidence: ${requirement.label}`,
+        expected: "Every implementation-facing requirement should be linked to API evidence or explicitly marked as non-API.",
+        observed: "No API operation candidate was linked by the deterministic traceability builder.",
+        impact: "API Agent may not know which backend contract supports this requirement.",
+        sourceEvidenceIds: requirement.evidenceIds,
+        owner: "api-contract",
+        createdAt: input.now,
+        updatedAt: input.now
+      });
+      gaps.push(gap2);
+      gapIds.push(gap2.id);
+    }
+    if (missingFigma) {
+      const gap2 = GapSchema.parse({
+        id: createGapId(),
+        category: "design",
+        severity: "major",
+        status: "open",
+        title: `Requirement has no linked Figma evidence: ${requirement.label}`,
+        expected: "Every user-facing requirement should be linked to Figma evidence or explicitly marked as non-visual.",
+        observed: "No Figma node candidate was linked by the deterministic traceability builder.",
+        impact: "UI Agent may need to guess layout, component, state, or token decisions.",
+        sourceEvidenceIds: requirement.evidenceIds,
+        owner: "design-ui",
+        createdAt: input.now,
+        updatedAt: input.now
+      });
+      gaps.push(gap2);
+      gapIds.push(gap2.id);
+    }
+    const status = computeRowStatus({
+      missingApi,
+      missingFigma,
+      blocked: blockedNodeIds.length > 0
+    });
+    matrix.push(
+      TraceabilityMatrixRowSchema.parse({
+        requirementNodeId: requirement.id,
+        requirementLabel: requirement.label,
+        briefEvidenceIds: requirement.evidenceIds,
+        apiNodeIds,
+        figmaNodeIds,
+        gapIds,
+        status
+      })
+    );
+  }
+  const linkedApiNodeIds = new Set([...apiByRequirement.values()].flat());
+  const linkedFigmaNodeIds = new Set([...figmaByRequirement.values()].flat());
+  return {
+    matrix,
+    gaps,
+    orphanApiNodeIds: input.apiNodes.filter((node) => !linkedApiNodeIds.has(node.id)).map((node) => node.id),
+    orphanFigmaNodeIds: input.figmaNodes.filter((node) => !linkedFigmaNodeIds.has(node.id)).map((node) => node.id)
+  };
+}
+function append(map2, key, value) {
+  const existing = map2.get(key) ?? [];
+  existing.push(value);
+  map2.set(key, existing);
+}
+function computeRowStatus(input) {
+  if (input.blocked) {
+    return "blocked";
+  }
+  if (input.missingApi && input.missingFigma) {
+    return "missing-api-and-figma";
+  }
+  if (input.missingApi) {
+    return "missing-api";
+  }
+  if (input.missingFigma) {
+    return "missing-figma";
+  }
+  return "linked";
+}
+var init_traceability_gap_detector = __esm({
+  "src/traceability/traceability-gap-detector.ts"() {
+    "use strict";
+    init_id_factory();
+    init_gap();
+    init_traceability_contracts();
+  }
+});
+
+// src/traceability/index.ts
+var init_traceability = __esm({
+  "src/traceability/index.ts"() {
+    "use strict";
+    init_traceability_contracts();
+    init_id_factory2();
+    init_text_normalizer();
+    init_keyword_extractor();
+    init_node_builder();
+    init_link_builder();
+    init_traceability_gap_detector();
+  }
+});
+
+// src/application/evidence-graph-service.ts
+var BuildEvidenceGraphInputSchema, GetTraceabilityMatrixInputSchema, EvidenceGraphBuildResultSchema, EVIDENCE_GRAPH_ADAPTER, EvidenceGraphService;
+var init_evidence_graph_service = __esm({
+  "src/application/evidence-graph-service.ts"() {
+    "use strict";
+    init_zod();
+    init_artifact_blob_store();
+    init_run2();
+    init_artifact();
+    init_id_factory();
+    init_ids();
+    init_traceability();
+    BuildEvidenceGraphInputSchema = external_exports.object({
+      runId: RunIdSchema
+    }).strict();
+    GetTraceabilityMatrixInputSchema = external_exports.object({
+      runId: RunIdSchema
+    }).strict();
+    EvidenceGraphBuildResultSchema = external_exports.object({
+      duplicate: external_exports.boolean(),
+      runId: RunIdSchema,
+      graphArtifactId: external_exports.string().optional(),
+      matrixArtifactId: external_exports.string().optional(),
+      requirementCount: external_exports.number().int().nonnegative(),
+      apiNodeCount: external_exports.number().int().nonnegative(),
+      figmaNodeCount: external_exports.number().int().nonnegative(),
+      edgeCount: external_exports.number().int().nonnegative(),
+      gapsAdded: external_exports.number().int().nonnegative(),
+      orphanApiCount: external_exports.number().int().nonnegative(),
+      orphanFigmaCount: external_exports.number().int().nonnegative()
+    }).strict();
+    EVIDENCE_GRAPH_ADAPTER = "evidence-graph-v1";
+    EvidenceGraphService = class {
+      constructor(runStore, artifactStore, now = () => (/* @__PURE__ */ new Date()).toISOString()) {
+        this.runStore = runStore;
+        this.artifactStore = artifactStore;
+        this.now = now;
+      }
+      runStore;
+      artifactStore;
+      now;
+      async buildEvidenceGraph(rawInput) {
+        const input = BuildEvidenceGraphInputSchema.parse(rawInput);
+        const run = await this.runStore.get(input.runId);
+        const timestamp = this.now();
+        const existingGraph = run.artifacts.find(
+          (artifact) => artifact.kind === "traceability-graph" && artifact.metadata["adapter"] === EVIDENCE_GRAPH_ADAPTER && artifact.metadata["runRevision"] === run.revision
+        );
+        if (existingGraph !== void 0) {
+          const matrixArtifact2 = run.artifacts.find(
+            (artifact) => artifact.kind === "traceability-matrix" && artifact.metadata["adapter"] === EVIDENCE_GRAPH_ADAPTER && artifact.metadata["runRevision"] === run.revision
+          );
+          return EvidenceGraphBuildResultSchema.parse({
+            duplicate: true,
+            runId: run.id,
+            graphArtifactId: existingGraph.id,
+            ...matrixArtifact2 === void 0 ? {} : { matrixArtifactId: matrixArtifact2.id },
+            requirementCount: Number(existingGraph.metadata["requirementCount"] ?? 0),
+            apiNodeCount: Number(existingGraph.metadata["apiNodeCount"] ?? 0),
+            figmaNodeCount: Number(existingGraph.metadata["figmaNodeCount"] ?? 0),
+            edgeCount: Number(existingGraph.metadata["edgeCount"] ?? 0),
+            gapsAdded: 0,
+            orphanApiCount: Number(existingGraph.metadata["orphanApiCount"] ?? 0),
+            orphanFigmaCount: Number(existingGraph.metadata["orphanFigmaCount"] ?? 0)
+          });
+        }
+        const nodes = buildTraceNodes(run);
+        const links = buildTraceLinks(nodes);
+        const gaps = detectTraceabilityGaps({
+          requirementNodes: nodes.requirementNodes,
+          apiNodes: nodes.apiNodes,
+          figmaNodes: nodes.figmaNodes,
+          edges: links.edges,
+          now: timestamp
+        });
+        const graph = EvidenceGraphSchema.parse({
+          adapter: EVIDENCE_GRAPH_ADAPTER,
+          runId: run.id,
+          builtAt: timestamp,
+          nodes: nodes.allNodes,
+          edges: links.edges,
+          matrix: gaps.matrix,
+          orphanApiNodeIds: gaps.orphanApiNodeIds,
+          orphanFigmaNodeIds: gaps.orphanFigmaNodeIds,
+          gapIds: gaps.gaps.map((gap2) => gap2.id)
+        });
+        const graphBlob = await this.artifactStore.writeBlob({
+          content: Buffer.from(`${JSON.stringify(graph, null, 2)}
+`, "utf8"),
+          mediaType: "application/json",
+          storedAt: timestamp,
+          label: "traceability-graph"
+        });
+        const matrixBlob = await this.artifactStore.writeBlob({
+          content: Buffer.from(`${JSON.stringify(graph.matrix, null, 2)}
+`, "utf8"),
+          mediaType: "application/json",
+          storedAt: timestamp,
+          label: "traceability-matrix"
+        });
+        const graphArtifact = ArtifactRefSchema.parse({
+          id: createArtifactId(),
+          kind: "traceability-graph",
+          uri: graphBlob.uri,
+          mediaType: "application/json",
+          digest: graphBlob.digest,
+          producedBy: "orchestrator",
+          evidenceIds: [...new Set(nodes.allNodes.flatMap((node) => node.evidenceIds))],
+          createdAt: timestamp,
+          metadata: {
+            adapter: EVIDENCE_GRAPH_ADAPTER,
+            runRevision: run.revision,
+            requirementCount: nodes.requirementNodes.length,
+            apiNodeCount: nodes.apiNodes.length,
+            figmaNodeCount: nodes.figmaNodes.length,
+            edgeCount: links.edges.length,
+            orphanApiCount: gaps.orphanApiNodeIds.length,
+            orphanFigmaCount: gaps.orphanFigmaNodeIds.length
+          }
+        });
+        const matrixArtifact = ArtifactRefSchema.parse({
+          id: createArtifactId(),
+          kind: "traceability-matrix",
+          uri: matrixBlob.uri,
+          mediaType: "application/json",
+          digest: matrixBlob.digest,
+          producedBy: "orchestrator",
+          evidenceIds: [...new Set(nodes.requirementNodes.flatMap((node) => node.evidenceIds))],
+          createdAt: timestamp,
+          metadata: {
+            adapter: EVIDENCE_GRAPH_ADAPTER,
+            runRevision: run.revision,
+            rowCount: graph.matrix.length
+          }
+        });
+        const nextRun = RunManifestSchema.parse({
+          ...run,
+          revision: run.revision + 1,
+          updatedAt: timestamp,
+          gaps: [...run.gaps, ...gaps.gaps],
+          artifacts: [...run.artifacts, graphArtifact, matrixArtifact]
+        });
+        await this.runStore.save(nextRun, run.revision);
+        return EvidenceGraphBuildResultSchema.parse({
+          duplicate: false,
+          runId: run.id,
+          graphArtifactId: graphArtifact.id,
+          matrixArtifactId: matrixArtifact.id,
+          requirementCount: nodes.requirementNodes.length,
+          apiNodeCount: nodes.apiNodes.length,
+          figmaNodeCount: nodes.figmaNodes.length,
+          edgeCount: links.edges.length,
+          gapsAdded: gaps.gaps.length,
+          orphanApiCount: gaps.orphanApiNodeIds.length,
+          orphanFigmaCount: gaps.orphanFigmaNodeIds.length
+        });
+      }
+      async getTraceabilityMatrix(rawInput) {
+        const input = GetTraceabilityMatrixInputSchema.parse(rawInput);
+        const run = await this.runStore.get(input.runId);
+        const matrixArtifact = [...run.artifacts].reverse().find((artifact) => artifact.kind === "traceability-matrix");
+        if (matrixArtifact === void 0) {
+          throw new Error(`Traceability matrix artifact not found for run ${run.id}`);
+        }
+        const matrixBlob = await this.artifactStore.readContent(matrixArtifact.digest);
+        return JSON.parse(matrixBlob.toString("utf8"));
+      }
+    };
+  }
+});
+
 // src/figma/figma-capability.ts
 function normalizeFigmaToolName(rawName) {
   const lower = rawName.toLowerCase();
@@ -35079,7 +35826,7 @@ function metadataString(artifact, key) {
   const value = artifact.metadata[key];
   return typeof value === "string" ? value : void 0;
 }
-function compactMetadata(metadata) {
+function compactMetadata2(metadata) {
   return Object.fromEntries(
     Object.entries(metadata).filter(([, value]) => value !== void 0)
   );
@@ -35307,7 +36054,7 @@ ${designText}`));
           producedBy: "evidence-verifier",
           evidenceIds: [],
           createdAt: input.timestamp,
-          metadata: compactMetadata(input.metadata)
+          metadata: compactMetadata2(input.metadata)
         });
       }
     };
@@ -38003,11 +38750,11 @@ var init_profile_service = __esm({
 });
 
 // src/application/run-service.ts
-import { randomUUID as randomUUID2 } from "crypto";
+import { randomUUID as randomUUID3 } from "crypto";
 import { realpath as realpath3, stat as stat3 } from "fs/promises";
 import path7 from "path";
 function createRunId() {
-  return RunIdSchema.parse(`run_${randomUUID2().replaceAll("-", "")}`);
+  return RunIdSchema.parse(`run_${randomUUID3().replaceAll("-", "")}`);
 }
 async function canonicalDirectory(rawPath) {
   const absolute = path7.resolve(rawPath);
@@ -38456,7 +39203,7 @@ var init_errors4 = __esm({
 });
 
 // src/state/stage-machine.ts
-import { randomUUID as randomUUID3 } from "crypto";
+import { randomUUID as randomUUID4 } from "crypto";
 function startStage(run, command, now) {
   const stage = findStage(run, command.stageName);
   const nowIso = now();
@@ -38665,7 +39412,7 @@ function mergeUnique(left, right) {
   return [.../* @__PURE__ */ new Set([...left, ...right])];
 }
 function createLeaseId() {
-  return LeaseIdSchema.parse(`lease_${randomUUID3().replaceAll("-", "")}`);
+  return LeaseIdSchema.parse(`lease_${randomUUID4().replaceAll("-", "")}`);
 }
 var DEFAULT_LEASE_TTL_MS, ALLOWED_TRANSITIONS;
 var init_stage_machine = __esm({
@@ -39243,6 +39990,50 @@ function createKernelServer(servicesProvider) {
     })
   );
   server.registerTool(
+    "build_evidence_graph",
+    {
+      title: "Build evidence graph",
+      description: "Build a traceability graph that links brief requirements, OpenAPI operations, Figma evidence, artifacts, and gaps.",
+      inputSchema: BuildEvidenceGraphInputSchema.shape,
+      outputSchema: EvidenceGraphBuildResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { evidenceGraphService } = await servicesProvider();
+      const structuredContent = await evidenceGraphService.buildEvidenceGraph(input);
+      return {
+        text: structuredContent.duplicate ? `Evidence graph already exists for current run revision ${structuredContent.runId}.` : `Built evidence graph for run ${structuredContent.runId}: ${structuredContent.requirementCount} requirements, ${structuredContent.edgeCount} edges.`,
+        structuredContent
+      };
+    })
+  );
+  server.registerTool(
+    "get_traceability_matrix",
+    {
+      title: "Get traceability matrix",
+      description: "Return the latest traceability matrix for a Run.",
+      inputSchema: GetTraceabilityMatrixInputSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { evidenceGraphService } = await servicesProvider();
+      const matrix = await evidenceGraphService.getTraceabilityMatrix(input);
+      return {
+        text: "Loaded traceability matrix.",
+        structuredContent: {
+          matrix
+        }
+      };
+    })
+  );
+  server.registerTool(
     "record_figma_mcp_capabilities",
     {
       title: "Record Figma MCP capabilities",
@@ -39670,6 +40461,7 @@ var init_create_server = __esm({
     init_mcp();
     init_zod();
     init_brief_adapter_service();
+    init_evidence_graph_service();
     init_figma_capability_service();
     init_figma_design_inventory_service();
     init_figma_intake_service();
@@ -39748,6 +40540,8 @@ var init_create_server = __esm({
       "get_source_snapshot",
       "analyze_brief_source",
       "analyze_openapi_source",
+      "build_evidence_graph",
+      "get_traceability_matrix",
       "record_figma_mcp_capabilities",
       "get_figma_provider_policy",
       "register_figma_source",
@@ -40102,6 +40896,7 @@ function createLazyServicesProvider() {
       ),
       sourceRegistryService: new SourceRegistryService(store, snapshotStore),
       briefAdapterService: new BriefAdapterService(store, snapshotStore),
+      evidenceGraphService: new EvidenceGraphService(store, artifactStore),
       figmaCapabilityService: new FigmaCapabilityService(store, artifactStore),
       figmaDesignInventoryService: new FigmaDesignInventoryService(store, artifactStore),
       figmaIntakeService: new FigmaIntakeService(store, artifactStore),
@@ -40119,6 +40914,7 @@ var init_run_service_provider = __esm({
     init_package();
     init_artifact_blob_store();
     init_brief_adapter_service();
+    init_evidence_graph_service();
     init_figma_capability_service();
     init_figma_design_inventory_service();
     init_figma_intake_service();

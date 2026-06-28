@@ -4,6 +4,11 @@ import { z } from "zod";
 
 import { AnalyzeBriefSourceInputSchema } from "../application/brief-adapter-service.js";
 import {
+  BuildEvidenceGraphInputSchema,
+  EvidenceGraphBuildResultSchema,
+  GetTraceabilityMatrixInputSchema,
+} from "../application/evidence-graph-service.js";
+import {
   GetFigmaProviderPolicyInputSchema,
   RecordFigmaMcpCapabilitiesInputSchema,
 } from "../application/figma-capability-service.js";
@@ -126,6 +131,8 @@ const TOOL_NAMES = [
   "get_source_snapshot",
   "analyze_brief_source",
   "analyze_openapi_source",
+  "build_evidence_graph",
+  "get_traceability_matrix",
   "record_figma_mcp_capabilities",
   "get_figma_provider_policy",
   "register_figma_source",
@@ -514,6 +521,59 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
             ? `OpenAPI source ${structuredContent.sourceId} was already analyzed.`
             : `Analyzed OpenAPI source ${structuredContent.sourceId}: ${structuredContent.operationCount} operations, ${structuredContent.schemaCount} schemas, ${structuredContent.gapsAdded} gaps.`,
           structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "build_evidence_graph",
+    {
+      title: "Build evidence graph",
+      description:
+        "Build a traceability graph that links brief requirements, OpenAPI operations, Figma evidence, artifacts, and gaps.",
+      inputSchema: BuildEvidenceGraphInputSchema.shape,
+      outputSchema: EvidenceGraphBuildResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { evidenceGraphService } = await servicesProvider();
+        const structuredContent = await evidenceGraphService.buildEvidenceGraph(input);
+
+        return {
+          text: structuredContent.duplicate
+            ? `Evidence graph already exists for current run revision ${structuredContent.runId}.`
+            : `Built evidence graph for run ${structuredContent.runId}: ${structuredContent.requirementCount} requirements, ${structuredContent.edgeCount} edges.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "get_traceability_matrix",
+    {
+      title: "Get traceability matrix",
+      description: "Return the latest traceability matrix for a Run.",
+      inputSchema: GetTraceabilityMatrixInputSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { evidenceGraphService } = await servicesProvider();
+        const matrix = await evidenceGraphService.getTraceabilityMatrix(input);
+
+        return {
+          text: "Loaded traceability matrix.",
+          structuredContent: {
+            matrix,
+          },
         };
       }),
   );
