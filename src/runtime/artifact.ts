@@ -44,6 +44,9 @@ export const ArtifactKindSchema = z.enum([
   "agent-context-pack",
   "agent-result-report",
   "pr-report",
+  "openspec-archive-plan",
+  "openspec-archive-result",
+  "openspec-archive-report",
   "log",
   "other",
 ]);
