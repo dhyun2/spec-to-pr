@@ -7,6 +7,7 @@ import { BriefAdapterService } from "../application/brief-adapter-service.js";
 import { FigmaCapabilityService } from "../application/figma-capability-service.js";
 import { FigmaDesignInventoryService } from "../application/figma-design-inventory-service.js";
 import { FigmaIntakeService } from "../application/figma-intake-service.js";
+import { OpenApiIntakeService } from "../application/openapi-intake-service.js";
 import { PolicyService } from "../application/policy-service.js";
 import { ProjectProfileService } from "../application/profile-service.js";
 import { RunService } from "../application/run-service.js";
@@ -26,6 +27,7 @@ export type Services = {
   figmaCapabilityService: FigmaCapabilityService;
   figmaDesignInventoryService: FigmaDesignInventoryService;
   figmaIntakeService: FigmaIntakeService;
+  openApiIntakeService: OpenApiIntakeService;
 };
 
 export type ServicesProvider = () => Promise<Services>;
@@ -59,6 +61,7 @@ export function createLazyServicesProvider(): ServicesProvider {
       figmaCapabilityService: new FigmaCapabilityService(store, artifactStore),
       figmaDesignInventoryService: new FigmaDesignInventoryService(store, artifactStore),
       figmaIntakeService: new FigmaIntakeService(store, artifactStore),
+      openApiIntakeService: new OpenApiIntakeService(store, snapshotStore, artifactStore),
     };
 
     return services;

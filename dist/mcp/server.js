@@ -66,6 +66,7 @@ var init_package = __esm({
       },
       dependencies: {
         "@modelcontextprotocol/sdk": "1.29.0",
+        yaml: "^2.9.0",
         zod: "^4.0.0"
       },
       devDependencies: {
@@ -24841,15 +24842,15 @@ var require_util = __commonJS({
     }
     exports.unescapeFragment = unescapeFragment;
     function escapeFragment(str) {
-      return encodeURIComponent(escapeJsonPointer(str));
+      return encodeURIComponent(escapeJsonPointer2(str));
     }
     exports.escapeFragment = escapeFragment;
-    function escapeJsonPointer(str) {
+    function escapeJsonPointer2(str) {
       if (typeof str == "number")
         return `${str}`;
       return str.replace(/~/g, "~0").replace(/\//g, "~1");
     }
-    exports.escapeJsonPointer = escapeJsonPointer;
+    exports.escapeJsonPointer = escapeJsonPointer2;
     function unescapeJsonPointer(str) {
       return str.replace(/~1/g, "/").replace(/~0/g, "~");
     }
@@ -24923,7 +24924,7 @@ var require_util = __commonJS({
         const isNumber = dataPropType === Type.Num;
         return jsPropertySyntax ? isNumber ? (0, codegen_1._)`"[" + ${dataProp} + "]"` : (0, codegen_1._)`"['" + ${dataProp} + "']"` : isNumber ? (0, codegen_1._)`"/" + ${dataProp}` : (0, codegen_1._)`"/" + ${dataProp}.replace(/~/g, "~0").replace(/\\//g, "~1")`;
       }
-      return jsPropertySyntax ? (0, codegen_1.getProperty)(dataProp).toString() : "/" + escapeJsonPointer(dataProp);
+      return jsPropertySyntax ? (0, codegen_1.getProperty)(dataProp).toString() : "/" + escapeJsonPointer2(dataProp);
     }
     exports.getErrorPath = getErrorPath;
     function checkStrictMode(it, msg, mode = it.opts.strictSchema) {
@@ -25913,7 +25914,7 @@ var require_resolve = __commonJS({
       if (typeof schema == "boolean")
         return true;
       if (limit === true)
-        return !hasRef(schema);
+        return !hasRef2(schema);
       if (!limit)
         return false;
       return countKeys(schema) <= limit;
@@ -25926,14 +25927,14 @@ var require_resolve = __commonJS({
       "$dynamicRef",
       "$dynamicAnchor"
     ]);
-    function hasRef(schema) {
+    function hasRef2(schema) {
       for (const key in schema) {
         if (REF_KEYWORDS.has(key))
           return true;
         const sch = schema[key];
-        if (Array.isArray(sch) && sch.some(hasRef))
+        if (Array.isArray(sch) && sch.some(hasRef2))
           return true;
-        if (typeof sch == "object" && hasRef(sch))
+        if (typeof sch == "object" && hasRef2(sch))
           return true;
       }
       return false;
@@ -33336,6 +33337,12 @@ var init_artifact = __esm({
       "figma-code-connect-map",
       "figma-design-inventory",
       "figma-provider-comparison",
+      "openapi-normalized-document",
+      "openapi-operation-inventory",
+      "openapi-schema-inventory",
+      "openapi-security-inventory",
+      "openapi-ref-inventory",
+      "openapi-intake-report",
       "requirement-graph",
       "openspec",
       "gherkin",
@@ -33537,51 +33544,52 @@ var init_gap = __esm({
       assumption: GapAssumptionSchema.optional(),
       waiver: GapWaiverSchema.optional(),
       createdAt: IsoDateTimeSchema,
-      updatedAt: IsoDateTimeSchema
-    }).strict().superRefine((gap, context) => {
-      if (Date.parse(gap.updatedAt) < Date.parse(gap.createdAt)) {
+      updatedAt: IsoDateTimeSchema,
+      metadata: external_exports.record(external_exports.string(), external_exports.unknown()).default({})
+    }).strict().superRefine((gap2, context) => {
+      if (Date.parse(gap2.updatedAt) < Date.parse(gap2.createdAt)) {
         context.addIssue({
           code: "custom",
           message: "updatedAt must be after createdAt",
           path: ["updatedAt"]
         });
       }
-      if (gap.status === "assumed" && gap.assumption === void 0) {
+      if (gap2.status === "assumed" && gap2.assumption === void 0) {
         context.addIssue({
           code: "custom",
           message: "An assumed gap requires assumption",
           path: ["assumption"]
         });
       }
-      if (gap.status !== "assumed" && gap.assumption !== void 0) {
+      if (gap2.status !== "assumed" && gap2.assumption !== void 0) {
         context.addIssue({
           code: "custom",
           message: "Only assumed gaps may include assumption",
           path: ["assumption"]
         });
       }
-      if (gap.status === "waived" && gap.waiver === void 0) {
+      if (gap2.status === "waived" && gap2.waiver === void 0) {
         context.addIssue({
           code: "custom",
           message: "A waived gap requires waiver",
           path: ["waiver"]
         });
       }
-      if (gap.status !== "waived" && gap.waiver !== void 0) {
+      if (gap2.status !== "waived" && gap2.waiver !== void 0) {
         context.addIssue({
           code: "custom",
           message: "Only waived gaps may include waiver",
           path: ["waiver"]
         });
       }
-      if (gap.status === "resolved" && gap.resolutionArtifactIds.length === 0) {
+      if (gap2.status === "resolved" && gap2.resolutionArtifactIds.length === 0) {
         context.addIssue({
           code: "custom",
           message: "A resolved gap requires at least one resolution artifact",
           path: ["resolutionArtifactIds"]
         });
       }
-      if (gap.status !== "resolved" && gap.resolutionArtifactIds.length > 0) {
+      if (gap2.status !== "resolved" && gap2.resolutionArtifactIds.length > 0) {
         context.addIssue({
           code: "custom",
           message: "Only resolved gaps may include resolutionArtifactIds",
@@ -33846,7 +33854,7 @@ var init_run = __esm({
       );
       addUniqueValueIssues(
         "gaps",
-        run.gaps.map((gap) => gap.id),
+        run.gaps.map((gap2) => gap2.id),
         context
       );
       addUniqueValueIssues(
@@ -33869,7 +33877,7 @@ var init_run = __esm({
       const sourceIds = new Set(run.sources.map((source) => source.id));
       const evidenceIds = new Set(run.evidence.map((evidence) => evidence.id));
       const artifactIds = new Set(run.artifacts.map((artifact) => artifact.id));
-      const gapIds = new Set(run.gaps.map((gap) => gap.id));
+      const gapIds = new Set(run.gaps.map((gap2) => gap2.id));
       run.evidence.forEach((evidence, evidenceIndex) => {
         if (!sourceIds.has(evidence.sourceId)) {
           addReferenceIssue(context, ["evidence", evidenceIndex, "sourceId"], {
@@ -33888,8 +33896,8 @@ var init_run = __esm({
           }
         });
       });
-      run.gaps.forEach((gap, gapIndex) => {
-        gap.sourceEvidenceIds.forEach((evidenceId, evidenceIndex) => {
+      run.gaps.forEach((gap2, gapIndex) => {
+        gap2.sourceEvidenceIds.forEach((evidenceId, evidenceIndex) => {
           if (!evidenceIds.has(evidenceId)) {
             addReferenceIssue(context, ["gaps", gapIndex, "sourceEvidenceIds", evidenceIndex], {
               kind: "evidence",
@@ -33897,7 +33905,7 @@ var init_run = __esm({
             });
           }
         });
-        gap.resolutionArtifactIds.forEach((artifactId, artifactIndex) => {
+        gap2.resolutionArtifactIds.forEach((artifactId, artifactIndex) => {
           if (!artifactIds.has(artifactId)) {
             addReferenceIssue(context, ["gaps", gapIndex, "resolutionArtifactIds", artifactIndex], {
               kind: "artifact",
@@ -34087,7 +34095,7 @@ function existingEvidenceItem(evidence, gaps) {
     summary: evidence.summary,
     headingPath,
     flags,
-    gapIds: gaps.filter((gap) => gap.sourceEvidenceIds.includes(evidence.id)).map((gap) => gap.id)
+    gapIds: gaps.filter((gap2) => gap2.sourceEvidenceIds.includes(evidence.id)).map((gap2) => gap2.id)
   };
 }
 function countBriefSections(evidence) {
@@ -34259,13 +34267,13 @@ var init_brief_adapter_service = __esm({
             itemType: "note",
             flags: []
           });
-          const gap = createUnsupportedGap({
+          const gap2 = createUnsupportedGap({
             evidence,
             block: unsupportedBlock,
             timestamp
           });
           evidenceToAdd.push(evidence);
-          gapsToAdd.push(gap);
+          gapsToAdd.push(gap2);
           items.push({
             evidenceId: evidence.id,
             itemType: "note",
@@ -34274,7 +34282,7 @@ var init_brief_adapter_service = __esm({
             summary: evidence.summary,
             headingPath: [],
             flags: [],
-            gapIds: [gap.id]
+            gapIds: [gap2.id]
           });
         }
         const candidates = isUnsupportedDocument(document) ? [] : classifyBriefBlocks(document.blocks);
@@ -34297,7 +34305,7 @@ var init_brief_adapter_service = __esm({
           evidenceToAdd.push(evidence);
           const gapIds = [];
           if (candidate.flags.includes("ambiguous")) {
-            const gap = GapSchema.parse({
+            const gap2 = GapSchema.parse({
               id: createGapId(),
               category: "requirement",
               severity: candidate.itemType === "requirement" ? "major" : "minor",
@@ -34311,11 +34319,11 @@ var init_brief_adapter_service = __esm({
               createdAt: timestamp,
               updatedAt: timestamp
             });
-            gapsToAdd.push(gap);
-            gapIds.push(gap.id);
+            gapsToAdd.push(gap2);
+            gapIds.push(gap2.id);
           }
           if (candidate.flags.includes("prompt-injection-like")) {
-            const gap = GapSchema.parse({
+            const gap2 = GapSchema.parse({
               id: createGapId(),
               category: "security",
               severity: "blocker",
@@ -34329,8 +34337,8 @@ var init_brief_adapter_service = __esm({
               createdAt: timestamp,
               updatedAt: timestamp
             });
-            gapsToAdd.push(gap);
-            gapIds.push(gap.id);
+            gapsToAdd.push(gap2);
+            gapIds.push(gap2.id);
           }
           items.push({
             evidenceId: evidence.id,
@@ -34722,7 +34730,7 @@ var init_figma_capability_service = __esm({
         const finalReport = FigmaCapabilityReportSchema.parse({
           ...reportWithoutIds,
           artifactId: artifact.id,
-          gapIds: gaps.map((gap) => gap.id)
+          gapIds: gaps.map((gap2) => gap2.id)
         });
         const finalReportContent = Buffer.from(`${JSON.stringify(finalReport, null, 2)}
 `, "utf8");
@@ -35128,7 +35136,7 @@ var init_figma_design_inventory_service = __esm({
               rawArtifactSetDigest,
               inventory2.generatedAt
             ),
-            gaps: run.gaps.filter((gap) => inventory2.gapIds.includes(gap.id))
+            gaps: run.gaps.filter((gap2) => inventory2.gapIds.includes(gap2.id))
           };
         }
         const metadataArtifacts = figmaArtifacts.filter(
@@ -35213,7 +35221,7 @@ ${designText}`));
           tokens,
           assets,
           providerComparison,
-          gapIds: gaps.map((gap) => gap.id)
+          gapIds: gaps.map((gap2) => gap2.id)
         });
         const inventoryArtifact = await this.writeJsonArtifact({
           kind: "figma-design-inventory",
@@ -35275,7 +35283,7 @@ ${designText}`));
             metadataString(latest, "rawArtifactSetDigest"),
             inventory.generatedAt
           ),
-          gaps: run.gaps.filter((gap) => inventory.gapIds.includes(gap.id))
+          gaps: run.gaps.filter((gap2) => inventory.gapIds.includes(gap2.id))
         };
       }
       async readInventory(artifact) {
@@ -35643,6 +35651,867 @@ var init_figma_intake_service = __esm({
           artifactId: artifact.id,
           artifactDigest: artifact.digest,
           kind: input.kind
+        });
+      }
+    };
+  }
+});
+
+// src/openapi/openapi-parser.ts
+import { parse as parseYaml } from "yaml";
+function parseOpenApiDocument(input) {
+  const text = input.content.toString("utf8");
+  const format = detectOpenApiFormat({
+    text,
+    ...input.path === void 0 ? {} : { path: input.path },
+    ...input.mediaType === void 0 ? {} : { mediaType: input.mediaType }
+  });
+  const parsed = format === "json" ? JSON.parse(text) : parseYaml(text);
+  if (!isRecord(parsed)) {
+    throw new Error("OpenAPI document must parse to an object");
+  }
+  const version2 = typeof parsed["openapi"] === "string" ? parsed["openapi"] : typeof parsed["swagger"] === "string" ? parsed["swagger"] : void 0;
+  return ParsedOpenApiDocumentSchema.parse({
+    format,
+    versionKind: detectVersionKind(parsed),
+    ...version2 === void 0 ? {} : { version: version2 },
+    document: parsed
+  });
+}
+function detectOpenApiFormat(input) {
+  const mediaType = input.mediaType?.toLowerCase();
+  const filePath = input.path?.toLowerCase();
+  if (mediaType === "application/json" || filePath?.endsWith(".json")) {
+    return "json";
+  }
+  if (mediaType === "application/yaml" || mediaType === "application/x-yaml" || filePath?.endsWith(".yaml") || filePath?.endsWith(".yml")) {
+    return "yaml";
+  }
+  const trimmed = input.text.trimStart();
+  if (trimmed.startsWith("{")) {
+    return "json";
+  }
+  return "yaml";
+}
+function detectVersionKind(document) {
+  const openapi = document["openapi"];
+  if (typeof openapi === "string") {
+    if (openapi.startsWith("3.0.")) {
+      return "openapi-3.0";
+    }
+    if (openapi.startsWith("3.1.")) {
+      return "openapi-3.1";
+    }
+    return "unknown";
+  }
+  const swagger = document["swagger"];
+  if (swagger === "2.0") {
+    return "swagger-2.0";
+  }
+  return "unknown";
+}
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function asRecord(value) {
+  return isRecord(value) ? value : void 0;
+}
+var OpenApiDocumentFormatSchema, OpenApiVersionKindSchema, ParsedOpenApiDocumentSchema;
+var init_openapi_parser = __esm({
+  "src/openapi/openapi-parser.ts"() {
+    "use strict";
+    init_zod();
+    OpenApiDocumentFormatSchema = external_exports.enum(["json", "yaml"]);
+    OpenApiVersionKindSchema = external_exports.enum([
+      "openapi-3.0",
+      "openapi-3.1",
+      "swagger-2.0",
+      "unknown"
+    ]);
+    ParsedOpenApiDocumentSchema = external_exports.object({
+      format: OpenApiDocumentFormatSchema,
+      versionKind: OpenApiVersionKindSchema,
+      version: external_exports.string().optional(),
+      document: external_exports.record(external_exports.string(), external_exports.unknown())
+    }).strict();
+  }
+});
+
+// src/openapi/openapi-inventory.ts
+function buildOpenApiInventory(parsed) {
+  const document = parsed.document;
+  const operations = collectOperations(document);
+  const schemas = collectSchemas(document);
+  const securitySchemes = collectSecuritySchemes(document);
+  const refs = collectRefs(document);
+  return OpenApiInventorySchema.parse({
+    ...parsed.version === void 0 ? {} : { version: parsed.version },
+    versionKind: parsed.versionKind,
+    operationCount: operations.length,
+    schemaCount: schemas.length,
+    securitySchemeCount: securitySchemes.length,
+    refCount: refs.length,
+    operations,
+    schemas,
+    securitySchemes,
+    refs
+  });
+}
+function collectOperations(document) {
+  const paths = asRecord(document["paths"]);
+  if (paths === void 0) {
+    return [];
+  }
+  const operations = [];
+  for (const [pathName, pathItemValue] of Object.entries(paths)) {
+    const pathItem = asRecord(pathItemValue);
+    if (pathItem === void 0) {
+      continue;
+    }
+    for (const [methodName, operationValue] of Object.entries(pathItem)) {
+      const method = methodName.toLowerCase();
+      if (!HTTP_METHODS.has(method)) {
+        continue;
+      }
+      const operation = asRecord(operationValue);
+      if (operation === void 0) {
+        continue;
+      }
+      const pointer = `/paths/${escapeJsonPointer(pathName)}/${method}`;
+      const operationId = asString(operation["operationId"]);
+      const summary = asString(operation["summary"]);
+      operations.push(
+        OpenApiOperationInventoryItemSchema.parse({
+          method,
+          path: pathName,
+          pointer,
+          ...operationId === void 0 ? {} : { operationId },
+          ...summary === void 0 ? {} : { summary },
+          tags: asStringArray(operation["tags"]),
+          requestContentTypes: collectRequestContentTypes(operation),
+          responseStatuses: collectResponseStatuses(operation),
+          responseContentTypes: collectResponseContentTypes(operation),
+          securitySchemeNames: collectOperationSecuritySchemeNames(document, operation)
+        })
+      );
+    }
+  }
+  return operations;
+}
+function collectSchemas(document) {
+  const schemas = asRecord(asRecord(document["components"])?.["schemas"]);
+  if (schemas === void 0) {
+    return [];
+  }
+  return Object.entries(schemas).map(([name, schemaValue]) => {
+    const schema = asRecord(schemaValue) ?? {};
+    const type = asString(schema["type"]);
+    return OpenApiSchemaInventoryItemSchema.parse({
+      name,
+      pointer: `/components/schemas/${escapeJsonPointer(name)}`,
+      ...type === void 0 ? {} : { type },
+      hasRef: hasRef(schema)
+    });
+  });
+}
+function collectSecuritySchemes(document) {
+  const schemes = asRecord(asRecord(document["components"])?.["securitySchemes"]);
+  if (schemes === void 0) {
+    return [];
+  }
+  return Object.entries(schemes).map(([name, schemeValue]) => {
+    const scheme = asRecord(schemeValue) ?? {};
+    const type = asString(scheme["type"]);
+    const schemeName = asString(scheme["scheme"]);
+    const bearerFormat = asString(scheme["bearerFormat"]);
+    const inValue = asString(scheme["in"]);
+    const nameField = asString(scheme["name"]);
+    return OpenApiSecuritySchemeInventoryItemSchema.parse({
+      name,
+      pointer: `/components/securitySchemes/${escapeJsonPointer(name)}`,
+      ...type === void 0 ? {} : { type },
+      ...schemeName === void 0 ? {} : { scheme: schemeName },
+      ...bearerFormat === void 0 ? {} : { bearerFormat },
+      ...inValue === void 0 ? {} : { in: inValue },
+      ...nameField === void 0 ? {} : { nameField }
+    });
+  });
+}
+function collectRefs(document) {
+  const refs = [];
+  walk(document, "", (pointer, value) => {
+    if (!isRecord(value)) {
+      return;
+    }
+    const ref = value["$ref"];
+    if (typeof ref === "string") {
+      refs.push(
+        OpenApiRefInventoryItemSchema.parse({
+          pointer: pointer.length === 0 ? "/" : pointer,
+          ref
+        })
+      );
+    }
+  });
+  return refs;
+}
+function collectRequestContentTypes(operation) {
+  const requestBody = asRecord(operation["requestBody"]);
+  const content = asRecord(requestBody?.["content"]);
+  return content === void 0 ? [] : Object.keys(content).sort();
+}
+function collectResponseStatuses(operation) {
+  const responses = asRecord(operation["responses"]);
+  return responses === void 0 ? [] : Object.keys(responses).sort();
+}
+function collectResponseContentTypes(operation) {
+  const responses = asRecord(operation["responses"]);
+  if (responses === void 0) {
+    return [];
+  }
+  const contentTypes = /* @__PURE__ */ new Set();
+  for (const responseValue of Object.values(responses)) {
+    const response = asRecord(responseValue);
+    const content = asRecord(response?.["content"]);
+    if (content === void 0) {
+      continue;
+    }
+    Object.keys(content).forEach((contentType) => contentTypes.add(contentType));
+  }
+  return [...contentTypes].sort();
+}
+function collectOperationSecuritySchemeNames(document, operation) {
+  const operationSecurity = Array.isArray(operation["security"]) ? operation["security"] : Array.isArray(document["security"]) ? document["security"] : [];
+  const names = /* @__PURE__ */ new Set();
+  for (const requirement of operationSecurity) {
+    if (!isRecord(requirement)) {
+      continue;
+    }
+    Object.keys(requirement).forEach((name) => names.add(name));
+  }
+  return [...names].sort();
+}
+function hasRef(value) {
+  let found = false;
+  walk(value, "", (_pointer, current) => {
+    if (isRecord(current) && typeof current["$ref"] === "string") {
+      found = true;
+    }
+  });
+  return found;
+}
+function walk(value, pointer, visitor) {
+  visitor(pointer, value);
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => {
+      walk(item, `${pointer}/${index}`, visitor);
+    });
+    return;
+  }
+  if (isRecord(value)) {
+    for (const [key, child] of Object.entries(value)) {
+      walk(child, `${pointer}/${escapeJsonPointer(key)}`, visitor);
+    }
+  }
+}
+function asString(value) {
+  return typeof value === "string" && value.trim().length > 0 ? value : void 0;
+}
+function asStringArray(value) {
+  return Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+}
+function escapeJsonPointer(value) {
+  return value.replace(/~/g, "~0").replace(/\//g, "~1");
+}
+var HttpMethodSchema, OpenApiOperationInventoryItemSchema, OpenApiSchemaInventoryItemSchema, OpenApiSecuritySchemeInventoryItemSchema, OpenApiRefInventoryItemSchema, OpenApiInventorySchema, HTTP_METHODS;
+var init_openapi_inventory = __esm({
+  "src/openapi/openapi-inventory.ts"() {
+    "use strict";
+    init_zod();
+    init_openapi_parser();
+    HttpMethodSchema = external_exports.enum([
+      "get",
+      "put",
+      "post",
+      "delete",
+      "options",
+      "head",
+      "patch",
+      "trace"
+    ]);
+    OpenApiOperationInventoryItemSchema = external_exports.object({
+      method: HttpMethodSchema,
+      path: external_exports.string().min(1),
+      pointer: external_exports.string().min(1),
+      operationId: external_exports.string().min(1).optional(),
+      summary: external_exports.string().optional(),
+      tags: external_exports.array(external_exports.string()).default([]),
+      requestContentTypes: external_exports.array(external_exports.string()).default([]),
+      responseStatuses: external_exports.array(external_exports.string()).default([]),
+      responseContentTypes: external_exports.array(external_exports.string()).default([]),
+      securitySchemeNames: external_exports.array(external_exports.string()).default([])
+    }).strict();
+    OpenApiSchemaInventoryItemSchema = external_exports.object({
+      name: external_exports.string().min(1),
+      pointer: external_exports.string().min(1),
+      type: external_exports.string().optional(),
+      hasRef: external_exports.boolean()
+    }).strict();
+    OpenApiSecuritySchemeInventoryItemSchema = external_exports.object({
+      name: external_exports.string().min(1),
+      pointer: external_exports.string().min(1),
+      type: external_exports.string().optional(),
+      scheme: external_exports.string().optional(),
+      bearerFormat: external_exports.string().optional(),
+      in: external_exports.string().optional(),
+      nameField: external_exports.string().optional()
+    }).strict();
+    OpenApiRefInventoryItemSchema = external_exports.object({
+      pointer: external_exports.string().min(1),
+      ref: external_exports.string().min(1)
+    }).strict();
+    OpenApiInventorySchema = external_exports.object({
+      version: external_exports.string().optional(),
+      versionKind: external_exports.string(),
+      operationCount: external_exports.number().int().nonnegative(),
+      schemaCount: external_exports.number().int().nonnegative(),
+      securitySchemeCount: external_exports.number().int().nonnegative(),
+      refCount: external_exports.number().int().nonnegative(),
+      operations: external_exports.array(OpenApiOperationInventoryItemSchema),
+      schemas: external_exports.array(OpenApiSchemaInventoryItemSchema),
+      securitySchemes: external_exports.array(OpenApiSecuritySchemeInventoryItemSchema),
+      refs: external_exports.array(OpenApiRefInventoryItemSchema)
+    }).strict();
+    HTTP_METHODS = /* @__PURE__ */ new Set(["get", "put", "post", "delete", "options", "head", "patch", "trace"]);
+  }
+});
+
+// src/openapi/openapi-analysis.ts
+var OpenApiAnalysisResultSchema;
+var init_openapi_analysis = __esm({
+  "src/openapi/openapi-analysis.ts"() {
+    "use strict";
+    init_zod();
+    init_ids();
+    init_scalars();
+    init_openapi_inventory();
+    OpenApiAnalysisResultSchema = external_exports.object({
+      duplicate: external_exports.boolean(),
+      sourceId: SourceIdSchema,
+      sourceDigest: Sha256DigestSchema,
+      versionKind: external_exports.string(),
+      version: external_exports.string().optional(),
+      operationCount: external_exports.number().int().nonnegative(),
+      schemaCount: external_exports.number().int().nonnegative(),
+      securitySchemeCount: external_exports.number().int().nonnegative(),
+      refCount: external_exports.number().int().nonnegative(),
+      evidenceAdded: external_exports.number().int().nonnegative(),
+      gapsAdded: external_exports.number().int().nonnegative(),
+      artifactIds: external_exports.array(ArtifactIdSchema),
+      evidenceIds: external_exports.array(EvidenceIdSchema),
+      gapIds: external_exports.array(GapIdSchema),
+      inventory: OpenApiInventorySchema
+    }).strict();
+  }
+});
+
+// src/openapi/openapi-gaps.ts
+function detectOpenApiGapCandidates(input) {
+  const gaps = [];
+  if (input.parsed.versionKind === "swagger-2.0" || input.parsed.versionKind === "unknown") {
+    gaps.push(
+      gap({
+        code: "unsupported-openapi-version",
+        severity: "blocker",
+        category: "api",
+        title: "Unsupported OpenAPI version",
+        expected: "OpenAPI source should use OpenAPI 3.0.x or 3.1.x for this plugin stage.",
+        observed: `Detected version kind: ${input.parsed.versionKind}`,
+        impact: "API generation and contract analysis may produce incorrect results.",
+        pointer: "/openapi"
+      })
+    );
+  }
+  if (input.inventory.operationCount === 0) {
+    gaps.push(
+      gap({
+        code: "missing-paths",
+        severity: "blocker",
+        category: "api",
+        title: "No OpenAPI operations found",
+        expected: "OpenAPI document should define operations under paths.",
+        observed: "No HTTP operations were found.",
+        impact: "API wrapper and contract generation cannot proceed.",
+        pointer: "/paths"
+      })
+    );
+  }
+  if (input.inventory.schemaCount === 0) {
+    gaps.push(
+      gap({
+        code: "empty-components-schemas",
+        severity: "minor",
+        category: "api",
+        title: "No component schemas found",
+        expected: "Reusable schemas should be declared under components.schemas when applicable.",
+        observed: "components.schemas is empty or missing.",
+        impact: "Generated types may be incomplete or operation-local schemas may be harder to reuse.",
+        pointer: "/components/schemas"
+      })
+    );
+  }
+  gaps.push(...detectOperationGaps(input.inventory.operations));
+  gaps.push(...detectDuplicateOperationIds(input.inventory.operations));
+  gaps.push(...detectSecurityGaps(input.inventory));
+  gaps.push(...detectRemoteRefs(input.inventory));
+  gaps.push(...detectPromptInjectionLikeDescriptions(input.inventory.operations));
+  return gaps;
+}
+function detectOperationGaps(operations) {
+  const gaps = [];
+  for (const operation of operations) {
+    if (operation.operationId === void 0) {
+      gaps.push(
+        gap({
+          code: "missing-operation-id",
+          severity: "major",
+          category: "api",
+          title: "Operation is missing operationId",
+          expected: "Each operation should define a stable operationId.",
+          observed: `${operation.method.toUpperCase()} ${operation.path} has no operationId.`,
+          impact: "Generated client method names and feature wrappers may become unstable.",
+          pointer: `${operation.pointer}/operationId`,
+          operationPointer: operation.pointer
+        })
+      );
+    }
+    if (!operation.responseStatuses.some((status) => isSuccessStatus(status))) {
+      gaps.push(
+        gap({
+          code: "missing-success-response",
+          severity: "blocker",
+          category: "api",
+          title: "Operation is missing success response",
+          expected: "Each operation should define at least one 2xx response.",
+          observed: `${operation.method.toUpperCase()} ${operation.path} responses: ${operation.responseStatuses.join(", ") || "none"}`,
+          impact: "Client generation cannot infer a successful response contract.",
+          pointer: `${operation.pointer}/responses`,
+          operationPointer: operation.pointer
+        })
+      );
+    }
+    if (!operation.responseStatuses.some((status) => isErrorStatus(status))) {
+      gaps.push(
+        gap({
+          code: "missing-error-response",
+          severity: "minor",
+          category: "api",
+          title: "Operation has no error response contract",
+          expected: "Operations should define relevant 4xx or 5xx error responses.",
+          observed: `${operation.method.toUpperCase()} ${operation.path} has no 4xx/5xx responses.`,
+          impact: "UI error states and contract tests may need assumptions.",
+          pointer: `${operation.pointer}/responses`,
+          operationPointer: operation.pointer
+        })
+      );
+    }
+  }
+  return gaps;
+}
+function detectDuplicateOperationIds(operations) {
+  const byId = /* @__PURE__ */ new Map();
+  for (const operation of operations) {
+    if (operation.operationId === void 0) {
+      continue;
+    }
+    byId.set(operation.operationId, [...byId.get(operation.operationId) ?? [], operation]);
+  }
+  const gaps = [];
+  for (const [operationId, matches] of byId.entries()) {
+    if (matches.length <= 1) {
+      continue;
+    }
+    gaps.push(
+      gap({
+        code: "duplicate-operation-id",
+        severity: "major",
+        category: "api",
+        title: "Duplicate operationId",
+        expected: "operationId values should be unique.",
+        observed: `${operationId} is used by ${matches.map((item) => `${item.method.toUpperCase()} ${item.path}`).join(", ")}.`,
+        impact: "Generated clients may overwrite methods or create unstable names.",
+        pointer: matches[0].pointer,
+        operationPointer: matches[0].pointer
+      })
+    );
+  }
+  return gaps;
+}
+function detectSecurityGaps(inventory) {
+  const known = new Set(inventory.securitySchemes.map((scheme) => scheme.name));
+  const gaps = [];
+  for (const operation of inventory.operations) {
+    for (const schemeName of operation.securitySchemeNames) {
+      if (!known.has(schemeName)) {
+        gaps.push(
+          gap({
+            code: "unknown-security-scheme",
+            severity: "major",
+            category: "security",
+            title: "Operation references unknown security scheme",
+            expected: "Security requirements should reference components.securitySchemes entries.",
+            observed: `${operation.method.toUpperCase()} ${operation.path} references ${schemeName}, but it is not declared.`,
+            impact: "API authentication behavior cannot be verified.",
+            pointer: `${operation.pointer}/security`,
+            operationPointer: operation.pointer
+          })
+        );
+      }
+    }
+  }
+  return gaps;
+}
+function detectRemoteRefs(inventory) {
+  return inventory.refs.filter((item) => !item.ref.startsWith("#/")).map(
+    (item) => gap({
+      code: "remote-ref-not-resolved",
+      severity: "minor",
+      category: "api",
+      title: "Remote or external $ref not resolved in intake",
+      expected: "Task 12 only inventories local JSON Pointer references.",
+      observed: `External reference found: ${item.ref}`,
+      impact: "Remote reference resolution requires network and trust policy and is deferred.",
+      pointer: item.pointer
+    })
+  );
+}
+function detectPromptInjectionLikeDescriptions(operations) {
+  const gaps = [];
+  for (const operation of operations) {
+    const combinedText = [operation.summary].filter(Boolean).join("\n");
+    if (PROMPT_INJECTION_LIKE_PATTERNS2.some((pattern) => pattern.test(combinedText))) {
+      gaps.push(
+        gap({
+          code: "prompt-injection-like-description",
+          severity: "blocker",
+          category: "security",
+          title: "Prompt-injection-like text in OpenAPI operation",
+          expected: "OpenAPI descriptions should be treated as untrusted data and must not instruct the automation system.",
+          observed: `${operation.method.toUpperCase()} ${operation.path}: ${combinedText}`,
+          impact: "The content resembles an instruction aimed at the model or tool environment rather than API documentation.",
+          pointer: operation.pointer,
+          operationPointer: operation.pointer
+        })
+      );
+    }
+  }
+  return gaps;
+}
+function isSuccessStatus(status) {
+  return /^2\d\d$/.test(status) || status === "default";
+}
+function isErrorStatus(status) {
+  return /^[45]\d\d$/.test(status) || status === "default";
+}
+function gap(input) {
+  return OpenApiGapCandidateSchema.parse(input);
+}
+var OpenApiGapCandidateCodeSchema, OpenApiGapCandidateSchema, PROMPT_INJECTION_LIKE_PATTERNS2;
+var init_openapi_gaps = __esm({
+  "src/openapi/openapi-gaps.ts"() {
+    "use strict";
+    init_zod();
+    OpenApiGapCandidateCodeSchema = external_exports.enum([
+      "unsupported-openapi-version",
+      "missing-paths",
+      "missing-operation-id",
+      "duplicate-operation-id",
+      "missing-success-response",
+      "missing-error-response",
+      "unknown-security-scheme",
+      "empty-components-schemas",
+      "remote-ref-not-resolved",
+      "prompt-injection-like-description"
+    ]);
+    OpenApiGapCandidateSchema = external_exports.object({
+      code: OpenApiGapCandidateCodeSchema,
+      severity: external_exports.enum(["blocker", "major", "minor", "info"]),
+      category: external_exports.enum(["api", "security"]),
+      title: external_exports.string().min(1),
+      expected: external_exports.string().min(1),
+      observed: external_exports.string().min(1),
+      impact: external_exports.string().min(1),
+      pointer: external_exports.string().min(1).optional(),
+      operationPointer: external_exports.string().min(1).optional()
+    }).strict();
+    PROMPT_INJECTION_LIKE_PATTERNS2 = [
+      /ignore\s+(all\s+)?previous\s+instructions?/i,
+      /disregard\s+(all\s+)?previous\s+instructions?/i,
+      /system\s+prompt/i,
+      /developer\s+message/i,
+      /reveal\s+(the\s+)?secret/i,
+      /print\s+(all\s+)?environment\s+variables/i,
+      /api\s*key/i
+    ];
+  }
+});
+
+// src/application/openapi-intake-service.ts
+function findOpenApiSource(sources, sourceId) {
+  const source = sources.find((item) => item.id === sourceId);
+  if (source === void 0) {
+    throw new Error(`Source not found: ${sourceId}`);
+  }
+  if (source.kind !== "openapi") {
+    throw new Error(`Source is not an OpenAPI source: ${sourceId}`);
+  }
+  return source;
+}
+function requireSourceDigest2(source) {
+  if (source.digest === void 0) {
+    throw new Error(`OpenAPI source has no digest: ${source.id}`);
+  }
+  return source.digest;
+}
+function createOpenApiArtifact(input) {
+  return ArtifactRefSchema.parse({
+    id: createArtifactId(),
+    kind: input.kind,
+    uri: input.uri,
+    mediaType: "application/json",
+    digest: input.digest,
+    producedBy: "orchestrator",
+    evidenceIds: [],
+    createdAt: input.timestamp,
+    metadata: {
+      adapter: OPENAPI_INTAKE_ADAPTER,
+      sourceId: input.source.id,
+      sourceDigest: input.sourceDigest,
+      ...input.metadata
+    }
+  });
+}
+function optionalMetadataString(value, key) {
+  return typeof value === "string" ? { [key]: value } : {};
+}
+var AnalyzeOpenApiSourceInputSchema, OPENAPI_INTAKE_ADAPTER, OpenApiIntakeService;
+var init_openapi_intake_service = __esm({
+  "src/application/openapi-intake-service.ts"() {
+    "use strict";
+    init_zod();
+    init_openapi_analysis();
+    init_openapi_gaps();
+    init_openapi_inventory();
+    init_openapi_parser();
+    init_run2();
+    init_artifact();
+    init_gap();
+    init_id_factory();
+    init_ids();
+    init_scalars();
+    init_source();
+    init_content_hash();
+    AnalyzeOpenApiSourceInputSchema = external_exports.object({
+      runId: RunIdSchema,
+      sourceId: SourceIdSchema
+    }).strict();
+    OPENAPI_INTAKE_ADAPTER = "openapi-intake-v1";
+    OpenApiIntakeService = class {
+      constructor(runStore, sourceSnapshotStore, artifactStore, now = () => (/* @__PURE__ */ new Date()).toISOString()) {
+        this.runStore = runStore;
+        this.sourceSnapshotStore = sourceSnapshotStore;
+        this.artifactStore = artifactStore;
+        this.now = now;
+      }
+      runStore;
+      sourceSnapshotStore;
+      artifactStore;
+      now;
+      async analyzeOpenApiSource(rawInput) {
+        const input = AnalyzeOpenApiSourceInputSchema.parse(rawInput);
+        const run = await this.runStore.get(input.runId);
+        const source = findOpenApiSource(run.sources, input.sourceId);
+        const sourceDigest = requireSourceDigest2(source);
+        const existingArtifact = run.artifacts.find(
+          (artifact) => artifact.metadata["adapter"] === OPENAPI_INTAKE_ADAPTER && artifact.metadata["sourceId"] === source.id && artifact.metadata["sourceDigest"] === sourceDigest && artifact.kind === "openapi-intake-report"
+        );
+        if (existingArtifact !== void 0) {
+          const inventory2 = existingArtifact.metadata["inventory"];
+          if (typeof inventory2 === "object" && inventory2 !== null) {
+            return OpenApiAnalysisResultSchema.parse({
+              duplicate: true,
+              sourceId: source.id,
+              sourceDigest,
+              versionKind: String(existingArtifact.metadata["versionKind"] ?? "unknown"),
+              ...optionalMetadataString(existingArtifact.metadata["version"], "version"),
+              operationCount: Number(existingArtifact.metadata["operationCount"] ?? 0),
+              schemaCount: Number(existingArtifact.metadata["schemaCount"] ?? 0),
+              securitySchemeCount: Number(existingArtifact.metadata["securitySchemeCount"] ?? 0),
+              refCount: Number(existingArtifact.metadata["refCount"] ?? 0),
+              evidenceAdded: 0,
+              gapsAdded: 0,
+              artifactIds: [existingArtifact.id],
+              evidenceIds: [],
+              gapIds: [],
+              inventory: inventory2
+            });
+          }
+        }
+        if (source.locator.type !== "file") {
+          throw new Error("Task 12 only supports file-based OpenAPI sources");
+        }
+        const sourcePath = source.locator.path;
+        const sourceMediaType = source.locator.mediaType;
+        const timestamp = IsoDateTimeSchema.parse(this.now());
+        const snapshotContent = await this.sourceSnapshotStore.readContent(sourceDigest);
+        const parsed = parseOpenApiDocument({
+          content: snapshotContent,
+          path: sourcePath,
+          ...sourceMediaType === void 0 ? {} : { mediaType: sourceMediaType }
+        });
+        const inventory = buildOpenApiInventory(parsed);
+        const gapCandidates = detectOpenApiGapCandidates({ parsed, inventory });
+        const normalizedDocumentBuffer = Buffer.from(
+          `${JSON.stringify(parsed.document, null, 2)}
+`,
+          "utf8"
+        );
+        const inventoryBuffer = Buffer.from(`${JSON.stringify(inventory, null, 2)}
+`, "utf8");
+        const normalizedBlob = await this.artifactStore.writeBlob({
+          content: normalizedDocumentBuffer,
+          mediaType: "application/json",
+          storedAt: timestamp,
+          label: "openapi-normalized-document"
+        });
+        const inventoryBlob = await this.artifactStore.writeBlob({
+          content: inventoryBuffer,
+          mediaType: "application/json",
+          storedAt: timestamp,
+          label: "openapi-intake-report"
+        });
+        const operationEvidence = inventory.operations.map(
+          (operation) => EvidenceRefSchema.parse({
+            id: createEvidenceId(),
+            sourceId: source.id,
+            location: {
+              type: "json-pointer",
+              document: sourcePath,
+              pointer: operation.pointer
+            },
+            summary: `${operation.method.toUpperCase()} ${operation.path}${operation.operationId === void 0 ? "" : ` (${operation.operationId})`}`,
+            digest: sha256Digest(Buffer.from(JSON.stringify(operation), "utf8")),
+            capturedAt: timestamp,
+            metadata: {
+              adapter: OPENAPI_INTAKE_ADAPTER,
+              sourceDigest,
+              evidenceType: "openapi-operation",
+              method: operation.method,
+              path: operation.path,
+              pointer: operation.pointer,
+              ...operation.operationId === void 0 ? {} : { operationId: operation.operationId }
+            }
+          })
+        );
+        const schemaEvidence = inventory.schemas.map(
+          (schema) => EvidenceRefSchema.parse({
+            id: createEvidenceId(),
+            sourceId: source.id,
+            location: {
+              type: "json-pointer",
+              document: sourcePath,
+              pointer: schema.pointer
+            },
+            summary: `Schema ${schema.name}`,
+            digest: sha256Digest(Buffer.from(JSON.stringify(schema), "utf8")),
+            capturedAt: timestamp,
+            metadata: {
+              adapter: OPENAPI_INTAKE_ADAPTER,
+              sourceDigest,
+              evidenceType: "openapi-schema",
+              schemaName: schema.name,
+              pointer: schema.pointer
+            }
+          })
+        );
+        const evidenceToAdd = [...operationEvidence, ...schemaEvidence];
+        const gapsToAdd = gapCandidates.map((candidate) => {
+          const matchingEvidence = candidate.operationPointer === void 0 ? void 0 : operationEvidence.find(
+            (evidence) => evidence.metadata["pointer"] === candidate.operationPointer
+          );
+          return GapSchema.parse({
+            id: createGapId(),
+            category: candidate.category,
+            severity: candidate.severity,
+            status: "open",
+            title: candidate.title,
+            expected: candidate.expected,
+            observed: candidate.observed,
+            impact: candidate.impact,
+            sourceEvidenceIds: matchingEvidence === void 0 ? [] : [matchingEvidence.id],
+            owner: candidate.category === "security" ? "evidence-verifier" : "api-contract",
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            metadata: {
+              adapter: OPENAPI_INTAKE_ADAPTER,
+              sourceId: source.id,
+              sourceDigest,
+              code: candidate.code,
+              ...candidate.pointer === void 0 ? {} : { pointer: candidate.pointer }
+            }
+          });
+        });
+        const normalizedArtifact = createOpenApiArtifact({
+          kind: "openapi-normalized-document",
+          uri: normalizedBlob.uri,
+          digest: normalizedBlob.digest,
+          timestamp,
+          source,
+          sourceDigest
+        });
+        const inventoryArtifact = createOpenApiArtifact({
+          kind: "openapi-intake-report",
+          uri: inventoryBlob.uri,
+          digest: inventoryBlob.digest,
+          timestamp,
+          source,
+          sourceDigest,
+          metadata: {
+            inventory,
+            versionKind: parsed.versionKind,
+            ...parsed.version === void 0 ? {} : { version: parsed.version },
+            operationCount: inventory.operationCount,
+            schemaCount: inventory.schemaCount,
+            securitySchemeCount: inventory.securitySchemeCount,
+            refCount: inventory.refCount
+          }
+        });
+        const artifactsToAdd = [normalizedArtifact, inventoryArtifact];
+        const nextRun = RunManifestSchema.parse({
+          ...run,
+          revision: run.revision + 1,
+          updatedAt: timestamp,
+          evidence: [...run.evidence, ...evidenceToAdd],
+          artifacts: [...run.artifacts, ...artifactsToAdd],
+          gaps: [...run.gaps, ...gapsToAdd]
+        });
+        await this.runStore.save(nextRun, run.revision);
+        return OpenApiAnalysisResultSchema.parse({
+          duplicate: false,
+          sourceId: source.id,
+          sourceDigest,
+          versionKind: parsed.versionKind,
+          ...parsed.version === void 0 ? {} : { version: parsed.version },
+          operationCount: inventory.operationCount,
+          schemaCount: inventory.schemaCount,
+          securitySchemeCount: inventory.securitySchemeCount,
+          refCount: inventory.refCount,
+          evidenceAdded: evidenceToAdd.length,
+          gapsAdded: gapsToAdd.length,
+          artifactIds: artifactsToAdd.map((artifact) => artifact.id),
+          evidenceIds: evidenceToAdd.map((evidence) => evidence.id),
+          gapIds: gapsToAdd.map((gap2) => gap2.id),
+          inventory
         });
       }
     };
@@ -38352,6 +39221,28 @@ function createKernelServer(servicesProvider) {
     })
   );
   server.registerTool(
+    "analyze_openapi_source",
+    {
+      title: "Analyze OpenAPI source",
+      description: "Analyze a registered OpenAPI Source snapshot and extract operation, schema, security, ref inventory, and API gaps.",
+      inputSchema: AnalyzeOpenApiSourceInputSchema.shape,
+      outputSchema: OpenApiAnalysisResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { openApiIntakeService } = await servicesProvider();
+      const structuredContent = await openApiIntakeService.analyzeOpenApiSource(input);
+      return {
+        text: structuredContent.duplicate ? `OpenAPI source ${structuredContent.sourceId} was already analyzed.` : `Analyzed OpenAPI source ${structuredContent.sourceId}: ${structuredContent.operationCount} operations, ${structuredContent.schemaCount} schemas, ${structuredContent.gapsAdded} gaps.`,
+        structuredContent
+      };
+    })
+  );
+  server.registerTool(
     "record_figma_mcp_capabilities",
     {
       title: "Record Figma MCP capabilities",
@@ -38782,12 +39673,14 @@ var init_create_server = __esm({
     init_figma_capability_service();
     init_figma_design_inventory_service();
     init_figma_intake_service();
+    init_openapi_intake_service();
     init_policy_service();
     init_profile_service();
     init_run_service();
     init_source_registry_service();
     init_brief_analysis();
     init_stage_service();
+    init_openapi_analysis();
     init_contracts();
     init_run2();
     init_command_policy();
@@ -38854,6 +39747,7 @@ var init_create_server = __esm({
       "register_file_source",
       "get_source_snapshot",
       "analyze_brief_source",
+      "analyze_openapi_source",
       "record_figma_mcp_capabilities",
       "get_figma_provider_policy",
       "register_figma_source",
@@ -39210,7 +40104,8 @@ function createLazyServicesProvider() {
       briefAdapterService: new BriefAdapterService(store, snapshotStore),
       figmaCapabilityService: new FigmaCapabilityService(store, artifactStore),
       figmaDesignInventoryService: new FigmaDesignInventoryService(store, artifactStore),
-      figmaIntakeService: new FigmaIntakeService(store, artifactStore)
+      figmaIntakeService: new FigmaIntakeService(store, artifactStore),
+      openApiIntakeService: new OpenApiIntakeService(store, snapshotStore, artifactStore)
     };
     return services;
   };
@@ -39227,6 +40122,7 @@ var init_run_service_provider = __esm({
     init_figma_capability_service();
     init_figma_design_inventory_service();
     init_figma_intake_service();
+    init_openapi_intake_service();
     init_policy_service();
     init_profile_service();
     init_run_service();

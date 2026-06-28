@@ -16,6 +16,7 @@ import {
   RecordFigmaTextArtifactInputSchema,
   RegisterFigmaSourceInputSchema,
 } from "../application/figma-intake-service.js";
+import { AnalyzeOpenApiSourceInputSchema } from "../application/openapi-intake-service.js";
 import { RedactTextInputSchema } from "../application/policy-service.js";
 import {
   CreateIntakeManifestInputSchema,
@@ -42,6 +43,7 @@ import {
   SkipStageInputSchema,
   StartStageInputSchema,
 } from "../application/stage-service.js";
+import { OpenApiAnalysisResultSchema } from "../openapi/openapi-analysis.js";
 import { IntakeManifestSchema, ProjectProfileSchema } from "../profile/contracts.js";
 import { RunManifestSchema, RunSummarySchema } from "../run/index.js";
 import { CommandInvocationSchema } from "../security/command-policy.js";
@@ -123,6 +125,7 @@ const TOOL_NAMES = [
   "register_file_source",
   "get_source_snapshot",
   "analyze_brief_source",
+  "analyze_openapi_source",
   "record_figma_mcp_capabilities",
   "get_figma_provider_policy",
   "register_figma_source",
@@ -482,6 +485,34 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
           text: structuredContent.duplicate
             ? `Brief source ${structuredContent.sourceId} was already analyzed.`
             : `Analyzed brief source ${structuredContent.sourceId}: ${structuredContent.evidenceAdded} evidence, ${structuredContent.gapsAdded} gaps.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "analyze_openapi_source",
+    {
+      title: "Analyze OpenAPI source",
+      description:
+        "Analyze a registered OpenAPI Source snapshot and extract operation, schema, security, ref inventory, and API gaps.",
+      inputSchema: AnalyzeOpenApiSourceInputSchema.shape,
+      outputSchema: OpenApiAnalysisResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { openApiIntakeService } = await servicesProvider();
+        const structuredContent = await openApiIntakeService.analyzeOpenApiSource(input);
+
+        return {
+          text: structuredContent.duplicate
+            ? `OpenAPI source ${structuredContent.sourceId} was already analyzed.`
+            : `Analyzed OpenAPI source ${structuredContent.sourceId}: ${structuredContent.operationCount} operations, ${structuredContent.schemaCount} schemas, ${structuredContent.gapsAdded} gaps.`,
           structuredContent,
         };
       }),
