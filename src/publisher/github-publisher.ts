@@ -109,13 +109,8 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
     const pr = (await response.json()) as Record<string, unknown>;
 
     return normalizeGitHubPr(pr, false, true, {
-      runId: "run_11111111111111111111111111111111",
-      title: String(pr["title"] ?? "Updated PR"),
-      body: input.body,
       sourceBranch: String((pr["head"] as Record<string, unknown>)?.["ref"] ?? ""),
       targetBranch: String((pr["base"] as Record<string, unknown>)?.["ref"] ?? ""),
-      mode: pr["draft"] === true ? "draft" : "ready",
-      reportArtifactId: "art_11111111111111111111111111111111",
     });
   }
 

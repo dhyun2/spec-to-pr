@@ -108,17 +108,8 @@ export class GitLabPublisherAdapter implements ReviewRequestPublisher {
     const mr = (await response.json()) as Record<string, unknown>;
 
     return normalizeGitLabMr(mr, false, true, {
-      runId: "run_11111111111111111111111111111111",
-      title: String(mr["title"] ?? "Updated MR"),
-      body: input.body,
       sourceBranch: String(mr["source_branch"] ?? ""),
       targetBranch: String(mr["target_branch"] ?? ""),
-      mode: String(mr["title"] ?? "")
-        .toLowerCase()
-        .startsWith("draft:")
-        ? "draft"
-        : "ready",
-      reportArtifactId: "art_11111111111111111111111111111111",
     });
   }
 
