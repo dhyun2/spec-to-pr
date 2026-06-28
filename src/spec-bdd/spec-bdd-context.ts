@@ -72,7 +72,10 @@ export async function buildSpecBddContextPack(input: {
       tasksPath: toRepoRelativePath(input.run.projectRoot, paths.tasksPath),
       manifestPath: toRepoRelativePath(input.run.projectRoot, paths.manifestPath),
       evidenceSummaryPath: toRepoRelativePath(input.run.projectRoot, paths.evidenceSummaryPath),
-      traceabilityMatrixPath: toRepoRelativePath(input.run.projectRoot, paths.traceabilityMatrixPath),
+      traceabilityMatrixPath: toRepoRelativePath(
+        input.run.projectRoot,
+        paths.traceabilityMatrixPath,
+      ),
       gapSummaryPath: toRepoRelativePath(input.run.projectRoot, paths.gapSummaryPath),
     },
     gherkin: {

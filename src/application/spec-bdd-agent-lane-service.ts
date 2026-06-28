@@ -16,10 +16,7 @@ import { GapIdSchema, RunIdSchema } from "../runtime/ids.js";
 import { GitObjectIdSchema, IsoDateTimeSchema } from "../runtime/scalars.js";
 import { sha256Digest } from "../source-registry/content-hash.js";
 import { writeAcceptanceSkeletons } from "../spec-bdd/acceptance-skeleton-writer.js";
-import {
-  SpecBddFindingSchema,
-  SpecBddReviewReportSchema,
-} from "../spec-bdd/spec-bdd-contracts.js";
+import { SpecBddFindingSchema, SpecBddReviewReportSchema } from "../spec-bdd/spec-bdd-contracts.js";
 import {
   buildSpecBddContextPack,
   renderSpecBddContextPackMarkdown,
