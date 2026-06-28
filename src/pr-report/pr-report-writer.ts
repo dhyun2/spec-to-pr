@@ -15,10 +15,13 @@ export async function writePrReportArtifacts(input: {
   markdown: string;
   viewModel: PrReportViewModel;
   generatedAt: string;
+  markdownArtifactId?: string | undefined;
+  viewModelArtifactId?: string | undefined;
 }): Promise<PrReportWriteResult> {
   const viewModelJson = `${JSON.stringify(input.viewModel, null, 2)}\n`;
   const markdownArtifact = await writeArtifact({
     artifactStore: input.artifactStore,
+    artifactId: input.markdownArtifactId,
     label: "pr-report.md",
     content: input.markdown,
     mediaType: "text/markdown",
@@ -30,6 +33,7 @@ export async function writePrReportArtifacts(input: {
   });
   const viewModelArtifact = await writeArtifact({
     artifactStore: input.artifactStore,
+    artifactId: input.viewModelArtifactId,
     label: "pr-report-view-model.json",
     content: viewModelJson,
     mediaType: "application/json",
@@ -50,6 +54,7 @@ export async function writePrReportArtifacts(input: {
 
 async function writeArtifact(input: {
   artifactStore: ArtifactBlobStore;
+  artifactId?: string | undefined;
   label: string;
   content: string;
   mediaType: string;
@@ -64,7 +69,7 @@ async function writeArtifact(input: {
   });
 
   return ArtifactRefSchema.parse({
-    id: createArtifactId(),
+    id: input.artifactId ?? createArtifactId(),
     kind: "pr-report",
     uri: blob.uri,
     mediaType: input.mediaType,
