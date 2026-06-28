@@ -53,6 +53,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "analyze_figma_design_inventory",
       "analyze_openapi_source",
       "block_stage",
+      "build_evidence_graph",
       "classify_command",
       "complete_stage",
       "create_intake_manifest",
@@ -64,6 +65,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "get_resume_plan",
       "get_run",
       "get_source_snapshot",
+      "get_traceability_matrix",
       "heartbeat_stage",
       "inspect_project",
       "kernel_info",
@@ -421,6 +423,27 @@ components:
         sourceId: (figmaSource.structuredContent as { source: { id: string } }).source.id,
       },
     });
+
+    const graph = await client.callTool({
+      name: "build_evidence_graph",
+      arguments: {
+        runId,
+      },
+    });
+
+    expect(graph.structuredContent).toMatchObject({
+      duplicate: false,
+      runId,
+    });
+
+    const matrix = await client.callTool({
+      name: "get_traceability_matrix",
+      arguments: {
+        runId,
+      },
+    });
+
+    expect(Array.isArray((matrix.structuredContent as { matrix: unknown }).matrix)).toBe(true);
 
     const intake = await client.callTool({
       name: "create_intake_manifest",
