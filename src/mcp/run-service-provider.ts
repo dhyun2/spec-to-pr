@@ -18,6 +18,7 @@ import { FigmaIntakeService } from "../application/figma-intake-service.js";
 import { GherkinTestMatrixService } from "../application/gherkin-test-matrix-service.js";
 import { IntegrationService } from "../application/integration-service.js";
 import { OpenApiIntakeService } from "../application/openapi-intake-service.js";
+import { ObservabilityService } from "../application/observability-service.js";
 import { OpenSpecChangeService } from "../application/openspec-change-service.js";
 import { PerformanceGateService } from "../application/performance-gate-service.js";
 import { PolicyService } from "../application/policy-service.js";
@@ -50,6 +51,7 @@ export type Services = {
   figmaDesignInventoryService: FigmaDesignInventoryService;
   figmaIntakeService: FigmaIntakeService;
   openApiIntakeService: OpenApiIntakeService;
+  observabilityService: ObservabilityService;
   openSpecChangeService: OpenSpecChangeService;
   gherkinTestMatrixService: GherkinTestMatrixService;
   integrationService: IntegrationService;
@@ -100,6 +102,7 @@ export function createLazyServicesProvider(): ServicesProvider {
       figmaDesignInventoryService: new FigmaDesignInventoryService(store, artifactStore),
       figmaIntakeService: new FigmaIntakeService(store, artifactStore),
       openApiIntakeService: new OpenApiIntakeService(store, snapshotStore, artifactStore),
+      observabilityService: new ObservabilityService(store, artifactStore),
       openSpecChangeService: new OpenSpecChangeService(store, artifactStore),
       gherkinTestMatrixService: new GherkinTestMatrixService(store),
       integrationService: new IntegrationService(store, artifactStore, dataDirectory),

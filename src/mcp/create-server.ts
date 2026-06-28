@@ -93,6 +93,16 @@ import {
   RecordIntegrationRepairInputSchema,
   RecordIntegrationRepairResultSchema,
 } from "../application/integration-service.js";
+import {
+  GenerateObservabilityConfigInputSchema,
+  GenerateObservabilityConfigResultSchema,
+  GetObservabilityReportInputSchema,
+  GetObservabilityReportResultSchema,
+  PlanObservabilityInputSchema,
+  PlanObservabilityResultSchema,
+  RecordObservabilityReviewInputSchema,
+  RecordObservabilityReviewResultSchema,
+} from "../application/observability-service.js";
 import { AnalyzeOpenApiSourceInputSchema } from "../application/openapi-intake-service.js";
 import { GenerateOpenSpecChangeInputSchema } from "../application/openspec-change-service.js";
 import { RedactTextInputSchema } from "../application/policy-service.js";
@@ -222,6 +232,10 @@ const TOOL_NAMES = [
   "run_performance_gate",
   "get_performance_report",
   "record_performance_review",
+  "plan_observability",
+  "generate_observability_config",
+  "get_observability_report",
+  "record_observability_review",
   "analyze_architecture_boundaries",
   "generate_source_guard_tests",
   "run_quality_gates",
@@ -587,6 +601,106 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
 
         return {
           text: `Recorded performance review ${structuredContent.reviewArtifactId}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "plan_observability",
+    {
+      title: "Plan observability",
+      description:
+        "Plan OpenTelemetry resource attributes, trace/log correlation, redaction policy, and target app templates.",
+      inputSchema: PlanObservabilityInputSchema.shape,
+      outputSchema: PlanObservabilityResultSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { observabilityService } = await servicesProvider();
+        const structuredContent = await observabilityService.planObservability(input);
+
+        return {
+          text: `Planned observability for ${structuredContent.plan.target} with ${structuredContent.gaps.length} gap(s).`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "generate_observability_config",
+    {
+      title: "Generate observability config",
+      description:
+        "Generate OpenTelemetry templates, trace/log correlation artifacts, and an observability report for a Run.",
+      inputSchema: GenerateObservabilityConfigInputSchema.shape,
+      outputSchema: GenerateObservabilityConfigResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { observabilityService } = await servicesProvider();
+        const structuredContent = await observabilityService.generateConfig(input);
+
+        return {
+          text: `Generated observability report ${structuredContent.reportArtifactId} with ${structuredContent.gapCount} gap(s).`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "get_observability_report",
+    {
+      title: "Get observability report",
+      description: "Return the latest observability report artifact for a Run.",
+      inputSchema: GetObservabilityReportInputSchema.shape,
+      outputSchema: GetObservabilityReportResultSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { observabilityService } = await servicesProvider();
+        const structuredContent = await observabilityService.getReport(input);
+
+        return {
+          text: `Loaded observability report ${structuredContent.reportArtifactId}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "record_observability_review",
+    {
+      title: "Record observability review",
+      description: "Record observability-reviewer triage output.",
+      inputSchema: RecordObservabilityReviewInputSchema.shape,
+      outputSchema: RecordObservabilityReviewResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { observabilityService } = await servicesProvider();
+        const structuredContent = await observabilityService.recordReview(input);
+
+        return {
+          text: `Recorded observability review ${structuredContent.reviewArtifactId}.`,
           structuredContent,
         };
       }),
