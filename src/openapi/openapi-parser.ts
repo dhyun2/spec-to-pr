@@ -31,8 +31,8 @@ export function parseOpenApiDocument(input: {
   const text = input.content.toString("utf8");
   const format = detectOpenApiFormat({
     text,
-    path: input.path,
-    mediaType: input.mediaType,
+    ...(input.path === undefined ? {} : { path: input.path }),
+    ...(input.mediaType === undefined ? {} : { mediaType: input.mediaType }),
   });
 
   const parsed = format === "json" ? JSON.parse(text) : parseYaml(text);

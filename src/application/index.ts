@@ -7,3 +7,4 @@ export * from "./brief-adapter-service.js";
 export * from "./figma-capability-service.js";
 export * from "./figma-design-inventory-service.js";
 export * from "./figma-intake-service.js";
+export * from "./openapi-intake-service.js";
