@@ -3,6 +3,10 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 import { AnalyzeBriefSourceInputSchema } from "../application/brief-adapter-service.js";
+import {
+  GetFigmaProviderPolicyInputSchema,
+  RecordFigmaMcpCapabilitiesInputSchema,
+} from "../application/figma-capability-service.js";
 import { RedactTextInputSchema } from "../application/policy-service.js";
 import {
   CreateIntakeManifestInputSchema,
@@ -110,6 +114,8 @@ const TOOL_NAMES = [
   "register_file_source",
   "get_source_snapshot",
   "analyze_brief_source",
+  "record_figma_mcp_capabilities",
+  "get_figma_provider_policy",
 ] as const;
 
 export function createKernelServer(servicesProvider: ServicesProvider): McpServer {
@@ -459,6 +465,53 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
           text: structuredContent.duplicate
             ? `Brief source ${structuredContent.sourceId} was already analyzed.`
             : `Analyzed brief source ${structuredContent.sourceId}: ${structuredContent.evidenceAdded} evidence, ${structuredContent.gapsAdded} gaps.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "record_figma_mcp_capabilities",
+    {
+      title: "Record Figma MCP capabilities",
+      description: "Record available Figma MCP providers and derive provider policy.",
+      inputSchema: RecordFigmaMcpCapabilitiesInputSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { figmaCapabilityService } = await servicesProvider();
+        const structuredContent = await figmaCapabilityService.recordCapabilities(input);
+
+        return {
+          text: `Recorded Figma MCP capability report for run ${structuredContent.report.runId}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "get_figma_provider_policy",
+    {
+      title: "Get Figma provider policy",
+      description: "Return the latest derived Figma provider policy for a Run.",
+      inputSchema: GetFigmaProviderPolicyInputSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { figmaCapabilityService } = await servicesProvider();
+        const structuredContent = await figmaCapabilityService.getProviderPolicy(input);
+
+        return {
+          text: "Loaded Figma provider policy.",
           structuredContent,
         };
       }),

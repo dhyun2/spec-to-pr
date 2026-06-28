@@ -2,7 +2,9 @@ import os from "node:os";
 import path from "node:path";
 
 import packageJson from "../../package.json" with { type: "json" };
+import { ArtifactBlobStore } from "../artifact-registry/artifact-blob-store.js";
 import { BriefAdapterService } from "../application/brief-adapter-service.js";
+import { FigmaCapabilityService } from "../application/figma-capability-service.js";
 import { PolicyService } from "../application/policy-service.js";
 import { ProjectProfileService } from "../application/profile-service.js";
 import { RunService } from "../application/run-service.js";
@@ -19,6 +21,7 @@ export type Services = {
   profileService: ProjectProfileService;
   sourceRegistryService: SourceRegistryService;
   briefAdapterService: BriefAdapterService;
+  figmaCapabilityService: FigmaCapabilityService;
 };
 
 export type ServicesProvider = () => Promise<Services>;
@@ -36,6 +39,7 @@ export function createLazyServicesProvider(): ServicesProvider {
     const dataDirectory = resolveDataDirectory();
     const store: RunStore = new SqliteRunStore(path.join(dataDirectory, "runs.sqlite3"));
     const snapshotStore = new SourceSnapshotStore(path.join(dataDirectory, "source-snapshots"));
+    const artifactStore = new ArtifactBlobStore(path.join(dataDirectory, "artifacts"));
 
     services = {
       runService: new RunService(store, {
@@ -48,6 +52,7 @@ export function createLazyServicesProvider(): ServicesProvider {
       ),
       sourceRegistryService: new SourceRegistryService(store, snapshotStore),
       briefAdapterService: new BriefAdapterService(store, snapshotStore),
+      figmaCapabilityService: new FigmaCapabilityService(store, artifactStore),
     };
 
     return services;

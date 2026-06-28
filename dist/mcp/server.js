@@ -333,10 +333,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path11) {
-  if (!path11)
+function getElementAtPath(obj, path12) {
+  if (!path12)
     return obj;
-  return path11.reduce((acc, key) => acc?.[key], obj);
+  return path12.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -664,11 +664,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path11, issues) {
+function prefixIssues(path12, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path11);
+    iss.path.unshift(path12);
     return iss;
   });
 }
@@ -886,16 +886,16 @@ function flattenError(error51, mapper = (issue2) => issue2.message) {
 }
 function formatError(error51, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error52, path11 = []) => {
+  const processError = (error52, path12 = []) => {
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path11, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path12, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path11, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path12, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path11, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path12, ...issue2.path]);
       } else {
-        const fullpath = [...path11, ...issue2.path];
+        const fullpath = [...path12, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -922,17 +922,17 @@ function formatError(error51, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error51, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error52, path11 = []) => {
+  const processError = (error52, path12 = []) => {
     var _a3, _b;
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path11, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path12, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path11, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path12, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path11, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path12, ...issue2.path]);
       } else {
-        const fullpath = [...path11, ...issue2.path];
+        const fullpath = [...path12, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -964,8 +964,8 @@ function treeifyError(error51, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path11 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path11) {
+  const path12 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path12) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -14468,13 +14468,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path11 = ref.slice(1).split("/").filter(Boolean);
-  if (path11.length === 0) {
+  const path12 = ref.slice(1).split("/").filter(Boolean);
+  if (path12.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path11[0] === defsKey) {
-    const key = path11[1];
+  if (path12[0] === defsKey) {
+    const key = path12[1];
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -17316,8 +17316,8 @@ var init_parseUtil = __esm({
     init_errors3();
     init_en2();
     makeIssue = (params) => {
-      const { data, path: path11, errorMaps, issueData } = params;
-      const fullPath = [...path11, ...issueData.path || []];
+      const { data, path: path12, errorMaps, issueData } = params;
+      const fullPath = [...path12, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -17600,11 +17600,11 @@ var init_types2 = __esm({
     init_parseUtil();
     init_util2();
     ParseInputLazyPath = class {
-      constructor(parent, value, path11, key) {
+      constructor(parent, value, path12, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path11;
+        this._path = path12;
         this._key = key;
       }
       get path() {
@@ -26948,8 +26948,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path11) {
-      let input = path11;
+    function removeDotSegments(path12) {
+      let input = path12;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -27201,8 +27201,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path11, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path11 && path11 !== "/" ? path11 : void 0;
+        const [path12, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path12 && path12 !== "/" ? path12 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -33303,6 +33303,9 @@ function createSourceId() {
 function createEvidenceId() {
   return EvidenceIdSchema.parse(`ev_${compactUuid()}`);
 }
+function createArtifactId() {
+  return ArtifactIdSchema.parse(`art_${compactUuid()}`);
+}
 function createGapId() {
   return GapIdSchema.parse(`gap_${compactUuid()}`);
 }
@@ -33324,6 +33327,8 @@ var init_artifact = __esm({
     ArtifactKindSchema = external_exports.enum([
       "project-profile",
       "source-snapshot",
+      "figma-mcp-capability-report",
+      "figma-provider-policy",
       "requirement-graph",
       "openspec",
       "gherkin",
@@ -33769,11 +33774,11 @@ function addUniqueValueIssues(collectionName, values, context) {
     seen.add(value);
   });
 }
-function addReferenceIssue(context, path11, reference) {
+function addReferenceIssue(context, path12, reference) {
   context.addIssue({
     code: "custom",
     message: `Unknown ${reference.kind} reference ${reference.id}`,
-    path: path11
+    path: path12
   });
 }
 var RunStatusSchema, RunManifestSchema, RunSummarySchema, CreateInitialRunInputSchema;
@@ -34397,6 +34402,367 @@ var init_brief_adapter_service = __esm({
   }
 });
 
+// src/artifact-registry/artifact-blob-store.ts
+import { mkdir, readFile, writeFile } from "fs/promises";
+import path2 from "path";
+async function writeIfMissing(filePath, content) {
+  try {
+    await writeFile(filePath, content, {
+      flag: "wx",
+      mode: 384
+    });
+  } catch (error51) {
+    if (isAlreadyExistsError(error51)) {
+      return;
+    }
+    throw error51;
+  }
+}
+function isAlreadyExistsError(error51) {
+  return error51 instanceof Error && "code" in error51 && error51.code === "EEXIST";
+}
+var ArtifactBlobStore;
+var init_artifact_blob_store = __esm({
+  "src/artifact-registry/artifact-blob-store.ts"() {
+    "use strict";
+    init_scalars();
+    init_content_hash();
+    ArtifactBlobStore = class {
+      constructor(rootDirectory) {
+        this.rootDirectory = rootDirectory;
+      }
+      rootDirectory;
+      async writeBlob(input) {
+        const digest = sha256Digest(input.content);
+        const { prefix, hex: hex3 } = digestPathSegments(digest);
+        const directory = path2.join(this.rootDirectory, "sha256", prefix, hex3);
+        const contentPath = path2.join(directory, "content");
+        const metadataPath = path2.join(directory, "metadata.json");
+        await mkdir(directory, {
+          recursive: true,
+          mode: 448
+        });
+        await writeIfMissing(contentPath, input.content);
+        const metadata = {
+          digest,
+          mediaType: input.mediaType,
+          byteLength: input.content.byteLength,
+          storedAt: input.storedAt,
+          ...input.label === void 0 ? {} : { label: input.label }
+        };
+        await writeIfMissing(
+          metadataPath,
+          Buffer.from(`${JSON.stringify(metadata, null, 2)}
+`, "utf8")
+        );
+        return {
+          digest,
+          uri: `artifact://sha256/${hex3}`,
+          contentPath,
+          metadataPath,
+          metadata
+        };
+      }
+      async readMetadata(rawDigest) {
+        const digest = Sha256DigestSchema.parse(rawDigest);
+        const { prefix, hex: hex3 } = digestPathSegments(digest);
+        const metadataPath = path2.join(this.rootDirectory, "sha256", prefix, hex3, "metadata.json");
+        return JSON.parse(await readFile(metadataPath, "utf8"));
+      }
+      async readContent(rawDigest) {
+        const digest = Sha256DigestSchema.parse(rawDigest);
+        const { prefix, hex: hex3 } = digestPathSegments(digest);
+        const contentPath = path2.join(this.rootDirectory, "sha256", prefix, hex3, "content");
+        return readFile(contentPath);
+      }
+    };
+  }
+});
+
+// src/figma/figma-capability.ts
+function normalizeFigmaToolName(rawName) {
+  const lower = rawName.toLowerCase();
+  if (lower.includes("get_metadata")) return "get_metadata";
+  if (lower.includes("get_design_context")) return "get_design_context";
+  if (lower.includes("get_screenshot")) return "get_screenshot";
+  if (lower.includes("get_variable_defs")) return "get_variable_defs";
+  if (lower.includes("get_code_connect_map")) return "get_code_connect_map";
+  if (lower.includes("get_code_connect_suggestions")) return "get_code_connect_suggestions";
+  if (lower.includes("add_code_connect_map")) return "add_code_connect_map";
+  if (lower.includes("download_assets")) return "download_assets";
+  if (lower.includes("use_figma")) return "use_figma";
+  return "unknown";
+}
+function inferProviderKind(input) {
+  const haystack = [input.providerId, input.serverName ?? "", ...input.rawToolNames].join(" ").toLowerCase();
+  if (haystack.includes("local") || haystack.includes("desktop")) return "local-desktop";
+  if (haystack.includes("remote") || haystack.includes("mcp.figma.com")) return "remote";
+  if (haystack.includes("plugin") || haystack.includes("code connect")) return "plugin";
+  return "unknown";
+}
+function deriveFigmaProviderPolicy(providers) {
+  const available = providers.filter((provider) => provider.available);
+  const pick2 = (tool) => preferLocalThenRemote(available.filter((provider) => provider.tools.includes(tool)))?.providerId;
+  const metadataProviderId = pick2("get_metadata");
+  const designContextProviderId = pick2("get_design_context");
+  const screenshotProviderId = pick2("get_screenshot");
+  const variableDefsProviderId = pick2("get_variable_defs");
+  const codeConnectProviderId = pick2("get_code_connect_map");
+  const missingCapabilities = [];
+  if (metadataProviderId === void 0) missingCapabilities.push("metadata");
+  if (designContextProviderId === void 0) missingCapabilities.push("design-context");
+  if (screenshotProviderId === void 0) missingCapabilities.push("screenshot");
+  if (variableDefsProviderId === void 0) missingCapabilities.push("variable-defs");
+  if (codeConnectProviderId === void 0) missingCapabilities.push("code-connect-map");
+  const crossCheckProviderIds = available.filter(
+    (provider) => provider.tools.includes("get_metadata") || provider.tools.includes("get_screenshot")
+  ).map((provider) => provider.providerId);
+  const rationale = [];
+  rationale.push("Prefer provider capability over hard-coded local or remote assumptions.");
+  rationale.push(
+    "Prefer local desktop when it exposes the required tool, then remote, then plugin/unknown."
+  );
+  rationale.push(
+    "Use cross-check providers for important node metadata and screenshots when multiple providers are available."
+  );
+  return FigmaProviderPolicySchema.parse({
+    metadataProviderId,
+    designContextProviderId,
+    screenshotProviderId,
+    variableDefsProviderId,
+    codeConnectProviderId,
+    crossCheckProviderIds,
+    missingCapabilities,
+    rationale
+  });
+}
+function preferLocalThenRemote(providers) {
+  return providers.find((provider) => provider.kind === "local-desktop") ?? providers.find((provider) => provider.kind === "remote") ?? providers.find((provider) => provider.kind === "plugin") ?? providers[0];
+}
+var FigmaProviderKindSchema, FigmaCapabilityNameSchema, FigmaToolNameSchema, FigmaProviderCapabilitySchema, FigmaProviderPolicySchema, FigmaCapabilityReportSchema;
+var init_figma_capability = __esm({
+  "src/figma/figma-capability.ts"() {
+    "use strict";
+    init_zod();
+    init_ids();
+    init_scalars();
+    FigmaProviderKindSchema = external_exports.enum(["local-desktop", "remote", "plugin", "unknown"]);
+    FigmaCapabilityNameSchema = external_exports.enum([
+      "metadata",
+      "design-context",
+      "screenshot",
+      "variable-defs",
+      "code-connect-map",
+      "code-connect-suggestions",
+      "asset-download",
+      "write-design",
+      "selected-node"
+    ]);
+    FigmaToolNameSchema = external_exports.enum([
+      "get_metadata",
+      "get_design_context",
+      "get_screenshot",
+      "get_variable_defs",
+      "get_code_connect_map",
+      "get_code_connect_suggestions",
+      "add_code_connect_map",
+      "download_assets",
+      "use_figma",
+      "unknown"
+    ]);
+    FigmaProviderCapabilitySchema = external_exports.object({
+      providerId: external_exports.string().trim().min(1).max(120),
+      kind: FigmaProviderKindSchema,
+      available: external_exports.boolean(),
+      transport: external_exports.enum(["stdio", "http", "sse", "unknown"]).default("unknown"),
+      tools: external_exports.array(FigmaToolNameSchema).default([]),
+      rawToolNames: external_exports.array(external_exports.string().trim().min(1)).default([]),
+      notes: external_exports.array(external_exports.string().trim().min(1).max(500)).default([])
+    }).strict();
+    FigmaProviderPolicySchema = external_exports.object({
+      metadataProviderId: external_exports.string().trim().min(1).optional(),
+      designContextProviderId: external_exports.string().trim().min(1).optional(),
+      screenshotProviderId: external_exports.string().trim().min(1).optional(),
+      variableDefsProviderId: external_exports.string().trim().min(1).optional(),
+      codeConnectProviderId: external_exports.string().trim().min(1).optional(),
+      crossCheckProviderIds: external_exports.array(external_exports.string().trim().min(1)).default([]),
+      missingCapabilities: external_exports.array(FigmaCapabilityNameSchema).default([]),
+      rationale: external_exports.array(external_exports.string().trim().min(1)).default([])
+    }).strict();
+    FigmaCapabilityReportSchema = external_exports.object({
+      runId: RunIdSchema,
+      capturedAt: IsoDateTimeSchema,
+      providers: external_exports.array(FigmaProviderCapabilitySchema),
+      policy: FigmaProviderPolicySchema,
+      artifactId: ArtifactIdSchema.optional(),
+      gapIds: external_exports.array(GapIdSchema).default([])
+    }).strict();
+  }
+});
+
+// src/application/figma-capability-service.ts
+function createCapabilityGaps(capabilities, timestamp) {
+  return capabilities.map(
+    (capability) => GapSchema.parse({
+      id: createGapId(),
+      category: "design",
+      severity: capability === "screenshot" || capability === "design-context" ? "major" : "minor",
+      status: "open",
+      title: `Missing Figma MCP capability: ${capability}`,
+      expected: `A connected Figma MCP provider should expose ${capability} capability for reliable design intake.`,
+      observed: `No available Figma provider exposed ${capability} capability in the recorded capability report.`,
+      impact: "Figma intake may be incomplete, and later UI implementation may need a fallback or manual review.",
+      sourceEvidenceIds: [],
+      owner: "evidence-verifier",
+      createdAt: timestamp,
+      updatedAt: timestamp
+    })
+  );
+}
+var RecordFigmaMcpCapabilitiesInputSchema, GetFigmaProviderPolicyInputSchema, FIGMA_CAPABILITY_ADAPTER, FigmaCapabilityService;
+var init_figma_capability_service = __esm({
+  "src/application/figma-capability-service.ts"() {
+    "use strict";
+    init_zod();
+    init_artifact_blob_store();
+    init_figma_capability();
+    init_run2();
+    init_artifact();
+    init_gap();
+    init_id_factory();
+    init_ids();
+    init_scalars();
+    RecordFigmaMcpCapabilitiesInputSchema = external_exports.object({
+      runId: RunIdSchema,
+      providers: external_exports.array(
+        external_exports.object({
+          providerId: external_exports.string().trim().min(1),
+          serverName: external_exports.string().trim().min(1).optional(),
+          kind: external_exports.enum(["local-desktop", "remote", "plugin", "unknown"]).optional(),
+          available: external_exports.boolean().default(true),
+          transport: external_exports.enum(["stdio", "http", "sse", "unknown"]).default("unknown"),
+          rawToolNames: external_exports.array(external_exports.string().trim().min(1)).default([]),
+          notes: external_exports.array(external_exports.string().trim().min(1).max(500)).default([])
+        }).strict()
+      )
+    }).strict();
+    GetFigmaProviderPolicyInputSchema = external_exports.object({
+      runId: RunIdSchema
+    }).strict();
+    FIGMA_CAPABILITY_ADAPTER = "figma-capability-v1";
+    FigmaCapabilityService = class {
+      constructor(runStore, artifactStore, now = () => (/* @__PURE__ */ new Date()).toISOString()) {
+        this.runStore = runStore;
+        this.artifactStore = artifactStore;
+        this.now = now;
+      }
+      runStore;
+      artifactStore;
+      now;
+      async recordCapabilities(rawInput) {
+        const input = RecordFigmaMcpCapabilitiesInputSchema.parse(rawInput);
+        const run = await this.runStore.get(input.runId);
+        const timestamp = IsoDateTimeSchema.parse(this.now());
+        const providers = input.providers.map((provider) => {
+          const rawToolNames = provider.rawToolNames;
+          const normalizedTools = [...new Set(rawToolNames.map(normalizeFigmaToolName))].filter(
+            (toolName) => toolName !== "unknown"
+          );
+          return FigmaProviderCapabilitySchema.parse({
+            providerId: provider.providerId,
+            kind: provider.kind ?? inferProviderKind({
+              providerId: provider.providerId,
+              ...provider.serverName === void 0 ? {} : { serverName: provider.serverName },
+              rawToolNames
+            }),
+            available: provider.available,
+            transport: provider.transport,
+            tools: normalizedTools,
+            rawToolNames,
+            notes: provider.notes
+          });
+        });
+        const policy = deriveFigmaProviderPolicy(providers);
+        const reportWithoutIds = {
+          runId: run.id,
+          capturedAt: timestamp,
+          providers,
+          policy,
+          gapIds: []
+        };
+        const content = Buffer.from(`${JSON.stringify(reportWithoutIds, null, 2)}
+`, "utf8");
+        const blob = await this.artifactStore.writeBlob({
+          content,
+          mediaType: "application/json",
+          storedAt: timestamp,
+          label: "figma-mcp-capability-report"
+        });
+        const artifact = ArtifactRefSchema.parse({
+          id: createArtifactId(),
+          kind: "figma-mcp-capability-report",
+          uri: blob.uri,
+          mediaType: "application/json",
+          digest: blob.digest,
+          producedBy: "orchestrator",
+          evidenceIds: [],
+          createdAt: timestamp,
+          metadata: {
+            adapter: FIGMA_CAPABILITY_ADAPTER
+          }
+        });
+        const gaps = createCapabilityGaps(policy.missingCapabilities, timestamp);
+        const finalReport = FigmaCapabilityReportSchema.parse({
+          ...reportWithoutIds,
+          artifactId: artifact.id,
+          gapIds: gaps.map((gap) => gap.id)
+        });
+        const finalReportContent = Buffer.from(`${JSON.stringify(finalReport, null, 2)}
+`, "utf8");
+        const finalBlob = await this.artifactStore.writeBlob({
+          content: finalReportContent,
+          mediaType: "application/json",
+          storedAt: timestamp,
+          label: "figma-mcp-capability-report-final"
+        });
+        const finalArtifact = ArtifactRefSchema.parse({
+          ...artifact,
+          digest: finalBlob.digest,
+          uri: finalBlob.uri
+        });
+        const nextRun = RunManifestSchema.parse({
+          ...run,
+          revision: run.revision + 1,
+          updatedAt: timestamp,
+          artifacts: [...run.artifacts, finalArtifact],
+          gaps: [...run.gaps, ...gaps]
+        });
+        await this.runStore.save(nextRun, run.revision);
+        return {
+          run: summarizeRun(nextRun),
+          report: finalReport,
+          artifact: finalArtifact,
+          gaps
+        };
+      }
+      async getProviderPolicy(rawInput) {
+        const input = GetFigmaProviderPolicyInputSchema.parse(rawInput);
+        const run = await this.runStore.get(input.runId);
+        const capabilityArtifacts = run.artifacts.filter(
+          (artifact) => artifact.kind === "figma-mcp-capability-report"
+        );
+        const latest = capabilityArtifacts.at(-1);
+        if (latest === void 0) {
+          throw new Error(`No Figma capability report found for run ${run.id}`);
+        }
+        const content = await this.artifactStore.readContent(latest.digest);
+        const report = FigmaCapabilityReportSchema.parse(JSON.parse(content.toString("utf8")));
+        return report.policy;
+      }
+    };
+  }
+});
+
 // src/security/policy.ts
 function allow(code, message, auditTags = []) {
   return PolicyDecisionSchema.parse({
@@ -34462,7 +34828,7 @@ var init_policy = __esm({
 });
 
 // src/security/command-policy.ts
-import path2 from "path";
+import path3 from "path";
 function classifyCommand(rawCommand) {
   const command = CommandInvocationSchema.parse(rawCommand);
   const normalizedCommand = normalizeExecutable(command.command);
@@ -34656,7 +35022,7 @@ function classifyPackageManager(manager, args, intent) {
   );
 }
 function normalizeExecutable(command) {
-  return path2.basename(command).toLowerCase();
+  return path3.basename(command).toLowerCase();
 }
 function findShellCharacters(parts) {
   const found = /* @__PURE__ */ new Set();
@@ -34751,14 +35117,14 @@ var init_command_policy = __esm({
 
 // src/security/path-policy.ts
 import { realpath, stat } from "fs/promises";
-import path3 from "path";
+import path4 from "path";
 async function validateWorkspacePath(rawInput) {
   const input = ValidateWorkspacePathInputSchema.parse(rawInput);
   if (hasNullByte(input.candidatePath) || hasNullByte(input.workspaceRoot)) {
     return deniedPath(input, "NULL_BYTE", "Paths must not contain null bytes.");
   }
-  const workspaceRootRealPath = await realpath(path3.resolve(input.workspaceRoot));
-  const candidateAbsolutePath = path3.resolve(workspaceRootRealPath, input.candidatePath);
+  const workspaceRootRealPath = await realpath(path4.resolve(input.workspaceRoot));
+  const candidateAbsolutePath = path4.resolve(workspaceRootRealPath, input.candidatePath);
   if (!isInsideOrEqual(workspaceRootRealPath, candidateAbsolutePath)) {
     return {
       workspaceRoot: input.workspaceRoot,
@@ -34838,7 +35204,7 @@ async function validateWorkspacePath(rawInput) {
   }
 }
 async function validateCreatePath(input, workspaceRootRealPath, candidateAbsolutePath) {
-  const parentPath = path3.dirname(candidateAbsolutePath);
+  const parentPath = path4.dirname(candidateAbsolutePath);
   try {
     const parentRealPath = await realpath(parentPath);
     if (!isInsideOrEqual(workspaceRootRealPath, parentRealPath)) {
@@ -34887,9 +35253,9 @@ async function validateCreatePath(input, workspaceRootRealPath, candidateAbsolut
 function deniedPath(input, code, message) {
   return {
     workspaceRoot: input.workspaceRoot,
-    workspaceRootRealPath: path3.resolve(input.workspaceRoot),
+    workspaceRootRealPath: path4.resolve(input.workspaceRoot),
     candidatePath: input.candidatePath,
-    candidateAbsolutePath: path3.resolve(input.workspaceRoot, input.candidatePath),
+    candidateAbsolutePath: path4.resolve(input.workspaceRoot, input.candidatePath),
     mode: input.mode,
     decision: deny(code, message, "critical", ["path"])
   };
@@ -34898,8 +35264,8 @@ function hasNullByte(value) {
   return value.includes("\0");
 }
 function isInsideOrEqual(root, candidate) {
-  const relative = path3.relative(root, candidate);
-  return relative === "" || !relative.startsWith("..") && !path3.isAbsolute(relative);
+  const relative = path4.relative(root, candidate);
+  return relative === "" || !relative.startsWith("..") && !path4.isAbsolute(relative);
 }
 var PathAccessModeSchema, ValidateWorkspacePathInputSchema, ValidatedWorkspacePathSchema;
 var init_path_policy = __esm({
@@ -35326,8 +35692,8 @@ var init_package_manager_detector = __esm({
 
 // src/profile/probe.ts
 import { execFile } from "child_process";
-import { access, readdir, readFile, realpath as realpath2, stat as stat2 } from "fs/promises";
-import path4 from "path";
+import { access, readdir, readFile as readFile2, realpath as realpath2, stat as stat2 } from "fs/promises";
+import path5 from "path";
 import { promisify } from "util";
 async function createProjectProbe(projectRoot) {
   const realRoot = await realpath2(projectRoot);
@@ -35336,7 +35702,7 @@ async function createProjectProbe(projectRoot) {
     throw new Error(`Project root is not a directory: ${realRoot}`);
   }
   async function resolveInside(relativePath) {
-    const candidate = path4.resolve(realRoot, relativePath);
+    const candidate = path5.resolve(realRoot, relativePath);
     const realCandidate = await realpathOrParent(candidate);
     if (!isInside(realRoot, realCandidate)) {
       throw new Error(`Path escapes project root: ${relativePath}`);
@@ -35362,7 +35728,7 @@ async function createProjectProbe(projectRoot) {
         if (!metadata2.isFile() || metadata2.size > maxBytes) {
           return void 0;
         }
-        return await readFile(absolute, "utf8");
+        return await readFile2(absolute, "utf8");
       } catch {
         return void 0;
       }
@@ -35410,26 +35776,26 @@ async function createProjectProbe(projectRoot) {
       }
     },
     toRelative(absolutePath) {
-      return normalizeRelative(path4.relative(realRoot, absolutePath));
+      return normalizeRelative(path5.relative(realRoot, absolutePath));
     },
     resolveInside
   };
   return probe;
 }
 function normalizeRelative(value) {
-  return value.split(path4.sep).join("/");
+  return value.split(path5.sep).join("/");
 }
 function isInside(root, candidate) {
-  const relative = path4.relative(root, candidate);
-  return relative === "" || !relative.startsWith("..") && !path4.isAbsolute(relative);
+  const relative = path5.relative(root, candidate);
+  return relative === "" || !relative.startsWith("..") && !path5.isAbsolute(relative);
 }
 async function realpathOrParent(candidate) {
   let current = candidate;
-  while (current !== path4.dirname(current)) {
+  while (current !== path5.dirname(current)) {
     try {
       return await realpath2(current);
     } catch {
-      current = path4.dirname(current);
+      current = path5.dirname(current);
     }
   }
   try {
@@ -35746,8 +36112,8 @@ var init_project_profiler = __esm({
 });
 
 // src/profile/profile-store.ts
-import { mkdir, readdir as readdir2, readFile as readFile2, writeFile } from "fs/promises";
-import path5 from "path";
+import { mkdir as mkdir2, readdir as readdir2, readFile as readFile3, writeFile as writeFile2 } from "fs/promises";
+import path6 from "path";
 var JsonProfileStore;
 var init_profile_store = __esm({
   "src/profile/profile-store.ts"() {
@@ -35759,12 +36125,12 @@ var init_profile_store = __esm({
       }
       directory;
       async saveManifest(manifest) {
-        await mkdir(this.directory, {
+        await mkdir2(this.directory, {
           recursive: true,
           mode: 448
         });
-        await writeFile(
-          path5.join(this.directory, `${manifest.runId}.intake.json`),
+        await writeFile2(
+          path6.join(this.directory, `${manifest.runId}.intake.json`),
           `${JSON.stringify(IntakeManifestSchema.parse(manifest), null, 2)}
 `,
           {
@@ -35774,16 +36140,16 @@ var init_profile_store = __esm({
         );
       }
       async getManifest(runId) {
-        const text = await readFile2(path5.join(this.directory, `${runId}.intake.json`), "utf8");
+        const text = await readFile3(path6.join(this.directory, `${runId}.intake.json`), "utf8");
         return IntakeManifestSchema.parse(JSON.parse(text));
       }
       async saveProfile(profile) {
-        await mkdir(this.directory, {
+        await mkdir2(this.directory, {
           recursive: true,
           mode: 448
         });
-        await writeFile(
-          path5.join(this.directory, `${profile.runId}.profile.json`),
+        await writeFile2(
+          path6.join(this.directory, `${profile.runId}.profile.json`),
           `${JSON.stringify(ProjectProfileSchema.parse(profile), null, 2)}
 `,
           {
@@ -35793,11 +36159,11 @@ var init_profile_store = __esm({
         );
       }
       async getProfile(runId) {
-        const text = await readFile2(path5.join(this.directory, `${runId}.profile.json`), "utf8");
+        const text = await readFile3(path6.join(this.directory, `${runId}.profile.json`), "utf8");
         return ProjectProfileSchema.parse(JSON.parse(text));
       }
       async listProfiles() {
-        await mkdir(this.directory, {
+        await mkdir2(this.directory, {
           recursive: true,
           mode: 448
         });
@@ -35805,7 +36171,7 @@ var init_profile_store = __esm({
         const profileFiles = files.filter((file2) => file2.endsWith(".profile.json"));
         const profiles = await Promise.all(
           profileFiles.map(async (file2) => {
-            const text = await readFile2(path5.join(this.directory, file2), "utf8");
+            const text = await readFile3(path6.join(this.directory, file2), "utf8");
             return ProjectProfileSchema.parse(JSON.parse(text));
           })
         );
@@ -35884,12 +36250,12 @@ var init_profile_service = __esm({
 // src/application/run-service.ts
 import { randomUUID as randomUUID2 } from "crypto";
 import { realpath as realpath3, stat as stat3 } from "fs/promises";
-import path6 from "path";
+import path7 from "path";
 function createRunId() {
   return RunIdSchema.parse(`run_${randomUUID2().replaceAll("-", "")}`);
 }
 async function canonicalDirectory(rawPath) {
-  const absolute = path6.resolve(rawPath);
+  const absolute = path7.resolve(rawPath);
   const canonical = await realpath3(absolute);
   const metadata = await stat3(canonical);
   if (!metadata.isDirectory()) {
@@ -36042,13 +36408,13 @@ var init_canonical_content = __esm({
 
 // src/source-registry/path-scope.ts
 import { realpath as realpath4, stat as stat4 } from "fs/promises";
-import path7 from "path";
+import path8 from "path";
 async function resolveFileInsideRoot(input) {
   const projectRoot = await realpath4(input.projectRoot);
-  const candidate = path7.resolve(projectRoot, input.filePath);
+  const candidate = path8.resolve(projectRoot, input.filePath);
   const absolutePath = await realpath4(candidate);
-  const relative = path7.relative(projectRoot, absolutePath);
-  if (relative === "" || relative.startsWith("..") || path7.isAbsolute(relative)) {
+  const relative = path8.relative(projectRoot, absolutePath);
+  if (relative === "" || relative.startsWith("..") || path8.isAbsolute(relative)) {
     throw new Error(`File is outside project root: ${input.filePath}`);
   }
   const metadata = await stat4(absolutePath);
@@ -36062,7 +36428,7 @@ async function resolveFileInsideRoot(input) {
   };
 }
 function toPosixPath(value) {
-  return value.split(path7.sep).join("/");
+  return value.split(path8.sep).join("/");
 }
 var init_path_scope = __esm({
   "src/source-registry/path-scope.ts"() {
@@ -36072,22 +36438,22 @@ var init_path_scope = __esm({
 });
 
 // src/source-registry/snapshot-store.ts
-import { mkdir as mkdir2, readFile as readFile3, writeFile as writeFile2 } from "fs/promises";
-import path8 from "path";
-async function writeIfMissing(filePath, content) {
+import { mkdir as mkdir3, readFile as readFile4, writeFile as writeFile3 } from "fs/promises";
+import path9 from "path";
+async function writeIfMissing2(filePath, content) {
   try {
-    await writeFile2(filePath, content, {
+    await writeFile3(filePath, content, {
       flag: "wx",
       mode: 384
     });
   } catch (error51) {
-    if (isAlreadyExistsError(error51)) {
+    if (isAlreadyExistsError2(error51)) {
       return;
     }
     throw error51;
   }
 }
-function isAlreadyExistsError(error51) {
+function isAlreadyExistsError2(error51) {
   return error51 instanceof Error && "code" in error51 && error51.code === "EEXIST";
 }
 var SourceSnapshotMetadataSchema, SourceSnapshotStore;
@@ -36116,14 +36482,14 @@ var init_snapshot_store = __esm({
       async writeSnapshot(input) {
         const digest = input.canonical.canonicalDigest;
         const { prefix, hex: hex3 } = digestPathSegments(digest);
-        const directory = path8.join(this.rootDirectory, "sha256", prefix, hex3);
-        const contentPath = path8.join(directory, "content");
-        const metadataPath = path8.join(directory, "metadata.json");
-        await mkdir2(directory, {
+        const directory = path9.join(this.rootDirectory, "sha256", prefix, hex3);
+        const contentPath = path9.join(directory, "content");
+        const metadataPath = path9.join(directory, "metadata.json");
+        await mkdir3(directory, {
           recursive: true,
           mode: 448
         });
-        await writeIfMissing(contentPath, input.canonical.canonicalContent);
+        await writeIfMissing2(contentPath, input.canonical.canonicalContent);
         const metadata = SourceSnapshotMetadataSchema.parse({
           source: input.source,
           rawDigest: input.canonical.rawDigest,
@@ -36134,7 +36500,7 @@ var init_snapshot_store = __esm({
           ...input.canonical.lineCount === void 0 ? {} : { lineCount: input.canonical.lineCount },
           storedAt: input.storedAt
         });
-        await writeIfMissing(
+        await writeIfMissing2(
           metadataPath,
           Buffer.from(`${JSON.stringify(metadata, null, 2)}
 `, "utf8")
@@ -36149,14 +36515,14 @@ var init_snapshot_store = __esm({
       async readMetadata(rawDigest) {
         const digest = Sha256DigestSchema.parse(rawDigest);
         const { prefix, hex: hex3 } = digestPathSegments(digest);
-        const metadataPath = path8.join(this.rootDirectory, "sha256", prefix, hex3, "metadata.json");
-        return SourceSnapshotMetadataSchema.parse(JSON.parse(await readFile3(metadataPath, "utf8")));
+        const metadataPath = path9.join(this.rootDirectory, "sha256", prefix, hex3, "metadata.json");
+        return SourceSnapshotMetadataSchema.parse(JSON.parse(await readFile4(metadataPath, "utf8")));
       }
       async readContent(rawDigest) {
         const digest = Sha256DigestSchema.parse(rawDigest);
         const { prefix, hex: hex3 } = digestPathSegments(digest);
-        const contentPath = path8.join(this.rootDirectory, "sha256", prefix, hex3, "content");
-        return readFile3(contentPath);
+        const contentPath = path9.join(this.rootDirectory, "sha256", prefix, hex3, "content");
+        return readFile4(contentPath);
       }
     };
   }
@@ -36174,7 +36540,7 @@ var init_source_registry = __esm({
 });
 
 // src/application/source-registry-service.ts
-import { readFile as readFile4 } from "fs/promises";
+import { readFile as readFile5 } from "fs/promises";
 function parseSourceRegistrationResult(result) {
   SourceRegistrationResultSchema.parse(result);
   return result;
@@ -36226,7 +36592,7 @@ var init_source_registry_service = __esm({
           projectRoot: run.projectRoot,
           filePath: input.path
         });
-        const rawContent = await readFile4(scopedPath.absolutePath);
+        const rawContent = await readFile5(scopedPath.absolutePath);
         const canonical = canonicalizeFileContent({
           path: scopedPath.relativePath,
           ...input.mediaType === void 0 ? {} : { mediaType: input.mediaType },
@@ -37100,6 +37466,47 @@ function createKernelServer(servicesProvider) {
     })
   );
   server.registerTool(
+    "record_figma_mcp_capabilities",
+    {
+      title: "Record Figma MCP capabilities",
+      description: "Record available Figma MCP providers and derive provider policy.",
+      inputSchema: RecordFigmaMcpCapabilitiesInputSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { figmaCapabilityService } = await servicesProvider();
+      const structuredContent = await figmaCapabilityService.recordCapabilities(input);
+      return {
+        text: `Recorded Figma MCP capability report for run ${structuredContent.report.runId}.`,
+        structuredContent
+      };
+    })
+  );
+  server.registerTool(
+    "get_figma_provider_policy",
+    {
+      title: "Get Figma provider policy",
+      description: "Return the latest derived Figma provider policy for a Run.",
+      inputSchema: GetFigmaProviderPolicyInputSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { figmaCapabilityService } = await servicesProvider();
+      const structuredContent = await figmaCapabilityService.getProviderPolicy(input);
+      return {
+        text: "Loaded Figma provider policy.",
+        structuredContent
+      };
+    })
+  );
+  server.registerTool(
     "create_run",
     {
       title: "Create run",
@@ -37352,6 +37759,7 @@ var init_create_server = __esm({
     init_mcp();
     init_zod();
     init_brief_adapter_service();
+    init_figma_capability_service();
     init_policy_service();
     init_profile_service();
     init_run_service();
@@ -37423,7 +37831,9 @@ var init_create_server = __esm({
       "list_project_profiles",
       "register_file_source",
       "get_source_snapshot",
-      "analyze_brief_source"
+      "analyze_brief_source",
+      "record_figma_mcp_capabilities",
+      "get_figma_provider_policy"
     ];
   }
 });
@@ -37467,7 +37877,7 @@ __export(sqlite_run_store_exports, {
   SqliteRunStore: () => SqliteRunStore
 });
 import { mkdirSync } from "fs";
-import path9 from "path";
+import path10 from "path";
 import { createRequire } from "module";
 function loadSqliteModule() {
   return require2("node:sqlite");
@@ -37509,7 +37919,7 @@ var init_sqlite_run_store = __esm({
     SqliteRunStore = class {
       database;
       constructor(databasePath) {
-        mkdirSync(path9.dirname(databasePath), {
+        mkdirSync(path10.dirname(databasePath), {
           recursive: true,
           mode: 448
         });
@@ -37745,7 +38155,7 @@ __export(run_service_provider_exports, {
   createLazyServicesProvider: () => createLazyServicesProvider
 });
 import os from "os";
-import path10 from "path";
+import path11 from "path";
 function createLazyServicesProvider() {
   let services;
   return async () => {
@@ -37754,8 +38164,9 @@ function createLazyServicesProvider() {
     }
     const { SqliteRunStore: SqliteRunStore2 } = await Promise.resolve().then(() => (init_sqlite_run_store(), sqlite_run_store_exports));
     const dataDirectory = resolveDataDirectory();
-    const store = new SqliteRunStore2(path10.join(dataDirectory, "runs.sqlite3"));
-    const snapshotStore = new SourceSnapshotStore(path10.join(dataDirectory, "source-snapshots"));
+    const store = new SqliteRunStore2(path11.join(dataDirectory, "runs.sqlite3"));
+    const snapshotStore = new SourceSnapshotStore(path11.join(dataDirectory, "source-snapshots"));
+    const artifactStore = new ArtifactBlobStore(path11.join(dataDirectory, "artifacts"));
     services = {
       runService: new RunService(store, {
         pluginVersion: package_default.version
@@ -37763,22 +38174,25 @@ function createLazyServicesProvider() {
       stageService: new StageService(store),
       policyService: new PolicyService(),
       profileService: new ProjectProfileService(
-        new JsonProfileStore(path10.join(dataDirectory, "profiles"))
+        new JsonProfileStore(path11.join(dataDirectory, "profiles"))
       ),
       sourceRegistryService: new SourceRegistryService(store, snapshotStore),
-      briefAdapterService: new BriefAdapterService(store, snapshotStore)
+      briefAdapterService: new BriefAdapterService(store, snapshotStore),
+      figmaCapabilityService: new FigmaCapabilityService(store, artifactStore)
     };
     return services;
   };
 }
 function resolveDataDirectory() {
-  return process.env.SPEC_TO_PR_DATA_DIR ?? path10.join(os.tmpdir(), "spec-to-pr-plugin-data");
+  return process.env.SPEC_TO_PR_DATA_DIR ?? path11.join(os.tmpdir(), "spec-to-pr-plugin-data");
 }
 var init_run_service_provider = __esm({
   "src/mcp/run-service-provider.ts"() {
     "use strict";
     init_package();
+    init_artifact_blob_store();
     init_brief_adapter_service();
+    init_figma_capability_service();
     init_policy_service();
     init_profile_service();
     init_run_service();
