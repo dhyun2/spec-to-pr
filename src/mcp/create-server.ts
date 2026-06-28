@@ -120,6 +120,19 @@ import {
   InspectProjectInputSchema,
 } from "../application/profile-service.js";
 import {
+  DetectPublishTargetInputSchema,
+  DetectPublishTargetResultSchema,
+  GetPublishResultInputSchema,
+  GetPublishResultResultSchema,
+  PlanReviewRequestPublishInputSchema,
+  PlanReviewRequestPublishResultSchema,
+  PublishReviewRequestInputSchema,
+  PublishReviewRequestResultSchema,
+  RecordPublishReviewInputSchema,
+  RecordPublishReviewResultSchema,
+  UpdateReviewRequestBodyInputSchema,
+} from "../application/publisher-service.js";
+import {
   RunQualityGatesInputSchema,
   RunQualityGatesResultSchema,
 } from "../application/quality-gate-service.js";
@@ -247,6 +260,12 @@ const TOOL_NAMES = [
   "generate_pr_report",
   "get_pr_report",
   "record_pr_report_review",
+  "detect_publish_target",
+  "plan_review_request_publish",
+  "publish_review_request",
+  "update_review_request_body",
+  "get_publish_result",
+  "record_publish_review",
   "analyze_architecture_boundaries",
   "generate_source_guard_tests",
   "run_quality_gates",
@@ -786,6 +805,159 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
 
         return {
           text: `Recorded PR report review ${structuredContent.reviewArtifactId}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "detect_publish_target",
+    {
+      title: "Detect publish target",
+      description: "Detect GitHub or GitLab publish target from the Run repository remote.",
+      inputSchema: DetectPublishTargetInputSchema.shape,
+      outputSchema: DetectPublishTargetResultSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { publisherService } = await servicesProvider();
+        const structuredContent = await publisherService.detectTarget(input);
+
+        return {
+          text: `Detected publish target from ${structuredContent.remoteName}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "plan_review_request_publish",
+    {
+      title: "Plan review request publish",
+      description: "Build a GitHub/GitLab PR/MR publish plan from a PR report artifact.",
+      inputSchema: PlanReviewRequestPublishInputSchema.shape,
+      outputSchema: PlanReviewRequestPublishResultSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { publisherService } = await servicesProvider();
+        const structuredContent = await publisherService.plan(input);
+
+        return {
+          text: `Prepared publish plan for ${structuredContent.target.host}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "publish_review_request",
+    {
+      title: "Publish review request",
+      description: "Create or update a GitHub Pull Request or GitLab Merge Request.",
+      inputSchema: PublishReviewRequestInputSchema.shape,
+      outputSchema: PublishReviewRequestResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { publisherService } = await servicesProvider();
+        const structuredContent = await publisherService.publish(input);
+
+        return {
+          text:
+            structuredContent.result.status === "passed"
+              ? `Published review request: ${structuredContent.result.request?.url}`
+              : `Publish failed: ${structuredContent.result.errorMessage}`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "update_review_request_body",
+    {
+      title: "Update review request body",
+      description: "Update an existing GitHub PR or GitLab MR body from the PR report artifact.",
+      inputSchema: UpdateReviewRequestBodyInputSchema.shape,
+      outputSchema: PublishReviewRequestResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { publisherService } = await servicesProvider();
+        const structuredContent = await publisherService.updateBody(input);
+
+        return {
+          text:
+            structuredContent.result.status === "passed"
+              ? `Updated review request: ${structuredContent.result.request?.url}`
+              : `Update failed: ${structuredContent.result.errorMessage}`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "get_publish_result",
+    {
+      title: "Get publish result",
+      description: "Load the latest publish result artifact for a Run.",
+      inputSchema: GetPublishResultInputSchema.shape,
+      outputSchema: GetPublishResultResultSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { publisherService } = await servicesProvider();
+        const structuredContent = await publisherService.getResult(input);
+
+        return {
+          text: `Loaded publish result ${structuredContent.artifactId}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "record_publish_review",
+    {
+      title: "Record publish review",
+      description: "Record publisher-reviewer findings for a publish plan or result.",
+      inputSchema: RecordPublishReviewInputSchema.shape,
+      outputSchema: RecordPublishReviewResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { publisherService } = await servicesProvider();
+        const structuredContent = await publisherService.recordReview(input);
+
+        return {
+          text: `Recorded publish review ${structuredContent.reviewArtifactId}.`,
           structuredContent,
         };
       }),

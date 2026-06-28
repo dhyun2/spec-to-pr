@@ -24,6 +24,7 @@ import { PerformanceGateService } from "../application/performance-gate-service.
 import { PolicyService } from "../application/policy-service.js";
 import { PrReportService } from "../application/pr-report-service.js";
 import { ProjectProfileService } from "../application/profile-service.js";
+import { PublisherService } from "../application/publisher-service.js";
 import { QualityGateService } from "../application/quality-gate-service.js";
 import { ReviewCouncilService } from "../application/review-council-service.js";
 import { RunService } from "../application/run-service.js";
@@ -41,6 +42,7 @@ export type Services = {
   accessibilityGateService: AccessibilityGateService;
   performanceGateService: PerformanceGateService;
   prReportService: PrReportService;
+  publisherService: PublisherService;
   stageService: StageService;
   policyService: PolicyService;
   architectureGuardService: ArchitectureGuardService;
@@ -91,6 +93,7 @@ export function createLazyServicesProvider(): ServicesProvider {
       accessibilityGateService: new AccessibilityGateService(store, artifactStore),
       performanceGateService: new PerformanceGateService(store, artifactStore),
       prReportService: new PrReportService(store, artifactStore),
+      publisherService: new PublisherService(store, artifactStore),
       stageService: new StageService(store),
       policyService: new PolicyService(),
       architectureGuardService: new ArchitectureGuardService(store, artifactStore),
