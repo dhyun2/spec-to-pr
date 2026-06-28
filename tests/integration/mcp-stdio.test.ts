@@ -65,6 +65,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "block_stage",
       "build_evidence_graph",
       "capture_browser_screenshots",
+      "check_review_request_status_once",
       "classify_command",
       "cleanup_agent_worktree",
       "compare_visual_snapshots",
@@ -73,7 +74,6 @@ describe("spec-to-pr MCP stdio server", () => {
       "create_intake_manifest",
       "create_run",
       "detect_publish_target",
-      "execute_openspec_archive",
       "fail_stage",
       "finalize_integration",
       "generate_api_pipeline",
@@ -92,7 +92,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "get_figma_provider_policy",
       "get_integration_plan",
       "get_observability_report",
-      "get_openspec_archive_result",
+      "get_openspec_archive_report",
       "get_performance_report",
       "get_pr_report",
       "get_project_profile",
@@ -136,8 +136,8 @@ describe("spec-to-pr MCP stdio server", () => {
       "record_figma_screenshot",
       "record_figma_variable_defs",
       "record_integration_repair",
+      "record_merge_attestation",
       "record_observability_review",
-      "record_openspec_archive_review",
       "record_performance_review",
       "record_pr_report_review",
       "record_publish_review",
@@ -148,13 +148,13 @@ describe("spec-to-pr MCP stdio server", () => {
       "register_figma_source",
       "register_file_source",
       "run_accessibility_gate",
+      "run_openspec_archive",
       "run_performance_gate",
       "run_quality_gates",
       "skip_stage",
       "start_stage",
       "update_review_request_body",
       "validate_path",
-      "verify_review_request_merged",
     ]);
 
     const info = await client.callTool({
@@ -1041,105 +1041,76 @@ components:
       changeName: "deliver-reservation-management",
     });
 
-    const archiveMergeStatus = await client.callTool({
-      name: "verify_review_request_merged",
+    const archiveAttestation = await client.callTool({
+      name: "record_merge_attestation",
       arguments: {
         runId,
-        review: {
-          provider: "github",
-          reviewRequestUrl: "https://github.com/acme/spec-to-pr/pull/123",
-          number: "123",
-          merged: false,
-          raw: {},
-        },
+        reviewRequestUrl: "https://github.com/acme/spec-to-pr/pull/123",
+        statement: "The GitHub pull request has been merged.",
+        attestedBy: "user",
       },
     });
 
-    expect(archiveMergeStatus.structuredContent).toMatchObject({
-      verification: {
-        verified: false,
-        review: {
-          merged: false,
-        },
-      },
-      artifactId: expect.any(String),
+    expect(archiveAttestation.structuredContent).toMatchObject({
+      type: "user-attested",
+      reviewRequestUrl: "https://github.com/acme/spec-to-pr/pull/123",
+      mergeEvidenceId: expect.any(String),
     });
 
-    const mergeStatusArtifactId = (
-      archiveMergeStatus.structuredContent as {
-        artifactId: string;
+    const mergeEvidenceId = (
+      archiveAttestation.structuredContent as {
+        mergeEvidenceId: string;
       }
-    ).artifactId;
+    ).mergeEvidenceId;
 
     const archivePlan = await client.callTool({
       name: "plan_openspec_archive",
       arguments: {
         runId,
         changeName: "deliver-reservation-management",
-        mergeStatusArtifactId,
       },
     });
 
     expect(archivePlan.structuredContent).toMatchObject({
-      plan: {
-        canExecute: false,
-        changeName: "deliver-reservation-management",
-      },
-      artifactId: expect.any(String),
+      status: "blocked",
+      changeName: "deliver-reservation-management",
+      executeAllowed: false,
+      polling: false,
     });
 
     const archiveExecution = await client.callTool({
-      name: "execute_openspec_archive",
+      name: "run_openspec_archive",
       arguments: {
         runId,
         changeName: "deliver-reservation-management",
-        mergeStatusArtifactId,
+        mergeEvidenceId,
+        yes: true,
       },
     });
 
     expect(archiveExecution.structuredContent).toMatchObject({
-      result: {
-        status: "blocked",
-      },
-      resultArtifactId: expect.any(String),
+      status: "blocked",
+      archiveResultId: expect.any(String),
       reportArtifactId: expect.any(String),
     });
 
     const archiveResultArtifactId = (
       archiveExecution.structuredContent as {
-        resultArtifactId: string;
+        archiveResultId: string;
       }
-    ).resultArtifactId;
+    ).archiveResultId;
 
     const loadedArchiveResult = await client.callTool({
-      name: "get_openspec_archive_result",
+      name: "get_openspec_archive_report",
       arguments: {
         runId,
-        artifactId: archiveResultArtifactId,
+        archiveResultId: archiveResultArtifactId,
       },
     });
 
     expect(loadedArchiveResult.structuredContent).toMatchObject({
-      result: {
-        status: "blocked",
-      },
-    });
-
-    const archiveReview = await client.callTool({
-      name: "record_openspec_archive_review",
-      arguments: {
-        runId,
-        archiveResultArtifactId,
-        review: {
-          status: "passed",
-          findings: [],
-        },
-      },
-    });
-
-    expect(archiveReview.structuredContent).toMatchObject({
-      reviewArtifactId: expect.any(String),
-      findingCount: 0,
+      status: "blocked",
+      reportArtifactId: expect.any(String),
     });
 
     const generatedGherkin = await client.callTool({

@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { createOpenSpecArchivePlan } from "../../src/openspec-archive/index.js";
+import { createOpenSpecArchivePlan, type MergeEvidence } from "../../src/archive/index.js";
 import { createInitialRun } from "../../src/run/index.js";
 
 let projectRoot: string;
@@ -21,7 +21,7 @@ afterEach(async () => {
 });
 
 describe("OpenSpec archive planner", () => {
-  it("blocks archive when review request is not merged", async () => {
+  it("requires explicit merge evidence and never polls", async () => {
     const run = createInitialRun(
       { sources: [] },
       {
@@ -35,23 +35,17 @@ describe("OpenSpec archive planner", () => {
     const plan = await createOpenSpecArchivePlan({
       run,
       changeName: "deliver-reservation-management",
+      publishResultUrl: "https://github.com/acme/spec-to-pr/pull/1",
       generatedAt: "2026-06-23T00:00:00.000Z",
-      review: {
-        provider: "github",
-        merged: false,
-        raw: {},
-      },
     });
 
-    expect(plan.canExecute).toBe(false);
-    expect(
-      plan.preconditions.some(
-        (item) => item.id === "review-request-merged" && item.status === "failed",
-      ),
-    ).toBe(true);
+    expect(plan.status).toBe("needs-merge-evidence");
+    expect(plan.executeAllowed).toBe(false);
+    expect(plan.polling).toBe(false);
+    expect(plan.blockingReasons).toContain("No merge evidence found.");
   });
 
-  it("passes blocking preconditions when merged status and change files exist", async () => {
+  it("is ready when publish result URL, matching merged evidence, and change files exist", async () => {
     const changeRoot = path.join(
       projectRoot,
       "openspec",
@@ -76,27 +70,30 @@ describe("OpenSpec archive planner", () => {
       },
     );
 
+    const mergeEvidence: MergeEvidence = {
+      id: "art_11111111111111111111111111111111",
+      runId: run.id,
+      kind: "user-attested",
+      provider: "github",
+      reviewRequestUrl: "https://github.com/acme/spec-to-pr/pull/1",
+      status: "merged",
+      statement: "User confirmed that the review request was merged.",
+      checkedAt: "2026-06-23T00:00:00.000Z",
+      attestedBy: "user",
+      metadata: {},
+    };
+
     const plan = await createOpenSpecArchivePlan({
       run,
       changeName: "deliver-reservation-management",
+      publishResultUrl: "https://github.com/acme/spec-to-pr/pull/1",
+      mergeEvidence,
       generatedAt: "2026-06-23T00:00:00.000Z",
-      review: {
-        provider: "github",
-        reviewRequestUrl: "https://github.com/acme/spec-to-pr/pull/1",
-        number: "1",
-        merged: true,
-        mergedAt: "2026-06-23T00:00:00.000Z",
-        mergedCommitSha: "abcdef1",
-        raw: {},
-      },
     });
 
-    expect(plan.canExecute).toBe(true);
-    expect(plan.command).toEqual([
-      "openspec",
-      "archive",
-      "deliver-reservation-management",
-      "--yes",
-    ]);
+    expect(plan.status).toBe("ready");
+    expect(plan.executeAllowed).toBe(true);
+    expect(plan.archiveCommand).toBe("openspec archive deliver-reservation-management --yes");
+    expect(plan.polling).toBe(false);
   });
 });

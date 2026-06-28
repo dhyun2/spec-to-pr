@@ -6,16 +6,32 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { ArtifactBlobStore } from "../../src/artifact-registry/artifact-blob-store.js";
 import { OpenSpecArchiveService } from "../../src/application/openspec-archive-service.js";
-import { createInitialRun } from "../../src/run/index.js";
+import { createInitialRun, RunManifestSchema } from "../../src/run/index.js";
+import { ArtifactRefSchema } from "../../src/runtime/artifact.js";
+import { createArtifactId } from "../../src/runtime/id-factory.js";
 import { SqliteRunStore } from "../../src/store/sqlite-run-store.js";
 
 let directory: string;
 let projectRoot: string;
 let dataRoot: string;
 let store: SqliteRunStore;
+let artifactStore: ArtifactBlobStore;
 let service: OpenSpecArchiveService;
+let originalGithubToken: string | undefined;
+let originalGhToken: string | undefined;
+let originalGitlabToken: string | undefined;
+let originalGitlabPrivateToken: string | undefined;
 
 beforeEach(async () => {
+  originalGithubToken = process.env.GITHUB_TOKEN;
+  originalGhToken = process.env.GH_TOKEN;
+  originalGitlabToken = process.env.GITLAB_TOKEN;
+  originalGitlabPrivateToken = process.env.GITLAB_PRIVATE_TOKEN;
+  process.env.GITHUB_TOKEN = "";
+  process.env.GH_TOKEN = "";
+  process.env.GITLAB_TOKEN = "";
+  process.env.GITLAB_PRIVATE_TOKEN = "";
+
   directory = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-archive-service-"));
   projectRoot = path.join(directory, "project");
   dataRoot = path.join(directory, "data");
@@ -25,10 +41,11 @@ beforeEach(async () => {
   });
 
   store = new SqliteRunStore(path.join(dataRoot, "runs.sqlite3"));
+  artifactStore = new ArtifactBlobStore(path.join(dataRoot, "artifacts"));
 
   service = new OpenSpecArchiveService(
     store,
-    new ArtifactBlobStore(path.join(dataRoot, "artifacts")),
+    artifactStore,
     () => "2026-06-23T00:00:00.000Z",
     async () => ({
       stdout: "archived\n",
@@ -44,72 +61,14 @@ afterEach(async () => {
     recursive: true,
     force: true,
   });
+  restoreEnv("GITHUB_TOKEN", originalGithubToken);
+  restoreEnv("GH_TOKEN", originalGhToken);
+  restoreEnv("GITLAB_TOKEN", originalGitlabToken);
+  restoreEnv("GITLAB_PRIVATE_TOKEN", originalGitlabPrivateToken);
 });
 
 describe("OpenSpecArchiveService", () => {
-  it("records merge status plan blocked execution result and archive review", async () => {
-    const run = createInitialRun(
-      { sources: [] },
-      {
-        id: "run_11111111111111111111111111111111",
-        pluginVersion: "0.1.0",
-        projectRoot,
-        now: "2026-06-23T00:00:00.000Z",
-      },
-    );
-
-    await store.create(run);
-
-    const verified = await service.verifyMerged({
-      runId: run.id,
-      review: {
-        provider: "github",
-        reviewRequestUrl: "https://github.com/acme/spec-to-pr/pull/123",
-        number: "123",
-        merged: false,
-        raw: {},
-      },
-    });
-
-    expect(verified.verification.verified).toBe(false);
-
-    const plan = await service.plan({
-      runId: run.id,
-      changeName: "deliver-reservation-management",
-      mergeStatusArtifactId: verified.artifactId,
-    });
-
-    expect(plan.plan.canExecute).toBe(false);
-
-    const executed = await service.execute({
-      runId: run.id,
-      changeName: "deliver-reservation-management",
-      mergeStatusArtifactId: verified.artifactId,
-    });
-
-    expect(executed.result.status).toBe("blocked");
-    expect(executed.reportArtifactId).toMatch(/^art_/);
-
-    const loadedResult = await service.getResult({
-      runId: run.id,
-      artifactId: executed.resultArtifactId,
-    });
-
-    expect(loadedResult.result.status).toBe("blocked");
-
-    const review = await service.recordReview({
-      runId: run.id,
-      archiveResultArtifactId: executed.resultArtifactId,
-      review: {
-        status: "passed",
-        findings: [],
-      },
-    });
-
-    expect(review.findingCount).toBe(0);
-  });
-
-  it("executes with a fake command runner after merge preconditions pass", async () => {
+  it("records attestation, plans ready, runs archive, and loads report", async () => {
     const changeRoot = path.join(
       projectRoot,
       "openspec",
@@ -121,9 +80,63 @@ describe("OpenSpecArchiveService", () => {
       recursive: true,
     });
     await writeFile(path.join(changeRoot, "proposal.md"), "# Proposal\n");
-    await writeFile(path.join(changeRoot, "design.md"), "# Design\n");
     await writeFile(path.join(changeRoot, "tasks.md"), "# Tasks\n");
 
+    const run = createInitialRun(
+      { sources: [] },
+      {
+        id: "run_11111111111111111111111111111111",
+        pluginVersion: "0.1.0",
+        projectRoot,
+        now: "2026-06-23T00:00:00.000Z",
+      },
+    );
+
+    await store.create(run);
+    await addPublishResult(run.id);
+
+    const attestation = await service.recordMergeAttestation({
+      runId: run.id,
+      reviewRequestUrl: "https://github.com/acme/spec-to-pr/pull/123",
+      statement: "The GitHub pull request has been merged.",
+      attestedBy: "user",
+    });
+
+    expect(attestation.type).toBe("user-attested");
+
+    const plan = await service.plan({
+      runId: run.id,
+      changeName: "deliver-reservation-management",
+    });
+
+    expect(plan).toMatchObject({
+      status: "ready",
+      executeAllowed: true,
+      polling: false,
+      changeName: "deliver-reservation-management",
+    });
+
+    const executed = await service.runArchive({
+      runId: run.id,
+      changeName: "deliver-reservation-management",
+      mergeEvidenceId: attestation.mergeEvidenceId,
+      yes: true,
+    });
+
+    expect(executed.status).toBe("passed");
+    expect(executed.stdoutArtifactId).toMatch(/^art_/);
+    expect(executed.reportArtifactId).toMatch(/^art_/);
+
+    const loadedResult = await service.getReport({
+      runId: run.id,
+      archiveResultId: executed.archiveResultId,
+    });
+
+    expect(loadedResult.status).toBe("passed");
+    expect(loadedResult.reportArtifactId).toBe(executed.reportArtifactId);
+  });
+
+  it("records a one-shot remote status check as unknown when no token is configured", async () => {
     const run = createInitialRun(
       { sources: [] },
       {
@@ -136,22 +149,86 @@ describe("OpenSpecArchiveService", () => {
 
     await store.create(run);
 
-    const executed = await service.execute({
+    const checked = await service.checkReviewRequestStatusOnce({
       runId: run.id,
-      changeName: "deliver-reservation-management",
-      review: {
-        provider: "github",
-        reviewRequestUrl: "https://github.com/acme/spec-to-pr/pull/123",
-        number: "123",
-        merged: true,
-        mergedAt: "2026-06-23T00:00:00.000Z",
-        mergedCommitSha: "abcdef1",
-        raw: {},
-      },
+      provider: "github",
+      reviewRequestUrl: "https://github.com/acme/spec-to-pr/pull/123",
     });
 
-    expect(executed.result.status).toBe("passed");
-    expect(executed.result.stdoutArtifactId).toMatch(/^art_/);
-    expect(executed.artifactIds).toContain(executed.resultArtifactId);
+    expect(checked.status).toBe("unknown");
+    expect(checked.evidence.kind).toBe("remote-checked");
+    expect(checked.evidence.metadata["polling"]).toBe(false);
   });
 });
+
+async function addPublishResult(
+  runId: string,
+  url = "https://github.com/acme/spec-to-pr/pull/123",
+): Promise<void> {
+  const run = await store.get(runId);
+  const publishedAt = "2026-06-23T00:00:00.000Z";
+  const result = {
+    runId,
+    status: "passed",
+    target: {
+      host: "github",
+      webBaseUrl: "https://github.com",
+      apiBaseUrl: "https://api.github.com",
+      owner: "acme",
+      repo: "spec-to-pr",
+    },
+    request: {
+      host: "github",
+      url,
+      number: "123",
+      draft: false,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      created: true,
+      updated: false,
+    },
+    retryable: false,
+    publishedAt,
+  };
+  const blob = await artifactStore.writeBlob({
+    content: Buffer.from(`${JSON.stringify(result, null, 2)}\n`, "utf8"),
+    mediaType: "application/json",
+    storedAt: publishedAt,
+    label: "publish-result",
+  });
+  const artifact = ArtifactRefSchema.parse({
+    id: createArtifactId(),
+    kind: "agent-result-report",
+    uri: blob.uri,
+    mediaType: "application/json",
+    digest: blob.digest,
+    producedBy: "pr-publisher",
+    evidenceIds: [],
+    createdAt: publishedAt,
+    metadata: {
+      adapter: "publisher-v1",
+      label: "publish-result",
+      reportKind: "publish-result",
+      status: "passed",
+      host: "github",
+      requestUrl: url,
+    },
+  });
+  const nextRun = RunManifestSchema.parse({
+    ...run,
+    revision: run.revision + 1,
+    updatedAt: publishedAt,
+    artifacts: [...run.artifacts, artifact],
+  });
+
+  await store.save(nextRun, run.revision);
+}
+
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[name];
+    return;
+  }
+
+  process.env[name] = value;
+}
