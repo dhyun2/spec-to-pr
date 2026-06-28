@@ -334,10 +334,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path21) {
-  if (!path21)
+function getElementAtPath(obj, path24) {
+  if (!path24)
     return obj;
-  return path21.reduce((acc, key) => acc?.[key], obj);
+  return path24.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -665,11 +665,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path21, issues) {
+function prefixIssues(path24, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path21);
+    iss.path.unshift(path24);
     return iss;
   });
 }
@@ -887,16 +887,16 @@ function flattenError(error51, mapper = (issue2) => issue2.message) {
 }
 function formatError(error51, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error52, path21 = []) => {
+  const processError = (error52, path24 = []) => {
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path21, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path24, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path21, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path24, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path21, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path24, ...issue2.path]);
       } else {
-        const fullpath = [...path21, ...issue2.path];
+        const fullpath = [...path24, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -923,17 +923,17 @@ function formatError(error51, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error51, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error52, path21 = []) => {
+  const processError = (error52, path24 = []) => {
     var _a3, _b;
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path21, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path24, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path21, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path24, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path21, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path24, ...issue2.path]);
       } else {
-        const fullpath = [...path21, ...issue2.path];
+        const fullpath = [...path24, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -965,8 +965,8 @@ function treeifyError(error51, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path21 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path21) {
+  const path24 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path24) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -14469,13 +14469,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path21 = ref.slice(1).split("/").filter(Boolean);
-  if (path21.length === 0) {
+  const path24 = ref.slice(1).split("/").filter(Boolean);
+  if (path24.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path21[0] === defsKey) {
-    const key = path21[1];
+  if (path24[0] === defsKey) {
+    const key = path24[1];
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -17317,8 +17317,8 @@ var init_parseUtil = __esm({
     init_errors3();
     init_en2();
     makeIssue = (params) => {
-      const { data, path: path21, errorMaps, issueData } = params;
-      const fullPath = [...path21, ...issueData.path || []];
+      const { data, path: path24, errorMaps, issueData } = params;
+      const fullPath = [...path24, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -17601,11 +17601,11 @@ var init_types2 = __esm({
     init_parseUtil();
     init_util2();
     ParseInputLazyPath = class {
-      constructor(parent, value, path21, key) {
+      constructor(parent, value, path24, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path21;
+        this._path = path24;
         this._key = key;
       }
       get path() {
@@ -26949,8 +26949,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path21) {
-      let input = path21;
+    function removeDotSegments(path24) {
+      let input = path24;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -27202,8 +27202,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path21, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path21 && path21 !== "/" ? path21 : void 0;
+        const [path24, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path24 && path24 !== "/" ? path24 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -33587,6 +33587,9 @@ function createArtifactId() {
 function createGapId() {
   return GapIdSchema.parse(`gap_${compactUuid()}`);
 }
+function createAgentResultId() {
+  return AgentResultIdSchema.parse(`ar_${compactUuid()}`);
+}
 var init_id_factory = __esm({
   "src/runtime/id-factory.ts"() {
     "use strict";
@@ -33882,11 +33885,11 @@ function addUniqueValueIssues(collectionName, values, context) {
     seen.add(value);
   });
 }
-function addReferenceIssue(context, path21, reference) {
+function addReferenceIssue(context, path24, reference) {
   context.addIssue({
     code: "custom",
     message: `Unknown ${reference.kind} reference ${reference.id}`,
-    path: path21
+    path: path24
   });
 }
 var RunStatusSchema, RunManifestSchema, RunSummarySchema, CreateInitialRunInputSchema;
@@ -34886,7 +34889,7 @@ function generateFeatureWrappers(input) {
 }
 function renderWrapper(input) {
   const method = input.operation.method.toUpperCase();
-  const path21 = input.operation.path;
+  const path24 = input.operation.path;
   return `// AUTO-GENERATED wrapper skeleton by spec-to-pr.
 // Review and adapt the generated client import to the target project's actual API client.
 // Do not import generated clients directly from UI components.
@@ -34901,7 +34904,7 @@ export type ${capitalize(input.wrapperName)}Input = {
 export async function ${input.wrapperName}(input: ${capitalize(input.wrapperName)}Input = {}) {
   return apiClient.request({
     method: ${JSON.stringify(method)},
-    path: ${JSON.stringify(path21)},
+    path: ${JSON.stringify(path24)},
     params: input.params,
     body: input.body,
   });
@@ -34953,8 +34956,8 @@ ${indent(handlers, 2)}
 }
 function renderHandler(operation) {
   const mswMethod = operation.method.toLowerCase();
-  const path21 = operation.path.replace(/{([^}]+)}/g, ":$1");
-  return `http.${mswMethod}(${JSON.stringify(path21)}, () => {
+  const path24 = operation.path.replace(/{([^}]+)}/g, ":$1");
+  return `http.${mswMethod}(${JSON.stringify(path24)}, () => {
   return HttpResponse.json({});
 }),`;
 }
@@ -37980,14 +37983,14 @@ function findDesignContractArtifact(artifacts, changeName) {
   );
 }
 async function readRepoArtifact(projectRoot, relativePath) {
-  const { readFile: readFile14 } = await import("fs/promises");
-  const path21 = await import("path");
-  const absolutePath = path21.join(projectRoot, relativePath);
-  const relative = path21.relative(projectRoot, absolutePath);
-  if (relative.startsWith("..") || path21.isAbsolute(relative)) {
+  const { readFile: readFile16 } = await import("fs/promises");
+  const path24 = await import("path");
+  const absolutePath = path24.join(projectRoot, relativePath);
+  const relative = path24.relative(projectRoot, absolutePath);
+  if (relative.startsWith("..") || path24.isAbsolute(relative)) {
     throw new Error(`Refusing to read outside project root: ${absolutePath}`);
   }
-  return readFile14(absolutePath, "utf8");
+  return readFile16(absolutePath, "utf8");
 }
 function metadataString(value) {
   return typeof value === "string" && value.trim().length > 0 ? value : void 0;
@@ -43187,6 +43190,738 @@ var init_source_registry_service = __esm({
   }
 });
 
+// src/gherkin/test-matrix.ts
+function inferTestLayer(input) {
+  if (input.hasGaps) {
+    return "manual";
+  }
+  if (input.hasOpenApi && /api|request|response|endpoint|schema|operation/i.test(input.requirementText)) {
+    return "contract";
+  }
+  if (input.hasFigma && input.hasOpenApi) {
+    return "acceptance";
+  }
+  if (input.hasFigma) {
+    return "component";
+  }
+  if (input.hasOpenApi) {
+    return "contract";
+  }
+  if (/format|mapper|policy|status|state|validation|계산|정책|상태|검증/.test(input.requirementText)) {
+    return "unit";
+  }
+  return "manual";
+}
+function inferAutomationStatus(input) {
+  if (input.requirementStatus === "blocked" || input.hasBlockerGap) {
+    return "blocked";
+  }
+  if (input.requirementStatus === "gap-only") {
+    return "manual";
+  }
+  if (input.hasGaps || input.requirementStatus === "partial") {
+    return "review-needed";
+  }
+  return "automated-candidate";
+}
+var TestLayerSchema, TestAutomationStatusSchema, TestMatrixRequirementStatusSchema, TestMatrixRowSchema, TestMatrixSchema;
+var init_test_matrix = __esm({
+  "src/gherkin/test-matrix.ts"() {
+    "use strict";
+    init_zod();
+    init_ids();
+    TestLayerSchema = external_exports.enum([
+      "unit",
+      "component",
+      "contract",
+      "acceptance",
+      "e2e",
+      "visual",
+      "manual"
+    ]);
+    TestAutomationStatusSchema = external_exports.enum([
+      "automated-candidate",
+      "manual",
+      "blocked",
+      "review-needed"
+    ]);
+    TestMatrixRequirementStatusSchema = external_exports.enum([
+      "ready",
+      "partial",
+      "blocked",
+      "gap-only"
+    ]);
+    TestMatrixRowSchema = external_exports.object({
+      requirementId: external_exports.string().trim().min(1),
+      scenarioId: external_exports.string().trim().min(1),
+      scenarioName: external_exports.string().trim().min(1),
+      featureFile: external_exports.string().trim().min(1),
+      area: external_exports.string().trim().min(1),
+      layer: TestLayerSchema,
+      automation: TestAutomationStatusSchema,
+      status: TestMatrixRequirementStatusSchema,
+      reason: external_exports.string().trim().min(1),
+      briefEvidenceIds: external_exports.array(EvidenceIdSchema).default([]),
+      figmaEvidenceIds: external_exports.array(EvidenceIdSchema).default([]),
+      openApiEvidenceIds: external_exports.array(EvidenceIdSchema).default([]),
+      gapIds: external_exports.array(GapIdSchema).default([]),
+      sourceArtifactIds: external_exports.array(ArtifactIdSchema).default([])
+    }).strict();
+    TestMatrixSchema = external_exports.object({
+      changeName: external_exports.string().trim().min(1),
+      generatedAt: external_exports.string().datetime({ offset: true }),
+      requirementCount: external_exports.number().int().nonnegative(),
+      scenarioCount: external_exports.number().int().nonnegative(),
+      automatedCandidateCount: external_exports.number().int().nonnegative(),
+      blockedCount: external_exports.number().int().nonnegative(),
+      reviewNeededCount: external_exports.number().int().nonnegative(),
+      rows: external_exports.array(TestMatrixRowSchema)
+    }).strict();
+  }
+});
+
+// src/spec-bdd/acceptance-skeleton-writer.ts
+import { mkdir as mkdir9, writeFile as writeFile8 } from "fs/promises";
+import path18 from "path";
+async function writeAcceptanceSkeletons(input) {
+  const directory = path18.join(
+    input.projectRoot,
+    "tests",
+    "acceptance",
+    "generated",
+    input.changeName
+  );
+  assertInsideProjectRoot4(input.projectRoot, directory);
+  await mkdir9(directory, {
+    recursive: true,
+    mode: 448
+  });
+  const files = [];
+  for (const row of input.matrix.rows) {
+    const fileName = `${sanitizeFileName(row.scenarioId)}.test.md`;
+    const absolutePath = path18.join(directory, fileName);
+    const content = renderSkeleton(row);
+    await writeFile8(absolutePath, content, {
+      encoding: "utf8",
+      mode: 384,
+      flag: input.force === true ? "w" : "wx"
+    }).catch((error51) => {
+      if (error51 instanceof Error && "code" in error51 && error51.code === "EEXIST") {
+        return;
+      }
+      throw error51;
+    });
+    files.push(path18.relative(input.projectRoot, absolutePath).split(path18.sep).join("/"));
+  }
+  return {
+    directory: path18.relative(input.projectRoot, directory).split(path18.sep).join("/"),
+    files
+  };
+}
+function renderSkeleton(row) {
+  return `# Acceptance Skeleton - ${row.scenarioId}
+
+## Requirement
+
+${row.requirementId}
+
+## Scenario
+
+${row.scenarioName}
+
+## Layer
+
+${row.layer}
+
+## Automation
+
+${row.automation}
+
+## Evidence
+
+- Brief: ${row.briefEvidenceIds.join(", ") || "-"}
+- Figma: ${row.figmaEvidenceIds.join(", ") || "-"}
+- OpenAPI: ${row.openApiEvidenceIds.join(", ") || "-"}
+
+## Gaps
+
+${row.gapIds.length === 0 ? "No linked gaps." : row.gapIds.map((id) => `- ${id}`).join("\n")}
+
+## Future implementation notes
+
+This file is a generated acceptance skeleton. It is not an executable test yet.
+Later tasks may convert this skeleton into Cucumber, Playwright, Vitest, or project-specific acceptance tests.
+`;
+}
+function sanitizeFileName(value) {
+  return value.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-|-$/g, "");
+}
+function assertInsideProjectRoot4(projectRoot, absolutePath) {
+  const relative = path18.relative(projectRoot, absolutePath);
+  if (relative.startsWith("..") || path18.isAbsolute(relative)) {
+    throw new Error(`Refusing to write outside project root: ${absolutePath}`);
+  }
+}
+var init_acceptance_skeleton_writer = __esm({
+  "src/spec-bdd/acceptance-skeleton-writer.ts"() {
+    "use strict";
+  }
+});
+
+// src/spec-bdd/spec-bdd-contracts.ts
+var SpecBddFindingSeveritySchema, SpecBddFindingCategorySchema, SpecBddFindingSchema, SpecBddReviewReportSchema;
+var init_spec_bdd_contracts = __esm({
+  "src/spec-bdd/spec-bdd-contracts.ts"() {
+    "use strict";
+    init_zod();
+    init_ids();
+    init_scalars();
+    SpecBddFindingSeveritySchema = external_exports.enum(["blocker", "major", "minor", "info"]);
+    SpecBddFindingCategorySchema = external_exports.enum([
+      "missing-evidence",
+      "over-specified-scenario",
+      "missing-scenario",
+      "gap-hidden",
+      "automation-status-mismatch",
+      "acceptance-skeleton",
+      "other"
+    ]);
+    SpecBddFindingSchema = external_exports.object({
+      category: SpecBddFindingCategorySchema,
+      severity: SpecBddFindingSeveritySchema,
+      title: external_exports.string().trim().min(1).max(200),
+      requirementId: external_exports.string().trim().min(1).optional(),
+      scenarioId: external_exports.string().trim().min(1).optional(),
+      evidenceIds: external_exports.array(EvidenceIdSchema).default([]),
+      gapIds: external_exports.array(GapIdSchema).default([]),
+      recommendation: external_exports.string().trim().min(1).max(2e3)
+    }).strict();
+    SpecBddReviewReportSchema = external_exports.object({
+      adapter: external_exports.literal("spec-bdd-agent-v1"),
+      runId: RunIdSchema,
+      changeName: external_exports.string().trim().min(1),
+      status: external_exports.enum(["passed", "failed", "blocked"]),
+      reviewedAt: IsoDateTimeSchema,
+      reviewedRequirements: external_exports.number().int().nonnegative(),
+      reviewedScenarios: external_exports.number().int().nonnegative(),
+      acceptanceSkeletonCount: external_exports.number().int().nonnegative(),
+      findings: external_exports.array(SpecBddFindingSchema).default([]),
+      artifactIds: external_exports.array(ArtifactIdSchema).default([])
+    }).strict().superRefine((report, context) => {
+      if (report.status === "passed") {
+        const blockingFinding = report.findings.find(
+          (finding) => finding.severity === "blocker" || finding.severity === "major"
+        );
+        if (blockingFinding !== void 0) {
+          context.addIssue({
+            code: "custom",
+            message: "A passed Spec/BDD review cannot contain blocker or major findings",
+            path: ["findings"]
+          });
+        }
+      }
+      if (report.status === "blocked" && report.findings.length === 0) {
+        context.addIssue({
+          code: "custom",
+          message: "A blocked Spec/BDD review requires at least one finding",
+          path: ["findings"]
+        });
+      }
+    });
+  }
+});
+
+// src/spec-bdd/spec-bdd-context.ts
+import { readFile as readFile12 } from "fs/promises";
+import path19 from "path";
+async function buildSpecBddContextPack(input) {
+  const changeName = OpenSpecChangeNameSchema.parse(input.changeName);
+  const paths = resolveOpenSpecChangePaths({
+    projectRoot: input.run.projectRoot,
+    changeName
+  });
+  const featureDirectory = path19.join(paths.artifactsRoot, "gherkin");
+  const indexPath = path19.join(paths.artifactsRoot, "gherkin-index.json");
+  const testMatrixPath = path19.join(paths.artifactsRoot, "test-matrix.json");
+  const testMatrixMdPath = path19.join(paths.artifactsRoot, "test-matrix.md");
+  await assertReadable(paths.manifestPath);
+  await assertReadable(testMatrixPath);
+  return SpecBddContextPackSchema.parse({
+    runId: input.run.id,
+    changeName,
+    projectRoot: input.run.projectRoot,
+    baseRevision: input.run.revision,
+    openSpec: {
+      proposalPath: toRepoRelativePath(input.run.projectRoot, paths.proposalPath),
+      designPath: toRepoRelativePath(input.run.projectRoot, paths.designPath),
+      tasksPath: toRepoRelativePath(input.run.projectRoot, paths.tasksPath),
+      manifestPath: toRepoRelativePath(input.run.projectRoot, paths.manifestPath),
+      evidenceSummaryPath: toRepoRelativePath(input.run.projectRoot, paths.evidenceSummaryPath),
+      traceabilityMatrixPath: toRepoRelativePath(
+        input.run.projectRoot,
+        paths.traceabilityMatrixPath
+      ),
+      gapSummaryPath: toRepoRelativePath(input.run.projectRoot, paths.gapSummaryPath)
+    },
+    gherkin: {
+      indexPath: toRepoRelativePath(input.run.projectRoot, indexPath),
+      testMatrixPath: toRepoRelativePath(input.run.projectRoot, testMatrixPath),
+      testMatrixMdPath: toRepoRelativePath(input.run.projectRoot, testMatrixMdPath),
+      featureDirectory: toRepoRelativePath(input.run.projectRoot, featureDirectory)
+    },
+    allowedWritePaths: [
+      `openspec/changes/${changeName}/artifacts/spec-bdd-review.md`,
+      `openspec/changes/${changeName}/artifacts/spec-bdd-review.json`,
+      `tests/acceptance/generated/${changeName}/**`
+    ],
+    expectedOutputs: [
+      `openspec/changes/${changeName}/artifacts/spec-bdd-review.md`,
+      `openspec/changes/${changeName}/artifacts/spec-bdd-review.json`,
+      `tests/acceptance/generated/${changeName}/`
+    ]
+  });
+}
+function renderSpecBddContextPackMarkdown(contextPack) {
+  return `# Spec/BDD Context Pack
+
+## Run
+
+- Run ID: ${contextPack.runId}
+- Change: ${contextPack.changeName}
+- Base revision: ${contextPack.baseRevision}
+
+## OpenSpec
+
+- Proposal: ${contextPack.openSpec.proposalPath}
+- Design: ${contextPack.openSpec.designPath}
+- Tasks: ${contextPack.openSpec.tasksPath}
+- Manifest: ${contextPack.openSpec.manifestPath}
+- Evidence Summary: ${contextPack.openSpec.evidenceSummaryPath}
+- Traceability Matrix: ${contextPack.openSpec.traceabilityMatrixPath}
+- Gap Summary: ${contextPack.openSpec.gapSummaryPath}
+
+## Gherkin
+
+- Index: ${contextPack.gherkin.indexPath}
+- Test Matrix: ${contextPack.gherkin.testMatrixPath}
+- Test Matrix Markdown: ${contextPack.gherkin.testMatrixMdPath}
+- Feature Directory: ${contextPack.gherkin.featureDirectory}
+
+## Allowed Write Paths
+
+${contextPack.allowedWritePaths.map((item) => `- ${item}`).join("\n")}
+
+## Expected Outputs
+
+${contextPack.expectedOutputs.map((item) => `- ${item}`).join("\n")}
+`;
+}
+async function assertReadable(filePath) {
+  await readFile12(filePath, "utf8");
+}
+var SpecBddContextPackSchema;
+var init_spec_bdd_context = __esm({
+  "src/spec-bdd/spec-bdd-context.ts"() {
+    "use strict";
+    init_zod();
+    init_openspec_paths();
+    init_ids();
+    SpecBddContextPackSchema = external_exports.object({
+      runId: RunIdSchema,
+      changeName: OpenSpecChangeNameSchema,
+      projectRoot: external_exports.string().trim().min(1),
+      baseRevision: external_exports.number().int().nonnegative(),
+      openSpec: external_exports.object({
+        proposalPath: external_exports.string().trim().min(1),
+        designPath: external_exports.string().trim().min(1),
+        tasksPath: external_exports.string().trim().min(1),
+        manifestPath: external_exports.string().trim().min(1),
+        evidenceSummaryPath: external_exports.string().trim().min(1),
+        traceabilityMatrixPath: external_exports.string().trim().min(1),
+        gapSummaryPath: external_exports.string().trim().min(1)
+      }).strict(),
+      gherkin: external_exports.object({
+        indexPath: external_exports.string().trim().min(1),
+        testMatrixPath: external_exports.string().trim().min(1),
+        testMatrixMdPath: external_exports.string().trim().min(1),
+        featureDirectory: external_exports.string().trim().min(1)
+      }).strict(),
+      allowedWritePaths: external_exports.array(external_exports.string().trim().min(1)).default([]),
+      expectedOutputs: external_exports.array(external_exports.string().trim().min(1)).default([])
+    }).strict();
+  }
+});
+
+// src/spec-bdd/spec-bdd-review-renderer.ts
+function renderSpecBddReviewMarkdown(report) {
+  const lines = [
+    `# Spec/BDD Review - ${report.changeName}`,
+    "",
+    "## Summary",
+    "",
+    `- Status: ${report.status}`,
+    `- Reviewed requirements: ${report.reviewedRequirements}`,
+    `- Reviewed scenarios: ${report.reviewedScenarios}`,
+    `- Acceptance skeletons: ${report.acceptanceSkeletonCount}`,
+    `- Findings: ${report.findings.length}`,
+    "",
+    "## Findings",
+    "",
+    ...report.findings.length === 0 ? ["No findings."] : [
+      "| Severity | Category | Requirement | Scenario | Title | Recommendation |",
+      "|---|---|---|---|---|---|",
+      ...report.findings.map(
+        (finding) => [
+          finding.severity,
+          finding.category,
+          finding.requirementId ?? "-",
+          finding.scenarioId ?? "-",
+          escapeCell2(finding.title),
+          escapeCell2(finding.recommendation)
+        ].join(" | ")
+      )
+    ],
+    "",
+    "## Artifact IDs",
+    "",
+    ...report.artifactIds.length === 0 ? ["No artifacts recorded yet."] : report.artifactIds.map((id) => `- ${id}`),
+    ""
+  ];
+  return `${lines.join("\n").trimEnd()}
+`;
+}
+function escapeCell2(value) {
+  return value.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
+}
+var init_spec_bdd_review_renderer = __esm({
+  "src/spec-bdd/spec-bdd-review-renderer.ts"() {
+    "use strict";
+  }
+});
+
+// src/application/spec-bdd-agent-lane-service.ts
+import { mkdir as mkdir10, readFile as readFile13, writeFile as writeFile9 } from "fs/promises";
+import path20 from "path";
+async function readTestMatrix(projectRoot, relativePath) {
+  const absolutePath = path20.join(projectRoot, relativePath);
+  assertInsideProjectRoot5(projectRoot, absolutePath);
+  const content = await readFile13(absolutePath, "utf8");
+  return TestMatrixSchema.parse(JSON.parse(content));
+}
+function specBddContextPaths(projectRoot, runId, changeName) {
+  const contextDirectory = path20.join(
+    projectRoot,
+    ".spec-to-pr",
+    "runs",
+    runId,
+    "agents",
+    "spec-bdd",
+    changeName
+  );
+  return {
+    contextDirectory,
+    contextJsonPath: path20.join(contextDirectory, "context-pack.json"),
+    contextMdPath: path20.join(contextDirectory, "context-pack.md")
+  };
+}
+function specBddReportPaths(projectRoot, changeName) {
+  const reportDirectory = path20.join(projectRoot, "openspec", "changes", changeName, "artifacts");
+  return {
+    reportDirectory,
+    reportJsonPath: path20.join(reportDirectory, "spec-bdd-review.json"),
+    reportMdPath: path20.join(reportDirectory, "spec-bdd-review.md")
+  };
+}
+async function currentHead(projectRoot, fallback) {
+  try {
+    const output = await runCommand({
+      cwd: projectRoot,
+      command: "git",
+      args: ["rev-parse", "HEAD"]
+    });
+    return GitObjectIdSchema.parse(output.stdout.trim());
+  } catch (error51) {
+    if (fallback !== void 0) {
+      return GitObjectIdSchema.parse(fallback);
+    }
+    throw error51;
+  }
+}
+function toRepoRelative(projectRoot, absolutePath) {
+  return path20.relative(projectRoot, absolutePath).split(path20.sep).join("/");
+}
+function assertInsideProjectRoot5(projectRoot, absolutePath) {
+  const relative = path20.relative(projectRoot, absolutePath);
+  if (relative.startsWith("..") || path20.isAbsolute(relative)) {
+    throw new Error(`Refusing to access outside project root: ${absolutePath}`);
+  }
+}
+function unique(items) {
+  return [...new Set(items)];
+}
+var PrepareSpecBddAgentInputSchema, GetSpecBddAgentContextInputSchema, RecordSpecBddAgentResultInputSchema, PrepareSpecBddAgentResultSchema, GetSpecBddAgentContextResultSchema, RecordSpecBddAgentResultSchema, SpecBddAgentLaneService;
+var init_spec_bdd_agent_lane_service = __esm({
+  "src/application/spec-bdd-agent-lane-service.ts"() {
+    "use strict";
+    init_zod();
+    init_test_matrix();
+    init_openspec_paths();
+    init_run2();
+    init_artifact();
+    init_check();
+    init_constants();
+    init_decision();
+    init_agent_result();
+    init_id_factory();
+    init_ids();
+    init_scalars();
+    init_content_hash();
+    init_acceptance_skeleton_writer();
+    init_spec_bdd_contracts();
+    init_spec_bdd_context();
+    init_spec_bdd_review_renderer();
+    init_command_runner();
+    PrepareSpecBddAgentInputSchema = external_exports.object({
+      runId: RunIdSchema,
+      changeName: OpenSpecChangeNameSchema
+    }).strict();
+    GetSpecBddAgentContextInputSchema = external_exports.object({
+      runId: RunIdSchema,
+      changeName: OpenSpecChangeNameSchema
+    }).strict();
+    RecordSpecBddAgentResultInputSchema = external_exports.object({
+      runId: RunIdSchema,
+      changeName: OpenSpecChangeNameSchema,
+      status: external_exports.enum(["passed", "failed", "blocked"]),
+      reviewedRequirements: external_exports.number().int().nonnegative(),
+      reviewedScenarios: external_exports.number().int().nonnegative(),
+      acceptanceSkeletonCount: external_exports.number().int().nonnegative(),
+      findings: external_exports.array(SpecBddFindingSchema).default([]),
+      gapIds: external_exports.array(GapIdSchema).default([]),
+      checks: external_exports.array(CheckResultSchema).default([]),
+      decisions: external_exports.array(DecisionSchema).default([]),
+      commitSha: GitObjectIdSchema.optional(),
+      force: external_exports.boolean().default(false)
+    }).strict();
+    PrepareSpecBddAgentResultSchema = external_exports.object({
+      runId: RunIdSchema,
+      changeName: OpenSpecChangeNameSchema,
+      preparedAt: IsoDateTimeSchema,
+      contextPackJsonPath: external_exports.string().trim().min(1),
+      contextPackMarkdownPath: external_exports.string().trim().min(1),
+      allowedWritePaths: external_exports.array(external_exports.string().trim().min(1)),
+      expectedOutputs: external_exports.array(external_exports.string().trim().min(1))
+    }).strict();
+    GetSpecBddAgentContextResultSchema = external_exports.object({
+      runId: RunIdSchema,
+      changeName: OpenSpecChangeNameSchema,
+      contextPack: SpecBddContextPackSchema,
+      contextPackMarkdown: external_exports.string(),
+      contextPackJsonPath: external_exports.string().trim().min(1),
+      contextPackMarkdownPath: external_exports.string().trim().min(1)
+    }).strict();
+    RecordSpecBddAgentResultSchema = external_exports.object({
+      run: RunSummarySchema,
+      artifactIds: external_exports.array(external_exports.string().trim().min(1)),
+      agentResultId: external_exports.string().trim().min(1),
+      reportJsonPath: external_exports.string().trim().min(1),
+      reportMarkdownPath: external_exports.string().trim().min(1),
+      acceptanceSkeletonDirectory: external_exports.string().trim().min(1),
+      acceptanceSkeletonFiles: external_exports.array(external_exports.string().trim().min(1))
+    }).strict();
+    SpecBddAgentLaneService = class {
+      constructor(runStore, now = () => (/* @__PURE__ */ new Date()).toISOString()) {
+        this.runStore = runStore;
+        this.now = now;
+      }
+      runStore;
+      now;
+      async prepare(rawInput) {
+        const input = PrepareSpecBddAgentInputSchema.parse(rawInput);
+        const run = await this.runStore.get(input.runId);
+        const timestamp = IsoDateTimeSchema.parse(this.now());
+        const contextPack = await buildSpecBddContextPack({
+          run,
+          changeName: input.changeName
+        });
+        const contextPaths = specBddContextPaths(run.projectRoot, run.id, input.changeName);
+        const contextJson = `${JSON.stringify(contextPack, null, 2)}
+`;
+        const contextMd = renderSpecBddContextPackMarkdown(contextPack);
+        assertInsideProjectRoot5(run.projectRoot, contextPaths.contextDirectory);
+        await mkdir10(contextPaths.contextDirectory, {
+          recursive: true,
+          mode: 448
+        });
+        await writeFile9(contextPaths.contextJsonPath, contextJson, {
+          encoding: "utf8",
+          mode: 384
+        });
+        await writeFile9(contextPaths.contextMdPath, contextMd, {
+          encoding: "utf8",
+          mode: 384
+        });
+        return PrepareSpecBddAgentResultSchema.parse({
+          runId: run.id,
+          changeName: input.changeName,
+          preparedAt: timestamp,
+          contextPackJsonPath: toRepoRelative(run.projectRoot, contextPaths.contextJsonPath),
+          contextPackMarkdownPath: toRepoRelative(run.projectRoot, contextPaths.contextMdPath),
+          allowedWritePaths: contextPack.allowedWritePaths,
+          expectedOutputs: contextPack.expectedOutputs
+        });
+      }
+      async getContext(rawInput) {
+        const input = GetSpecBddAgentContextInputSchema.parse(rawInput);
+        const run = await this.runStore.get(input.runId);
+        const contextPaths = specBddContextPaths(run.projectRoot, run.id, input.changeName);
+        const rawContext = await readFile13(contextPaths.contextJsonPath, "utf8");
+        const contextPackMarkdown = await readFile13(contextPaths.contextMdPath, "utf8");
+        return GetSpecBddAgentContextResultSchema.parse({
+          runId: run.id,
+          changeName: input.changeName,
+          contextPack: SpecBddContextPackSchema.parse(JSON.parse(rawContext)),
+          contextPackMarkdown,
+          contextPackJsonPath: toRepoRelative(run.projectRoot, contextPaths.contextJsonPath),
+          contextPackMarkdownPath: toRepoRelative(run.projectRoot, contextPaths.contextMdPath)
+        });
+      }
+      async recordResult(rawInput) {
+        const input = RecordSpecBddAgentResultInputSchema.parse(rawInput);
+        const run = await this.runStore.get(input.runId);
+        const timestamp = IsoDateTimeSchema.parse(this.now());
+        const contextPack = await buildSpecBddContextPack({
+          run,
+          changeName: input.changeName
+        });
+        const matrix = await readTestMatrix(run.projectRoot, contextPack.gherkin.testMatrixPath);
+        const skeletons = await writeAcceptanceSkeletons({
+          projectRoot: run.projectRoot,
+          changeName: input.changeName,
+          matrix,
+          force: input.force
+        });
+        const reportPaths = specBddReportPaths(run.projectRoot, input.changeName);
+        const reportJsonArtifactId = createArtifactId();
+        const reportMdArtifactId = createArtifactId();
+        const report = SpecBddReviewReportSchema.parse({
+          adapter: "spec-bdd-agent-v1",
+          runId: run.id,
+          changeName: input.changeName,
+          status: input.status,
+          reviewedAt: timestamp,
+          reviewedRequirements: input.reviewedRequirements,
+          reviewedScenarios: input.reviewedScenarios,
+          acceptanceSkeletonCount: skeletons.files.length,
+          findings: input.findings,
+          artifactIds: [reportJsonArtifactId, reportMdArtifactId]
+        });
+        const reportJson = `${JSON.stringify(report, null, 2)}
+`;
+        const reportMd = renderSpecBddReviewMarkdown(report);
+        assertInsideProjectRoot5(run.projectRoot, reportPaths.reportDirectory);
+        await mkdir10(reportPaths.reportDirectory, {
+          recursive: true,
+          mode: 448
+        });
+        await writeFile9(reportPaths.reportJsonPath, reportJson, {
+          encoding: "utf8",
+          mode: 384
+        });
+        await writeFile9(reportPaths.reportMdPath, reportMd, {
+          encoding: "utf8",
+          mode: 384
+        });
+        const reportJsonArtifact = ArtifactRefSchema.parse({
+          id: reportJsonArtifactId,
+          kind: "test-report",
+          uri: `repo://${toRepoRelative(run.projectRoot, reportPaths.reportJsonPath)}`,
+          mediaType: "application/json",
+          digest: sha256Digest(Buffer.from(reportJson, "utf8")),
+          producedBy: "spec-bdd",
+          evidenceIds: [],
+          createdAt: timestamp,
+          metadata: {
+            changeName: input.changeName,
+            role: "spec-bdd",
+            reportType: "spec-bdd-review-json",
+            relativePath: toRepoRelative(run.projectRoot, reportPaths.reportJsonPath)
+          }
+        });
+        const reportMdArtifact = ArtifactRefSchema.parse({
+          id: reportMdArtifactId,
+          kind: "test-report",
+          uri: `repo://${toRepoRelative(run.projectRoot, reportPaths.reportMdPath)}`,
+          mediaType: "text/markdown",
+          digest: sha256Digest(Buffer.from(reportMd, "utf8")),
+          producedBy: "spec-bdd",
+          evidenceIds: [],
+          createdAt: timestamp,
+          metadata: {
+            changeName: input.changeName,
+            role: "spec-bdd",
+            reportType: "spec-bdd-review-markdown",
+            relativePath: toRepoRelative(run.projectRoot, reportPaths.reportMdPath)
+          }
+        });
+        const baseSha = await currentHead(run.projectRoot, run.baseCommit);
+        const knownGapIds = new Set(run.gaps.map((gap2) => gap2.id));
+        const agentGapIds = unique([
+          ...input.gapIds,
+          ...input.findings.flatMap((finding) => finding.gapIds)
+        ]).filter((gapId) => knownGapIds.has(gapId));
+        if (input.status === "blocked" && agentGapIds.length === 0) {
+          throw new Error("Blocked Spec/BDD results must reference at least one existing Run gap.");
+        }
+        const knownEvidenceIds = new Set(run.evidence.map((evidence) => evidence.id));
+        const agentEvidenceIds = unique(
+          input.findings.flatMap((finding) => finding.evidenceIds)
+        ).filter((evidenceId) => knownEvidenceIds.has(evidenceId));
+        const changedFiles = unique([
+          toRepoRelative(run.projectRoot, reportPaths.reportJsonPath),
+          toRepoRelative(run.projectRoot, reportPaths.reportMdPath),
+          ...skeletons.files
+        ]);
+        const agentResult = ImplementationAgentResultSchema.parse({
+          schemaVersion: RUNTIME_CONTRACT_VERSION,
+          id: createAgentResultId(),
+          runId: run.id,
+          kind: "implementation",
+          agent: "spec-bdd",
+          status: input.status,
+          baseSha,
+          ...input.status === "passed" ? { commitSha: input.commitSha ?? baseSha } : {},
+          evidenceIds: agentEvidenceIds,
+          artifactIds: [reportJsonArtifact.id, reportMdArtifact.id],
+          gapIds: agentGapIds,
+          checks: input.checks,
+          decisions: input.decisions,
+          changedFiles,
+          startedAt: timestamp,
+          completedAt: timestamp
+        });
+        const nextRun = RunManifestSchema.parse({
+          ...run,
+          revision: run.revision + 1,
+          updatedAt: timestamp,
+          artifacts: [...run.artifacts, reportJsonArtifact, reportMdArtifact],
+          agentResults: [...run.agentResults, agentResult]
+        });
+        await this.runStore.save(nextRun, run.revision);
+        return RecordSpecBddAgentResultSchema.parse({
+          run: summarizeRun(nextRun),
+          artifactIds: [reportJsonArtifact.id, reportMdArtifact.id],
+          agentResultId: agentResult.id,
+          reportJsonPath: toRepoRelative(run.projectRoot, reportPaths.reportJsonPath),
+          reportMarkdownPath: toRepoRelative(run.projectRoot, reportPaths.reportMdPath),
+          acceptanceSkeletonDirectory: skeletons.directory,
+          acceptanceSkeletonFiles: skeletons.files
+        });
+      }
+    };
+  }
+});
+
 // src/state/errors.ts
 var StageStateError, StageNotFoundError, InvalidStageTransitionError, StageLeaseMismatchError, StageLeaseExpiredError, StageRetryExhaustedError;
 var init_errors4 = __esm({
@@ -43741,96 +44476,6 @@ var init_gherkin_model = __esm({
   }
 });
 
-// src/gherkin/test-matrix.ts
-function inferTestLayer(input) {
-  if (input.hasGaps) {
-    return "manual";
-  }
-  if (input.hasOpenApi && /api|request|response|endpoint|schema|operation/i.test(input.requirementText)) {
-    return "contract";
-  }
-  if (input.hasFigma && input.hasOpenApi) {
-    return "acceptance";
-  }
-  if (input.hasFigma) {
-    return "component";
-  }
-  if (input.hasOpenApi) {
-    return "contract";
-  }
-  if (/format|mapper|policy|status|state|validation|계산|정책|상태|검증/.test(input.requirementText)) {
-    return "unit";
-  }
-  return "manual";
-}
-function inferAutomationStatus(input) {
-  if (input.requirementStatus === "blocked" || input.hasBlockerGap) {
-    return "blocked";
-  }
-  if (input.requirementStatus === "gap-only") {
-    return "manual";
-  }
-  if (input.hasGaps || input.requirementStatus === "partial") {
-    return "review-needed";
-  }
-  return "automated-candidate";
-}
-var TestLayerSchema, TestAutomationStatusSchema, TestMatrixRequirementStatusSchema, TestMatrixRowSchema, TestMatrixSchema;
-var init_test_matrix = __esm({
-  "src/gherkin/test-matrix.ts"() {
-    "use strict";
-    init_zod();
-    init_ids();
-    TestLayerSchema = external_exports.enum([
-      "unit",
-      "component",
-      "contract",
-      "acceptance",
-      "e2e",
-      "visual",
-      "manual"
-    ]);
-    TestAutomationStatusSchema = external_exports.enum([
-      "automated-candidate",
-      "manual",
-      "blocked",
-      "review-needed"
-    ]);
-    TestMatrixRequirementStatusSchema = external_exports.enum([
-      "ready",
-      "partial",
-      "blocked",
-      "gap-only"
-    ]);
-    TestMatrixRowSchema = external_exports.object({
-      requirementId: external_exports.string().trim().min(1),
-      scenarioId: external_exports.string().trim().min(1),
-      scenarioName: external_exports.string().trim().min(1),
-      featureFile: external_exports.string().trim().min(1),
-      area: external_exports.string().trim().min(1),
-      layer: TestLayerSchema,
-      automation: TestAutomationStatusSchema,
-      status: TestMatrixRequirementStatusSchema,
-      reason: external_exports.string().trim().min(1),
-      briefEvidenceIds: external_exports.array(EvidenceIdSchema).default([]),
-      figmaEvidenceIds: external_exports.array(EvidenceIdSchema).default([]),
-      openApiEvidenceIds: external_exports.array(EvidenceIdSchema).default([]),
-      gapIds: external_exports.array(GapIdSchema).default([]),
-      sourceArtifactIds: external_exports.array(ArtifactIdSchema).default([])
-    }).strict();
-    TestMatrixSchema = external_exports.object({
-      changeName: external_exports.string().trim().min(1),
-      generatedAt: external_exports.string().datetime({ offset: true }),
-      requirementCount: external_exports.number().int().nonnegative(),
-      scenarioCount: external_exports.number().int().nonnegative(),
-      automatedCandidateCount: external_exports.number().int().nonnegative(),
-      blockedCount: external_exports.number().int().nonnegative(),
-      reviewNeededCount: external_exports.number().int().nonnegative(),
-      rows: external_exports.array(TestMatrixRowSchema)
-    }).strict();
-  }
-});
-
 // src/gherkin/gherkin-generator.ts
 function generateGherkinAndTestMatrix(input) {
   const gapById = new Map(input.gaps.map((gap2) => [gap2.id, gap2]));
@@ -44112,35 +44757,35 @@ var init_gherkin_renderer = __esm({
 });
 
 // src/gherkin/gherkin-writer.ts
-import { mkdir as mkdir9, readFile as readFile12, writeFile as writeFile8 } from "fs/promises";
-import path18 from "path";
+import { mkdir as mkdir11, readFile as readFile14, writeFile as writeFile10 } from "fs/promises";
+import path21 from "path";
 async function writeGherkinArtifacts(input) {
   const changePaths = resolveOpenSpecChangePaths({
     projectRoot: input.projectRoot,
     changeName: input.changeName
   });
-  const gherkinRoot = path18.join(changePaths.artifactsRoot, "gherkin");
+  const gherkinRoot = path21.join(changePaths.artifactsRoot, "gherkin");
   const files = [
     ...input.rendered.featureFiles.map((file2) => ({
-      absolutePath: path18.join(gherkinRoot, file2.fileName),
+      absolutePath: path21.join(gherkinRoot, file2.fileName),
       content: file2.content,
       mediaType: "text/x-gherkin",
       kind: "gherkin"
     })),
     {
-      absolutePath: path18.join(changePaths.artifactsRoot, "gherkin-index.json"),
+      absolutePath: path21.join(changePaths.artifactsRoot, "gherkin-index.json"),
       content: input.rendered.gherkinIndexJson,
       mediaType: "application/json",
       kind: "gherkin"
     },
     {
-      absolutePath: path18.join(changePaths.artifactsRoot, "test-matrix.json"),
+      absolutePath: path21.join(changePaths.artifactsRoot, "test-matrix.json"),
       content: input.rendered.testMatrixJson,
       mediaType: "application/json",
       kind: "test-matrix"
     },
     {
-      absolutePath: path18.join(changePaths.artifactsRoot, "test-matrix.md"),
+      absolutePath: path21.join(changePaths.artifactsRoot, "test-matrix.md"),
       content: input.rendered.testMatrixMd,
       mediaType: "text/markdown",
       kind: "test-matrix"
@@ -44148,7 +44793,7 @@ async function writeGherkinArtifacts(input) {
   ];
   const writtenFiles = [];
   for (const file2 of files) {
-    assertInsideProjectRoot4(input.projectRoot, file2.absolutePath);
+    assertInsideProjectRoot6(input.projectRoot, file2.absolutePath);
     const changed = await writeWithConflictPolicy2({
       absolutePath: file2.absolutePath,
       content: file2.content,
@@ -44192,7 +44837,7 @@ async function writeGherkinArtifacts(input) {
   };
 }
 async function writeWithConflictPolicy2(input) {
-  await mkdir9(path18.dirname(input.absolutePath), {
+  await mkdir11(path21.dirname(input.absolutePath), {
     recursive: true,
     mode: 448
   });
@@ -44205,7 +44850,7 @@ async function writeWithConflictPolicy2(input) {
       throw new Error(`Generated Gherkin artifact already exists: ${input.absolutePath}`);
     }
   }
-  await writeFile8(input.absolutePath, input.content, {
+  await writeFile10(input.absolutePath, input.content, {
     encoding: "utf8",
     mode: 384
   });
@@ -44213,7 +44858,7 @@ async function writeWithConflictPolicy2(input) {
 }
 async function readExisting3(absolutePath) {
   try {
-    return await readFile12(absolutePath, "utf8");
+    return await readFile14(absolutePath, "utf8");
   } catch (error51) {
     if (error51 instanceof Error && "code" in error51 && error51.code === "ENOENT") {
       return void 0;
@@ -44221,9 +44866,9 @@ async function readExisting3(absolutePath) {
     throw error51;
   }
 }
-function assertInsideProjectRoot4(projectRoot, absolutePath) {
-  const relative = path18.relative(projectRoot, absolutePath);
-  if (relative.startsWith("..") || path18.isAbsolute(relative)) {
+function assertInsideProjectRoot6(projectRoot, absolutePath) {
+  const relative = path21.relative(projectRoot, absolutePath);
+  if (relative.startsWith("..") || path21.isAbsolute(relative)) {
     throw new Error(`Refusing to write outside project root: ${absolutePath}`);
   }
 }
@@ -44238,7 +44883,7 @@ var init_gherkin_writer = __esm({
 });
 
 // src/application/gherkin-test-matrix-service.ts
-import { readFile as readFile13 } from "fs/promises";
+import { readFile as readFile15 } from "fs/promises";
 var GenerateGherkinTestMatrixInputSchema, GenerateGherkinTestMatrixResultSchema, GherkinTestMatrixService;
 var init_gherkin_test_matrix_service = __esm({
   "src/application/gherkin-test-matrix-service.ts"() {
@@ -44333,7 +44978,7 @@ var init_gherkin_test_matrix_service = __esm({
           projectRoot,
           changeName: OpenSpecChangeNameSchema.parse(changeName)
         });
-        const raw = await readFile13(paths.manifestPath, "utf8");
+        const raw = await readFile15(paths.manifestPath, "utf8");
         return OpenSpecChangeModelSchema.parse(JSON.parse(raw));
       }
     };
@@ -45007,6 +45652,71 @@ function createKernelServer(servicesProvider) {
       };
     })
   );
+  server.registerTool(
+    "prepare_spec_bdd_agent",
+    {
+      title: "Prepare Spec/BDD agent",
+      description: "Prepare context pack for the Spec/BDD agent lane.",
+      inputSchema: PrepareSpecBddAgentInputSchema.shape,
+      outputSchema: PrepareSpecBddAgentResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { specBddAgentLaneService } = await servicesProvider();
+      const structuredContent = await specBddAgentLaneService.prepare(input);
+      return {
+        text: `Prepared Spec/BDD context pack for ${structuredContent.changeName}.`,
+        structuredContent
+      };
+    })
+  );
+  server.registerTool(
+    "record_spec_bdd_agent_result",
+    {
+      title: "Record Spec/BDD agent result",
+      description: "Record Spec/BDD review report artifacts after the agent lane finishes.",
+      inputSchema: RecordSpecBddAgentResultInputSchema.shape,
+      outputSchema: RecordSpecBddAgentResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { specBddAgentLaneService } = await servicesProvider();
+      const structuredContent = await specBddAgentLaneService.recordResult(input);
+      return {
+        text: `Recorded Spec/BDD agent result with ${structuredContent.artifactIds.length} artifacts.`,
+        structuredContent
+      };
+    })
+  );
+  server.registerTool(
+    "get_spec_bdd_agent_context",
+    {
+      title: "Get Spec/BDD agent context",
+      description: "Load the prepared context pack for a Spec/BDD agent lane.",
+      inputSchema: GetSpecBddAgentContextInputSchema.shape,
+      outputSchema: GetSpecBddAgentContextResultSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { specBddAgentLaneService } = await servicesProvider();
+      const structuredContent = await specBddAgentLaneService.getContext(input);
+      return {
+        text: `Loaded Spec/BDD context pack for ${structuredContent.changeName}.`,
+        structuredContent
+      };
+    })
+  );
   registerFigmaTextRecorder(server, servicesProvider, {
     toolName: "record_figma_metadata",
     title: "Record Figma metadata",
@@ -45387,6 +46097,7 @@ var init_create_server = __esm({
     init_profile_service();
     init_run_service();
     init_source_registry_service();
+    init_spec_bdd_agent_lane_service();
     init_brief_analysis();
     init_stage_service();
     init_openapi_analysis();
@@ -45480,7 +46191,10 @@ var init_create_server = __esm({
       "generate_gherkin_test_matrix",
       "generate_api_pipeline",
       "generate_figma_design_contract",
-      "get_figma_design_contract_summary"
+      "get_figma_design_contract_summary",
+      "prepare_spec_bdd_agent",
+      "record_spec_bdd_agent_result",
+      "get_spec_bdd_agent_context"
     ];
   }
 });
@@ -45524,7 +46238,7 @@ __export(sqlite_run_store_exports, {
   SqliteRunStore: () => SqliteRunStore
 });
 import { mkdirSync } from "fs";
-import path19 from "path";
+import path22 from "path";
 import { createRequire } from "module";
 function loadSqliteModule() {
   return require2("node:sqlite");
@@ -45566,7 +46280,7 @@ var init_sqlite_run_store = __esm({
     SqliteRunStore = class {
       database;
       constructor(databasePath) {
-        mkdirSync(path19.dirname(databasePath), {
+        mkdirSync(path22.dirname(databasePath), {
           recursive: true,
           mode: 448
         });
@@ -45802,7 +46516,7 @@ __export(run_service_provider_exports, {
   createLazyServicesProvider: () => createLazyServicesProvider
 });
 import os from "os";
-import path20 from "path";
+import path23 from "path";
 function createLazyServicesProvider() {
   let services;
   return async () => {
@@ -45811,9 +46525,9 @@ function createLazyServicesProvider() {
     }
     const { SqliteRunStore: SqliteRunStore2 } = await Promise.resolve().then(() => (init_sqlite_run_store(), sqlite_run_store_exports));
     const dataDirectory = resolveDataDirectory();
-    const store = new SqliteRunStore2(path20.join(dataDirectory, "runs.sqlite3"));
-    const snapshotStore = new SourceSnapshotStore(path20.join(dataDirectory, "source-snapshots"));
-    const artifactStore = new ArtifactBlobStore(path20.join(dataDirectory, "artifacts"));
+    const store = new SqliteRunStore2(path23.join(dataDirectory, "runs.sqlite3"));
+    const snapshotStore = new SourceSnapshotStore(path23.join(dataDirectory, "source-snapshots"));
+    const artifactStore = new ArtifactBlobStore(path23.join(dataDirectory, "artifacts"));
     services = {
       runService: new RunService(store, {
         pluginVersion: package_default.version
@@ -45821,7 +46535,7 @@ function createLazyServicesProvider() {
       stageService: new StageService(store),
       policyService: new PolicyService(),
       profileService: new ProjectProfileService(
-        new JsonProfileStore(path20.join(dataDirectory, "profiles"))
+        new JsonProfileStore(path23.join(dataDirectory, "profiles"))
       ),
       sourceRegistryService: new SourceRegistryService(store, snapshotStore),
       briefAdapterService: new BriefAdapterService(store, snapshotStore),
@@ -45834,13 +46548,14 @@ function createLazyServicesProvider() {
       gherkinTestMatrixService: new GherkinTestMatrixService(store),
       apiPipelineService: new ApiPipelineService(store, artifactStore),
       designContractService: new DesignContractService(store, artifactStore),
-      agentRuntimeService: new AgentRuntimeService(store)
+      agentRuntimeService: new AgentRuntimeService(store),
+      specBddAgentLaneService: new SpecBddAgentLaneService(store)
     };
     return services;
   };
 }
 function resolveDataDirectory() {
-  return process.env.SPEC_TO_PR_DATA_DIR ?? path20.join(os.tmpdir(), "spec-to-pr-plugin-data");
+  return process.env.SPEC_TO_PR_DATA_DIR ?? path23.join(os.tmpdir(), "spec-to-pr-plugin-data");
 }
 var init_run_service_provider = __esm({
   "src/mcp/run-service-provider.ts"() {
@@ -45862,6 +46577,7 @@ var init_run_service_provider = __esm({
     init_profile_service();
     init_run_service();
     init_source_registry_service();
+    init_spec_bdd_agent_lane_service();
     init_stage_service();
     init_profile_store();
     init_snapshot_store();
