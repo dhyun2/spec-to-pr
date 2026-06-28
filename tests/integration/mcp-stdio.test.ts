@@ -77,6 +77,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "get_figma_provider_policy",
       "get_project_profile",
       "get_resume_plan",
+      "get_review_council_context",
       "get_run",
       "get_source_snapshot",
       "get_spec_bdd_agent_context",
@@ -93,6 +94,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "prepare_agent_runtime",
       "prepare_api_contract_agent",
       "prepare_design_ui_agent",
+      "prepare_review_council",
       "prepare_spec_bdd_agent",
       "record_api_contract_agent_result",
       "record_design_ui_agent_result",
@@ -102,6 +104,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "record_figma_metadata",
       "record_figma_screenshot",
       "record_figma_variable_defs",
+      "record_review_council_result",
       "record_spec_bdd_agent_result",
       "redact_text",
       "register_figma_source",
@@ -807,6 +810,68 @@ components:
         agent: "design-ui",
         status: "passed",
       },
+    });
+
+    const preparedReview = await client.callTool({
+      name: "prepare_review_council",
+      arguments: {
+        runId,
+      },
+    });
+
+    expect(preparedReview.structuredContent).toMatchObject({
+      run: {
+        id: runId,
+      },
+      precheckFindingCount: expect.any(Number),
+    });
+
+    const reviewContextArtifactId = (
+      preparedReview.structuredContent as {
+        contextArtifactId: string;
+      }
+    ).contextArtifactId;
+
+    const loadedReviewContext = await client.callTool({
+      name: "get_review_council_context",
+      arguments: {
+        runId,
+        contextArtifactId: reviewContextArtifactId,
+      },
+    });
+
+    expect(loadedReviewContext.structuredContent).toMatchObject({
+      contextArtifactId: reviewContextArtifactId,
+      context: {
+        runId,
+        schemaVersion: "review-council-context-v1",
+      },
+    });
+
+    const recordedReview = await client.callTool({
+      name: "record_review_council_result",
+      arguments: {
+        runId,
+        contextArtifactId: reviewContextArtifactId,
+        result: {
+          schemaVersion: "review-council-v1",
+          runId,
+          agent: "review-council",
+          generatedAt: "2026-06-23T00:00:01.000Z",
+          summary: "MCP smoke review result.",
+          findings: [],
+          requirementVerdicts: [],
+          contradictions: [],
+          newGapDrafts: [],
+          sourceArtifactIds: [reviewContextArtifactId],
+        },
+      },
+    });
+
+    expect(recordedReview.structuredContent).toMatchObject({
+      newGapCount: 0,
+      findingCount: 0,
+      verdictCount: 0,
     });
 
     const contextPack = await client.callTool({
