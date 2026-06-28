@@ -62,3 +62,34 @@ Task 14 turns it into a human-reviewable OpenSpec change folder:
 - repeated generation is idempotent when content is unchanged.
 - conflicting existing files are detected.
 - MCP tool works through stdio integration tests.
+
+## Verification
+
+Run:
+
+```bash
+pnpm format:check
+pnpm typecheck
+pnpm schemas:build
+pnpm build
+pnpm test
+pnpm audit
+```
+
+Expected:
+
+- OpenSpec path tests pass.
+- OpenSpec model builder tests pass.
+- Markdown renderer tests pass.
+- repository writer conflict tests pass.
+- OpenSpecChangeService tests pass.
+- MCP stdio integration can call `generate_openspec_change`.
+
+## Known limitations
+
+- OpenSpec CLI validation is optional in Task 14.
+- Generated requirements are conservative.
+- No Gherkin is generated here.
+- No code implementation is performed.
+- Existing conflicting files require force overwrite.
+- Human review may refine proposal and design wording.
