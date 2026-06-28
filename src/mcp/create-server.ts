@@ -55,6 +55,8 @@ import { CommandInvocationSchema } from "../security/command-policy.js";
 import { ValidateWorkspacePathInputSchema } from "../security/path-policy.js";
 import type { ServicesProvider } from "./run-service-provider.js";
 
+import { GenerateOpenSpecChangeInputSchema } from "../application/openspec-change-service.js";
+
 const CONTRACT_VERSION = "0.2.0" as const;
 const SERVER_NAME = "spec-to-pr-kernel" as const;
 const MINIMUM_NODE_MAJOR = 22 as const;
@@ -143,6 +145,7 @@ const TOOL_NAMES = [
   "record_figma_code_connect_map",
   "analyze_figma_design_inventory",
   "get_figma_design_inventory",
+  "generate_openspec_change",
 ] as const;
 
 export function createKernelServer(servicesProvider: ServicesProvider): McpServer {
@@ -647,6 +650,32 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
             ? `Figma source ${result.source.id} was already registered.`
             : `Registered Figma source ${result.source.id}.`,
           structuredContent: result,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "generate_openspec_change",
+    {
+      title: "Generate OpenSpec change",
+      description: "Generate OpenSpec change files from a traceability matrix artifact.",
+      inputSchema: GenerateOpenSpecChangeInputSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { openSpecChangeService } = await servicesProvider();
+        const structuredContent = await openSpecChangeService.generateOpenSpecChange(input);
+
+        return {
+          text: structuredContent.duplicate
+            ? `OpenSpec change ${structuredContent.changeName} already exists.`
+            : `Generated OpenSpec change ${structuredContent.changeName} with ${structuredContent.changedFiles.length} changed files.`,
+          structuredContent,
         };
       }),
   );

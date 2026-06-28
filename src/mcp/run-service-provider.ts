@@ -16,6 +16,8 @@ import { SourceRegistryService } from "../application/source-registry-service.js
 import { StageService } from "../application/stage-service.js";
 import { JsonProfileStore } from "../profile/profile-store.js";
 import { SourceSnapshotStore } from "../source-registry/snapshot-store.js";
+import { OpenSpecChangeService } from "../application/openspec-change-service.js";
+
 import type { RunStore } from "../store/run-store.js";
 
 export type Services = {
@@ -30,6 +32,7 @@ export type Services = {
   figmaDesignInventoryService: FigmaDesignInventoryService;
   figmaIntakeService: FigmaIntakeService;
   openApiIntakeService: OpenApiIntakeService;
+  openSpecChangeService: OpenSpecChangeService;
 };
 
 export type ServicesProvider = () => Promise<Services>;
@@ -65,6 +68,7 @@ export function createLazyServicesProvider(): ServicesProvider {
       figmaDesignInventoryService: new FigmaDesignInventoryService(store, artifactStore),
       figmaIntakeService: new FigmaIntakeService(store, artifactStore),
       openApiIntakeService: new OpenApiIntakeService(store, snapshotStore, artifactStore),
+      openSpecChangeService: new OpenSpecChangeService(store, artifactStore),
     };
 
     return services;
