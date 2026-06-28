@@ -334,10 +334,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path15) {
-  if (!path15)
+function getElementAtPath(obj, path17) {
+  if (!path17)
     return obj;
-  return path15.reduce((acc, key) => acc?.[key], obj);
+  return path17.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -665,11 +665,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path15, issues) {
+function prefixIssues(path17, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path15);
+    iss.path.unshift(path17);
     return iss;
   });
 }
@@ -887,16 +887,16 @@ function flattenError(error51, mapper = (issue2) => issue2.message) {
 }
 function formatError(error51, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error52, path15 = []) => {
+  const processError = (error52, path17 = []) => {
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path15, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path17, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path15, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path17, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path15, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path17, ...issue2.path]);
       } else {
-        const fullpath = [...path15, ...issue2.path];
+        const fullpath = [...path17, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -923,17 +923,17 @@ function formatError(error51, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error51, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error52, path15 = []) => {
+  const processError = (error52, path17 = []) => {
     var _a3, _b;
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path15, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path17, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path15, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path17, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path15, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path17, ...issue2.path]);
       } else {
-        const fullpath = [...path15, ...issue2.path];
+        const fullpath = [...path17, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -965,8 +965,8 @@ function treeifyError(error51, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path15 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path15) {
+  const path17 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path17) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -14469,13 +14469,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path15 = ref.slice(1).split("/").filter(Boolean);
-  if (path15.length === 0) {
+  const path17 = ref.slice(1).split("/").filter(Boolean);
+  if (path17.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path15[0] === defsKey) {
-    const key = path15[1];
+  if (path17[0] === defsKey) {
+    const key = path17[1];
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -17317,8 +17317,8 @@ var init_parseUtil = __esm({
     init_errors3();
     init_en2();
     makeIssue = (params) => {
-      const { data, path: path15, errorMaps, issueData } = params;
-      const fullPath = [...path15, ...issueData.path || []];
+      const { data, path: path17, errorMaps, issueData } = params;
+      const fullPath = [...path17, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -17601,11 +17601,11 @@ var init_types2 = __esm({
     init_parseUtil();
     init_util2();
     ParseInputLazyPath = class {
-      constructor(parent, value, path15, key) {
+      constructor(parent, value, path17, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path15;
+        this._path = path17;
         this._key = key;
       }
       get path() {
@@ -26949,8 +26949,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path15) {
-      let input = path15;
+    function removeDotSegments(path17) {
+      let input = path17;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -27202,8 +27202,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path15, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path15 && path15 !== "/" ? path15 : void 0;
+        const [path17, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path17 && path17 !== "/" ? path17 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -32332,805 +32332,1047 @@ var init_scalars = __esm({
   }
 });
 
-// src/runtime/source.ts
-var SourceKindSchema, FileSourceLocatorSchema, UrlSourceLocatorSchema, FigmaSourceLocatorSchema, RepositorySourceLocatorSchema, TicketProviderSchema, TicketSourceLocatorSchema, SourceLocatorSchema, SourceRefSchema, FileLinesEvidenceLocationSchema, JsonPointerEvidenceLocationSchema, FigmaNodeEvidenceLocationSchema, UrlFragmentEvidenceLocationSchema, PdfPageEvidenceLocationSchema, PdfTextBlockEvidenceLocationSchema, TicketFieldEvidenceLocationSchema, GitFileEvidenceLocationSchema, EvidenceLocationSchema, EvidenceRefSchema;
-var init_source = __esm({
-  "src/runtime/source.ts"() {
+// src/api-pipeline/api-pipeline-contracts.ts
+var ApiPipelineModeSchema, ApiGeneratedFileKindSchema, ApiOperationPipelineItemSchema, ApiGeneratedFileSchema, ApiGeneratorPlanSchema, ApiPipelineReportSchema;
+var init_api_pipeline_contracts = __esm({
+  "src/api-pipeline/api-pipeline-contracts.ts"() {
     "use strict";
     init_zod();
     init_ids();
     init_scalars();
-    SourceKindSchema = external_exports.enum([
-      "brief",
-      "figma",
-      "openapi",
-      "repository",
-      "generated",
-      "test-report",
-      "other"
+    ApiPipelineModeSchema = external_exports.enum([
+      "existing-generator",
+      "fallback-generator",
+      "plan-only"
     ]);
-    FileSourceLocatorSchema = external_exports.object({
-      type: external_exports.literal("file"),
-      path: RelativePathSchema,
-      mediaType: external_exports.string().trim().min(1).optional()
-    }).strict();
-    UrlSourceLocatorSchema = external_exports.object({
-      type: external_exports.literal("url"),
-      url: external_exports.string().url(),
-      mediaType: external_exports.string().trim().min(1).optional()
-    }).strict();
-    FigmaSourceLocatorSchema = external_exports.object({
-      type: external_exports.literal("figma"),
-      url: external_exports.string().url(),
-      fileKey: external_exports.string().trim().min(1).optional(),
-      nodeId: external_exports.string().trim().min(1).optional()
-    }).strict();
-    RepositorySourceLocatorSchema = external_exports.object({
-      type: external_exports.literal("repository"),
-      root: external_exports.string().trim().min(1),
-      commit: GitObjectIdSchema.optional()
-    }).strict();
-    TicketProviderSchema = external_exports.enum(["jira", "gitlab", "github", "notion", "linear"]);
-    TicketSourceLocatorSchema = external_exports.object({
-      type: external_exports.literal("ticket"),
-      provider: TicketProviderSchema,
-      url: external_exports.string().url(),
-      externalId: external_exports.string().trim().min(1).optional(),
-      mediaType: external_exports.string().trim().min(1).optional()
-    }).strict();
-    SourceLocatorSchema = external_exports.discriminatedUnion("type", [
-      FileSourceLocatorSchema,
-      UrlSourceLocatorSchema,
-      FigmaSourceLocatorSchema,
-      RepositorySourceLocatorSchema,
-      TicketSourceLocatorSchema
+    ApiGeneratedFileKindSchema = external_exports.enum([
+      "typescript-types",
+      "zod-schemas",
+      "api-client",
+      "feature-wrapper",
+      "entity-wrapper",
+      "mock-handler",
+      "contract-test",
+      "source-guard-test",
+      "manifest",
+      "report"
     ]);
-    SourceRefSchema = external_exports.object({
-      id: SourceIdSchema,
-      kind: SourceKindSchema,
-      locator: SourceLocatorSchema,
-      digest: Sha256DigestSchema.optional(),
-      capturedAt: IsoDateTimeSchema,
-      metadata: external_exports.record(external_exports.string(), external_exports.unknown()).default({})
-    }).strict();
-    FileLinesEvidenceLocationSchema = external_exports.object({
-      type: external_exports.literal("file-lines"),
-      path: RelativePathSchema,
-      startLine: external_exports.number().int().positive(),
-      endLine: external_exports.number().int().positive()
-    }).strict().superRefine((location, context) => {
-      if (location.endLine < location.startLine) {
-        context.addIssue({
-          code: "custom",
-          message: "endLine must be greater than or equal to startLine",
-          path: ["endLine"]
-        });
-      }
-    });
-    JsonPointerEvidenceLocationSchema = external_exports.object({
-      type: external_exports.literal("json-pointer"),
-      document: RelativePathSchema,
-      pointer: external_exports.string().startsWith("/")
-    }).strict();
-    FigmaNodeEvidenceLocationSchema = external_exports.object({
-      type: external_exports.literal("figma-node"),
-      fileKey: external_exports.string().trim().min(1),
-      nodeId: external_exports.string().trim().min(1),
-      propertyPath: external_exports.array(external_exports.string().trim().min(1)).optional()
-    }).strict();
-    UrlFragmentEvidenceLocationSchema = external_exports.object({
-      type: external_exports.literal("url-fragment"),
-      url: external_exports.string().url(),
-      fragment: external_exports.string().trim().min(1)
-    }).strict();
-    PdfPageEvidenceLocationSchema = external_exports.object({
-      type: external_exports.literal("pdf-page"),
-      path: RelativePathSchema,
-      page: external_exports.number().int().positive()
-    }).strict();
-    PdfTextBlockEvidenceLocationSchema = external_exports.object({
-      type: external_exports.literal("pdf-text-block"),
-      path: RelativePathSchema,
-      page: external_exports.number().int().positive(),
-      blockIndex: external_exports.number().int().nonnegative()
-    }).strict();
-    TicketFieldEvidenceLocationSchema = external_exports.object({
-      type: external_exports.literal("ticket-field"),
-      provider: TicketProviderSchema,
-      url: external_exports.string().url(),
-      field: external_exports.string().trim().min(1),
-      commentId: external_exports.string().trim().min(1).optional()
-    }).strict();
-    GitFileEvidenceLocationSchema = external_exports.object({
-      type: external_exports.literal("git-file"),
-      commit: GitObjectIdSchema,
-      path: RelativePathSchema,
-      startLine: external_exports.number().int().positive().optional(),
-      endLine: external_exports.number().int().positive().optional()
-    }).strict().superRefine((location, context) => {
-      const hasStartLine = location.startLine !== void 0;
-      const hasEndLine = location.endLine !== void 0;
-      if (hasStartLine !== hasEndLine) {
-        context.addIssue({
-          code: "custom",
-          message: "startLine and endLine must be provided together",
-          path: ["startLine"]
-        });
-      }
-      if (location.startLine !== void 0 && location.endLine !== void 0 && location.endLine < location.startLine) {
-        context.addIssue({
-          code: "custom",
-          message: "endLine must be greater than or equal to startLine",
-          path: ["endLine"]
-        });
-      }
-    });
-    EvidenceLocationSchema = external_exports.discriminatedUnion("type", [
-      FileLinesEvidenceLocationSchema,
-      JsonPointerEvidenceLocationSchema,
-      FigmaNodeEvidenceLocationSchema,
-      UrlFragmentEvidenceLocationSchema,
-      PdfPageEvidenceLocationSchema,
-      PdfTextBlockEvidenceLocationSchema,
-      TicketFieldEvidenceLocationSchema,
-      GitFileEvidenceLocationSchema
-    ]);
-    EvidenceRefSchema = external_exports.object({
-      id: EvidenceIdSchema,
-      sourceId: SourceIdSchema,
-      location: EvidenceLocationSchema,
-      summary: external_exports.string().trim().min(1).max(2e3),
-      excerpt: external_exports.string().max(4e3).optional(),
-      digest: Sha256DigestSchema,
-      capturedAt: IsoDateTimeSchema,
-      metadata: external_exports.record(external_exports.string(), external_exports.unknown()).default({})
-    }).strict();
-  }
-});
-
-// src/brief/brief-classifier.ts
-function classifyBriefBlocks(blocks) {
-  return blocks.filter((block) => block.kind !== "heading").map(classifyBlock).filter((candidate) => candidate !== void 0);
-}
-function classifyBlock(block) {
-  const text = block.text.trim();
-  if (text.length === 0) {
-    return void 0;
-  }
-  const itemType = classifyText(text);
-  const flags = detectFlags(text);
-  if (itemType === "note" && flags.length === 0) {
-    return void 0;
-  }
-  return BriefCandidateSchema.parse({
-    itemType,
-    location: block.location,
-    ...block.location.type === "file-lines" ? {
-      lineStart: block.location.startLine,
-      lineEnd: block.location.endLine
-    } : {},
-    text,
-    summary: summarizeText(text),
-    headingPath: block.headingPath,
-    flags
-  });
-}
-function classifyText(text) {
-  if (matchesAny(text, OUT_OF_SCOPE_PATTERNS)) {
-    return "out-of-scope";
-  }
-  if (matchesAny(text, API_PATTERNS)) {
-    return "api";
-  }
-  if (matchesAny(text, DESIGN_PATTERNS)) {
-    return "design";
-  }
-  if (matchesAny(text, TEST_PATTERNS)) {
-    return "test";
-  }
-  if (matchesAny(text, POLICY_PATTERNS)) {
-    return "policy";
-  }
-  if (matchesAny(text, REQUIREMENT_PATTERNS)) {
-    return "requirement";
-  }
-  return "note";
-}
-function detectFlags(text) {
-  const flags = [];
-  if (matchesAny(text, AMBIGUITY_PATTERNS)) {
-    flags.push("ambiguous");
-  }
-  if (matchesAny(text, PROMPT_INJECTION_LIKE_PATTERNS)) {
-    flags.push("prompt-injection-like");
-  }
-  return flags;
-}
-function matchesAny(text, patterns) {
-  return patterns.some((pattern) => pattern.test(text));
-}
-function summarizeText(text) {
-  const normalized = text.replace(/\s+/g, " ").trim();
-  if (normalized.length <= 160) {
-    return normalized;
-  }
-  return `${normalized.slice(0, 157)}...`;
-}
-var BriefItemTypeSchema, BriefIssueFlagSchema, BriefCandidateSchema, REQUIREMENT_PATTERNS, POLICY_PATTERNS, API_PATTERNS, DESIGN_PATTERNS, TEST_PATTERNS, OUT_OF_SCOPE_PATTERNS, AMBIGUITY_PATTERNS, PROMPT_INJECTION_LIKE_PATTERNS;
-var init_brief_classifier = __esm({
-  "src/brief/brief-classifier.ts"() {
-    "use strict";
-    init_zod();
-    init_source();
-    BriefItemTypeSchema = external_exports.enum([
-      "requirement",
-      "policy",
-      "api",
-      "design",
-      "test",
-      "out-of-scope",
-      "note"
-    ]);
-    BriefIssueFlagSchema = external_exports.enum(["ambiguous", "prompt-injection-like"]);
-    BriefCandidateSchema = external_exports.object({
-      itemType: BriefItemTypeSchema,
-      location: EvidenceLocationSchema,
-      lineStart: external_exports.number().int().positive().optional(),
-      lineEnd: external_exports.number().int().positive().optional(),
-      text: external_exports.string().trim().min(1),
-      summary: external_exports.string().trim().min(1),
-      headingPath: external_exports.array(external_exports.string()).default([]),
-      flags: external_exports.array(BriefIssueFlagSchema).default([])
-    }).strict();
-    REQUIREMENT_PATTERNS = [
-      /해야\s*한다/,
-      /해야\s*함/,
-      /필수/,
-      /제공/,
-      /지원/,
-      /가능해야/,
-      /표시/,
-      /노출/,
-      /관리/,
-      /생성/,
-      /수정/,
-      /삭제/,
-      /변경/,
-      /조회/,
-      /검색/,
-      /필터/,
-      /정렬/,
-      /저장/,
-      /검증/,
-      /\bmust\b/i,
-      /\bshould\b/i,
-      /\brequired\b/i
-    ];
-    POLICY_PATTERNS = [
-      /정책/,
-      /규칙/,
-      /조건/,
-      /제한/,
-      /상태/,
-      /권한/,
-      /가드/,
-      /guard/i,
-      /fallback/i
-    ];
-    API_PATTERNS = [
-      /\bAPI\b/i,
-      /\bOpenAPI\b/i,
-      /\bendpoint\b/i,
-      /엔드포인트/,
-      /응답/,
-      /요청/,
-      /\bGET\b/,
-      /\bPOST\b/,
-      /\bPUT\b/,
-      /\bPATCH\b/,
-      /\bDELETE\b/,
-      /status\s*code/i
-    ];
-    DESIGN_PATTERNS = [
-      /\bFigma\b/i,
-      /피그마/,
-      /\bUI\b/i,
-      /화면/,
-      /디자인/,
-      /컴포넌트/,
-      /토큰/,
-      /색상/,
-      /타이포/,
-      /모바일/,
-      /데스크톱/
-    ];
-    TEST_PATTERNS = [
-      /테스트/,
-      /검증/,
-      /통과/,
-      /coverage/i,
-      /unit/i,
-      /component/i,
-      /e2e/i,
-      /acceptance/i,
-      /시나리오/
-    ];
-    OUT_OF_SCOPE_PATTERNS = [
-      /범위\s*제외/,
-      /제외/,
-      /하지\s*않음/,
-      /구현하지\s*않음/,
-      /추후/,
-      /이번\s*범위가\s*아님/,
-      /out\s+of\s+scope/i
-    ];
-    AMBIGUITY_PATTERNS = [
-      /적절히/,
-      /빠르게/,
-      /사용자\s*친화/,
-      /간단히/,
-      /충분히/,
-      /가능하면/,
-      /필요시/,
-      /기존과\s*동일/,
-      /기존처럼/,
-      /등$/,
-      /\betc\.?$/i,
-      /\bas appropriate\b/i,
-      /\buser friendly\b/i
-    ];
-    PROMPT_INJECTION_LIKE_PATTERNS = [
-      /ignore\s+previous\s+instructions/i,
-      /ignore\s+all\s+previous/i,
-      /system\s+prompt/i,
-      /developer\s+message/i,
-      /reveal\s+.*secret/i,
-      /exfiltrate/i,
-      /api\s*key/i,
-      /access\s*token/i,
-      /이전\s*지시.*무시/,
-      /시스템\s*프롬프트/,
-      /개발자\s*메시지/,
-      /비밀.*출력/,
-      /토큰.*출력/,
-      /API\s*키.*출력/,
-      /모든\s*도구.*실행/
-    ];
-  }
-});
-
-// src/brief/brief-analysis.ts
-var BriefExtractedItemSchema, BriefAnalysisResultSchema;
-var init_brief_analysis = __esm({
-  "src/brief/brief-analysis.ts"() {
-    "use strict";
-    init_zod();
-    init_ids();
-    init_scalars();
-    init_source();
-    init_brief_classifier();
-    BriefExtractedItemSchema = external_exports.object({
-      evidenceId: EvidenceIdSchema,
-      itemType: BriefItemTypeSchema,
-      location: EvidenceLocationSchema,
-      lineStart: external_exports.number().int().positive().optional(),
-      lineEnd: external_exports.number().int().positive().optional(),
-      summary: external_exports.string().trim().min(1),
-      headingPath: external_exports.array(external_exports.string()).default([]),
-      flags: external_exports.array(BriefIssueFlagSchema).default([]),
+    ApiOperationPipelineItemSchema = external_exports.object({
+      operationKey: external_exports.string().trim().min(1),
+      method: external_exports.string().trim().min(1),
+      path: external_exports.string().trim().min(1),
+      operationId: external_exports.string().trim().min(1).optional(),
+      evidenceIds: external_exports.array(EvidenceIdSchema).default([]),
+      wrapperName: external_exports.string().trim().min(1).optional(),
+      wrapperPath: external_exports.string().trim().min(1).optional(),
+      generatedClientSymbol: external_exports.string().trim().min(1).optional(),
+      status: external_exports.enum(["planned", "generated", "skipped", "blocked"]),
+      reason: external_exports.string().trim().min(1),
       gapIds: external_exports.array(GapIdSchema).default([])
     }).strict();
-    BriefAnalysisResultSchema = external_exports.object({
-      sourceId: SourceIdSchema,
-      sourceDigest: Sha256DigestSchema,
-      duplicate: external_exports.boolean(),
-      sectionCount: external_exports.number().int().nonnegative(),
-      candidateCount: external_exports.number().int().nonnegative(),
-      evidenceAdded: external_exports.number().int().nonnegative(),
-      gapsAdded: external_exports.number().int().nonnegative(),
-      items: external_exports.array(BriefExtractedItemSchema)
+    ApiGeneratedFileSchema = external_exports.object({
+      kind: ApiGeneratedFileKindSchema,
+      path: external_exports.string().trim().min(1),
+      digest: Sha256DigestSchema,
+      changed: external_exports.boolean()
+    }).strict();
+    ApiGeneratorPlanSchema = external_exports.object({
+      mode: ApiPipelineModeSchema,
+      generatorName: external_exports.string().trim().min(1),
+      command: external_exports.array(external_exports.string().trim().min(1)).default([]),
+      generatedRoot: external_exports.string().trim().min(1),
+      wrapperRoot: external_exports.string().trim().min(1),
+      sourceKey: external_exports.string().trim().min(1),
+      canRun: external_exports.boolean(),
+      reason: external_exports.string().trim().min(1)
+    }).strict();
+    ApiPipelineReportSchema = external_exports.object({
+      adapter: external_exports.literal("api-pipeline-v1"),
+      runId: RunIdSchema,
+      sourceKey: external_exports.string().trim().min(1),
+      openApiSourceDigest: Sha256DigestSchema.optional(),
+      openApiIntakeArtifactId: ArtifactIdSchema.optional(),
+      mode: ApiPipelineModeSchema,
+      generator: ApiGeneratorPlanSchema,
+      operationCount: external_exports.number().int().nonnegative(),
+      generatedOperationCount: external_exports.number().int().nonnegative(),
+      skippedOperationCount: external_exports.number().int().nonnegative(),
+      blockedOperationCount: external_exports.number().int().nonnegative(),
+      operations: external_exports.array(ApiOperationPipelineItemSchema),
+      generatedFiles: external_exports.array(ApiGeneratedFileSchema),
+      warnings: external_exports.array(external_exports.string().trim().min(1)).default([]),
+      gapIds: external_exports.array(GapIdSchema).default([]),
+      artifactIds: external_exports.array(ArtifactIdSchema).default([]),
+      generatedAt: external_exports.string().datetime({ offset: true })
     }).strict();
   }
 });
 
-// src/brief/normalized-brief.ts
-var NormalizedBriefFormatSchema, NormalizedBriefBlockKindSchema, NormalizedBriefBlockSchema, NormalizedBriefDocumentSchema;
-var init_normalized_brief = __esm({
-  "src/brief/normalized-brief.ts"() {
-    "use strict";
-    init_zod();
-    init_ids();
-    init_source();
-    init_scalars();
-    NormalizedBriefFormatSchema = external_exports.enum([
-      "markdown",
-      "plaintext",
-      "pdf",
-      "ticket",
-      "html",
-      "unknown"
-    ]);
-    NormalizedBriefBlockKindSchema = external_exports.enum([
-      "heading",
-      "paragraph",
-      "list-item",
-      "table-row",
-      "ticket-field",
-      "pdf-text-block",
-      "unsupported"
-    ]);
-    NormalizedBriefBlockSchema = external_exports.object({
-      blockId: external_exports.string().trim().min(1),
-      kind: NormalizedBriefBlockKindSchema,
-      text: external_exports.string(),
-      location: EvidenceLocationSchema,
-      headingPath: external_exports.array(external_exports.string()).default([]),
-      metadata: external_exports.record(external_exports.string(), external_exports.unknown()).default({})
-    }).strict();
-    NormalizedBriefDocumentSchema = external_exports.object({
-      sourceId: SourceIdSchema,
-      sourceDigest: Sha256DigestSchema,
-      format: NormalizedBriefFormatSchema,
-      title: external_exports.string().trim().min(1).optional(),
-      blocks: external_exports.array(NormalizedBriefBlockSchema),
-      metadata: external_exports.record(external_exports.string(), external_exports.unknown()).default({})
-    }).strict();
-  }
-});
-
-// src/brief/brief-source-type.ts
+// src/api-pipeline/api-generator-discovery.ts
+import { readFile } from "fs/promises";
 import path from "path";
-function detectBriefSourceType(source) {
-  const locator = source.locator;
-  if (locator.type === "ticket") {
-    return "ticket";
+async function discoverApiGenerator(input) {
+  if (input.preferredCommand !== void 0 && input.preferredCommand.length > 0) {
+    return ApiGeneratorPlanSchema.parse({
+      mode: "existing-generator",
+      generatorName: "preferred-command",
+      command: input.preferredCommand,
+      generatedRoot: input.generatedRoot ?? "src/shared/api/generated",
+      wrapperRoot: input.wrapperRoot ?? "src/features",
+      sourceKey: input.sourceKey,
+      canRun: true,
+      reason: "Preferred API generator command was provided."
+    });
   }
-  if (locator.type === "url") {
-    return isHtmlMediaType(locator.mediaType) ? "html" : "unknown";
+  const packageJson = await readPackageJson(input.projectRoot);
+  const scripts = getScripts(packageJson);
+  const matchingScript = Object.keys(scripts).find(
+    (scriptName) => KNOWN_GENERATOR_SCRIPT_PATTERNS.some((pattern) => pattern.test(scriptName))
+  );
+  if (matchingScript !== void 0) {
+    return ApiGeneratorPlanSchema.parse({
+      mode: "existing-generator",
+      generatorName: `package-script:${matchingScript}`,
+      command: ["pnpm", "run", matchingScript],
+      generatedRoot: input.generatedRoot ?? "src/shared/api/generated",
+      wrapperRoot: input.wrapperRoot ?? "src/features",
+      sourceKey: input.sourceKey,
+      canRun: true,
+      reason: `Detected package.json script ${matchingScript}.`
+    });
   }
-  if (locator.type !== "file") {
+  const knownConfig = await detectKnownGeneratorConfig(input.projectRoot);
+  if (knownConfig !== void 0) {
+    return ApiGeneratorPlanSchema.parse({
+      mode: "existing-generator",
+      generatorName: knownConfig.generatorName,
+      command: knownConfig.command,
+      generatedRoot: input.generatedRoot ?? "src/shared/api/generated",
+      wrapperRoot: input.wrapperRoot ?? "src/features",
+      sourceKey: input.sourceKey,
+      canRun: true,
+      reason: `Detected ${knownConfig.configPath}.`
+    });
+  }
+  return ApiGeneratorPlanSchema.parse({
+    mode: "fallback-generator",
+    generatorName: "spec-to-pr-fallback-openapi-ts-zod",
+    command: [],
+    generatedRoot: input.generatedRoot ?? `src/shared/api/generated/${input.sourceKey}`,
+    wrapperRoot: input.wrapperRoot ?? "src/features",
+    sourceKey: input.sourceKey,
+    canRun: true,
+    reason: "No existing API generator was detected. Using conservative fallback generator."
+  });
+}
+async function readPackageJson(projectRoot) {
+  try {
+    return JSON.parse(await readFile(path.join(projectRoot, "package.json"), "utf8"));
+  } catch {
+    return {};
+  }
+}
+function getScripts(packageJson) {
+  if (typeof packageJson !== "object" || packageJson === null) {
+    return {};
+  }
+  const scripts = packageJson.scripts;
+  if (typeof scripts !== "object" || scripts === null) {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(scripts).filter(
+      (entry) => typeof entry[1] === "string"
+    )
+  );
+}
+async function detectKnownGeneratorConfig(projectRoot) {
+  const candidates = [
+    {
+      file: "orval.config.ts",
+      generatorName: "orval",
+      command: ["pnpm", "orval"]
+    },
+    {
+      file: "orval.config.js",
+      generatorName: "orval",
+      command: ["pnpm", "orval"]
+    },
+    {
+      file: "openapi-generator.config.json",
+      generatorName: "openapi-generator",
+      command: ["pnpm", "openapi-generator-cli", "generate"]
+    },
+    {
+      file: "swagger-typescript-api.config.ts",
+      generatorName: "swagger-typescript-api",
+      command: ["pnpm", "swagger-typescript-api"]
+    },
+    {
+      file: "openapi-ts.config.ts",
+      generatorName: "openapi-typescript",
+      command: ["pnpm", "openapi-typescript"]
+    }
+  ];
+  for (const candidate of candidates) {
+    try {
+      await readFile(path.join(projectRoot, candidate.file), "utf8");
+      return {
+        generatorName: candidate.generatorName,
+        configPath: candidate.file,
+        command: candidate.command
+      };
+    } catch {
+    }
+  }
+  return void 0;
+}
+var KNOWN_GENERATOR_SCRIPT_PATTERNS;
+var init_api_generator_discovery = __esm({
+  "src/api-pipeline/api-generator-discovery.ts"() {
+    "use strict";
+    init_api_pipeline_contracts();
+    KNOWN_GENERATOR_SCRIPT_PATTERNS = [
+      /^api:generate/i,
+      /^generate:api/i,
+      /^openapi:generate/i,
+      /^swagger:generate/i,
+      /^gen:api/i
+    ];
+  }
+});
+
+// src/api-pipeline/openapi-schema-to-typescript.ts
+function generateTypescriptTypes(input) {
+  const warnings = [];
+  const lines = [
+    "/* eslint-disable */",
+    "// AUTO-GENERATED by spec-to-pr. DO NOT EDIT.",
+    ""
+  ];
+  for (const [name, schema] of Object.entries(input.schemas)) {
+    lines.push(`export type ${safeTypeName(name)} = ${schemaToTypeScript(schema, warnings)};`);
+    lines.push("");
+  }
+  return {
+    content: `${lines.join("\n").trimEnd()}
+`,
+    warnings
+  };
+}
+function schemaToTypeScript(schema, warnings) {
+  const ref = schema["$ref"];
+  if (typeof ref === "string") {
+    return refToTypeName(ref);
+  }
+  const enumValue = schema["enum"];
+  if (Array.isArray(enumValue)) {
+    return enumValue.map((value) => JSON.stringify(value)).join(" | ");
+  }
+  if (Array.isArray(schema["oneOf"]) || Array.isArray(schema["anyOf"])) {
+    warnings.push("oneOf/anyOf was converted to unknown for fallback TypeScript generation.");
     return "unknown";
   }
-  const extension = path.extname(locator.path).toLowerCase();
-  const mediaType = locator.mediaType?.toLowerCase();
-  if (mediaType === "application/pdf" || extension === ".pdf") {
-    return "pdf";
+  if (Array.isArray(schema["allOf"])) {
+    warnings.push("allOf was converted to intersection only when refs are simple.");
+    const parts = schema["allOf"].filter((item) => isRecord(item)).map((item) => schemaToTypeScript(item, warnings));
+    return parts.length === 0 ? "unknown" : parts.join(" & ");
   }
-  if (mediaType === "text/markdown" || mediaType === "text/x-markdown" || extension === ".md" || extension === ".mdx") {
-    return "markdown";
+  const type = schema["type"];
+  if (type === "string") {
+    return "string";
   }
-  if (mediaType === "text/plain" || extension === ".txt") {
-    return "plaintext";
+  if (type === "number" || type === "integer") {
+    return "number";
   }
-  if (isHtmlMediaType(mediaType) || extension === ".html" || extension === ".htm") {
-    return "html";
+  if (type === "boolean") {
+    return "boolean";
+  }
+  if (type === "array") {
+    const items = isRecord(schema["items"]) ? schema["items"] : {};
+    return `Array<${schemaToTypeScript(items, warnings)}>`;
+  }
+  if (type === "object" || isRecord(schema["properties"])) {
+    return objectSchemaToTypeScript(schema, warnings);
   }
   return "unknown";
 }
-function isHtmlMediaType(mediaType) {
-  return mediaType === "text/html" || mediaType === "application/xhtml+xml";
+function objectSchemaToTypeScript(schema, warnings) {
+  const properties = isRecord(schema["properties"]) ? schema["properties"] : {};
+  const required2 = new Set(
+    Array.isArray(schema["required"]) ? schema["required"].filter((item) => typeof item === "string") : []
+  );
+  const members = Object.entries(properties).map(([key, rawProperty]) => {
+    const property = isRecord(rawProperty) ? rawProperty : {};
+    const optional2 = required2.has(key) ? "" : "?";
+    const nullable2 = property["nullable"] === true ? " | null" : "";
+    return `  ${JSON.stringify(key)}${optional2}: ${schemaToTypeScript(property, warnings)}${nullable2};`;
+  });
+  if (members.length === 0) {
+    return "Record<string, unknown>";
+  }
+  return `{
+${members.join("\n")}
+}`;
 }
-var init_brief_source_type = __esm({
-  "src/brief/brief-source-type.ts"() {
+function refToTypeName(ref) {
+  const marker = "#/components/schemas/";
+  if (!ref.startsWith(marker)) {
+    return "unknown";
+  }
+  return safeTypeName(ref.slice(marker.length));
+}
+function safeTypeName(name) {
+  const safe = name.replace(/[^A-Za-z0-9_]/g, "_");
+  if (/^[0-9]/.test(safe)) {
+    return `Schema_${safe}`;
+  }
+  return safe;
+}
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+var init_openapi_schema_to_typescript = __esm({
+  "src/api-pipeline/openapi-schema-to-typescript.ts"() {
     "use strict";
-    init_normalized_brief();
   }
 });
 
-// src/brief/markdown-lines.ts
-function parseMarkdownLines(content) {
-  const lines = content.split("\n");
-  const blocks = [];
-  const headings = [];
-  const headingStack = [];
-  let paragraph;
-  let fence;
-  function flushParagraph() {
-    if (paragraph === void 0) {
-      return;
-    }
-    const text = paragraph.lines.join(" ").trim();
-    if (text.length > 0) {
-      blocks.push(
-        MarkdownBlockSchema.parse({
-          kind: "paragraph",
-          lineStart: paragraph.lineStart,
-          lineEnd: paragraph.lineEnd,
-          text,
-          headingPath: paragraph.headingPath
-        })
-      );
-    }
-    paragraph = void 0;
+// src/api-pipeline/openapi-schema-to-zod.ts
+function generateZodSchemas(input) {
+  const warnings = [];
+  const lines = [
+    "/* eslint-disable */",
+    "// AUTO-GENERATED by spec-to-pr. DO NOT EDIT.",
+    'import { z } from "zod";',
+    ""
+  ];
+  for (const [name, schema] of Object.entries(input.schemas)) {
+    lines.push(`export const ${safeSchemaConstName(name)} = ${schemaToZod(schema, warnings)};`);
+    lines.push(`export type ${safeTypeName2(name)} = z.infer<typeof ${safeSchemaConstName(name)}>;`);
+    lines.push("");
   }
-  lines.forEach((line, index) => {
-    const lineNumber = index + 1;
-    const fenceMarker = parseFenceMarker(line);
-    if (fence !== void 0) {
-      if (fenceMarker !== void 0 && fenceMarker.marker === fence.marker && fenceMarker.length >= fence.length) {
-        fence = void 0;
-      }
-      return;
+  return {
+    content: `${lines.join("\n").trimEnd()}
+`,
+    warnings
+  };
+}
+function schemaToZod(schema, warnings) {
+  const ref = schema["$ref"];
+  if (typeof ref === "string") {
+    return refToZodName(ref);
+  }
+  const enumValue = schema["enum"];
+  if (Array.isArray(enumValue) && enumValue.length > 0) {
+    const values = enumValue.filter((item) => typeof item === "string");
+    if (values.length === enumValue.length && values.length > 0) {
+      return `z.enum([${values.map((value) => JSON.stringify(value)).join(", ")}])`;
     }
-    if (fenceMarker !== void 0) {
-      flushParagraph();
-      fence = fenceMarker;
-      return;
-    }
-    const heading = parseHeading(line);
-    if (heading !== void 0) {
-      flushParagraph();
-      headingStack.splice(heading.level - 1);
-      headingStack[heading.level - 1] = heading.text;
-      const headingPath = headingStack.filter(Boolean);
-      const block = MarkdownBlockSchema.parse({
-        kind: "heading",
-        lineStart: lineNumber,
-        lineEnd: lineNumber,
-        text: heading.text,
-        headingLevel: heading.level,
-        headingPath
-      });
-      blocks.push(block);
-      headings.push(block);
-      return;
-    }
-    const listItem = parseListItem(line);
-    if (listItem !== void 0) {
-      flushParagraph();
-      blocks.push(
-        MarkdownBlockSchema.parse({
-          kind: "list-item",
-          lineStart: lineNumber,
-          lineEnd: lineNumber,
-          text: listItem,
-          headingPath: headingStack.filter(Boolean)
-        })
-      );
-      return;
-    }
-    if (line.trim().length === 0) {
-      flushParagraph();
-      return;
-    }
-    if (paragraph === void 0) {
-      paragraph = {
-        lineStart: lineNumber,
-        lineEnd: lineNumber,
-        lines: [line.trim()],
-        headingPath: headingStack.filter(Boolean)
-      };
-      return;
-    }
-    paragraph.lineEnd = lineNumber;
-    paragraph.lines.push(line.trim());
+    return `z.union([${enumValue.map((value) => `z.literal(${JSON.stringify(value)})`).join(", ")}])`;
+  }
+  if (Array.isArray(schema["oneOf"]) || Array.isArray(schema["anyOf"])) {
+    warnings.push("oneOf/anyOf was converted to z.unknown() by fallback generator.");
+    return "z.unknown()";
+  }
+  if (Array.isArray(schema["allOf"])) {
+    warnings.push("allOf was converted to z.unknown() by fallback generator.");
+    return "z.unknown()";
+  }
+  const type = schema["type"];
+  let expression;
+  if (type === "string") {
+    expression = stringSchemaToZod(schema);
+  } else if (type === "number") {
+    expression = "z.number()";
+  } else if (type === "integer") {
+    expression = "z.number().int()";
+  } else if (type === "boolean") {
+    expression = "z.boolean()";
+  } else if (type === "array") {
+    const items = isRecord2(schema["items"]) ? schema["items"] : {};
+    expression = `z.array(${schemaToZod(items, warnings)})`;
+  } else if (type === "object" || isRecord2(schema["properties"])) {
+    expression = objectSchemaToZod(schema, warnings);
+  } else {
+    expression = "z.unknown()";
+  }
+  if (schema["nullable"] === true) {
+    return `${expression}.nullable()`;
+  }
+  return expression;
+}
+function stringSchemaToZod(schema) {
+  const format = schema["format"];
+  if (format === "uuid") {
+    return "z.string().uuid()";
+  }
+  if (format === "date-time") {
+    return "z.string().datetime()";
+  }
+  if (format === "date") {
+    return "z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/)";
+  }
+  return "z.string()";
+}
+function objectSchemaToZod(schema, warnings) {
+  const properties = isRecord2(schema["properties"]) ? schema["properties"] : {};
+  const required2 = new Set(
+    Array.isArray(schema["required"]) ? schema["required"].filter((item) => typeof item === "string") : []
+  );
+  const members = Object.entries(properties).map(([key, rawProperty]) => {
+    const property = isRecord2(rawProperty) ? rawProperty : {};
+    const optional2 = required2.has(key) ? "" : ".optional()";
+    return `  ${JSON.stringify(key)}: ${schemaToZod(property, warnings)}${optional2},`;
   });
-  flushParagraph();
+  return `z.object({
+${members.join("\n")}
+})`;
+}
+function refToZodName(ref) {
+  const marker = "#/components/schemas/";
+  if (!ref.startsWith(marker)) {
+    return "z.unknown()";
+  }
+  return safeSchemaConstName(ref.slice(marker.length));
+}
+function safeTypeName2(name) {
+  const safe = name.replace(/[^A-Za-z0-9_]/g, "_");
+  if (/^[0-9]/.test(safe)) {
+    return `Schema_${safe}`;
+  }
+  return safe;
+}
+function safeSchemaConstName(name) {
+  return `${safeTypeName2(name)}Schema`;
+}
+function isRecord2(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+var init_openapi_schema_to_zod = __esm({
+  "src/api-pipeline/openapi-schema-to-zod.ts"() {
+    "use strict";
+  }
+});
+
+// src/api-pipeline/wrapper-generator.ts
+function generateFeatureWrappers(input) {
+  return input.operations.filter((operation) => operation.operationId !== void 0).map((operation) => {
+    const wrapperName = wrapperNameFor(operation);
+    const featureName = featureNameFor(operation);
+    const fileName = `${kebabCase(wrapperName)}.ts`;
+    return {
+      path: `${input.wrapperRoot}/${featureName}/api/${fileName}`,
+      operationKey: operationKey(operation),
+      wrapperName,
+      content: renderWrapper({
+        sourceKey: input.sourceKey,
+        operation,
+        wrapperName
+      })
+    };
+  });
+}
+function renderWrapper(input) {
+  const method = input.operation.method.toUpperCase();
+  const path17 = input.operation.path;
+  return `// AUTO-GENERATED wrapper skeleton by spec-to-pr.
+// Review and adapt the generated client import to the target project's actual API client.
+// Do not import generated clients directly from UI components.
+
+import { apiClient } from "@/shared/api/generated/${input.sourceKey}";
+
+export type ${capitalize(input.wrapperName)}Input = {
+  params?: Record<string, unknown>;
+  body?: unknown;
+};
+
+export async function ${input.wrapperName}(input: ${capitalize(input.wrapperName)}Input = {}) {
+  return apiClient.request({
+    method: ${JSON.stringify(method)},
+    path: ${JSON.stringify(path17)},
+    params: input.params,
+    body: input.body,
+  });
+}
+`;
+}
+function wrapperNameFor(operation) {
+  if (operation.operationId !== void 0) {
+    return operation.operationId;
+  }
+  return `${operation.method}${operation.path.replace(/[{}]/g, "").split("/").filter(Boolean).map(capitalize).join("")}`;
+}
+function featureNameFor(operation) {
+  const parts = operation.path.split("/").filter(Boolean);
+  const first = parts[0] ?? "api";
+  return kebabCase(first);
+}
+function operationKey(operation) {
+  return `${operation.method.toUpperCase()} ${operation.path}`;
+}
+function capitalize(value) {
+  if (value.length === 0) {
+    return value;
+  }
+  return value.slice(0, 1).toUpperCase() + value.slice(1);
+}
+function kebabCase(value) {
+  return value.replace(/([a-z])([A-Z])/g, "$1-$2").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "").toLowerCase();
+}
+var init_wrapper_generator = __esm({
+  "src/api-pipeline/wrapper-generator.ts"() {
+    "use strict";
+  }
+});
+
+// src/api-pipeline/mock-generator.ts
+function generateMswHandlers(input) {
+  const handlers = input.operations.filter((operation) => operation.operationId !== void 0).map((operation) => renderHandler(operation)).join("\n\n");
   return {
-    blocks,
-    headings,
-    lineCount: lines.length
+    path: input.outputPath,
+    content: `// AUTO-GENERATED by spec-to-pr. Review fixture data before use.
+import { http, HttpResponse } from "msw";
+
+export const ${camelCase(input.sourceKey)}Handlers = [
+${indent(handlers, 2)}
+];
+`
   };
 }
-function parseHeading(line) {
-  const match = /^(#{1,6})\s+(.+?)\s*$/.exec(line);
-  if (match === null) {
-    return void 0;
+function renderHandler(operation) {
+  const mswMethod = operation.method.toLowerCase();
+  const path17 = operation.path.replace(/{([^}]+)}/g, ":$1");
+  return `http.${mswMethod}(${JSON.stringify(path17)}, () => {
+  return HttpResponse.json({});
+}),`;
+}
+function camelCase(value) {
+  return value.replace(/[^A-Za-z0-9]+(.)/g, (_match, chr) => chr.toUpperCase()).replace(/^[A-Z]/, (chr) => chr.toLowerCase());
+}
+function indent(value, spaces) {
+  const prefix = " ".repeat(spaces);
+  return value.split("\n").map((line) => line.length === 0 ? line : `${prefix}${line}`).join("\n");
+}
+var init_mock_generator = __esm({
+  "src/api-pipeline/mock-generator.ts"() {
+    "use strict";
   }
+});
+
+// src/api-pipeline/contract-test-generator.ts
+function generateContractTestSkeleton(input) {
+  const cases = input.operations.filter((operation) => operation.operationId !== void 0).map((operation) => {
+    const successStatusCodes = operation.responseStatuses.filter(
+      (status) => status.startsWith("2")
+    );
+    const errorStatusCodes = operation.responseStatuses.filter(
+      (status) => !status.startsWith("2")
+    );
+    return `it(${JSON.stringify(`${operation.method.toUpperCase()} ${operation.path} has documented success and error responses`)}, () => {
+  expect(${JSON.stringify(successStatusCodes)}.length).toBeGreaterThan(0);
+  // Error responses are recommended for UI error handling.
+  expect(${JSON.stringify(errorStatusCodes)}.length).toBeGreaterThanOrEqual(0);
+});`;
+  }).join("\n\n");
   return {
-    level: match[1].length,
-    text: stripMarkdownInline(match[2])
+    path: input.outputPath,
+    content: `// AUTO-GENERATED by spec-to-pr.
+// This is a contract skeleton. Extend with generated Zod schemas where available.
+
+import { describe, expect, it } from "vitest";
+
+describe(${JSON.stringify(`${input.sourceKey} OpenAPI contract`)}, () => {
+${indent2(cases, 2)}
+});
+`
   };
 }
-function parseListItem(line) {
-  const match = /^\s{0,3}(?:[-*+]|\d+[.)])\s+(.+?)\s*$/.exec(line);
-  if (match === null) {
-    return void 0;
-  }
-  return stripMarkdownInline(match[1]);
+function indent2(value, spaces) {
+  const prefix = " ".repeat(spaces);
+  return value.split("\n").map((line) => line.length === 0 ? line : `${prefix}${line}`).join("\n");
 }
-function parseFenceMarker(line) {
-  const match = /^\s{0,3}(`{3,}|~{3,})/.exec(line);
-  if (match === null) {
-    return void 0;
+var init_contract_test_generator = __esm({
+  "src/api-pipeline/contract-test-generator.ts"() {
+    "use strict";
   }
-  const raw = match[1];
+});
+
+// src/api-pipeline/source-guard-generator.ts
+function generateSourceGuardTest(input) {
   return {
-    marker: raw[0] === "`" ? "`" : "~",
-    length: raw.length
+    path: input.outputPath,
+    content: `// AUTO-GENERATED by spec-to-pr.
+// Guards API architecture boundaries.
+
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+
+const uiGlobs = ${JSON.stringify(input.uiGlobs, null, 2)};
+
+const forbiddenPatterns = [
+  {
+    name: "direct fetch",
+    pattern: /\\bfetch\\s*\\(/,
+  },
+  {
+    name: "direct httpClient import",
+    pattern: /from\\s+["'][^"']*http-client[^"']*["']/,
+  },
+  {
+    name: "direct generated client import",
+    pattern: new RegExp(${JSON.stringify(input.generatedImportPattern)}),
+  },
+];
+
+describe("API source guards", () => {
+  const files = uiGlobs.flatMap(resolveFiles);
+
+  for (const file of files) {
+    it(\`\${file} does not bypass API wrapper boundaries\`, () => {
+      const content = readFileSync(file, "utf8");
+
+      for (const forbidden of forbiddenPatterns) {
+        expect(content, \`\${file} contains forbidden \${forbidden.name}\`).not.toMatch(
+          forbidden.pattern,
+        );
+      }
+    });
+  }
+});
+
+function resolveFiles(pattern: string): string[] {
+  const root = pattern.split("**")[0]?.replace(/\\/$/, "") ?? pattern;
+  const extensions = new Set(
+    [...pattern.matchAll(/\\{([^}]+)\\}/g)].flatMap((match) =>
+      match[1]!.split(",").map((extension) => \`.\${extension.replace(/^\\./, "")}\`),
+    ),
+  );
+  const fallbackExtensions = new Set([".ts", ".tsx"]);
+
+  return walkFiles(root, extensions.size === 0 ? fallbackExtensions : extensions);
+}
+
+function walkFiles(root: string, extensions: Set<string>): string[] {
+  if (!existsSync(root)) {
+    return [];
+  }
+
+  const current = statSync(root);
+
+  if (current.isFile()) {
+    return extensions.has(path.extname(root)) ? [root] : [];
+  }
+
+  return readdirSync(root).flatMap((entry) => walkFiles(path.join(root, entry), extensions));
+}
+`
   };
 }
-function stripMarkdownInline(value) {
-  return value.replace(/`([^`]+)`/g, "$1").replace(/\*\*([^*]+)\*\*/g, "$1").replace(/\*([^*]+)\*/g, "$1").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").trim();
+var init_source_guard_generator = __esm({
+  "src/api-pipeline/source-guard-generator.ts"() {
+    "use strict";
+  }
+});
+
+// src/api-pipeline/api-pipeline-renderer.ts
+function renderApiPipelineReportMarkdown(report) {
+  const lines = [
+    `# API Pipeline Report \u2014 ${report.sourceKey}`,
+    "",
+    "## Summary",
+    "",
+    `- Mode: ${report.mode}`,
+    `- Generator: ${report.generator.generatorName}`,
+    `- Operations: ${report.operationCount}`,
+    `- Generated operations: ${report.generatedOperationCount}`,
+    `- Skipped operations: ${report.skippedOperationCount}`,
+    `- Blocked operations: ${report.blockedOperationCount}`,
+    `- Generated files: ${report.generatedFiles.length}`,
+    `- Warnings: ${report.warnings.length}`,
+    "",
+    "## Operations",
+    "",
+    "| Operation | Status | Wrapper | Reason | Gaps |",
+    "|---|---|---|---|---|",
+    ...report.operations.map(
+      (operation) => [
+        `${operation.method.toUpperCase()} ${operation.path}`,
+        operation.status,
+        operation.wrapperName ?? "-",
+        escapeTableCell(operation.reason),
+        operation.gapIds.length === 0 ? "-" : operation.gapIds.join("<br>")
+      ].join(" | ")
+    ),
+    "",
+    "## Generated Files",
+    "",
+    "| Kind | Path | Changed | Digest |",
+    "|---|---|---|---|",
+    ...report.generatedFiles.map(
+      (file2) => [file2.kind, file2.path, String(file2.changed), file2.digest].join(" | ")
+    ),
+    "",
+    "## Warnings",
+    "",
+    ...report.warnings.length === 0 ? ["No warnings."] : report.warnings.map((warning) => `- ${warning}`),
+    ""
+  ];
+  return `${lines.join("\n").trimEnd()}
+`;
 }
-var MarkdownBlockKindSchema, MarkdownBlockSchema;
-var init_markdown_lines = __esm({
-  "src/brief/markdown-lines.ts"() {
+function escapeTableCell(value) {
+  return value.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
+}
+var init_api_pipeline_renderer = __esm({
+  "src/api-pipeline/api-pipeline-renderer.ts"() {
+    "use strict";
+  }
+});
+
+// src/api-pipeline/index.ts
+var init_api_pipeline = __esm({
+  "src/api-pipeline/index.ts"() {
+    "use strict";
+    init_api_pipeline_contracts();
+    init_api_generator_discovery();
+    init_openapi_schema_to_typescript();
+    init_openapi_schema_to_zod();
+    init_wrapper_generator();
+    init_mock_generator();
+    init_contract_test_generator();
+    init_source_guard_generator();
+    init_api_pipeline_renderer();
+  }
+});
+
+// src/openapi/openapi-parser.ts
+import { parse as parseYaml } from "yaml";
+function parseOpenApiDocument(input) {
+  const text = input.content.toString("utf8");
+  const format = detectOpenApiFormat({
+    text,
+    ...input.path === void 0 ? {} : { path: input.path },
+    ...input.mediaType === void 0 ? {} : { mediaType: input.mediaType }
+  });
+  const parsed = format === "json" ? JSON.parse(text) : parseYaml(text);
+  if (!isRecord3(parsed)) {
+    throw new Error("OpenAPI document must parse to an object");
+  }
+  const version2 = typeof parsed["openapi"] === "string" ? parsed["openapi"] : typeof parsed["swagger"] === "string" ? parsed["swagger"] : void 0;
+  return ParsedOpenApiDocumentSchema.parse({
+    format,
+    versionKind: detectVersionKind(parsed),
+    ...version2 === void 0 ? {} : { version: version2 },
+    document: parsed
+  });
+}
+function detectOpenApiFormat(input) {
+  const mediaType = input.mediaType?.toLowerCase();
+  const filePath = input.path?.toLowerCase();
+  if (mediaType === "application/json" || filePath?.endsWith(".json")) {
+    return "json";
+  }
+  if (mediaType === "application/yaml" || mediaType === "application/x-yaml" || filePath?.endsWith(".yaml") || filePath?.endsWith(".yml")) {
+    return "yaml";
+  }
+  const trimmed = input.text.trimStart();
+  if (trimmed.startsWith("{")) {
+    return "json";
+  }
+  return "yaml";
+}
+function detectVersionKind(document) {
+  const openapi = document["openapi"];
+  if (typeof openapi === "string") {
+    if (openapi.startsWith("3.0.")) {
+      return "openapi-3.0";
+    }
+    if (openapi.startsWith("3.1.")) {
+      return "openapi-3.1";
+    }
+    return "unknown";
+  }
+  const swagger = document["swagger"];
+  if (swagger === "2.0") {
+    return "swagger-2.0";
+  }
+  return "unknown";
+}
+function isRecord3(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function asRecord(value) {
+  return isRecord3(value) ? value : void 0;
+}
+var OpenApiDocumentFormatSchema, OpenApiVersionKindSchema, ParsedOpenApiDocumentSchema;
+var init_openapi_parser = __esm({
+  "src/openapi/openapi-parser.ts"() {
     "use strict";
     init_zod();
-    MarkdownBlockKindSchema = external_exports.enum(["heading", "list-item", "paragraph"]);
-    MarkdownBlockSchema = external_exports.object({
-      kind: MarkdownBlockKindSchema,
-      lineStart: external_exports.number().int().positive(),
-      lineEnd: external_exports.number().int().positive(),
-      text: external_exports.string(),
-      headingLevel: external_exports.number().int().positive().max(6).optional(),
-      headingPath: external_exports.array(external_exports.string()).default([])
+    OpenApiDocumentFormatSchema = external_exports.enum(["json", "yaml"]);
+    OpenApiVersionKindSchema = external_exports.enum([
+      "openapi-3.0",
+      "openapi-3.1",
+      "swagger-2.0",
+      "unknown"
+    ]);
+    ParsedOpenApiDocumentSchema = external_exports.object({
+      format: OpenApiDocumentFormatSchema,
+      versionKind: OpenApiVersionKindSchema,
+      version: external_exports.string().optional(),
+      document: external_exports.record(external_exports.string(), external_exports.unknown())
     }).strict();
   }
 });
 
-// src/brief/markdown-brief-parser.ts
-function parseMarkdownBrief(input) {
-  const locator = input.source.locator;
-  if (locator.type !== "file") {
-    throw new Error("Markdown brief parser requires a file source");
-  }
-  const parsed = parseMarkdownLines(input.content);
-  return NormalizedBriefDocumentSchema.parse({
-    sourceId: input.source.id,
-    sourceDigest: input.sourceDigest,
-    format: "markdown",
-    title: parsed.headings[0]?.text,
-    blocks: parsed.blocks.map((block, index) => ({
-      blockId: `md-${index + 1}`,
-      kind: block.kind,
-      text: block.text,
-      location: {
-        type: "file-lines",
-        path: locator.path,
-        startLine: block.lineStart,
-        endLine: block.lineEnd
-      },
-      headingPath: block.headingPath,
-      metadata: {
-        ...block.headingLevel === void 0 ? {} : { headingLevel: block.headingLevel }
-      }
-    })),
-    metadata: {
-      lineCount: parsed.lineCount
-    }
+// src/openapi/openapi-inventory.ts
+function buildOpenApiInventory(parsed) {
+  const document = parsed.document;
+  const operations = collectOperations(document);
+  const schemas = collectSchemas(document);
+  const securitySchemes = collectSecuritySchemes(document);
+  const refs = collectRefs(document);
+  return OpenApiInventorySchema.parse({
+    ...parsed.version === void 0 ? {} : { version: parsed.version },
+    versionKind: parsed.versionKind,
+    operationCount: operations.length,
+    schemaCount: schemas.length,
+    securitySchemeCount: securitySchemes.length,
+    refCount: refs.length,
+    operations,
+    schemas,
+    securitySchemes,
+    refs
   });
 }
-var init_markdown_brief_parser = __esm({
-  "src/brief/markdown-brief-parser.ts"() {
-    "use strict";
-    init_normalized_brief();
-    init_markdown_lines();
+function collectOperations(document) {
+  const paths = asRecord(document["paths"]);
+  if (paths === void 0) {
+    return [];
   }
-});
-
-// src/brief/plaintext-brief-parser.ts
-function parsePlainTextBrief(input) {
-  const locator = input.source.locator;
-  if (locator.type !== "file") {
-    throw new Error("Plain-text brief parser requires a file source");
-  }
-  const paragraphs = parseParagraphs(input.content);
-  return NormalizedBriefDocumentSchema.parse({
-    sourceId: input.source.id,
-    sourceDigest: input.sourceDigest,
-    format: "plaintext",
-    blocks: paragraphs.map((paragraph, index) => ({
-      blockId: `txt-${index + 1}`,
-      kind: "paragraph",
-      text: paragraph.lines.join(" ").trim(),
-      location: {
-        type: "file-lines",
-        path: locator.path,
-        startLine: paragraph.lineStart,
-        endLine: paragraph.lineEnd
-      },
-      headingPath: []
-    })),
-    metadata: {
-      lineCount: input.content.split("\n").length
+  const operations = [];
+  for (const [pathName, pathItemValue] of Object.entries(paths)) {
+    const pathItem = asRecord(pathItemValue);
+    if (pathItem === void 0) {
+      continue;
     }
+    for (const [methodName, operationValue] of Object.entries(pathItem)) {
+      const method = methodName.toLowerCase();
+      if (!HTTP_METHODS.has(method)) {
+        continue;
+      }
+      const operation = asRecord(operationValue);
+      if (operation === void 0) {
+        continue;
+      }
+      const pointer = `/paths/${escapeJsonPointer(pathName)}/${method}`;
+      const operationId = asString(operation["operationId"]);
+      const summary = asString(operation["summary"]);
+      operations.push(
+        OpenApiOperationInventoryItemSchema.parse({
+          method,
+          path: pathName,
+          pointer,
+          ...operationId === void 0 ? {} : { operationId },
+          ...summary === void 0 ? {} : { summary },
+          tags: asStringArray(operation["tags"]),
+          requestContentTypes: collectRequestContentTypes(operation),
+          responseStatuses: collectResponseStatuses(operation),
+          responseContentTypes: collectResponseContentTypes(operation),
+          securitySchemeNames: collectOperationSecuritySchemeNames(document, operation)
+        })
+      );
+    }
+  }
+  return operations;
+}
+function collectSchemas(document) {
+  const schemas = asRecord(asRecord(document["components"])?.["schemas"]);
+  if (schemas === void 0) {
+    return [];
+  }
+  return Object.entries(schemas).map(([name, schemaValue]) => {
+    const schema = asRecord(schemaValue) ?? {};
+    const type = asString(schema["type"]);
+    return OpenApiSchemaInventoryItemSchema.parse({
+      name,
+      pointer: `/components/schemas/${escapeJsonPointer(name)}`,
+      ...type === void 0 ? {} : { type },
+      hasRef: hasRef(schema)
+    });
   });
 }
-function parseParagraphs(content) {
-  const paragraphs = [];
-  let current;
-  content.split("\n").forEach((line, index) => {
-    const lineNumber = index + 1;
-    const trimmed = line.trim();
-    if (trimmed.length === 0) {
-      if (current !== void 0) {
-        paragraphs.push(current);
-        current = void 0;
-      }
+function collectSecuritySchemes(document) {
+  const schemes = asRecord(asRecord(document["components"])?.["securitySchemes"]);
+  if (schemes === void 0) {
+    return [];
+  }
+  return Object.entries(schemes).map(([name, schemeValue]) => {
+    const scheme = asRecord(schemeValue) ?? {};
+    const type = asString(scheme["type"]);
+    const schemeName = asString(scheme["scheme"]);
+    const bearerFormat = asString(scheme["bearerFormat"]);
+    const inValue = asString(scheme["in"]);
+    const nameField = asString(scheme["name"]);
+    return OpenApiSecuritySchemeInventoryItemSchema.parse({
+      name,
+      pointer: `/components/securitySchemes/${escapeJsonPointer(name)}`,
+      ...type === void 0 ? {} : { type },
+      ...schemeName === void 0 ? {} : { scheme: schemeName },
+      ...bearerFormat === void 0 ? {} : { bearerFormat },
+      ...inValue === void 0 ? {} : { in: inValue },
+      ...nameField === void 0 ? {} : { nameField }
+    });
+  });
+}
+function collectRefs(document) {
+  const refs = [];
+  walk(document, "", (pointer, value) => {
+    if (!isRecord3(value)) {
       return;
     }
-    if (current === void 0) {
-      current = {
-        lineStart: lineNumber,
-        lineEnd: lineNumber,
-        lines: [trimmed]
-      };
-      return;
-    }
-    current.lineEnd = lineNumber;
-    current.lines.push(trimmed);
-  });
-  if (current !== void 0) {
-    paragraphs.push(current);
-  }
-  return paragraphs;
-}
-var init_plaintext_brief_parser = __esm({
-  "src/brief/plaintext-brief-parser.ts"() {
-    "use strict";
-    init_normalized_brief();
-  }
-});
-
-// src/brief/unsupported-brief-parser.ts
-function createUnsupportedBriefDocument(input) {
-  return NormalizedBriefDocumentSchema.parse({
-    sourceId: input.source.id,
-    sourceDigest: input.sourceDigest,
-    format: input.format,
-    blocks: [
-      {
-        blockId: "unsupported-1",
-        kind: "unsupported",
-        text: input.reason,
-        location: unsupportedLocation(input.source, input.format),
-        headingPath: [],
-        metadata: {
-          unsupported: true,
-          reason: input.reason
-        }
-      }
-    ],
-    metadata: {
-      unsupported: true,
-      reason: input.reason
+    const ref = value["$ref"];
+    if (typeof ref === "string") {
+      refs.push(
+        OpenApiRefInventoryItemSchema.parse({
+          pointer: pointer.length === 0 ? "/" : pointer,
+          ref
+        })
+      );
     }
   });
+  return refs;
 }
-function unsupportedLocation(source, format) {
-  const locator = source.locator;
-  if (locator.type === "file") {
-    if (format === "pdf") {
-      return {
-        type: "pdf-page",
-        path: locator.path,
-        page: 1
-      };
+function collectRequestContentTypes(operation) {
+  const requestBody = asRecord(operation["requestBody"]);
+  const content = asRecord(requestBody?.["content"]);
+  return content === void 0 ? [] : Object.keys(content).sort();
+}
+function collectResponseStatuses(operation) {
+  const responses = asRecord(operation["responses"]);
+  return responses === void 0 ? [] : Object.keys(responses).sort();
+}
+function collectResponseContentTypes(operation) {
+  const responses = asRecord(operation["responses"]);
+  if (responses === void 0) {
+    return [];
+  }
+  const contentTypes = /* @__PURE__ */ new Set();
+  for (const responseValue of Object.values(responses)) {
+    const response = asRecord(responseValue);
+    const content = asRecord(response?.["content"]);
+    if (content === void 0) {
+      continue;
     }
-    return {
-      type: "file-lines",
-      path: locator.path,
-      startLine: 1,
-      endLine: 1
-    };
+    Object.keys(content).forEach((contentType) => contentTypes.add(contentType));
   }
-  if (locator.type === "ticket") {
-    return {
-      type: "ticket-field",
-      provider: locator.provider,
-      url: locator.url,
-      field: "source"
-    };
-  }
-  if (locator.type === "url") {
-    return {
-      type: "url-fragment",
-      url: locator.url,
-      fragment: "source"
-    };
-  }
-  return {
-    type: "json-pointer",
-    document: "source.json",
-    pointer: "/locator"
-  };
+  return [...contentTypes].sort();
 }
-var init_unsupported_brief_parser = __esm({
-  "src/brief/unsupported-brief-parser.ts"() {
+function collectOperationSecuritySchemeNames(document, operation) {
+  const operationSecurity = Array.isArray(operation["security"]) ? operation["security"] : Array.isArray(document["security"]) ? document["security"] : [];
+  const names = /* @__PURE__ */ new Set();
+  for (const requirement of operationSecurity) {
+    if (!isRecord3(requirement)) {
+      continue;
+    }
+    Object.keys(requirement).forEach((name) => names.add(name));
+  }
+  return [...names].sort();
+}
+function hasRef(value) {
+  let found = false;
+  walk(value, "", (_pointer, current) => {
+    if (isRecord3(current) && typeof current["$ref"] === "string") {
+      found = true;
+    }
+  });
+  return found;
+}
+function walk(value, pointer, visitor) {
+  visitor(pointer, value);
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => {
+      walk(item, `${pointer}/${index}`, visitor);
+    });
+    return;
+  }
+  if (isRecord3(value)) {
+    for (const [key, child] of Object.entries(value)) {
+      walk(child, `${pointer}/${escapeJsonPointer(key)}`, visitor);
+    }
+  }
+}
+function asString(value) {
+  return typeof value === "string" && value.trim().length > 0 ? value : void 0;
+}
+function asStringArray(value) {
+  return Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+}
+function escapeJsonPointer(value) {
+  return value.replace(/~/g, "~0").replace(/\//g, "~1");
+}
+var HttpMethodSchema, OpenApiOperationInventoryItemSchema, OpenApiSchemaInventoryItemSchema, OpenApiSecuritySchemeInventoryItemSchema, OpenApiRefInventoryItemSchema, OpenApiInventorySchema, HTTP_METHODS;
+var init_openapi_inventory = __esm({
+  "src/openapi/openapi-inventory.ts"() {
     "use strict";
-    init_normalized_brief();
+    init_zod();
+    init_openapi_parser();
+    HttpMethodSchema = external_exports.enum([
+      "get",
+      "put",
+      "post",
+      "delete",
+      "options",
+      "head",
+      "patch",
+      "trace"
+    ]);
+    OpenApiOperationInventoryItemSchema = external_exports.object({
+      method: HttpMethodSchema,
+      path: external_exports.string().min(1),
+      pointer: external_exports.string().min(1),
+      operationId: external_exports.string().min(1).optional(),
+      summary: external_exports.string().optional(),
+      tags: external_exports.array(external_exports.string()).default([]),
+      requestContentTypes: external_exports.array(external_exports.string()).default([]),
+      responseStatuses: external_exports.array(external_exports.string()).default([]),
+      responseContentTypes: external_exports.array(external_exports.string()).default([]),
+      securitySchemeNames: external_exports.array(external_exports.string()).default([])
+    }).strict();
+    OpenApiSchemaInventoryItemSchema = external_exports.object({
+      name: external_exports.string().min(1),
+      pointer: external_exports.string().min(1),
+      type: external_exports.string().optional(),
+      hasRef: external_exports.boolean()
+    }).strict();
+    OpenApiSecuritySchemeInventoryItemSchema = external_exports.object({
+      name: external_exports.string().min(1),
+      pointer: external_exports.string().min(1),
+      type: external_exports.string().optional(),
+      scheme: external_exports.string().optional(),
+      bearerFormat: external_exports.string().optional(),
+      in: external_exports.string().optional(),
+      nameField: external_exports.string().optional()
+    }).strict();
+    OpenApiRefInventoryItemSchema = external_exports.object({
+      pointer: external_exports.string().min(1),
+      ref: external_exports.string().min(1)
+    }).strict();
+    OpenApiInventorySchema = external_exports.object({
+      version: external_exports.string().optional(),
+      versionKind: external_exports.string(),
+      operationCount: external_exports.number().int().nonnegative(),
+      schemaCount: external_exports.number().int().nonnegative(),
+      securitySchemeCount: external_exports.number().int().nonnegative(),
+      refCount: external_exports.number().int().nonnegative(),
+      operations: external_exports.array(OpenApiOperationInventoryItemSchema),
+      schemas: external_exports.array(OpenApiSchemaInventoryItemSchema),
+      securitySchemes: external_exports.array(OpenApiSecuritySchemeInventoryItemSchema),
+      refs: external_exports.array(OpenApiRefInventoryItemSchema)
+    }).strict();
+    HTTP_METHODS = /* @__PURE__ */ new Set(["get", "put", "post", "delete", "options", "head", "patch", "trace"]);
   }
 });
 
@@ -33314,6 +33556,162 @@ var init_id_factory = __esm({
   "src/runtime/id-factory.ts"() {
     "use strict";
     init_ids();
+  }
+});
+
+// src/runtime/source.ts
+var SourceKindSchema, FileSourceLocatorSchema, UrlSourceLocatorSchema, FigmaSourceLocatorSchema, RepositorySourceLocatorSchema, TicketProviderSchema, TicketSourceLocatorSchema, SourceLocatorSchema, SourceRefSchema, FileLinesEvidenceLocationSchema, JsonPointerEvidenceLocationSchema, FigmaNodeEvidenceLocationSchema, UrlFragmentEvidenceLocationSchema, PdfPageEvidenceLocationSchema, PdfTextBlockEvidenceLocationSchema, TicketFieldEvidenceLocationSchema, GitFileEvidenceLocationSchema, EvidenceLocationSchema, EvidenceRefSchema;
+var init_source = __esm({
+  "src/runtime/source.ts"() {
+    "use strict";
+    init_zod();
+    init_ids();
+    init_scalars();
+    SourceKindSchema = external_exports.enum([
+      "brief",
+      "figma",
+      "openapi",
+      "repository",
+      "generated",
+      "test-report",
+      "other"
+    ]);
+    FileSourceLocatorSchema = external_exports.object({
+      type: external_exports.literal("file"),
+      path: RelativePathSchema,
+      mediaType: external_exports.string().trim().min(1).optional()
+    }).strict();
+    UrlSourceLocatorSchema = external_exports.object({
+      type: external_exports.literal("url"),
+      url: external_exports.string().url(),
+      mediaType: external_exports.string().trim().min(1).optional()
+    }).strict();
+    FigmaSourceLocatorSchema = external_exports.object({
+      type: external_exports.literal("figma"),
+      url: external_exports.string().url(),
+      fileKey: external_exports.string().trim().min(1).optional(),
+      nodeId: external_exports.string().trim().min(1).optional()
+    }).strict();
+    RepositorySourceLocatorSchema = external_exports.object({
+      type: external_exports.literal("repository"),
+      root: external_exports.string().trim().min(1),
+      commit: GitObjectIdSchema.optional()
+    }).strict();
+    TicketProviderSchema = external_exports.enum(["jira", "gitlab", "github", "notion", "linear"]);
+    TicketSourceLocatorSchema = external_exports.object({
+      type: external_exports.literal("ticket"),
+      provider: TicketProviderSchema,
+      url: external_exports.string().url(),
+      externalId: external_exports.string().trim().min(1).optional(),
+      mediaType: external_exports.string().trim().min(1).optional()
+    }).strict();
+    SourceLocatorSchema = external_exports.discriminatedUnion("type", [
+      FileSourceLocatorSchema,
+      UrlSourceLocatorSchema,
+      FigmaSourceLocatorSchema,
+      RepositorySourceLocatorSchema,
+      TicketSourceLocatorSchema
+    ]);
+    SourceRefSchema = external_exports.object({
+      id: SourceIdSchema,
+      kind: SourceKindSchema,
+      locator: SourceLocatorSchema,
+      digest: Sha256DigestSchema.optional(),
+      capturedAt: IsoDateTimeSchema,
+      metadata: external_exports.record(external_exports.string(), external_exports.unknown()).default({})
+    }).strict();
+    FileLinesEvidenceLocationSchema = external_exports.object({
+      type: external_exports.literal("file-lines"),
+      path: RelativePathSchema,
+      startLine: external_exports.number().int().positive(),
+      endLine: external_exports.number().int().positive()
+    }).strict().superRefine((location, context) => {
+      if (location.endLine < location.startLine) {
+        context.addIssue({
+          code: "custom",
+          message: "endLine must be greater than or equal to startLine",
+          path: ["endLine"]
+        });
+      }
+    });
+    JsonPointerEvidenceLocationSchema = external_exports.object({
+      type: external_exports.literal("json-pointer"),
+      document: RelativePathSchema,
+      pointer: external_exports.string().startsWith("/")
+    }).strict();
+    FigmaNodeEvidenceLocationSchema = external_exports.object({
+      type: external_exports.literal("figma-node"),
+      fileKey: external_exports.string().trim().min(1),
+      nodeId: external_exports.string().trim().min(1),
+      propertyPath: external_exports.array(external_exports.string().trim().min(1)).optional()
+    }).strict();
+    UrlFragmentEvidenceLocationSchema = external_exports.object({
+      type: external_exports.literal("url-fragment"),
+      url: external_exports.string().url(),
+      fragment: external_exports.string().trim().min(1)
+    }).strict();
+    PdfPageEvidenceLocationSchema = external_exports.object({
+      type: external_exports.literal("pdf-page"),
+      path: RelativePathSchema,
+      page: external_exports.number().int().positive()
+    }).strict();
+    PdfTextBlockEvidenceLocationSchema = external_exports.object({
+      type: external_exports.literal("pdf-text-block"),
+      path: RelativePathSchema,
+      page: external_exports.number().int().positive(),
+      blockIndex: external_exports.number().int().nonnegative()
+    }).strict();
+    TicketFieldEvidenceLocationSchema = external_exports.object({
+      type: external_exports.literal("ticket-field"),
+      provider: TicketProviderSchema,
+      url: external_exports.string().url(),
+      field: external_exports.string().trim().min(1),
+      commentId: external_exports.string().trim().min(1).optional()
+    }).strict();
+    GitFileEvidenceLocationSchema = external_exports.object({
+      type: external_exports.literal("git-file"),
+      commit: GitObjectIdSchema,
+      path: RelativePathSchema,
+      startLine: external_exports.number().int().positive().optional(),
+      endLine: external_exports.number().int().positive().optional()
+    }).strict().superRefine((location, context) => {
+      const hasStartLine = location.startLine !== void 0;
+      const hasEndLine = location.endLine !== void 0;
+      if (hasStartLine !== hasEndLine) {
+        context.addIssue({
+          code: "custom",
+          message: "startLine and endLine must be provided together",
+          path: ["startLine"]
+        });
+      }
+      if (location.startLine !== void 0 && location.endLine !== void 0 && location.endLine < location.startLine) {
+        context.addIssue({
+          code: "custom",
+          message: "endLine must be greater than or equal to startLine",
+          path: ["endLine"]
+        });
+      }
+    });
+    EvidenceLocationSchema = external_exports.discriminatedUnion("type", [
+      FileLinesEvidenceLocationSchema,
+      JsonPointerEvidenceLocationSchema,
+      FigmaNodeEvidenceLocationSchema,
+      UrlFragmentEvidenceLocationSchema,
+      PdfPageEvidenceLocationSchema,
+      PdfTextBlockEvidenceLocationSchema,
+      TicketFieldEvidenceLocationSchema,
+      GitFileEvidenceLocationSchema
+    ]);
+    EvidenceRefSchema = external_exports.object({
+      id: EvidenceIdSchema,
+      sourceId: SourceIdSchema,
+      location: EvidenceLocationSchema,
+      summary: external_exports.string().trim().min(1).max(2e3),
+      excerpt: external_exports.string().max(4e3).optional(),
+      digest: Sha256DigestSchema,
+      capturedAt: IsoDateTimeSchema,
+      metadata: external_exports.record(external_exports.string(), external_exports.unknown()).default({})
+    }).strict();
   }
 });
 
@@ -33791,11 +34189,11 @@ function addUniqueValueIssues(collectionName, values, context) {
     seen.add(value);
   });
 }
-function addReferenceIssue(context, path15, reference) {
+function addReferenceIssue(context, path17, reference) {
   context.addIssue({
     code: "custom",
     message: `Unknown ${reference.kind} reference ${reference.id}`,
-    path: path15
+    path: path17
   });
 }
 var RunStatusSchema, RunManifestSchema, RunSummarySchema, CreateInitialRunInputSchema;
@@ -34062,6 +34460,1106 @@ var init_content_hash = __esm({
   "src/source-registry/content-hash.ts"() {
     "use strict";
     init_scalars();
+  }
+});
+
+// src/application/api-pipeline-service.ts
+import { mkdir, readFile as readFile2, writeFile } from "fs/promises";
+import path2 from "path";
+function operationPipelineItem(operation, wrapper) {
+  const base = {
+    operationKey: operationKey2(operation),
+    method: operation.method,
+    path: operation.path,
+    ...operation.operationId === void 0 ? {} : { operationId: operation.operationId },
+    evidenceIds: [],
+    generatedClientSymbol: "apiClient",
+    gapIds: []
+  };
+  if (wrapper === void 0) {
+    return {
+      ...base,
+      status: "skipped",
+      reason: "Operation has no operationId, so no wrapper skeleton was generated."
+    };
+  }
+  return {
+    ...base,
+    wrapperName: wrapper.wrapperName,
+    wrapperPath: wrapper.path,
+    status: "generated",
+    reason: "Wrapper skeleton generated for documented operation."
+  };
+}
+function operationKey2(operation) {
+  return `${operation.method.toUpperCase()} ${operation.path}`;
+}
+function renderFallbackClient(sourceKey) {
+  return `// AUTO-GENERATED by spec-to-pr. DO NOT EDIT.
+// Fallback API client skeleton for ${sourceKey}. Replace transport with the target project client.
+
+export const apiClient = {
+  async request(input: {
+    method: string;
+    path: string;
+    params?: Record<string, unknown>;
+    body?: unknown;
+  }): Promise<unknown> {
+    return {
+      method: input.method,
+      path: input.path,
+      params: input.params,
+      body: input.body,
+    };
+  },
+};
+`;
+}
+function optionalSha256(value) {
+  return typeof value === "string" ? Sha256DigestSchema.parse(value) : void 0;
+}
+function rawComponentSchemas(document) {
+  if (!isRecord4(document)) {
+    return {};
+  }
+  const components = document["components"];
+  if (!isRecord4(components)) {
+    return {};
+  }
+  const schemas = components["schemas"];
+  if (!isRecord4(schemas)) {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(schemas).filter(
+      (entry) => isRecord4(entry[1])
+    )
+  );
+}
+function isRecord4(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+var GenerateApiPipelineInputSchema, GenerateApiPipelineResultSchema, ApiPipelineService;
+var init_api_pipeline_service = __esm({
+  "src/application/api-pipeline-service.ts"() {
+    "use strict";
+    init_zod();
+    init_api_pipeline();
+    init_openapi_inventory();
+    init_run2();
+    init_artifact();
+    init_id_factory();
+    init_ids();
+    init_scalars();
+    init_content_hash();
+    GenerateApiPipelineInputSchema = external_exports.object({
+      runId: RunIdSchema,
+      openApiIntakeArtifactId: ArtifactIdSchema,
+      sourceKey: external_exports.string().trim().min(1),
+      generatedRoot: external_exports.string().trim().min(1).optional(),
+      wrapperRoot: external_exports.string().trim().min(1).optional(),
+      preferredCommand: external_exports.array(external_exports.string().trim().min(1)).optional(),
+      force: external_exports.boolean().default(false)
+    }).strict();
+    GenerateApiPipelineResultSchema = external_exports.object({
+      duplicate: external_exports.boolean(),
+      run: external_exports.custom(),
+      sourceKey: external_exports.string(),
+      mode: ApiPipelineModeSchema,
+      generatedFiles: external_exports.array(external_exports.string()),
+      reportArtifactId: ArtifactIdSchema.optional(),
+      warnings: external_exports.array(external_exports.string())
+    }).strict();
+    ApiPipelineService = class {
+      constructor(runStore, artifactStore, now = () => (/* @__PURE__ */ new Date()).toISOString()) {
+        this.runStore = runStore;
+        this.artifactStore = artifactStore;
+        this.now = now;
+      }
+      runStore;
+      artifactStore;
+      now;
+      async generate(rawInput) {
+        const input = GenerateApiPipelineInputSchema.parse(rawInput);
+        const run = await this.runStore.get(input.runId);
+        const timestamp = IsoDateTimeSchema.parse(this.now());
+        const openApiArtifact = run.artifacts.find(
+          (artifact) => artifact.id === input.openApiIntakeArtifactId
+        );
+        if (openApiArtifact === void 0) {
+          throw new Error(`OpenAPI intake artifact not found: ${input.openApiIntakeArtifactId}`);
+        }
+        if (openApiArtifact.kind !== "openapi-intake-report") {
+          throw new Error(`Artifact is not an OpenAPI intake report: ${openApiArtifact.id}`);
+        }
+        const existingReport = run.artifacts.find(
+          (artifact) => artifact.kind === "api-contract-report" && artifact.metadata["adapter"] === "api-pipeline-v1" && artifact.metadata["openApiIntakeArtifactId"] === input.openApiIntakeArtifactId && artifact.metadata["sourceKey"] === input.sourceKey && artifact.metadata["format"] === "json"
+        );
+        if (existingReport !== void 0 && !input.force) {
+          return GenerateApiPipelineResultSchema.parse({
+            duplicate: true,
+            run: summarizeRun(run),
+            sourceKey: input.sourceKey,
+            mode: ApiPipelineModeSchema.parse(existingReport.metadata["mode"]),
+            generatedFiles: [],
+            reportArtifactId: existingReport.id,
+            warnings: []
+          });
+        }
+        const inventory = await this.readOpenApiInventory(openApiArtifact.digest);
+        const sourceDigest = optionalSha256(openApiArtifact.metadata["sourceDigest"]);
+        const plan = await discoverApiGenerator({
+          projectRoot: run.projectRoot,
+          sourceKey: input.sourceKey,
+          ...input.generatedRoot === void 0 ? {} : { generatedRoot: input.generatedRoot },
+          ...input.wrapperRoot === void 0 ? {} : { wrapperRoot: input.wrapperRoot },
+          ...input.preferredCommand === void 0 ? {} : { preferredCommand: input.preferredCommand }
+        });
+        const generatedFiles = [];
+        const warnings = [];
+        const schemas = await this.extractSchemas({
+          runArtifacts: run.artifacts,
+          sourceDigest,
+          inventory
+        });
+        if (plan.mode === "fallback-generator") {
+          const tsResult = generateTypescriptTypes({ schemas });
+          const zodResult = generateZodSchemas({ schemas });
+          warnings.push(...tsResult.warnings, ...zodResult.warnings);
+          await this.writeProjectFile({
+            projectRoot: run.projectRoot,
+            relativePath: `${plan.generatedRoot}/types.ts`,
+            content: tsResult.content,
+            force: input.force,
+            generatedFiles,
+            kind: "typescript-types"
+          });
+          await this.writeProjectFile({
+            projectRoot: run.projectRoot,
+            relativePath: `${plan.generatedRoot}/schemas.ts`,
+            content: zodResult.content,
+            force: input.force,
+            generatedFiles,
+            kind: "zod-schemas"
+          });
+          await this.writeProjectFile({
+            projectRoot: run.projectRoot,
+            relativePath: `${plan.generatedRoot}/client.ts`,
+            content: renderFallbackClient(input.sourceKey),
+            force: input.force,
+            generatedFiles,
+            kind: "api-client"
+          });
+          await this.writeProjectFile({
+            projectRoot: run.projectRoot,
+            relativePath: `${plan.generatedRoot}/index.ts`,
+            content: `export * from "./types";
+export * from "./schemas";
+export * from "./client";
+`,
+            force: input.force,
+            generatedFiles,
+            kind: "api-client"
+          });
+        } else {
+          warnings.push(
+            `Existing generator ${plan.generatorName} was detected; command execution is deferred to the project command policy.`
+          );
+        }
+        const wrappers = generateFeatureWrappers({
+          sourceKey: input.sourceKey,
+          wrapperRoot: plan.wrapperRoot,
+          operations: inventory.operations
+        });
+        const wrapperByOperationKey = new Map(
+          wrappers.map((wrapper) => [wrapper.operationKey, wrapper])
+        );
+        for (const wrapper of wrappers) {
+          await this.writeProjectFile({
+            projectRoot: run.projectRoot,
+            relativePath: wrapper.path,
+            content: wrapper.content,
+            force: input.force,
+            generatedFiles,
+            kind: "feature-wrapper"
+          });
+        }
+        const mock = generateMswHandlers({
+          sourceKey: input.sourceKey,
+          operations: inventory.operations,
+          outputPath: `src/shared/api/mocks/${input.sourceKey}.handlers.ts`
+        });
+        await this.writeProjectFile({
+          projectRoot: run.projectRoot,
+          relativePath: mock.path,
+          content: mock.content,
+          force: input.force,
+          generatedFiles,
+          kind: "mock-handler"
+        });
+        const contractTest = generateContractTestSkeleton({
+          sourceKey: input.sourceKey,
+          operations: inventory.operations,
+          outputPath: `src/shared/api/__tests__/${input.sourceKey}.contract.generated.test.ts`
+        });
+        await this.writeProjectFile({
+          projectRoot: run.projectRoot,
+          relativePath: contractTest.path,
+          content: contractTest.content,
+          force: input.force,
+          generatedFiles,
+          kind: "contract-test"
+        });
+        const uiGlobs = [
+          "src/pages/**/*.{ts,tsx}",
+          "src/widgets/**/*.{ts,tsx}",
+          "src/features/**/*.{ts,tsx}"
+        ];
+        const sourceGuard = generateSourceGuardTest({
+          generatedImportPattern: `shared/api/generated/${input.sourceKey}`,
+          uiGlobs,
+          outputPath: "src/shared/api/__tests__/source-guards.generated.test.ts"
+        });
+        await this.writeProjectFile({
+          projectRoot: run.projectRoot,
+          relativePath: sourceGuard.path,
+          content: sourceGuard.content,
+          force: input.force,
+          generatedFiles,
+          kind: "source-guard-test"
+        });
+        const operationItems = inventory.operations.map(
+          (operation) => operationPipelineItem(operation, wrapperByOperationKey.get(operationKey2(operation)))
+        );
+        const baseReport = ApiPipelineReportSchema.parse({
+          adapter: "api-pipeline-v1",
+          runId: run.id,
+          sourceKey: input.sourceKey,
+          ...sourceDigest === void 0 ? {} : { openApiSourceDigest: sourceDigest },
+          openApiIntakeArtifactId: openApiArtifact.id,
+          mode: plan.mode,
+          generator: plan,
+          operationCount: inventory.operationCount,
+          generatedOperationCount: operationItems.filter((item) => item.status === "generated").length,
+          skippedOperationCount: operationItems.filter((item) => item.status === "skipped").length,
+          blockedOperationCount: operationItems.filter((item) => item.status === "blocked").length,
+          operations: operationItems,
+          generatedFiles,
+          warnings,
+          gapIds: [],
+          artifactIds: [],
+          generatedAt: timestamp
+        });
+        const reportArtifacts = await this.writeReportArtifacts({
+          report: baseReport,
+          generatedFiles,
+          sourceGuardReport: {
+            adapter: "api-pipeline-v1",
+            sourceKey: input.sourceKey,
+            generatedImportPattern: `shared/api/generated/${input.sourceKey}`,
+            uiGlobs,
+            generatedAt: timestamp
+          },
+          timestamp
+        });
+        const nextRun = RunManifestSchema.parse({
+          ...run,
+          revision: run.revision + 1,
+          updatedAt: timestamp,
+          artifacts: [...run.artifacts, ...reportArtifacts]
+        });
+        await this.runStore.save(nextRun, run.revision);
+        return GenerateApiPipelineResultSchema.parse({
+          duplicate: false,
+          run: summarizeRun(nextRun),
+          sourceKey: input.sourceKey,
+          mode: plan.mode,
+          generatedFiles: generatedFiles.map((file2) => file2.path),
+          reportArtifactId: reportArtifacts[0]?.id,
+          warnings
+        });
+      }
+      async readOpenApiInventory(rawDigest) {
+        const digest = Sha256DigestSchema.parse(rawDigest);
+        const content = await this.artifactStore.readContent(digest);
+        return OpenApiInventorySchema.parse(JSON.parse(content.toString("utf8")));
+      }
+      async extractSchemas(input) {
+        const normalizedArtifact = input.runArtifacts.find(
+          (artifact) => artifact.kind === "openapi-normalized-document" && input.sourceDigest !== void 0 && artifact.metadata["sourceDigest"] === input.sourceDigest
+        );
+        if (normalizedArtifact !== void 0) {
+          const content = await this.artifactStore.readContent(
+            Sha256DigestSchema.parse(normalizedArtifact.digest)
+          );
+          const document = JSON.parse(content.toString("utf8"));
+          const rawSchemas = rawComponentSchemas(document);
+          if (Object.keys(rawSchemas).length > 0) {
+            return rawSchemas;
+          }
+        }
+        return Object.fromEntries(
+          input.inventory.schemas.map((schema) => [
+            schema.name,
+            {
+              type: schema.type ?? "object"
+            }
+          ])
+        );
+      }
+      async writeProjectFile(input) {
+        const absolutePath = path2.join(input.projectRoot, input.relativePath);
+        const relative = path2.relative(input.projectRoot, absolutePath);
+        if (relative.startsWith("..") || path2.isAbsolute(relative)) {
+          throw new Error(`Refusing to write outside project root: ${absolutePath}`);
+        }
+        await mkdir(path2.dirname(absolutePath), {
+          recursive: true,
+          mode: 448
+        });
+        let changed = true;
+        try {
+          const existing = await readFile2(absolutePath, "utf8");
+          if (existing === input.content) {
+            changed = false;
+          } else if (!input.force) {
+            throw new Error(`File already exists with different content: ${input.relativePath}`);
+          }
+        } catch (error51) {
+          if (error51 instanceof Error && "code" in error51 && error51.code !== "ENOENT") {
+            throw error51;
+          }
+        }
+        if (changed) {
+          await writeFile(absolutePath, input.content, {
+            encoding: "utf8",
+            mode: 384
+          });
+        }
+        input.generatedFiles.push({
+          kind: input.kind,
+          path: input.relativePath,
+          digest: sha256Digest(Buffer.from(input.content, "utf8")),
+          changed
+        });
+      }
+      async writeReportArtifacts(input) {
+        const reportMarkdown = renderApiPipelineReportMarkdown(input.report);
+        const blobs = [
+          {
+            mediaType: "application/json",
+            content: `${JSON.stringify(input.report, null, 2)}
+`,
+            format: "json",
+            label: "api-pipeline-report-json"
+          },
+          {
+            mediaType: "text/markdown",
+            content: reportMarkdown,
+            format: "markdown",
+            label: "api-pipeline-report-md"
+          },
+          {
+            mediaType: "application/json",
+            content: `${JSON.stringify(
+              {
+                adapter: "api-pipeline-v1",
+                sourceKey: input.report.sourceKey,
+                generatedFiles: input.generatedFiles,
+                generatedAt: input.timestamp
+              },
+              null,
+              2
+            )}
+`,
+            format: "generated-file-manifest",
+            label: "generated-file-manifest"
+          },
+          {
+            mediaType: "application/json",
+            content: `${JSON.stringify(input.sourceGuardReport, null, 2)}
+`,
+            format: "source-guard-report",
+            label: "source-guard-report"
+          }
+        ];
+        const artifactRefs = [];
+        for (const blob of blobs) {
+          const stored = await this.artifactStore.writeBlob({
+            content: Buffer.from(blob.content, "utf8"),
+            mediaType: blob.mediaType,
+            storedAt: input.timestamp,
+            label: blob.label
+          });
+          artifactRefs.push(
+            ArtifactRefSchema.parse({
+              id: createArtifactId(),
+              kind: blob.format === "generated-file-manifest" ? "generated-code" : "api-contract-report",
+              uri: stored.uri,
+              mediaType: blob.mediaType,
+              digest: stored.digest,
+              producedBy: "orchestrator",
+              evidenceIds: [],
+              createdAt: input.timestamp,
+              metadata: {
+                adapter: "api-pipeline-v1",
+                sourceKey: input.report.sourceKey,
+                mode: input.report.mode,
+                openApiIntakeArtifactId: input.report.openApiIntakeArtifactId,
+                format: blob.format
+              }
+            })
+          );
+        }
+        return artifactRefs;
+      }
+    };
+  }
+});
+
+// src/brief/brief-classifier.ts
+function classifyBriefBlocks(blocks) {
+  return blocks.filter((block) => block.kind !== "heading").map(classifyBlock).filter((candidate) => candidate !== void 0);
+}
+function classifyBlock(block) {
+  const text = block.text.trim();
+  if (text.length === 0) {
+    return void 0;
+  }
+  const itemType = classifyText(text);
+  const flags = detectFlags(text);
+  if (itemType === "note" && flags.length === 0) {
+    return void 0;
+  }
+  return BriefCandidateSchema.parse({
+    itemType,
+    location: block.location,
+    ...block.location.type === "file-lines" ? {
+      lineStart: block.location.startLine,
+      lineEnd: block.location.endLine
+    } : {},
+    text,
+    summary: summarizeText(text),
+    headingPath: block.headingPath,
+    flags
+  });
+}
+function classifyText(text) {
+  if (matchesAny(text, OUT_OF_SCOPE_PATTERNS)) {
+    return "out-of-scope";
+  }
+  if (matchesAny(text, API_PATTERNS)) {
+    return "api";
+  }
+  if (matchesAny(text, DESIGN_PATTERNS)) {
+    return "design";
+  }
+  if (matchesAny(text, TEST_PATTERNS)) {
+    return "test";
+  }
+  if (matchesAny(text, POLICY_PATTERNS)) {
+    return "policy";
+  }
+  if (matchesAny(text, REQUIREMENT_PATTERNS)) {
+    return "requirement";
+  }
+  return "note";
+}
+function detectFlags(text) {
+  const flags = [];
+  if (matchesAny(text, AMBIGUITY_PATTERNS)) {
+    flags.push("ambiguous");
+  }
+  if (matchesAny(text, PROMPT_INJECTION_LIKE_PATTERNS)) {
+    flags.push("prompt-injection-like");
+  }
+  return flags;
+}
+function matchesAny(text, patterns) {
+  return patterns.some((pattern) => pattern.test(text));
+}
+function summarizeText(text) {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= 160) {
+    return normalized;
+  }
+  return `${normalized.slice(0, 157)}...`;
+}
+var BriefItemTypeSchema, BriefIssueFlagSchema, BriefCandidateSchema, REQUIREMENT_PATTERNS, POLICY_PATTERNS, API_PATTERNS, DESIGN_PATTERNS, TEST_PATTERNS, OUT_OF_SCOPE_PATTERNS, AMBIGUITY_PATTERNS, PROMPT_INJECTION_LIKE_PATTERNS;
+var init_brief_classifier = __esm({
+  "src/brief/brief-classifier.ts"() {
+    "use strict";
+    init_zod();
+    init_source();
+    BriefItemTypeSchema = external_exports.enum([
+      "requirement",
+      "policy",
+      "api",
+      "design",
+      "test",
+      "out-of-scope",
+      "note"
+    ]);
+    BriefIssueFlagSchema = external_exports.enum(["ambiguous", "prompt-injection-like"]);
+    BriefCandidateSchema = external_exports.object({
+      itemType: BriefItemTypeSchema,
+      location: EvidenceLocationSchema,
+      lineStart: external_exports.number().int().positive().optional(),
+      lineEnd: external_exports.number().int().positive().optional(),
+      text: external_exports.string().trim().min(1),
+      summary: external_exports.string().trim().min(1),
+      headingPath: external_exports.array(external_exports.string()).default([]),
+      flags: external_exports.array(BriefIssueFlagSchema).default([])
+    }).strict();
+    REQUIREMENT_PATTERNS = [
+      /해야\s*한다/,
+      /해야\s*함/,
+      /필수/,
+      /제공/,
+      /지원/,
+      /가능해야/,
+      /표시/,
+      /노출/,
+      /관리/,
+      /생성/,
+      /수정/,
+      /삭제/,
+      /변경/,
+      /조회/,
+      /검색/,
+      /필터/,
+      /정렬/,
+      /저장/,
+      /검증/,
+      /\bmust\b/i,
+      /\bshould\b/i,
+      /\brequired\b/i
+    ];
+    POLICY_PATTERNS = [
+      /정책/,
+      /규칙/,
+      /조건/,
+      /제한/,
+      /상태/,
+      /권한/,
+      /가드/,
+      /guard/i,
+      /fallback/i
+    ];
+    API_PATTERNS = [
+      /\bAPI\b/i,
+      /\bOpenAPI\b/i,
+      /\bendpoint\b/i,
+      /엔드포인트/,
+      /응답/,
+      /요청/,
+      /\bGET\b/,
+      /\bPOST\b/,
+      /\bPUT\b/,
+      /\bPATCH\b/,
+      /\bDELETE\b/,
+      /status\s*code/i
+    ];
+    DESIGN_PATTERNS = [
+      /\bFigma\b/i,
+      /피그마/,
+      /\bUI\b/i,
+      /화면/,
+      /디자인/,
+      /컴포넌트/,
+      /토큰/,
+      /색상/,
+      /타이포/,
+      /모바일/,
+      /데스크톱/
+    ];
+    TEST_PATTERNS = [
+      /테스트/,
+      /검증/,
+      /통과/,
+      /coverage/i,
+      /unit/i,
+      /component/i,
+      /e2e/i,
+      /acceptance/i,
+      /시나리오/
+    ];
+    OUT_OF_SCOPE_PATTERNS = [
+      /범위\s*제외/,
+      /제외/,
+      /하지\s*않음/,
+      /구현하지\s*않음/,
+      /추후/,
+      /이번\s*범위가\s*아님/,
+      /out\s+of\s+scope/i
+    ];
+    AMBIGUITY_PATTERNS = [
+      /적절히/,
+      /빠르게/,
+      /사용자\s*친화/,
+      /간단히/,
+      /충분히/,
+      /가능하면/,
+      /필요시/,
+      /기존과\s*동일/,
+      /기존처럼/,
+      /등$/,
+      /\betc\.?$/i,
+      /\bas appropriate\b/i,
+      /\buser friendly\b/i
+    ];
+    PROMPT_INJECTION_LIKE_PATTERNS = [
+      /ignore\s+previous\s+instructions/i,
+      /ignore\s+all\s+previous/i,
+      /system\s+prompt/i,
+      /developer\s+message/i,
+      /reveal\s+.*secret/i,
+      /exfiltrate/i,
+      /api\s*key/i,
+      /access\s*token/i,
+      /이전\s*지시.*무시/,
+      /시스템\s*프롬프트/,
+      /개발자\s*메시지/,
+      /비밀.*출력/,
+      /토큰.*출력/,
+      /API\s*키.*출력/,
+      /모든\s*도구.*실행/
+    ];
+  }
+});
+
+// src/brief/brief-analysis.ts
+var BriefExtractedItemSchema, BriefAnalysisResultSchema;
+var init_brief_analysis = __esm({
+  "src/brief/brief-analysis.ts"() {
+    "use strict";
+    init_zod();
+    init_ids();
+    init_scalars();
+    init_source();
+    init_brief_classifier();
+    BriefExtractedItemSchema = external_exports.object({
+      evidenceId: EvidenceIdSchema,
+      itemType: BriefItemTypeSchema,
+      location: EvidenceLocationSchema,
+      lineStart: external_exports.number().int().positive().optional(),
+      lineEnd: external_exports.number().int().positive().optional(),
+      summary: external_exports.string().trim().min(1),
+      headingPath: external_exports.array(external_exports.string()).default([]),
+      flags: external_exports.array(BriefIssueFlagSchema).default([]),
+      gapIds: external_exports.array(GapIdSchema).default([])
+    }).strict();
+    BriefAnalysisResultSchema = external_exports.object({
+      sourceId: SourceIdSchema,
+      sourceDigest: Sha256DigestSchema,
+      duplicate: external_exports.boolean(),
+      sectionCount: external_exports.number().int().nonnegative(),
+      candidateCount: external_exports.number().int().nonnegative(),
+      evidenceAdded: external_exports.number().int().nonnegative(),
+      gapsAdded: external_exports.number().int().nonnegative(),
+      items: external_exports.array(BriefExtractedItemSchema)
+    }).strict();
+  }
+});
+
+// src/brief/normalized-brief.ts
+var NormalizedBriefFormatSchema, NormalizedBriefBlockKindSchema, NormalizedBriefBlockSchema, NormalizedBriefDocumentSchema;
+var init_normalized_brief = __esm({
+  "src/brief/normalized-brief.ts"() {
+    "use strict";
+    init_zod();
+    init_ids();
+    init_source();
+    init_scalars();
+    NormalizedBriefFormatSchema = external_exports.enum([
+      "markdown",
+      "plaintext",
+      "pdf",
+      "ticket",
+      "html",
+      "unknown"
+    ]);
+    NormalizedBriefBlockKindSchema = external_exports.enum([
+      "heading",
+      "paragraph",
+      "list-item",
+      "table-row",
+      "ticket-field",
+      "pdf-text-block",
+      "unsupported"
+    ]);
+    NormalizedBriefBlockSchema = external_exports.object({
+      blockId: external_exports.string().trim().min(1),
+      kind: NormalizedBriefBlockKindSchema,
+      text: external_exports.string(),
+      location: EvidenceLocationSchema,
+      headingPath: external_exports.array(external_exports.string()).default([]),
+      metadata: external_exports.record(external_exports.string(), external_exports.unknown()).default({})
+    }).strict();
+    NormalizedBriefDocumentSchema = external_exports.object({
+      sourceId: SourceIdSchema,
+      sourceDigest: Sha256DigestSchema,
+      format: NormalizedBriefFormatSchema,
+      title: external_exports.string().trim().min(1).optional(),
+      blocks: external_exports.array(NormalizedBriefBlockSchema),
+      metadata: external_exports.record(external_exports.string(), external_exports.unknown()).default({})
+    }).strict();
+  }
+});
+
+// src/brief/brief-source-type.ts
+import path3 from "path";
+function detectBriefSourceType(source) {
+  const locator = source.locator;
+  if (locator.type === "ticket") {
+    return "ticket";
+  }
+  if (locator.type === "url") {
+    return isHtmlMediaType(locator.mediaType) ? "html" : "unknown";
+  }
+  if (locator.type !== "file") {
+    return "unknown";
+  }
+  const extension = path3.extname(locator.path).toLowerCase();
+  const mediaType = locator.mediaType?.toLowerCase();
+  if (mediaType === "application/pdf" || extension === ".pdf") {
+    return "pdf";
+  }
+  if (mediaType === "text/markdown" || mediaType === "text/x-markdown" || extension === ".md" || extension === ".mdx") {
+    return "markdown";
+  }
+  if (mediaType === "text/plain" || extension === ".txt") {
+    return "plaintext";
+  }
+  if (isHtmlMediaType(mediaType) || extension === ".html" || extension === ".htm") {
+    return "html";
+  }
+  return "unknown";
+}
+function isHtmlMediaType(mediaType) {
+  return mediaType === "text/html" || mediaType === "application/xhtml+xml";
+}
+var init_brief_source_type = __esm({
+  "src/brief/brief-source-type.ts"() {
+    "use strict";
+    init_normalized_brief();
+  }
+});
+
+// src/brief/markdown-lines.ts
+function parseMarkdownLines(content) {
+  const lines = content.split("\n");
+  const blocks = [];
+  const headings = [];
+  const headingStack = [];
+  let paragraph;
+  let fence;
+  function flushParagraph() {
+    if (paragraph === void 0) {
+      return;
+    }
+    const text = paragraph.lines.join(" ").trim();
+    if (text.length > 0) {
+      blocks.push(
+        MarkdownBlockSchema.parse({
+          kind: "paragraph",
+          lineStart: paragraph.lineStart,
+          lineEnd: paragraph.lineEnd,
+          text,
+          headingPath: paragraph.headingPath
+        })
+      );
+    }
+    paragraph = void 0;
+  }
+  lines.forEach((line, index) => {
+    const lineNumber = index + 1;
+    const fenceMarker = parseFenceMarker(line);
+    if (fence !== void 0) {
+      if (fenceMarker !== void 0 && fenceMarker.marker === fence.marker && fenceMarker.length >= fence.length) {
+        fence = void 0;
+      }
+      return;
+    }
+    if (fenceMarker !== void 0) {
+      flushParagraph();
+      fence = fenceMarker;
+      return;
+    }
+    const heading = parseHeading(line);
+    if (heading !== void 0) {
+      flushParagraph();
+      headingStack.splice(heading.level - 1);
+      headingStack[heading.level - 1] = heading.text;
+      const headingPath = headingStack.filter(Boolean);
+      const block = MarkdownBlockSchema.parse({
+        kind: "heading",
+        lineStart: lineNumber,
+        lineEnd: lineNumber,
+        text: heading.text,
+        headingLevel: heading.level,
+        headingPath
+      });
+      blocks.push(block);
+      headings.push(block);
+      return;
+    }
+    const listItem = parseListItem(line);
+    if (listItem !== void 0) {
+      flushParagraph();
+      blocks.push(
+        MarkdownBlockSchema.parse({
+          kind: "list-item",
+          lineStart: lineNumber,
+          lineEnd: lineNumber,
+          text: listItem,
+          headingPath: headingStack.filter(Boolean)
+        })
+      );
+      return;
+    }
+    if (line.trim().length === 0) {
+      flushParagraph();
+      return;
+    }
+    if (paragraph === void 0) {
+      paragraph = {
+        lineStart: lineNumber,
+        lineEnd: lineNumber,
+        lines: [line.trim()],
+        headingPath: headingStack.filter(Boolean)
+      };
+      return;
+    }
+    paragraph.lineEnd = lineNumber;
+    paragraph.lines.push(line.trim());
+  });
+  flushParagraph();
+  return {
+    blocks,
+    headings,
+    lineCount: lines.length
+  };
+}
+function parseHeading(line) {
+  const match = /^(#{1,6})\s+(.+?)\s*$/.exec(line);
+  if (match === null) {
+    return void 0;
+  }
+  return {
+    level: match[1].length,
+    text: stripMarkdownInline(match[2])
+  };
+}
+function parseListItem(line) {
+  const match = /^\s{0,3}(?:[-*+]|\d+[.)])\s+(.+?)\s*$/.exec(line);
+  if (match === null) {
+    return void 0;
+  }
+  return stripMarkdownInline(match[1]);
+}
+function parseFenceMarker(line) {
+  const match = /^\s{0,3}(`{3,}|~{3,})/.exec(line);
+  if (match === null) {
+    return void 0;
+  }
+  const raw = match[1];
+  return {
+    marker: raw[0] === "`" ? "`" : "~",
+    length: raw.length
+  };
+}
+function stripMarkdownInline(value) {
+  return value.replace(/`([^`]+)`/g, "$1").replace(/\*\*([^*]+)\*\*/g, "$1").replace(/\*([^*]+)\*/g, "$1").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").trim();
+}
+var MarkdownBlockKindSchema, MarkdownBlockSchema;
+var init_markdown_lines = __esm({
+  "src/brief/markdown-lines.ts"() {
+    "use strict";
+    init_zod();
+    MarkdownBlockKindSchema = external_exports.enum(["heading", "list-item", "paragraph"]);
+    MarkdownBlockSchema = external_exports.object({
+      kind: MarkdownBlockKindSchema,
+      lineStart: external_exports.number().int().positive(),
+      lineEnd: external_exports.number().int().positive(),
+      text: external_exports.string(),
+      headingLevel: external_exports.number().int().positive().max(6).optional(),
+      headingPath: external_exports.array(external_exports.string()).default([])
+    }).strict();
+  }
+});
+
+// src/brief/markdown-brief-parser.ts
+function parseMarkdownBrief(input) {
+  const locator = input.source.locator;
+  if (locator.type !== "file") {
+    throw new Error("Markdown brief parser requires a file source");
+  }
+  const parsed = parseMarkdownLines(input.content);
+  return NormalizedBriefDocumentSchema.parse({
+    sourceId: input.source.id,
+    sourceDigest: input.sourceDigest,
+    format: "markdown",
+    title: parsed.headings[0]?.text,
+    blocks: parsed.blocks.map((block, index) => ({
+      blockId: `md-${index + 1}`,
+      kind: block.kind,
+      text: block.text,
+      location: {
+        type: "file-lines",
+        path: locator.path,
+        startLine: block.lineStart,
+        endLine: block.lineEnd
+      },
+      headingPath: block.headingPath,
+      metadata: {
+        ...block.headingLevel === void 0 ? {} : { headingLevel: block.headingLevel }
+      }
+    })),
+    metadata: {
+      lineCount: parsed.lineCount
+    }
+  });
+}
+var init_markdown_brief_parser = __esm({
+  "src/brief/markdown-brief-parser.ts"() {
+    "use strict";
+    init_normalized_brief();
+    init_markdown_lines();
+  }
+});
+
+// src/brief/plaintext-brief-parser.ts
+function parsePlainTextBrief(input) {
+  const locator = input.source.locator;
+  if (locator.type !== "file") {
+    throw new Error("Plain-text brief parser requires a file source");
+  }
+  const paragraphs = parseParagraphs(input.content);
+  return NormalizedBriefDocumentSchema.parse({
+    sourceId: input.source.id,
+    sourceDigest: input.sourceDigest,
+    format: "plaintext",
+    blocks: paragraphs.map((paragraph, index) => ({
+      blockId: `txt-${index + 1}`,
+      kind: "paragraph",
+      text: paragraph.lines.join(" ").trim(),
+      location: {
+        type: "file-lines",
+        path: locator.path,
+        startLine: paragraph.lineStart,
+        endLine: paragraph.lineEnd
+      },
+      headingPath: []
+    })),
+    metadata: {
+      lineCount: input.content.split("\n").length
+    }
+  });
+}
+function parseParagraphs(content) {
+  const paragraphs = [];
+  let current;
+  content.split("\n").forEach((line, index) => {
+    const lineNumber = index + 1;
+    const trimmed = line.trim();
+    if (trimmed.length === 0) {
+      if (current !== void 0) {
+        paragraphs.push(current);
+        current = void 0;
+      }
+      return;
+    }
+    if (current === void 0) {
+      current = {
+        lineStart: lineNumber,
+        lineEnd: lineNumber,
+        lines: [trimmed]
+      };
+      return;
+    }
+    current.lineEnd = lineNumber;
+    current.lines.push(trimmed);
+  });
+  if (current !== void 0) {
+    paragraphs.push(current);
+  }
+  return paragraphs;
+}
+var init_plaintext_brief_parser = __esm({
+  "src/brief/plaintext-brief-parser.ts"() {
+    "use strict";
+    init_normalized_brief();
+  }
+});
+
+// src/brief/unsupported-brief-parser.ts
+function createUnsupportedBriefDocument(input) {
+  return NormalizedBriefDocumentSchema.parse({
+    sourceId: input.source.id,
+    sourceDigest: input.sourceDigest,
+    format: input.format,
+    blocks: [
+      {
+        blockId: "unsupported-1",
+        kind: "unsupported",
+        text: input.reason,
+        location: unsupportedLocation(input.source, input.format),
+        headingPath: [],
+        metadata: {
+          unsupported: true,
+          reason: input.reason
+        }
+      }
+    ],
+    metadata: {
+      unsupported: true,
+      reason: input.reason
+    }
+  });
+}
+function unsupportedLocation(source, format) {
+  const locator = source.locator;
+  if (locator.type === "file") {
+    if (format === "pdf") {
+      return {
+        type: "pdf-page",
+        path: locator.path,
+        page: 1
+      };
+    }
+    return {
+      type: "file-lines",
+      path: locator.path,
+      startLine: 1,
+      endLine: 1
+    };
+  }
+  if (locator.type === "ticket") {
+    return {
+      type: "ticket-field",
+      provider: locator.provider,
+      url: locator.url,
+      field: "source"
+    };
+  }
+  if (locator.type === "url") {
+    return {
+      type: "url-fragment",
+      url: locator.url,
+      fragment: "source"
+    };
+  }
+  return {
+    type: "json-pointer",
+    document: "source.json",
+    pointer: "/locator"
+  };
+}
+var init_unsupported_brief_parser = __esm({
+  "src/brief/unsupported-brief-parser.ts"() {
+    "use strict";
+    init_normalized_brief();
   }
 });
 
@@ -34420,11 +35918,11 @@ var init_brief_adapter_service = __esm({
 });
 
 // src/artifact-registry/artifact-blob-store.ts
-import { mkdir, readFile, writeFile } from "fs/promises";
-import path2 from "path";
+import { mkdir as mkdir2, readFile as readFile3, writeFile as writeFile2 } from "fs/promises";
+import path4 from "path";
 async function writeIfMissing(filePath, content) {
   try {
-    await writeFile(filePath, content, {
+    await writeFile2(filePath, content, {
       flag: "wx",
       mode: 384
     });
@@ -34452,10 +35950,10 @@ var init_artifact_blob_store = __esm({
       async writeBlob(input) {
         const digest = sha256Digest(input.content);
         const { prefix, hex: hex3 } = digestPathSegments(digest);
-        const directory = path2.join(this.rootDirectory, "sha256", prefix, hex3);
-        const contentPath = path2.join(directory, "content");
-        const metadataPath = path2.join(directory, "metadata.json");
-        await mkdir(directory, {
+        const directory = path4.join(this.rootDirectory, "sha256", prefix, hex3);
+        const contentPath = path4.join(directory, "content");
+        const metadataPath = path4.join(directory, "metadata.json");
+        await mkdir2(directory, {
           recursive: true,
           mode: 448
         });
@@ -34483,14 +35981,14 @@ var init_artifact_blob_store = __esm({
       async readMetadata(rawDigest) {
         const digest = Sha256DigestSchema.parse(rawDigest);
         const { prefix, hex: hex3 } = digestPathSegments(digest);
-        const metadataPath = path2.join(this.rootDirectory, "sha256", prefix, hex3, "metadata.json");
-        return JSON.parse(await readFile(metadataPath, "utf8"));
+        const metadataPath = path4.join(this.rootDirectory, "sha256", prefix, hex3, "metadata.json");
+        return JSON.parse(await readFile3(metadataPath, "utf8"));
       }
       async readContent(rawDigest) {
         const digest = Sha256DigestSchema.parse(rawDigest);
         const { prefix, hex: hex3 } = digestPathSegments(digest);
-        const contentPath = path2.join(this.rootDirectory, "sha256", prefix, hex3, "content");
-        return readFile(contentPath);
+        const contentPath = path4.join(this.rootDirectory, "sha256", prefix, hex3, "content");
+        return readFile3(contentPath);
       }
     };
   }
@@ -36404,335 +37902,6 @@ var init_figma_intake_service = __esm({
   }
 });
 
-// src/openapi/openapi-parser.ts
-import { parse as parseYaml } from "yaml";
-function parseOpenApiDocument(input) {
-  const text = input.content.toString("utf8");
-  const format = detectOpenApiFormat({
-    text,
-    ...input.path === void 0 ? {} : { path: input.path },
-    ...input.mediaType === void 0 ? {} : { mediaType: input.mediaType }
-  });
-  const parsed = format === "json" ? JSON.parse(text) : parseYaml(text);
-  if (!isRecord(parsed)) {
-    throw new Error("OpenAPI document must parse to an object");
-  }
-  const version2 = typeof parsed["openapi"] === "string" ? parsed["openapi"] : typeof parsed["swagger"] === "string" ? parsed["swagger"] : void 0;
-  return ParsedOpenApiDocumentSchema.parse({
-    format,
-    versionKind: detectVersionKind(parsed),
-    ...version2 === void 0 ? {} : { version: version2 },
-    document: parsed
-  });
-}
-function detectOpenApiFormat(input) {
-  const mediaType = input.mediaType?.toLowerCase();
-  const filePath = input.path?.toLowerCase();
-  if (mediaType === "application/json" || filePath?.endsWith(".json")) {
-    return "json";
-  }
-  if (mediaType === "application/yaml" || mediaType === "application/x-yaml" || filePath?.endsWith(".yaml") || filePath?.endsWith(".yml")) {
-    return "yaml";
-  }
-  const trimmed = input.text.trimStart();
-  if (trimmed.startsWith("{")) {
-    return "json";
-  }
-  return "yaml";
-}
-function detectVersionKind(document) {
-  const openapi = document["openapi"];
-  if (typeof openapi === "string") {
-    if (openapi.startsWith("3.0.")) {
-      return "openapi-3.0";
-    }
-    if (openapi.startsWith("3.1.")) {
-      return "openapi-3.1";
-    }
-    return "unknown";
-  }
-  const swagger = document["swagger"];
-  if (swagger === "2.0") {
-    return "swagger-2.0";
-  }
-  return "unknown";
-}
-function isRecord(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function asRecord(value) {
-  return isRecord(value) ? value : void 0;
-}
-var OpenApiDocumentFormatSchema, OpenApiVersionKindSchema, ParsedOpenApiDocumentSchema;
-var init_openapi_parser = __esm({
-  "src/openapi/openapi-parser.ts"() {
-    "use strict";
-    init_zod();
-    OpenApiDocumentFormatSchema = external_exports.enum(["json", "yaml"]);
-    OpenApiVersionKindSchema = external_exports.enum([
-      "openapi-3.0",
-      "openapi-3.1",
-      "swagger-2.0",
-      "unknown"
-    ]);
-    ParsedOpenApiDocumentSchema = external_exports.object({
-      format: OpenApiDocumentFormatSchema,
-      versionKind: OpenApiVersionKindSchema,
-      version: external_exports.string().optional(),
-      document: external_exports.record(external_exports.string(), external_exports.unknown())
-    }).strict();
-  }
-});
-
-// src/openapi/openapi-inventory.ts
-function buildOpenApiInventory(parsed) {
-  const document = parsed.document;
-  const operations = collectOperations(document);
-  const schemas = collectSchemas(document);
-  const securitySchemes = collectSecuritySchemes(document);
-  const refs = collectRefs(document);
-  return OpenApiInventorySchema.parse({
-    ...parsed.version === void 0 ? {} : { version: parsed.version },
-    versionKind: parsed.versionKind,
-    operationCount: operations.length,
-    schemaCount: schemas.length,
-    securitySchemeCount: securitySchemes.length,
-    refCount: refs.length,
-    operations,
-    schemas,
-    securitySchemes,
-    refs
-  });
-}
-function collectOperations(document) {
-  const paths = asRecord(document["paths"]);
-  if (paths === void 0) {
-    return [];
-  }
-  const operations = [];
-  for (const [pathName, pathItemValue] of Object.entries(paths)) {
-    const pathItem = asRecord(pathItemValue);
-    if (pathItem === void 0) {
-      continue;
-    }
-    for (const [methodName, operationValue] of Object.entries(pathItem)) {
-      const method = methodName.toLowerCase();
-      if (!HTTP_METHODS.has(method)) {
-        continue;
-      }
-      const operation = asRecord(operationValue);
-      if (operation === void 0) {
-        continue;
-      }
-      const pointer = `/paths/${escapeJsonPointer(pathName)}/${method}`;
-      const operationId = asString(operation["operationId"]);
-      const summary = asString(operation["summary"]);
-      operations.push(
-        OpenApiOperationInventoryItemSchema.parse({
-          method,
-          path: pathName,
-          pointer,
-          ...operationId === void 0 ? {} : { operationId },
-          ...summary === void 0 ? {} : { summary },
-          tags: asStringArray(operation["tags"]),
-          requestContentTypes: collectRequestContentTypes(operation),
-          responseStatuses: collectResponseStatuses(operation),
-          responseContentTypes: collectResponseContentTypes(operation),
-          securitySchemeNames: collectOperationSecuritySchemeNames(document, operation)
-        })
-      );
-    }
-  }
-  return operations;
-}
-function collectSchemas(document) {
-  const schemas = asRecord(asRecord(document["components"])?.["schemas"]);
-  if (schemas === void 0) {
-    return [];
-  }
-  return Object.entries(schemas).map(([name, schemaValue]) => {
-    const schema = asRecord(schemaValue) ?? {};
-    const type = asString(schema["type"]);
-    return OpenApiSchemaInventoryItemSchema.parse({
-      name,
-      pointer: `/components/schemas/${escapeJsonPointer(name)}`,
-      ...type === void 0 ? {} : { type },
-      hasRef: hasRef(schema)
-    });
-  });
-}
-function collectSecuritySchemes(document) {
-  const schemes = asRecord(asRecord(document["components"])?.["securitySchemes"]);
-  if (schemes === void 0) {
-    return [];
-  }
-  return Object.entries(schemes).map(([name, schemeValue]) => {
-    const scheme = asRecord(schemeValue) ?? {};
-    const type = asString(scheme["type"]);
-    const schemeName = asString(scheme["scheme"]);
-    const bearerFormat = asString(scheme["bearerFormat"]);
-    const inValue = asString(scheme["in"]);
-    const nameField = asString(scheme["name"]);
-    return OpenApiSecuritySchemeInventoryItemSchema.parse({
-      name,
-      pointer: `/components/securitySchemes/${escapeJsonPointer(name)}`,
-      ...type === void 0 ? {} : { type },
-      ...schemeName === void 0 ? {} : { scheme: schemeName },
-      ...bearerFormat === void 0 ? {} : { bearerFormat },
-      ...inValue === void 0 ? {} : { in: inValue },
-      ...nameField === void 0 ? {} : { nameField }
-    });
-  });
-}
-function collectRefs(document) {
-  const refs = [];
-  walk(document, "", (pointer, value) => {
-    if (!isRecord(value)) {
-      return;
-    }
-    const ref = value["$ref"];
-    if (typeof ref === "string") {
-      refs.push(
-        OpenApiRefInventoryItemSchema.parse({
-          pointer: pointer.length === 0 ? "/" : pointer,
-          ref
-        })
-      );
-    }
-  });
-  return refs;
-}
-function collectRequestContentTypes(operation) {
-  const requestBody = asRecord(operation["requestBody"]);
-  const content = asRecord(requestBody?.["content"]);
-  return content === void 0 ? [] : Object.keys(content).sort();
-}
-function collectResponseStatuses(operation) {
-  const responses = asRecord(operation["responses"]);
-  return responses === void 0 ? [] : Object.keys(responses).sort();
-}
-function collectResponseContentTypes(operation) {
-  const responses = asRecord(operation["responses"]);
-  if (responses === void 0) {
-    return [];
-  }
-  const contentTypes = /* @__PURE__ */ new Set();
-  for (const responseValue of Object.values(responses)) {
-    const response = asRecord(responseValue);
-    const content = asRecord(response?.["content"]);
-    if (content === void 0) {
-      continue;
-    }
-    Object.keys(content).forEach((contentType) => contentTypes.add(contentType));
-  }
-  return [...contentTypes].sort();
-}
-function collectOperationSecuritySchemeNames(document, operation) {
-  const operationSecurity = Array.isArray(operation["security"]) ? operation["security"] : Array.isArray(document["security"]) ? document["security"] : [];
-  const names = /* @__PURE__ */ new Set();
-  for (const requirement of operationSecurity) {
-    if (!isRecord(requirement)) {
-      continue;
-    }
-    Object.keys(requirement).forEach((name) => names.add(name));
-  }
-  return [...names].sort();
-}
-function hasRef(value) {
-  let found = false;
-  walk(value, "", (_pointer, current) => {
-    if (isRecord(current) && typeof current["$ref"] === "string") {
-      found = true;
-    }
-  });
-  return found;
-}
-function walk(value, pointer, visitor) {
-  visitor(pointer, value);
-  if (Array.isArray(value)) {
-    value.forEach((item, index) => {
-      walk(item, `${pointer}/${index}`, visitor);
-    });
-    return;
-  }
-  if (isRecord(value)) {
-    for (const [key, child] of Object.entries(value)) {
-      walk(child, `${pointer}/${escapeJsonPointer(key)}`, visitor);
-    }
-  }
-}
-function asString(value) {
-  return typeof value === "string" && value.trim().length > 0 ? value : void 0;
-}
-function asStringArray(value) {
-  return Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
-}
-function escapeJsonPointer(value) {
-  return value.replace(/~/g, "~0").replace(/\//g, "~1");
-}
-var HttpMethodSchema, OpenApiOperationInventoryItemSchema, OpenApiSchemaInventoryItemSchema, OpenApiSecuritySchemeInventoryItemSchema, OpenApiRefInventoryItemSchema, OpenApiInventorySchema, HTTP_METHODS;
-var init_openapi_inventory = __esm({
-  "src/openapi/openapi-inventory.ts"() {
-    "use strict";
-    init_zod();
-    init_openapi_parser();
-    HttpMethodSchema = external_exports.enum([
-      "get",
-      "put",
-      "post",
-      "delete",
-      "options",
-      "head",
-      "patch",
-      "trace"
-    ]);
-    OpenApiOperationInventoryItemSchema = external_exports.object({
-      method: HttpMethodSchema,
-      path: external_exports.string().min(1),
-      pointer: external_exports.string().min(1),
-      operationId: external_exports.string().min(1).optional(),
-      summary: external_exports.string().optional(),
-      tags: external_exports.array(external_exports.string()).default([]),
-      requestContentTypes: external_exports.array(external_exports.string()).default([]),
-      responseStatuses: external_exports.array(external_exports.string()).default([]),
-      responseContentTypes: external_exports.array(external_exports.string()).default([]),
-      securitySchemeNames: external_exports.array(external_exports.string()).default([])
-    }).strict();
-    OpenApiSchemaInventoryItemSchema = external_exports.object({
-      name: external_exports.string().min(1),
-      pointer: external_exports.string().min(1),
-      type: external_exports.string().optional(),
-      hasRef: external_exports.boolean()
-    }).strict();
-    OpenApiSecuritySchemeInventoryItemSchema = external_exports.object({
-      name: external_exports.string().min(1),
-      pointer: external_exports.string().min(1),
-      type: external_exports.string().optional(),
-      scheme: external_exports.string().optional(),
-      bearerFormat: external_exports.string().optional(),
-      in: external_exports.string().optional(),
-      nameField: external_exports.string().optional()
-    }).strict();
-    OpenApiRefInventoryItemSchema = external_exports.object({
-      pointer: external_exports.string().min(1),
-      ref: external_exports.string().min(1)
-    }).strict();
-    OpenApiInventorySchema = external_exports.object({
-      version: external_exports.string().optional(),
-      versionKind: external_exports.string(),
-      operationCount: external_exports.number().int().nonnegative(),
-      schemaCount: external_exports.number().int().nonnegative(),
-      securitySchemeCount: external_exports.number().int().nonnegative(),
-      refCount: external_exports.number().int().nonnegative(),
-      operations: external_exports.array(OpenApiOperationInventoryItemSchema),
-      schemas: external_exports.array(OpenApiSchemaInventoryItemSchema),
-      securitySchemes: external_exports.array(OpenApiSecuritySchemeInventoryItemSchema),
-      refs: external_exports.array(OpenApiRefInventoryItemSchema)
-    }).strict();
-    HTTP_METHODS = /* @__PURE__ */ new Set(["get", "put", "post", "delete", "options", "head", "patch", "trace"]);
-  }
-});
-
 // src/openapi/openapi-analysis.ts
 var OpenApiAnalysisResultSchema;
 var init_openapi_analysis = __esm({
@@ -37266,7 +38435,7 @@ var init_openapi_intake_service = __esm({
 });
 
 // src/openspec/openspec-paths.ts
-import path3 from "path";
+import path5 from "path";
 function toOpenSpecChangeName(input) {
   if (/[\\/]/.test(input) || input.split(/[\s_-]+/).includes("..")) {
     throw new Error("OpenSpec change name must not contain path separators or traversal segments");
@@ -37275,31 +38444,31 @@ function toOpenSpecChangeName(input) {
   return OpenSpecChangeNameSchema.parse(normalized);
 }
 function resolveOpenSpecChangePaths(input) {
-  const openspecRoot = path3.join(input.projectRoot, "openspec");
-  const changesRoot = path3.join(openspecRoot, "changes");
-  const changeRoot = path3.join(changesRoot, input.changeName);
-  const specsRoot = path3.join(changeRoot, "specs");
-  const artifactsRoot = path3.join(changeRoot, "artifacts");
+  const openspecRoot = path5.join(input.projectRoot, "openspec");
+  const changesRoot = path5.join(openspecRoot, "changes");
+  const changeRoot = path5.join(changesRoot, input.changeName);
+  const specsRoot = path5.join(changeRoot, "specs");
+  const artifactsRoot = path5.join(changeRoot, "artifacts");
   return {
     openspecRoot,
     changesRoot,
     changeRoot,
-    proposalPath: path3.join(changeRoot, "proposal.md"),
-    designPath: path3.join(changeRoot, "design.md"),
-    tasksPath: path3.join(changeRoot, "tasks.md"),
+    proposalPath: path5.join(changeRoot, "proposal.md"),
+    designPath: path5.join(changeRoot, "design.md"),
+    tasksPath: path5.join(changeRoot, "tasks.md"),
     specsRoot,
     artifactsRoot,
-    evidenceSummaryPath: path3.join(artifactsRoot, "evidence-summary.md"),
-    traceabilityMatrixPath: path3.join(artifactsRoot, "traceability-matrix.md"),
-    gapSummaryPath: path3.join(artifactsRoot, "gap-summary.md"),
-    manifestPath: path3.join(artifactsRoot, "change-manifest.json")
+    evidenceSummaryPath: path5.join(artifactsRoot, "evidence-summary.md"),
+    traceabilityMatrixPath: path5.join(artifactsRoot, "traceability-matrix.md"),
+    gapSummaryPath: path5.join(artifactsRoot, "gap-summary.md"),
+    manifestPath: path5.join(artifactsRoot, "change-manifest.json")
   };
 }
 function specFilePath(input) {
-  return path3.join(input.specsRoot, input.area, "spec.md");
+  return path5.join(input.specsRoot, input.area, "spec.md");
 }
 function toRepoRelativePath(projectRoot, absolutePath) {
-  return path3.relative(projectRoot, absolutePath).split(path3.sep).join("/");
+  return path5.relative(projectRoot, absolutePath).split(path5.sep).join("/");
 }
 var OpenSpecChangeNameSchema, OpenSpecSpecAreaSchema;
 var init_openspec_paths = __esm({
@@ -37715,7 +38884,7 @@ function renderGapSummary(model, gapById) {
         if (gap2 === void 0) {
           return `| ${gapId} | - | - | - | Missing gap object |`;
         }
-        return `| ${gap2.id} | ${gap2.category} | ${gap2.severity} | ${gap2.status} | ${escapeTableCell(gap2.title)} |`;
+        return `| ${gap2.id} | ${gap2.category} | ${gap2.severity} | ${gap2.status} | ${escapeTableCell2(gap2.title)} |`;
       }),
       ""
     ]
@@ -37750,7 +38919,7 @@ function renderEvidenceCell(ids, evidenceById) {
   }
   return ids.map((id) => {
     const evidence = evidenceById.get(id);
-    return evidence === void 0 ? id : `${id}<br>${escapeTableCell(evidence.summary)}`;
+    return evidence === void 0 ? id : `${id}<br>${escapeTableCell2(evidence.summary)}`;
   }).join("<br>");
 }
 function toShallStatement(summary) {
@@ -37764,7 +38933,7 @@ function markdown(lines) {
   return `${lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd()}
 `;
 }
-function escapeTableCell(value) {
+function escapeTableCell2(value) {
   return value.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
 }
 var init_openspec_renderer = __esm({
@@ -37774,8 +38943,8 @@ var init_openspec_renderer = __esm({
 });
 
 // src/openspec/openspec-writer.ts
-import { mkdir as mkdir2, readFile as readFile2, writeFile as writeFile2 } from "fs/promises";
-import path4 from "path";
+import { mkdir as mkdir3, readFile as readFile4, writeFile as writeFile3 } from "fs/promises";
+import path6 from "path";
 async function writeOpenSpecChange(input) {
   const paths = resolveOpenSpecChangePaths({
     projectRoot: input.projectRoot,
@@ -37865,7 +39034,7 @@ async function writeOpenSpecChange(input) {
   };
 }
 async function writeFileWithConflictPolicy(input) {
-  await mkdir2(path4.dirname(input.absolutePath), {
+  await mkdir3(path6.dirname(input.absolutePath), {
     recursive: true,
     mode: 448
   });
@@ -37878,7 +39047,7 @@ async function writeFileWithConflictPolicy(input) {
       throw new Error(`OpenSpec file already exists with different content: ${input.absolutePath}`);
     }
   }
-  await writeFile2(input.absolutePath, input.content, {
+  await writeFile3(input.absolutePath, input.content, {
     encoding: "utf8",
     mode: 384
   });
@@ -37886,7 +39055,7 @@ async function writeFileWithConflictPolicy(input) {
 }
 async function readExisting(absolutePath) {
   try {
-    return await readFile2(absolutePath, "utf8");
+    return await readFile4(absolutePath, "utf8");
   } catch (error51) {
     if (error51 instanceof Error && "code" in error51 && error51.code === "ENOENT") {
       return void 0;
@@ -37895,8 +39064,8 @@ async function readExisting(absolutePath) {
   }
 }
 function assertInsideProjectRoot(projectRoot, absolutePath) {
-  const relative = path4.relative(projectRoot, absolutePath);
-  if (relative.startsWith("..") || path4.isAbsolute(relative)) {
+  const relative = path6.relative(projectRoot, absolutePath);
+  if (relative.startsWith("..") || path6.isAbsolute(relative)) {
     throw new Error(`Refusing to write outside project root: ${absolutePath}`);
   }
 }
@@ -38086,7 +39255,7 @@ var init_policy = __esm({
 });
 
 // src/security/command-policy.ts
-import path5 from "path";
+import path7 from "path";
 function classifyCommand(rawCommand) {
   const command = CommandInvocationSchema.parse(rawCommand);
   const normalizedCommand = normalizeExecutable(command.command);
@@ -38280,7 +39449,7 @@ function classifyPackageManager(manager, args, intent) {
   );
 }
 function normalizeExecutable(command) {
-  return path5.basename(command).toLowerCase();
+  return path7.basename(command).toLowerCase();
 }
 function findShellCharacters(parts) {
   const found = /* @__PURE__ */ new Set();
@@ -38375,14 +39544,14 @@ var init_command_policy = __esm({
 
 // src/security/path-policy.ts
 import { realpath, stat } from "fs/promises";
-import path6 from "path";
+import path8 from "path";
 async function validateWorkspacePath(rawInput) {
   const input = ValidateWorkspacePathInputSchema.parse(rawInput);
   if (hasNullByte(input.candidatePath) || hasNullByte(input.workspaceRoot)) {
     return deniedPath(input, "NULL_BYTE", "Paths must not contain null bytes.");
   }
-  const workspaceRootRealPath = await realpath(path6.resolve(input.workspaceRoot));
-  const candidateAbsolutePath = path6.resolve(workspaceRootRealPath, input.candidatePath);
+  const workspaceRootRealPath = await realpath(path8.resolve(input.workspaceRoot));
+  const candidateAbsolutePath = path8.resolve(workspaceRootRealPath, input.candidatePath);
   if (!isInsideOrEqual(workspaceRootRealPath, candidateAbsolutePath)) {
     return {
       workspaceRoot: input.workspaceRoot,
@@ -38462,7 +39631,7 @@ async function validateWorkspacePath(rawInput) {
   }
 }
 async function validateCreatePath(input, workspaceRootRealPath, candidateAbsolutePath) {
-  const parentPath = path6.dirname(candidateAbsolutePath);
+  const parentPath = path8.dirname(candidateAbsolutePath);
   try {
     const parentRealPath = await realpath(parentPath);
     if (!isInsideOrEqual(workspaceRootRealPath, parentRealPath)) {
@@ -38511,9 +39680,9 @@ async function validateCreatePath(input, workspaceRootRealPath, candidateAbsolut
 function deniedPath(input, code, message) {
   return {
     workspaceRoot: input.workspaceRoot,
-    workspaceRootRealPath: path6.resolve(input.workspaceRoot),
+    workspaceRootRealPath: path8.resolve(input.workspaceRoot),
     candidatePath: input.candidatePath,
-    candidateAbsolutePath: path6.resolve(input.workspaceRoot, input.candidatePath),
+    candidateAbsolutePath: path8.resolve(input.workspaceRoot, input.candidatePath),
     mode: input.mode,
     decision: deny(code, message, "critical", ["path"])
   };
@@ -38522,8 +39691,8 @@ function hasNullByte(value) {
   return value.includes("\0");
 }
 function isInsideOrEqual(root, candidate) {
-  const relative = path6.relative(root, candidate);
-  return relative === "" || !relative.startsWith("..") && !path6.isAbsolute(relative);
+  const relative = path8.relative(root, candidate);
+  return relative === "" || !relative.startsWith("..") && !path8.isAbsolute(relative);
 }
 var PathAccessModeSchema, ValidateWorkspacePathInputSchema, ValidatedWorkspacePathSchema;
 var init_path_policy = __esm({
@@ -38850,7 +40019,7 @@ async function detectPackageManager(probe, findings) {
       presentLockfiles.push(lockfile);
     }
   }
-  const packageJson = await readPackageJson(probe, "package.json");
+  const packageJson = await readPackageJson2(probe, "package.json");
   const packageManagerField = typeof packageJson?.packageManager === "string" ? packageJson.packageManager : void 0;
   const detectedByField = detectFromPackageManagerField(packageManagerField);
   const detectedByLockfile = detectFromLockfiles(presentLockfiles);
@@ -38881,7 +40050,7 @@ async function detectPackageManager(probe, findings) {
     ...runCommandPrefix(name) === void 0 ? {} : { runCommandPrefix: runCommandPrefix(name) }
   });
 }
-async function readPackageJson(probe, relativePath) {
+async function readPackageJson2(probe, relativePath) {
   const value = await probe.readJson(relativePath);
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return void 0;
@@ -38950,8 +40119,8 @@ var init_package_manager_detector = __esm({
 
 // src/profile/probe.ts
 import { execFile } from "child_process";
-import { access, readdir, readFile as readFile3, realpath as realpath2, stat as stat2 } from "fs/promises";
-import path7 from "path";
+import { access, readdir, readFile as readFile5, realpath as realpath2, stat as stat2 } from "fs/promises";
+import path9 from "path";
 import { promisify } from "util";
 async function createProjectProbe(projectRoot) {
   const realRoot = await realpath2(projectRoot);
@@ -38960,7 +40129,7 @@ async function createProjectProbe(projectRoot) {
     throw new Error(`Project root is not a directory: ${realRoot}`);
   }
   async function resolveInside(relativePath) {
-    const candidate = path7.resolve(realRoot, relativePath);
+    const candidate = path9.resolve(realRoot, relativePath);
     const realCandidate = await realpathOrParent(candidate);
     if (!isInside(realRoot, realCandidate)) {
       throw new Error(`Path escapes project root: ${relativePath}`);
@@ -38986,7 +40155,7 @@ async function createProjectProbe(projectRoot) {
         if (!metadata2.isFile() || metadata2.size > maxBytes) {
           return void 0;
         }
-        return await readFile3(absolute, "utf8");
+        return await readFile5(absolute, "utf8");
       } catch {
         return void 0;
       }
@@ -39034,26 +40203,26 @@ async function createProjectProbe(projectRoot) {
       }
     },
     toRelative(absolutePath) {
-      return normalizeRelative(path7.relative(realRoot, absolutePath));
+      return normalizeRelative(path9.relative(realRoot, absolutePath));
     },
     resolveInside
   };
   return probe;
 }
 function normalizeRelative(value) {
-  return value.split(path7.sep).join("/");
+  return value.split(path9.sep).join("/");
 }
 function isInside(root, candidate) {
-  const relative = path7.relative(root, candidate);
-  return relative === "" || !relative.startsWith("..") && !path7.isAbsolute(relative);
+  const relative = path9.relative(root, candidate);
+  return relative === "" || !relative.startsWith("..") && !path9.isAbsolute(relative);
 }
 async function realpathOrParent(candidate) {
   let current = candidate;
-  while (current !== path7.dirname(current)) {
+  while (current !== path9.dirname(current)) {
     try {
       return await realpath2(current);
     } catch {
-      current = path7.dirname(current);
+      current = path9.dirname(current);
     }
   }
   try {
@@ -39072,7 +40241,7 @@ var init_probe = __esm({
 
 // src/profile/workspace-detector.ts
 async function detectWorkspace(probe, findings) {
-  const rootPackageJson = await readPackageJson2(probe, "package.json");
+  const rootPackageJson = await readPackageJson3(probe, "package.json");
   const patterns = /* @__PURE__ */ new Set();
   const workspaceField = rootPackageJson?.workspaces;
   if (Array.isArray(workspaceField)) {
@@ -39109,7 +40278,7 @@ async function detectWorkspace(probe, findings) {
     packages
   });
 }
-async function readPackageJson2(probe, relativePath) {
+async function readPackageJson3(probe, relativePath) {
   const value = await probe.readJson(relativePath);
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return void 0;
@@ -39206,7 +40375,7 @@ async function profileProject(input) {
   });
 }
 async function detectFramework(probe) {
-  const rootPackage = await readPackageJson3(probe, "package.json");
+  const rootPackage = await readPackageJson4(probe, "package.json");
   const deps = dependencyNames(rootPackage);
   const evidence = [];
   const hasNext = deps.has("next") || await probe.exists("next.config.js") || await probe.exists("next.config.mjs");
@@ -39293,7 +40462,7 @@ async function detectDesignSystem(probe) {
   });
 }
 async function detectApiGeneration(probe) {
-  const rootPackage = await readPackageJson3(probe, "package.json");
+  const rootPackage = await readPackageJson4(probe, "package.json");
   const scripts = typeof rootPackage?.scripts === "object" && rootPackage.scripts !== null && !Array.isArray(rootPackage.scripts) ? rootPackage.scripts : {};
   const generatorScripts = Object.entries(scripts).filter(([name, value]) => {
     const text = `${name} ${String(value)}`.toLowerCase();
@@ -39333,7 +40502,7 @@ async function detectApiGeneration(probe) {
     evidence: [...generatorScripts, ...generatedClientRoots, ...openapiSourceCandidates]
   });
 }
-async function readPackageJson3(probe, relativePath) {
+async function readPackageJson4(probe, relativePath) {
   const value = await probe.readJson(relativePath);
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return void 0;
@@ -39370,8 +40539,8 @@ var init_project_profiler = __esm({
 });
 
 // src/profile/profile-store.ts
-import { mkdir as mkdir3, readdir as readdir2, readFile as readFile4, writeFile as writeFile3 } from "fs/promises";
-import path8 from "path";
+import { mkdir as mkdir4, readdir as readdir2, readFile as readFile6, writeFile as writeFile4 } from "fs/promises";
+import path10 from "path";
 var JsonProfileStore;
 var init_profile_store = __esm({
   "src/profile/profile-store.ts"() {
@@ -39383,12 +40552,12 @@ var init_profile_store = __esm({
       }
       directory;
       async saveManifest(manifest) {
-        await mkdir3(this.directory, {
+        await mkdir4(this.directory, {
           recursive: true,
           mode: 448
         });
-        await writeFile3(
-          path8.join(this.directory, `${manifest.runId}.intake.json`),
+        await writeFile4(
+          path10.join(this.directory, `${manifest.runId}.intake.json`),
           `${JSON.stringify(IntakeManifestSchema.parse(manifest), null, 2)}
 `,
           {
@@ -39398,16 +40567,16 @@ var init_profile_store = __esm({
         );
       }
       async getManifest(runId) {
-        const text = await readFile4(path8.join(this.directory, `${runId}.intake.json`), "utf8");
+        const text = await readFile6(path10.join(this.directory, `${runId}.intake.json`), "utf8");
         return IntakeManifestSchema.parse(JSON.parse(text));
       }
       async saveProfile(profile) {
-        await mkdir3(this.directory, {
+        await mkdir4(this.directory, {
           recursive: true,
           mode: 448
         });
-        await writeFile3(
-          path8.join(this.directory, `${profile.runId}.profile.json`),
+        await writeFile4(
+          path10.join(this.directory, `${profile.runId}.profile.json`),
           `${JSON.stringify(ProjectProfileSchema.parse(profile), null, 2)}
 `,
           {
@@ -39417,11 +40586,11 @@ var init_profile_store = __esm({
         );
       }
       async getProfile(runId) {
-        const text = await readFile4(path8.join(this.directory, `${runId}.profile.json`), "utf8");
+        const text = await readFile6(path10.join(this.directory, `${runId}.profile.json`), "utf8");
         return ProjectProfileSchema.parse(JSON.parse(text));
       }
       async listProfiles() {
-        await mkdir3(this.directory, {
+        await mkdir4(this.directory, {
           recursive: true,
           mode: 448
         });
@@ -39429,7 +40598,7 @@ var init_profile_store = __esm({
         const profileFiles = files.filter((file2) => file2.endsWith(".profile.json"));
         const profiles = await Promise.all(
           profileFiles.map(async (file2) => {
-            const text = await readFile4(path8.join(this.directory, file2), "utf8");
+            const text = await readFile6(path10.join(this.directory, file2), "utf8");
             return ProjectProfileSchema.parse(JSON.parse(text));
           })
         );
@@ -39508,12 +40677,12 @@ var init_profile_service = __esm({
 // src/application/run-service.ts
 import { randomUUID as randomUUID3 } from "crypto";
 import { realpath as realpath3, stat as stat3 } from "fs/promises";
-import path9 from "path";
+import path11 from "path";
 function createRunId() {
   return RunIdSchema.parse(`run_${randomUUID3().replaceAll("-", "")}`);
 }
 async function canonicalDirectory(rawPath) {
-  const absolute = path9.resolve(rawPath);
+  const absolute = path11.resolve(rawPath);
   const canonical = await realpath3(absolute);
   const metadata = await stat3(canonical);
   if (!metadata.isDirectory()) {
@@ -39666,13 +40835,13 @@ var init_canonical_content = __esm({
 
 // src/source-registry/path-scope.ts
 import { realpath as realpath4, stat as stat4 } from "fs/promises";
-import path10 from "path";
+import path12 from "path";
 async function resolveFileInsideRoot(input) {
   const projectRoot = await realpath4(input.projectRoot);
-  const candidate = path10.resolve(projectRoot, input.filePath);
+  const candidate = path12.resolve(projectRoot, input.filePath);
   const absolutePath = await realpath4(candidate);
-  const relative = path10.relative(projectRoot, absolutePath);
-  if (relative === "" || relative.startsWith("..") || path10.isAbsolute(relative)) {
+  const relative = path12.relative(projectRoot, absolutePath);
+  if (relative === "" || relative.startsWith("..") || path12.isAbsolute(relative)) {
     throw new Error(`File is outside project root: ${input.filePath}`);
   }
   const metadata = await stat4(absolutePath);
@@ -39686,7 +40855,7 @@ async function resolveFileInsideRoot(input) {
   };
 }
 function toPosixPath(value) {
-  return value.split(path10.sep).join("/");
+  return value.split(path12.sep).join("/");
 }
 var init_path_scope = __esm({
   "src/source-registry/path-scope.ts"() {
@@ -39696,11 +40865,11 @@ var init_path_scope = __esm({
 });
 
 // src/source-registry/snapshot-store.ts
-import { mkdir as mkdir4, readFile as readFile5, writeFile as writeFile4 } from "fs/promises";
-import path11 from "path";
+import { mkdir as mkdir5, readFile as readFile7, writeFile as writeFile5 } from "fs/promises";
+import path13 from "path";
 async function writeIfMissing2(filePath, content) {
   try {
-    await writeFile4(filePath, content, {
+    await writeFile5(filePath, content, {
       flag: "wx",
       mode: 384
     });
@@ -39740,10 +40909,10 @@ var init_snapshot_store = __esm({
       async writeSnapshot(input) {
         const digest = input.canonical.canonicalDigest;
         const { prefix, hex: hex3 } = digestPathSegments(digest);
-        const directory = path11.join(this.rootDirectory, "sha256", prefix, hex3);
-        const contentPath = path11.join(directory, "content");
-        const metadataPath = path11.join(directory, "metadata.json");
-        await mkdir4(directory, {
+        const directory = path13.join(this.rootDirectory, "sha256", prefix, hex3);
+        const contentPath = path13.join(directory, "content");
+        const metadataPath = path13.join(directory, "metadata.json");
+        await mkdir5(directory, {
           recursive: true,
           mode: 448
         });
@@ -39773,14 +40942,14 @@ var init_snapshot_store = __esm({
       async readMetadata(rawDigest) {
         const digest = Sha256DigestSchema.parse(rawDigest);
         const { prefix, hex: hex3 } = digestPathSegments(digest);
-        const metadataPath = path11.join(this.rootDirectory, "sha256", prefix, hex3, "metadata.json");
-        return SourceSnapshotMetadataSchema.parse(JSON.parse(await readFile5(metadataPath, "utf8")));
+        const metadataPath = path13.join(this.rootDirectory, "sha256", prefix, hex3, "metadata.json");
+        return SourceSnapshotMetadataSchema.parse(JSON.parse(await readFile7(metadataPath, "utf8")));
       }
       async readContent(rawDigest) {
         const digest = Sha256DigestSchema.parse(rawDigest);
         const { prefix, hex: hex3 } = digestPathSegments(digest);
-        const contentPath = path11.join(this.rootDirectory, "sha256", prefix, hex3, "content");
-        return readFile5(contentPath);
+        const contentPath = path13.join(this.rootDirectory, "sha256", prefix, hex3, "content");
+        return readFile7(contentPath);
       }
     };
   }
@@ -39798,7 +40967,7 @@ var init_source_registry = __esm({
 });
 
 // src/application/source-registry-service.ts
-import { readFile as readFile6 } from "fs/promises";
+import { readFile as readFile8 } from "fs/promises";
 function parseSourceRegistrationResult(result) {
   SourceRegistrationResultSchema.parse(result);
   return result;
@@ -39850,7 +41019,7 @@ var init_source_registry_service = __esm({
           projectRoot: run.projectRoot,
           filePath: input.path
         });
-        const rawContent = await readFile6(scopedPath.absolutePath);
+        const rawContent = await readFile8(scopedPath.absolutePath);
         const canonical = canonicalizeFileContent({
           path: scopedPath.relativePath,
           ...input.mediaType === void 0 ? {} : { mediaType: input.mediaType },
@@ -40753,14 +41922,14 @@ function renderFeature(feature) {
   lines.push(`Feature: ${feature.name}`);
   if (feature.description !== void 0) {
     lines.push("");
-    lines.push(indent(feature.description, 2));
+    lines.push(indent3(feature.description, 2));
   }
   for (const rule of feature.rules) {
     lines.push("");
     lines.push(`  Rule: ${rule.name}`);
     if (rule.description !== void 0) {
       lines.push("");
-      lines.push(indent(rule.description, 4));
+      lines.push(indent3(rule.description, 4));
     }
     for (const scenario of rule.scenarios) {
       lines.push("");
@@ -40818,16 +41987,16 @@ function renderMatrixRow(row) {
     joinIds(row.figmaEvidenceIds),
     joinIds(row.openApiEvidenceIds),
     joinIds(row.gapIds),
-    escapeTableCell2(row.reason)
+    escapeTableCell3(row.reason)
   ].join(" | ");
 }
 function joinIds(ids) {
   return ids.length === 0 ? "-" : ids.join("<br>");
 }
-function escapeTableCell2(value) {
+function escapeTableCell3(value) {
   return value.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
 }
-function indent(value, spaces) {
+function indent3(value, spaces) {
   const prefix = " ".repeat(spaces);
   return value.split("\n").map((line) => `${prefix}${line}`).join("\n");
 }
@@ -40838,35 +42007,35 @@ var init_gherkin_renderer = __esm({
 });
 
 // src/gherkin/gherkin-writer.ts
-import { mkdir as mkdir5, readFile as readFile7, writeFile as writeFile5 } from "fs/promises";
-import path12 from "path";
+import { mkdir as mkdir6, readFile as readFile9, writeFile as writeFile6 } from "fs/promises";
+import path14 from "path";
 async function writeGherkinArtifacts(input) {
   const changePaths = resolveOpenSpecChangePaths({
     projectRoot: input.projectRoot,
     changeName: input.changeName
   });
-  const gherkinRoot = path12.join(changePaths.artifactsRoot, "gherkin");
+  const gherkinRoot = path14.join(changePaths.artifactsRoot, "gherkin");
   const files = [
     ...input.rendered.featureFiles.map((file2) => ({
-      absolutePath: path12.join(gherkinRoot, file2.fileName),
+      absolutePath: path14.join(gherkinRoot, file2.fileName),
       content: file2.content,
       mediaType: "text/x-gherkin",
       kind: "gherkin"
     })),
     {
-      absolutePath: path12.join(changePaths.artifactsRoot, "gherkin-index.json"),
+      absolutePath: path14.join(changePaths.artifactsRoot, "gherkin-index.json"),
       content: input.rendered.gherkinIndexJson,
       mediaType: "application/json",
       kind: "gherkin"
     },
     {
-      absolutePath: path12.join(changePaths.artifactsRoot, "test-matrix.json"),
+      absolutePath: path14.join(changePaths.artifactsRoot, "test-matrix.json"),
       content: input.rendered.testMatrixJson,
       mediaType: "application/json",
       kind: "test-matrix"
     },
     {
-      absolutePath: path12.join(changePaths.artifactsRoot, "test-matrix.md"),
+      absolutePath: path14.join(changePaths.artifactsRoot, "test-matrix.md"),
       content: input.rendered.testMatrixMd,
       mediaType: "text/markdown",
       kind: "test-matrix"
@@ -40918,7 +42087,7 @@ async function writeGherkinArtifacts(input) {
   };
 }
 async function writeWithConflictPolicy(input) {
-  await mkdir5(path12.dirname(input.absolutePath), {
+  await mkdir6(path14.dirname(input.absolutePath), {
     recursive: true,
     mode: 448
   });
@@ -40931,7 +42100,7 @@ async function writeWithConflictPolicy(input) {
       throw new Error(`Generated Gherkin artifact already exists: ${input.absolutePath}`);
     }
   }
-  await writeFile5(input.absolutePath, input.content, {
+  await writeFile6(input.absolutePath, input.content, {
     encoding: "utf8",
     mode: 384
   });
@@ -40939,7 +42108,7 @@ async function writeWithConflictPolicy(input) {
 }
 async function readExisting2(absolutePath) {
   try {
-    return await readFile7(absolutePath, "utf8");
+    return await readFile9(absolutePath, "utf8");
   } catch (error51) {
     if (error51 instanceof Error && "code" in error51 && error51.code === "ENOENT") {
       return void 0;
@@ -40948,8 +42117,8 @@ async function readExisting2(absolutePath) {
   }
 }
 function assertInsideProjectRoot2(projectRoot, absolutePath) {
-  const relative = path12.relative(projectRoot, absolutePath);
-  if (relative.startsWith("..") || path12.isAbsolute(relative)) {
+  const relative = path14.relative(projectRoot, absolutePath);
+  if (relative.startsWith("..") || path14.isAbsolute(relative)) {
     throw new Error(`Refusing to write outside project root: ${absolutePath}`);
   }
 }
@@ -40964,7 +42133,7 @@ var init_gherkin_writer = __esm({
 });
 
 // src/application/gherkin-test-matrix-service.ts
-import { readFile as readFile8 } from "fs/promises";
+import { readFile as readFile10 } from "fs/promises";
 var GenerateGherkinTestMatrixInputSchema, GenerateGherkinTestMatrixResultSchema, GherkinTestMatrixService;
 var init_gherkin_test_matrix_service = __esm({
   "src/application/gherkin-test-matrix-service.ts"() {
@@ -41059,7 +42228,7 @@ var init_gherkin_test_matrix_service = __esm({
           projectRoot,
           changeName: OpenSpecChangeNameSchema.parse(changeName)
         });
-        const raw = await readFile8(paths.manifestPath, "utf8");
+        const raw = await readFile10(paths.manifestPath, "utf8");
         return OpenSpecChangeModelSchema.parse(JSON.parse(raw));
       }
     };
@@ -41543,6 +42712,27 @@ function createKernelServer(servicesProvider) {
       };
     })
   );
+  server.registerTool(
+    "generate_api_pipeline",
+    {
+      title: "Generate API pipeline",
+      description: "Generate API types, Zod schemas, wrappers, mocks, contract tests, source guards, and pipeline reports from OpenAPI intake evidence.",
+      inputSchema: GenerateApiPipelineInputSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { apiPipelineService } = await servicesProvider();
+      const structuredContent = await apiPipelineService.generate(input);
+      return {
+        text: structuredContent.duplicate ? `API pipeline for ${structuredContent.sourceKey} already exists.` : `Generated API pipeline for ${structuredContent.sourceKey} with ${structuredContent.generatedFiles.length} files.`,
+        structuredContent
+      };
+    })
+  );
   registerFigmaTextRecorder(server, servicesProvider, {
     toolName: "record_figma_metadata",
     title: "Record Figma metadata",
@@ -41908,6 +43098,7 @@ var init_create_server = __esm({
     init_package();
     init_mcp();
     init_zod();
+    init_api_pipeline_service();
     init_brief_adapter_service();
     init_evidence_graph_service();
     init_figma_capability_service();
@@ -42003,7 +43194,8 @@ var init_create_server = __esm({
       "analyze_figma_design_inventory",
       "get_figma_design_inventory",
       "generate_openspec_change",
-      "generate_gherkin_test_matrix"
+      "generate_gherkin_test_matrix",
+      "generate_api_pipeline"
     ];
   }
 });
@@ -42047,7 +43239,7 @@ __export(sqlite_run_store_exports, {
   SqliteRunStore: () => SqliteRunStore
 });
 import { mkdirSync } from "fs";
-import path13 from "path";
+import path15 from "path";
 import { createRequire } from "module";
 function loadSqliteModule() {
   return require2("node:sqlite");
@@ -42089,7 +43281,7 @@ var init_sqlite_run_store = __esm({
     SqliteRunStore = class {
       database;
       constructor(databasePath) {
-        mkdirSync(path13.dirname(databasePath), {
+        mkdirSync(path15.dirname(databasePath), {
           recursive: true,
           mode: 448
         });
@@ -42325,7 +43517,7 @@ __export(run_service_provider_exports, {
   createLazyServicesProvider: () => createLazyServicesProvider
 });
 import os from "os";
-import path14 from "path";
+import path16 from "path";
 function createLazyServicesProvider() {
   let services;
   return async () => {
@@ -42334,9 +43526,9 @@ function createLazyServicesProvider() {
     }
     const { SqliteRunStore: SqliteRunStore2 } = await Promise.resolve().then(() => (init_sqlite_run_store(), sqlite_run_store_exports));
     const dataDirectory = resolveDataDirectory();
-    const store = new SqliteRunStore2(path14.join(dataDirectory, "runs.sqlite3"));
-    const snapshotStore = new SourceSnapshotStore(path14.join(dataDirectory, "source-snapshots"));
-    const artifactStore = new ArtifactBlobStore(path14.join(dataDirectory, "artifacts"));
+    const store = new SqliteRunStore2(path16.join(dataDirectory, "runs.sqlite3"));
+    const snapshotStore = new SourceSnapshotStore(path16.join(dataDirectory, "source-snapshots"));
+    const artifactStore = new ArtifactBlobStore(path16.join(dataDirectory, "artifacts"));
     services = {
       runService: new RunService(store, {
         pluginVersion: package_default.version
@@ -42344,7 +43536,7 @@ function createLazyServicesProvider() {
       stageService: new StageService(store),
       policyService: new PolicyService(),
       profileService: new ProjectProfileService(
-        new JsonProfileStore(path14.join(dataDirectory, "profiles"))
+        new JsonProfileStore(path16.join(dataDirectory, "profiles"))
       ),
       sourceRegistryService: new SourceRegistryService(store, snapshotStore),
       briefAdapterService: new BriefAdapterService(store, snapshotStore),
@@ -42354,19 +43546,21 @@ function createLazyServicesProvider() {
       figmaIntakeService: new FigmaIntakeService(store, artifactStore),
       openApiIntakeService: new OpenApiIntakeService(store, snapshotStore, artifactStore),
       openSpecChangeService: new OpenSpecChangeService(store, artifactStore),
-      gherkinTestMatrixService: new GherkinTestMatrixService(store)
+      gherkinTestMatrixService: new GherkinTestMatrixService(store),
+      apiPipelineService: new ApiPipelineService(store, artifactStore)
     };
     return services;
   };
 }
 function resolveDataDirectory() {
-  return process.env.SPEC_TO_PR_DATA_DIR ?? path14.join(os.tmpdir(), "spec-to-pr-plugin-data");
+  return process.env.SPEC_TO_PR_DATA_DIR ?? path16.join(os.tmpdir(), "spec-to-pr-plugin-data");
 }
 var init_run_service_provider = __esm({
   "src/mcp/run-service-provider.ts"() {
     "use strict";
     init_package();
     init_artifact_blob_store();
+    init_api_pipeline_service();
     init_brief_adapter_service();
     init_evidence_graph_service();
     init_figma_capability_service();
