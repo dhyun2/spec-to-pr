@@ -116,6 +116,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "redact_text",
       "register_figma_source",
       "register_file_source",
+      "run_quality_gates",
       "skip_stage",
       "start_stage",
       "validate_path",
