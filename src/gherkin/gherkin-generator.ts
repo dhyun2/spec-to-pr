@@ -5,16 +5,9 @@ import type {
   GherkinRule,
   GherkinScenario,
 } from "./gherkin-model.js";
-import {
-  inferAutomationStatus,
-  inferTestLayer,
-  TestMatrixSchema,
-} from "./test-matrix.js";
+import { inferAutomationStatus, inferTestLayer, TestMatrixSchema } from "./test-matrix.js";
 import type { TestAutomationStatus, TestLayer, TestMatrix, TestMatrixRow } from "./test-matrix.js";
-import type {
-  OpenSpecChangeModel,
-  OpenSpecRequirementModel,
-} from "../openspec/openspec-model.js";
+import type { OpenSpecChangeModel, OpenSpecRequirementModel } from "../openspec/openspec-model.js";
 import type { Gap } from "../runtime/gap.js";
 
 export type GeneratedGherkinAndMatrix = {
@@ -98,9 +91,8 @@ export function generateGherkinAndTestMatrix(input: {
     generatedAt: input.model.generatedAt,
     requirementCount: input.model.requirements.length,
     scenarioCount: matrixRows.length,
-    automatedCandidateCount: matrixRows.filter(
-      (row) => row.automation === "automated-candidate",
-    ).length,
+    automatedCandidateCount: matrixRows.filter((row) => row.automation === "automated-candidate")
+      .length,
     blockedCount: matrixRows.filter((row) => row.automation === "blocked").length,
     reviewNeededCount: matrixRows.filter((row) => row.automation === "review-needed").length,
     rows: matrixRows,

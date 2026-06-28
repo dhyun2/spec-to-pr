@@ -63,8 +63,9 @@ export async function writeGherkinArtifacts(input: {
     },
   ];
 
-  const writtenFiles: Array<WrittenGherkinFile & { content: string; kind: "gherkin" | "test-matrix"; mediaType: string }> =
-    [];
+  const writtenFiles: Array<
+    WrittenGherkinFile & { content: string; kind: "gherkin" | "test-matrix"; mediaType: string }
+  > = [];
 
   for (const file of files) {
     assertInsideProjectRoot(input.projectRoot, file.absolutePath);

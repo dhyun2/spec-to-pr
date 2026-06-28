@@ -74,7 +74,10 @@ export function inferTestLayer(input: {
     return "manual";
   }
 
-  if (input.hasOpenApi && /api|request|response|endpoint|schema|operation/i.test(input.requirementText)) {
+  if (
+    input.hasOpenApi &&
+    /api|request|response|endpoint|schema|operation/i.test(input.requirementText)
+  ) {
     return "contract";
   }
 
@@ -90,7 +93,9 @@ export function inferTestLayer(input: {
     return "contract";
   }
 
-  if (/format|mapper|policy|status|state|validation|계산|정책|상태|검증/.test(input.requirementText)) {
+  if (
+    /format|mapper|policy|status|state|validation|계산|정책|상태|검증/.test(input.requirementText)
+  ) {
     return "unit";
   }
 

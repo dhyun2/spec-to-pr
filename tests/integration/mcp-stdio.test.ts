@@ -59,6 +59,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "create_intake_manifest",
       "create_run",
       "fail_stage",
+      "generate_gherkin_test_matrix",
       "generate_openspec_change",
       "get_figma_design_inventory",
       "get_figma_provider_policy",
@@ -460,6 +461,19 @@ components:
     });
 
     expect(generatedOpenSpec.structuredContent).toMatchObject({
+      duplicate: false,
+      changeName: "deliver-reservation-management",
+    });
+
+    const generatedGherkin = await client.callTool({
+      name: "generate_gherkin_test_matrix",
+      arguments: {
+        runId,
+        changeName: "deliver-reservation-management",
+      },
+    });
+
+    expect(generatedGherkin.structuredContent).toMatchObject({
       duplicate: false,
       changeName: "deliver-reservation-management",
     });
