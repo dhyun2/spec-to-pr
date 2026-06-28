@@ -410,7 +410,9 @@ export class VisualRegressionService {
       metadata: {
         adapter: "visual-regression-v1",
         reportKind: "visual-review-result",
-        ...(input.reportArtifactId === undefined ? {} : { reportArtifactId: input.reportArtifactId }),
+        ...(input.reportArtifactId === undefined
+          ? {}
+          : { reportArtifactId: input.reportArtifactId }),
       },
     });
     const nextRun = RunManifestSchema.parse({
@@ -482,7 +484,8 @@ function requireArtifact(artifacts: ArtifactRef[], artifactId: string): Artifact
 function latestVisualReportArtifact(artifacts: ArtifactRef[]): ArtifactRef {
   const artifact = artifacts
     .filter(
-      (item) => item.kind === "visual-report" && item.metadata["reportKind"] === "visual-report-json",
+      (item) =>
+        item.kind === "visual-report" && item.metadata["reportKind"] === "visual-report-json",
     )
     .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))[0];
 

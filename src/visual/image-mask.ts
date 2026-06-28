@@ -1,10 +1,6 @@
 import type { VisualMaskRegion } from "./visual-model.js";
 
-export function isMaskedPixel(input: {
-  x: number;
-  y: number;
-  masks: VisualMaskRegion[];
-}): boolean {
+export function isMaskedPixel(input: { x: number; y: number; masks: VisualMaskRegion[] }): boolean {
   return input.masks.some(
     (mask) =>
       input.x >= mask.x &&
