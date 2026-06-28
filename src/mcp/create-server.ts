@@ -63,6 +63,14 @@ import {
   InspectProjectInputSchema,
 } from "../application/profile-service.js";
 import {
+  GetReviewCouncilContextInputSchema,
+  GetReviewCouncilContextResultSchema,
+  PrepareReviewCouncilInputSchema,
+  PrepareReviewCouncilResultSchema,
+  RecordReviewCouncilResultInputSchema,
+  RecordReviewCouncilResultSchema,
+} from "../application/review-council-service.js";
+import {
   CreateRunInputSchema,
   GetRunInputSchema,
   ListRunsInputSchema,
@@ -204,6 +212,9 @@ const TOOL_NAMES = [
   "prepare_design_ui_agent",
   "get_design_ui_agent_context",
   "record_design_ui_agent_result",
+  "prepare_review_council",
+  "get_review_council_context",
+  "record_review_council_result",
   "prepare_spec_bdd_agent",
   "record_spec_bdd_agent_result",
   "get_spec_bdd_agent_context",
@@ -1137,6 +1148,80 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
 
         return {
           text: `Recorded Design/UI agent result ${structuredContent.result.id}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "prepare_review_council",
+    {
+      title: "Prepare Review Council",
+      description: "Create a Review Council context pack and deterministic precheck findings.",
+      inputSchema: PrepareReviewCouncilInputSchema.shape,
+      outputSchema: PrepareReviewCouncilResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { reviewCouncilService } = await servicesProvider();
+        const structuredContent = await reviewCouncilService.prepare(input);
+
+        return {
+          text: `Prepared Review Council context with ${structuredContent.precheckFindingCount} precheck finding(s).`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "get_review_council_context",
+    {
+      title: "Get Review Council context",
+      description: "Return the prepared Review Council context pack.",
+      inputSchema: GetReviewCouncilContextInputSchema.shape,
+      outputSchema: GetReviewCouncilContextResultSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { reviewCouncilService } = await servicesProvider();
+        const structuredContent = await reviewCouncilService.getContext(input);
+
+        return {
+          text: `Loaded Review Council context for run ${structuredContent.context.runId}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "record_review_council_result",
+    {
+      title: "Record Review Council Result",
+      description: "Validate and persist a structured Review Council result.",
+      inputSchema: RecordReviewCouncilResultInputSchema.shape,
+      outputSchema: RecordReviewCouncilResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { reviewCouncilService } = await servicesProvider();
+        const structuredContent = await reviewCouncilService.record(input);
+
+        return {
+          text: `Recorded Review Council result with ${structuredContent.findingCount} finding(s) and ${structuredContent.newGapCount} new gap(s).`,
           structuredContent,
         };
       }),

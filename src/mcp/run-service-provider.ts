@@ -18,6 +18,7 @@ import { OpenApiIntakeService } from "../application/openapi-intake-service.js";
 import { OpenSpecChangeService } from "../application/openspec-change-service.js";
 import { PolicyService } from "../application/policy-service.js";
 import { ProjectProfileService } from "../application/profile-service.js";
+import { ReviewCouncilService } from "../application/review-council-service.js";
 import { RunService } from "../application/run-service.js";
 import { SourceRegistryService } from "../application/source-registry-service.js";
 import { SpecBddAgentLaneService } from "../application/spec-bdd-agent-lane-service.js";
@@ -45,6 +46,7 @@ export type Services = {
   apiContractAgentService: ApiContractAgentService;
   designContractService: DesignContractService;
   designUiAgentLaneService: DesignUiAgentLaneService;
+  reviewCouncilService: ReviewCouncilService;
   agentRuntimeService: AgentRuntimeService;
   specBddAgentLaneService: SpecBddAgentLaneService;
 };
@@ -88,6 +90,7 @@ export function createLazyServicesProvider(): ServicesProvider {
       apiContractAgentService: new ApiContractAgentService(store, dataDirectory),
       designContractService: new DesignContractService(store, artifactStore),
       designUiAgentLaneService: new DesignUiAgentLaneService(store, dataDirectory),
+      reviewCouncilService: new ReviewCouncilService(store, artifactStore, dataDirectory),
       agentRuntimeService: new AgentRuntimeService(store),
       specBddAgentLaneService: new SpecBddAgentLaneService(store),
     };
