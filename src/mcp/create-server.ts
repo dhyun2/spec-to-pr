@@ -14,6 +14,14 @@ import {
   ListAgentWorktreesResultSchema,
   PrepareAgentRuntimeInputSchema,
 } from "../application/agent-runtime-service.js";
+import {
+  GetApiContractAgentContextInputSchema,
+  GetApiContractAgentContextResultSchema,
+  PrepareApiContractAgentInputSchema,
+  PrepareApiContractAgentResultSchema,
+  RecordApiContractAgentResultInputSchema,
+  RecordApiContractAgentResultSchema,
+} from "../application/api-contract-agent-service.js";
 import { GenerateApiPipelineInputSchema } from "../application/api-pipeline-service.js";
 import { AnalyzeBriefSourceInputSchema } from "../application/brief-adapter-service.js";
 import {
@@ -180,6 +188,9 @@ const TOOL_NAMES = [
   "generate_openspec_change",
   "generate_gherkin_test_matrix",
   "generate_api_pipeline",
+  "prepare_api_contract_agent",
+  "get_api_contract_agent_context",
+  "record_api_contract_agent_result",
   "generate_figma_design_contract",
   "get_figma_design_contract_summary",
   "prepare_spec_bdd_agent",
@@ -917,6 +928,81 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
           text: structuredContent.duplicate
             ? `API pipeline for ${structuredContent.sourceKey} already exists.`
             : `Generated API pipeline for ${structuredContent.sourceKey} with ${structuredContent.generatedFiles.length} files.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "prepare_api_contract_agent",
+    {
+      title: "Prepare API Contract Agent",
+      description:
+        "Prepare the API Contract Agent context pack and record it as a Run artifact.",
+      inputSchema: PrepareApiContractAgentInputSchema.shape,
+      outputSchema: PrepareApiContractAgentResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { apiContractAgentService } = await servicesProvider();
+        const structuredContent = await apiContractAgentService.prepare(input);
+
+        return {
+          text: `Prepared API Contract Agent context at ${structuredContent.context.contextPackPath}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "get_api_contract_agent_context",
+    {
+      title: "Get API Contract Agent context",
+      description: "Load a prepared API Contract Agent context pack.",
+      inputSchema: GetApiContractAgentContextInputSchema.shape,
+      outputSchema: GetApiContractAgentContextResultSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { apiContractAgentService } = await servicesProvider();
+        const structuredContent = await apiContractAgentService.getContext(input);
+
+        return {
+          text: `Loaded API Contract Agent context for run ${structuredContent.runId}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "record_api_contract_agent_result",
+    {
+      title: "Record API Contract Agent result",
+      description: "Validate and record an API Contract Agent implementation result.",
+      inputSchema: RecordApiContractAgentResultInputSchema.shape,
+      outputSchema: RecordApiContractAgentResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { apiContractAgentService } = await servicesProvider();
+        const structuredContent = await apiContractAgentService.recordResult(input);
+
+        return {
+          text: `Recorded API Contract Agent result ${structuredContent.resultId}.`,
           structuredContent,
         };
       }),

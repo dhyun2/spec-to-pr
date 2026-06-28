@@ -4,6 +4,7 @@ import path from "node:path";
 import packageJson from "../../package.json" with { type: "json" };
 import { ArtifactBlobStore } from "../artifact-registry/artifact-blob-store.js";
 import { AgentRuntimeService } from "../application/agent-runtime-service.js";
+import { ApiContractAgentService } from "../application/api-contract-agent-service.js";
 import { ApiPipelineService } from "../application/api-pipeline-service.js";
 import { BriefAdapterService } from "../application/brief-adapter-service.js";
 import { DesignContractService } from "../application/design-contract-service.js";
@@ -40,6 +41,7 @@ export type Services = {
   openSpecChangeService: OpenSpecChangeService;
   gherkinTestMatrixService: GherkinTestMatrixService;
   apiPipelineService: ApiPipelineService;
+  apiContractAgentService: ApiContractAgentService;
   designContractService: DesignContractService;
   agentRuntimeService: AgentRuntimeService;
   specBddAgentLaneService: SpecBddAgentLaneService;
@@ -81,6 +83,7 @@ export function createLazyServicesProvider(): ServicesProvider {
       openSpecChangeService: new OpenSpecChangeService(store, artifactStore),
       gherkinTestMatrixService: new GherkinTestMatrixService(store),
       apiPipelineService: new ApiPipelineService(store, artifactStore),
+      apiContractAgentService: new ApiContractAgentService(store, dataDirectory),
       designContractService: new DesignContractService(store, artifactStore),
       agentRuntimeService: new AgentRuntimeService(store),
       specBddAgentLaneService: new SpecBddAgentLaneService(store),
