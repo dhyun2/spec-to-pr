@@ -75,6 +75,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "generate_gherkin_test_matrix",
       "generate_openspec_change",
       "generate_source_guard_tests",
+      "get_accessibility_report",
       "get_agent_context_pack",
       "get_api_contract_agent_context",
       "get_design_ui_agent_context",
@@ -98,6 +99,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "list_agent_worktrees",
       "list_project_profiles",
       "list_runs",
+      "plan_accessibility_gate",
       "plan_visual_regression",
       "policy_info",
       "prepare_agent_runtime",
@@ -106,6 +108,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "prepare_integration",
       "prepare_review_council",
       "prepare_spec_bdd_agent",
+      "record_accessibility_review",
       "record_api_contract_agent_result",
       "record_design_ui_agent_result",
       "record_figma_code_connect_map",
@@ -121,6 +124,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "redact_text",
       "register_figma_source",
       "register_file_source",
+      "run_accessibility_gate",
       "run_quality_gates",
       "skip_stage",
       "start_stage",
@@ -217,6 +221,85 @@ describe("spec-to-pr MCP stdio server", () => {
       id: runId,
       status: "created",
       revision: 0,
+    });
+
+    const accessibilityTargets = [
+      {
+        id: "reservation-list",
+        name: "Reservation list",
+        url: "http://localhost:4173/reservations",
+        viewport: {
+          width: 390,
+          height: 844,
+        },
+      },
+    ];
+
+    const plannedAccessibility = await client.callTool({
+      name: "plan_accessibility_gate",
+      arguments: {
+        runId,
+        targets: accessibilityTargets,
+      },
+    });
+
+    expect(plannedAccessibility.structuredContent).toMatchObject({
+      targetCount: 1,
+    });
+
+    const accessibility = await client.callTool({
+      name: "run_accessibility_gate",
+      arguments: {
+        runId,
+        targets: accessibilityTargets,
+        rawAxeResults: {
+          "reservation-list": {
+            violations: [],
+          },
+        },
+      },
+    });
+
+    expect(accessibility.structuredContent).toMatchObject({
+      targetCount: 1,
+      decision: "review-needed",
+    });
+
+    const accessibilityReportArtifactId = (
+      accessibility.structuredContent as {
+        artifactId: string;
+      }
+    ).artifactId;
+
+    const accessibilityReport = await client.callTool({
+      name: "get_accessibility_report",
+      arguments: {
+        runId,
+        artifactId: accessibilityReportArtifactId,
+      },
+    });
+
+    expect(accessibilityReport.structuredContent).toMatchObject({
+      report: {
+        runId,
+        decision: "review-needed",
+      },
+    });
+
+    const accessibilityReview = await client.callTool({
+      name: "record_accessibility_review",
+      arguments: {
+        runId,
+        reportArtifactId: accessibilityReportArtifactId,
+        reviewer: "accessibility-reviewer",
+        summary: "Manual screen reader review is still required.",
+        falsePositiveNotes: [],
+        manualReviewNotes: ["Screen reader flow was not manually reviewed."],
+      },
+    });
+
+    expect(accessibilityReview.structuredContent).toMatchObject({
+      artifactId: expect.any(String),
     });
 
     await mkdir(path.join(projectDirectory, "docs"), {
