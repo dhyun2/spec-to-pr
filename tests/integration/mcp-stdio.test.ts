@@ -75,6 +75,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "generate_gherkin_test_matrix",
       "generate_observability_config",
       "generate_openspec_change",
+      "generate_pr_report",
       "generate_source_guard_tests",
       "get_accessibility_report",
       "get_agent_context_pack",
@@ -86,6 +87,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "get_integration_plan",
       "get_observability_report",
       "get_performance_report",
+      "get_pr_report",
       "get_project_profile",
       "get_resume_plan",
       "get_review_council_context",
@@ -125,6 +127,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "record_integration_repair",
       "record_observability_review",
       "record_performance_review",
+      "record_pr_report_review",
       "record_review_council_result",
       "record_spec_bdd_agent_result",
       "record_visual_review_result",
@@ -504,6 +507,54 @@ describe("spec-to-pr MCP stdio server", () => {
     });
 
     expect(observabilityReview.structuredContent).toMatchObject({
+      reviewArtifactId: expect.any(String),
+    });
+
+    const generatedPrReport = await client.callTool({
+      name: "generate_pr_report",
+      arguments: {
+        runId,
+      },
+    });
+
+    expect(generatedPrReport.structuredContent).toMatchObject({
+      markdownArtifactId: expect.any(String),
+      viewModelArtifactId: expect.any(String),
+      decision: expect.any(String),
+    });
+
+    const prReportArtifactId = (
+      generatedPrReport.structuredContent as {
+        markdownArtifactId: string;
+      }
+    ).markdownArtifactId;
+
+    const prReport = await client.callTool({
+      name: "get_pr_report",
+      arguments: {
+        runId,
+        artifactId: prReportArtifactId,
+      },
+    });
+
+    expect(prReport.structuredContent).toMatchObject({
+      artifactId: prReportArtifactId,
+      markdown: expect.stringContaining("# Summary"),
+    });
+
+    const prReportReview = await client.callTool({
+      name: "record_pr_report_review",
+      arguments: {
+        runId,
+        reportArtifactId: prReportArtifactId,
+        review: {
+          status: "passed",
+          findings: [],
+        },
+      },
+    });
+
+    expect(prReportReview.structuredContent).toMatchObject({
       reviewArtifactId: expect.any(String),
     });
 
