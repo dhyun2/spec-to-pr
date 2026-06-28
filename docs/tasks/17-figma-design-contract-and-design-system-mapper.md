@@ -64,3 +64,34 @@ The UI Agent needs a contract that says:
 - UI implementation rules are generated.
 - MCP tool can generate design contract.
 - Skill explains how to run the workflow.
+
+## Verification
+
+Run:
+
+```bash
+pnpm format:check
+pnpm typecheck
+pnpm schemas:build
+pnpm build
+pnpm test
+pnpm audit
+```
+
+Expected:
+
+- design-system scanner tests pass
+- design contract mapper tests pass
+- design contract service tests pass
+- MCP stdio test can call `generate_figma_design_contract`
+- generated files are written under `openspec/changes/<change>/artifacts/design-contract`
+
+## Known limitations
+
+- Component scanning is heuristic.
+- Code Connect mapping is trusted when provided but not revalidated here.
+- Token mapping is conservative.
+- No UI code is generated.
+- No design token source code is modified.
+- No visual regression is performed.
+- Missing mappings remain open design gaps.
