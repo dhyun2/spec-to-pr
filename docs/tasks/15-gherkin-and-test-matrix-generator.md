@@ -62,3 +62,35 @@ The plugin needs to connect each requirement to:
 - test-matrix.json and test-matrix.md are generated.
 - Gherkin artifacts are recorded in Run.
 - MCP tool works through stdio integration tests.
+
+## Verification
+
+Run:
+
+```bash
+pnpm format:check
+pnpm typecheck
+pnpm schemas:build
+pnpm build
+pnpm test
+pnpm audit
+```
+
+Expected:
+
+- Gherkin model tests pass.
+- Test matrix policy tests pass.
+- Generator tests pass.
+- Renderer tests pass.
+- Writer tests pass.
+- GherkinTestMatrixService tests pass.
+- MCP stdio integration can call `generate_gherkin_test_matrix`.
+
+## Known limitations
+
+- Generated feature files are not executable by themselves.
+- No step definitions are generated.
+- No Cucumber runner is installed.
+- No Playwright/Vitest test code is created.
+- Blocked requirements are represented in the matrix but not emitted as executable scenarios.
+- Scenario wording is conservative and should be refined by later Spec/BDD agent.
