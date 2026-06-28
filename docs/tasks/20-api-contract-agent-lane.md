@@ -54,3 +54,50 @@ The plugin needs an API-focused implementation agent that can use OpenAPI eviden
 - Agent result validation rejects passed result without commitSha.
 - Agent result validation rejects failed checks in passed result.
 - MCP tools work through stdio integration tests.
+
+## Implemented Components
+
+- `agents/api-contract.md`
+- `skills/run-api-contract/SKILL.md`
+- `src/api-agent/api-contract-agent-contracts.ts`
+- `src/api-agent/api-contract-context-builder.ts`
+- `src/api-agent/api-contract-result-validator.ts`
+- `src/application/api-contract-agent-service.ts`
+
+## MCP Tools
+
+- `prepare_api_contract_agent`
+- `get_api_contract_agent_context`
+- `record_api_contract_agent_result`
+
+## Verification
+
+Run:
+
+```bash
+pnpm format:check
+pnpm typecheck
+pnpm schemas:build
+pnpm build
+pnpm test
+pnpm audit
+```
+
+Expected:
+
+- API Contract Agent context builder tests pass
+- API Contract Agent result validator tests pass
+- ApiContractAgentService integration tests pass
+- MCP stdio integration can call:
+  - `prepare_api_contract_agent`
+  - `get_api_contract_agent_context`
+  - `record_api_contract_agent_result`
+
+## Known Limitations
+
+- This task does not merge the API agent worktree.
+- This task does not run the API agent automatically outside Claude Code.
+- Live API calls are not performed.
+- Review Council does not run yet.
+- Integration and repair happen later.
+- API checks are recorded by the agent but full quality gates run later.

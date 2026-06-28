@@ -47,3 +47,25 @@ Tradeoffs:
 - The agent may be blocked when OpenAPI evidence is incomplete.
 - Generated wrappers may be conservative.
 - More review artifacts are produced before implementation.
+
+## Implementation Notes
+
+The first API Contract Agent lane implementation exposes three MCP tools:
+
+- `prepare_api_contract_agent`
+- `get_api_contract_agent_context`
+- `record_api_contract_agent_result`
+
+The context builder writes a scoped context pack containing API evidence, API gaps, API artifacts,
+ownership policy, and instructions.
+
+The result validator requires an implementation AgentResult for `agent: api-contract`, rejects file
+changes outside allowed API globs, rejects forbidden UI paths, and relies on runtime AgentResult
+contracts for commit and check consistency.
+
+## Deferred Decisions
+
+- The service does not directly invoke the subagent.
+- Worktree merge and integration are deferred.
+- Live API checks and full quality gates are deferred.
+- Review Council validation remains a later lane.
