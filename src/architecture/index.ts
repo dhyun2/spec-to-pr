@@ -4,3 +4,5 @@ export * from "./import-parser.js";
 export * from "./architecture-report.js";
 export * from "./fsd-boundary-rules.js";
 export * from "./source-guard-rules.js";
+export * from "./architecture-analyzer.js";
+export * from "./source-guard-writer.js";
