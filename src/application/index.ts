@@ -29,3 +29,4 @@ export * from "./integration-service.js";
 export * from "./architecture-guard-service.js";
 export * from "./quality-gate-service.js";
 export * from "./visual-regression-service.js";
+export * from "./performance-gate-service.js";
