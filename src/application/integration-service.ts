@@ -257,7 +257,8 @@ export class IntegrationService {
     }
 
     const status = conflictReports.length > 0 ? "conflicted" : "passed";
-    const headSha = status === "passed" ? await currentHead(plan.integrationWorktreePath, this.git) : undefined;
+    const headSha =
+      status === "passed" ? await currentHead(plan.integrationWorktreePath, this.git) : undefined;
     const integrationResult = IntegrationResultSchema.parse({
       runId: run.id,
       status,
@@ -448,7 +449,9 @@ export class IntegrationService {
       return plan.baseCommit;
     }
 
-    return GitObjectIdSchema.parse(run.baseCommit ?? (await currentHead(run.projectRoot, this.git)));
+    return GitObjectIdSchema.parse(
+      run.baseCommit ?? (await currentHead(run.projectRoot, this.git)),
+    );
   }
 
   private async planForResult(
@@ -541,7 +544,9 @@ function assertReviewCouncilAllowsIntegration(run: Awaited<ReturnType<RunStore["
   }
 
   if (reviewResult.status !== "passed") {
-    throw new Error(`Review Council result must be passed before integration: ${reviewResult.status}`);
+    throw new Error(
+      `Review Council result must be passed before integration: ${reviewResult.status}`,
+    );
   }
 
   const openBlockerGap = run.gaps.find(
@@ -611,8 +616,14 @@ async function writeIntegrationContextPack(input: {
   });
   await Promise.all([
     writeJsonFile(path.join(contextDirectory, "integration-plan.json"), input.plan),
-    writeJsonFile(path.join(contextDirectory, "review-council-result.json"), input.reviewCouncilResult),
-    writeJsonFile(path.join(contextDirectory, "approved-agent-results.json"), input.approvedAgentResults),
+    writeJsonFile(
+      path.join(contextDirectory, "review-council-result.json"),
+      input.reviewCouncilResult,
+    ),
+    writeJsonFile(
+      path.join(contextDirectory, "approved-agent-results.json"),
+      input.approvedAgentResults,
+    ),
     writeJsonFile(path.join(contextDirectory, "repair-policy.json"), input.repairPolicy),
     writeJsonFile(path.join(contextDirectory, "allowed-files.json"), {
       changedFiles: unique(input.plan.candidates.flatMap((candidate) => candidate.changedFiles)),

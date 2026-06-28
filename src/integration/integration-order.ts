@@ -1,8 +1,5 @@
 import type { AgentResult } from "../runtime/agent-result.js";
-import {
-  IntegrationCandidateSchema,
-  type IntegrationCandidate,
-} from "./integration-contracts.js";
+import { IntegrationCandidateSchema, type IntegrationCandidate } from "./integration-contracts.js";
 
 const AGENT_ORDER = new Map<string, number>([
   ["spec-bdd", 0],

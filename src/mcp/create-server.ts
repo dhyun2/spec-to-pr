@@ -1247,7 +1247,8 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
     "prepare_integration",
     {
       title: "Prepare integration",
-      description: "Create an integration worktree and integration plan from approved AgentResults.",
+      description:
+        "Create an integration worktree and integration plan from approved AgentResults.",
       inputSchema: PrepareIntegrationInputSchema.shape,
       outputSchema: PrepareIntegrationResultSchema.shape,
       annotations: {

@@ -1,11 +1,6 @@
 import { z } from "zod";
 
-import {
-  AgentResultIdSchema,
-  ArtifactIdSchema,
-  GapIdSchema,
-  RunIdSchema,
-} from "../runtime/ids.js";
+import { AgentResultIdSchema, ArtifactIdSchema, GapIdSchema, RunIdSchema } from "../runtime/ids.js";
 import { GitObjectIdSchema, IsoDateTimeSchema } from "../runtime/scalars.js";
 
 export const IntegrationStrategySchema = z.enum(["cherry-pick", "merge"]);

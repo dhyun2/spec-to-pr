@@ -1,10 +1,7 @@
 import { z } from "zod";
 
 import { RunIdSchema } from "../runtime/ids.js";
-import {
-  IntegrationConflictReportSchema,
-  RepairAttemptSchema,
-} from "./integration-contracts.js";
+import { IntegrationConflictReportSchema, RepairAttemptSchema } from "./integration-contracts.js";
 
 export const RepairHistorySchema = z
   .object({

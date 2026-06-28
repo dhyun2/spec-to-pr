@@ -50,9 +50,6 @@ describe("integration order", () => {
       ],
     });
 
-    expect(candidates.map((candidate) => candidate.agent)).toEqual([
-      "api-contract",
-      "design-ui",
-    ]);
+    expect(candidates.map((candidate) => candidate.agent)).toEqual(["api-contract", "design-ui"]);
   });
 });
