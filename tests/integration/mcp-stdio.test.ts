@@ -68,8 +68,14 @@ describe("spec-to-pr MCP stdio server", () => {
       "list_project_profiles",
       "list_runs",
       "policy_info",
+      "record_figma_code_connect_map",
+      "record_figma_design_context",
       "record_figma_mcp_capabilities",
+      "record_figma_metadata",
+      "record_figma_screenshot",
+      "record_figma_variable_defs",
       "redact_text",
+      "register_figma_source",
       "register_file_source",
       "skip_stage",
       "start_stage",
@@ -266,6 +272,42 @@ describe("spec-to-pr MCP stdio server", () => {
 
     expect(figmaPolicy.structuredContent).toMatchObject({
       metadataProviderId: "figma-local",
+    });
+
+    const figmaSource = await client.callTool({
+      name: "register_figma_source",
+      arguments: {
+        runId,
+        url: "https://www.figma.com/design/abc123/Product?node-id=238-941",
+      },
+    });
+
+    expect(figmaSource.structuredContent).toMatchObject({
+      duplicate: false,
+      source: {
+        kind: "figma",
+        locator: {
+          type: "figma",
+          fileKey: "abc123",
+          nodeId: "238:941",
+        },
+      },
+    });
+
+    const figmaMetadata = await client.callTool({
+      name: "record_figma_metadata",
+      arguments: {
+        runId,
+        sourceId: (figmaSource.structuredContent as { source: { id: string } }).source.id,
+        providerId: "figma-local",
+        content: '<node id="238:941" name="Product" />',
+      },
+    });
+
+    expect(figmaMetadata.structuredContent).toMatchObject({
+      duplicate: false,
+      kind: "metadata",
+      sourceId: (figmaSource.structuredContent as { source: { id: string } }).source.id,
     });
 
     const intake = await client.callTool({
