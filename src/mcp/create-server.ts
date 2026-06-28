@@ -2,6 +2,18 @@ import packageJson from "../../package.json" with { type: "json" };
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
+import { AgentRuntimePreparationResultSchema } from "../agent-runtime/agent-runtime-report.js";
+import {
+  CleanupAgentWorktreeInputSchema,
+  CleanupAgentWorktreeResultSchema,
+  CreateAgentWorktreeInputSchema,
+  GetAgentContextPackInputSchema,
+  GetAgentContextPackResultSchema,
+  ListAgentDescriptorsOutputSchema,
+  ListAgentWorktreesInputSchema,
+  ListAgentWorktreesResultSchema,
+  PrepareAgentRuntimeInputSchema,
+} from "../application/agent-runtime-service.js";
 import { GenerateApiPipelineInputSchema } from "../application/api-pipeline-service.js";
 import { AnalyzeBriefSourceInputSchema } from "../application/brief-adapter-service.js";
 import {
@@ -131,6 +143,12 @@ const TOOL_NAMES = [
   "validate_path",
   "classify_command",
   "redact_text",
+  "list_agent_descriptors",
+  "prepare_agent_runtime",
+  "create_agent_worktree",
+  "get_agent_context_pack",
+  "list_agent_worktrees",
+  "cleanup_agent_worktree",
   "create_intake_manifest",
   "inspect_project",
   "get_project_profile",
@@ -324,6 +342,155 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
 
         return {
           text: `Redacted ${structuredContent.redactionCount} secret-like value(s).`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "list_agent_descriptors",
+    {
+      title: "List agent descriptors",
+      description: "List implementation agent roles available for isolated runtime preparation.",
+      outputSchema: ListAgentDescriptorsOutputSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async () =>
+      handleTool(async () => {
+        const { agentRuntimeService } = await servicesProvider();
+        const structuredContent = agentRuntimeService.listAgentDescriptors();
+
+        return {
+          text: `Loaded ${structuredContent.descriptors.length} agent descriptors.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "prepare_agent_runtime",
+    {
+      title: "Prepare agent runtime",
+      description:
+        "Create isolated git worktrees and context packs for selected implementation agents without running them.",
+      inputSchema: PrepareAgentRuntimeInputSchema.shape,
+      outputSchema: AgentRuntimePreparationResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { agentRuntimeService } = await servicesProvider();
+        const structuredContent = await agentRuntimeService.prepare(input);
+
+        return {
+          text: `Prepared ${structuredContent.worktrees.length} agent runtime worktree(s).`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "create_agent_worktree",
+    {
+      title: "Create agent worktree",
+      description: "Create one isolated git worktree and context pack for an implementation agent.",
+      inputSchema: CreateAgentWorktreeInputSchema.shape,
+      outputSchema: AgentRuntimePreparationResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { agentRuntimeService } = await servicesProvider();
+        const structuredContent = await agentRuntimeService.createWorktree(input);
+
+        return {
+          text: `Prepared agent runtime worktree for ${structuredContent.worktrees[0]?.agent}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "get_agent_context_pack",
+    {
+      title: "Get agent context pack",
+      description: "Load the persisted context pack prepared for an implementation agent.",
+      inputSchema: GetAgentContextPackInputSchema.shape,
+      outputSchema: GetAgentContextPackResultSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { agentRuntimeService } = await servicesProvider();
+        const structuredContent = await agentRuntimeService.getContextPack(input);
+
+        return {
+          text: `Loaded context pack for ${structuredContent.pack.agent.agent}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "list_agent_worktrees",
+    {
+      title: "List agent worktrees",
+      description: "List git worktrees created under a spec-to-pr Run runtime directory.",
+      inputSchema: ListAgentWorktreesInputSchema.shape,
+      outputSchema: ListAgentWorktreesResultSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { agentRuntimeService } = await servicesProvider();
+        const structuredContent = await agentRuntimeService.listWorktrees(input);
+
+        return {
+          text: `Loaded ${structuredContent.worktrees.length} agent worktree(s).`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "cleanup_agent_worktree",
+    {
+      title: "Cleanup agent worktree",
+      description: "Remove one prepared spec-to-pr agent worktree for a Run.",
+      inputSchema: CleanupAgentWorktreeInputSchema.shape,
+      outputSchema: CleanupAgentWorktreeResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { agentRuntimeService } = await servicesProvider();
+        const structuredContent = await agentRuntimeService.cleanupWorktree(input);
+
+        return {
+          text: structuredContent.removed
+            ? `Removed agent worktree for ${structuredContent.agent}.`
+            : `Agent worktree for ${structuredContent.agent} was already absent.`,
           structuredContent,
         };
       }),

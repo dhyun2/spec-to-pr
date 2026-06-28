@@ -3,6 +3,7 @@ import path from "node:path";
 
 import packageJson from "../../package.json" with { type: "json" };
 import { ArtifactBlobStore } from "../artifact-registry/artifact-blob-store.js";
+import { AgentRuntimeService } from "../application/agent-runtime-service.js";
 import { ApiPipelineService } from "../application/api-pipeline-service.js";
 import { BriefAdapterService } from "../application/brief-adapter-service.js";
 import { DesignContractService } from "../application/design-contract-service.js";
@@ -39,6 +40,7 @@ export type Services = {
   gherkinTestMatrixService: GherkinTestMatrixService;
   apiPipelineService: ApiPipelineService;
   designContractService: DesignContractService;
+  agentRuntimeService: AgentRuntimeService;
 };
 
 export type ServicesProvider = () => Promise<Services>;
@@ -78,6 +80,7 @@ export function createLazyServicesProvider(): ServicesProvider {
       gherkinTestMatrixService: new GherkinTestMatrixService(store),
       apiPipelineService: new ApiPipelineService(store, artifactStore),
       designContractService: new DesignContractService(store, artifactStore),
+      agentRuntimeService: new AgentRuntimeService(store),
     };
 
     return services;
