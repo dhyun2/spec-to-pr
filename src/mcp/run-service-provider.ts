@@ -5,6 +5,7 @@ import packageJson from "../../package.json" with { type: "json" };
 import { ArtifactBlobStore } from "../artifact-registry/artifact-blob-store.js";
 import { BriefAdapterService } from "../application/brief-adapter-service.js";
 import { FigmaCapabilityService } from "../application/figma-capability-service.js";
+import { FigmaDesignInventoryService } from "../application/figma-design-inventory-service.js";
 import { FigmaIntakeService } from "../application/figma-intake-service.js";
 import { PolicyService } from "../application/policy-service.js";
 import { ProjectProfileService } from "../application/profile-service.js";
@@ -23,6 +24,7 @@ export type Services = {
   sourceRegistryService: SourceRegistryService;
   briefAdapterService: BriefAdapterService;
   figmaCapabilityService: FigmaCapabilityService;
+  figmaDesignInventoryService: FigmaDesignInventoryService;
   figmaIntakeService: FigmaIntakeService;
 };
 
@@ -55,6 +57,7 @@ export function createLazyServicesProvider(): ServicesProvider {
       sourceRegistryService: new SourceRegistryService(store, snapshotStore),
       briefAdapterService: new BriefAdapterService(store, snapshotStore),
       figmaCapabilityService: new FigmaCapabilityService(store, artifactStore),
+      figmaDesignInventoryService: new FigmaDesignInventoryService(store, artifactStore),
       figmaIntakeService: new FigmaIntakeService(store, artifactStore),
     };
 

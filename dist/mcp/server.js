@@ -33334,6 +33334,8 @@ var init_artifact = __esm({
       "figma-screenshot",
       "figma-variable-defs",
       "figma-code-connect-map",
+      "figma-design-inventory",
+      "figma-provider-comparison",
       "requirement-graph",
       "openspec",
       "gherkin",
@@ -34768,6 +34770,534 @@ var init_figma_capability_service = __esm({
   }
 });
 
+// src/figma/figma-design-inventory.ts
+var FigmaComponentInventoryItemSchema, FigmaTokenInventoryItemSchema, FigmaAssetInventoryItemSchema, FigmaProviderComparisonSchema, FigmaDesignInventorySchema;
+var init_figma_design_inventory = __esm({
+  "src/figma/figma-design-inventory.ts"() {
+    "use strict";
+    init_zod();
+    init_ids();
+    init_scalars();
+    FigmaComponentInventoryItemSchema = external_exports.object({
+      nodeId: external_exports.string().trim().min(1),
+      name: external_exports.string().trim().min(1),
+      type: external_exports.string().trim().min(1).optional(),
+      componentName: external_exports.string().trim().min(1).optional(),
+      mainComponentId: external_exports.string().trim().min(1).optional(),
+      variantProperties: external_exports.record(external_exports.string(), external_exports.string()).default({}),
+      codeConnectComponent: external_exports.string().trim().min(1).optional(),
+      codeConnectSource: external_exports.string().trim().min(1).optional(),
+      mapped: external_exports.boolean()
+    }).strict();
+    FigmaTokenInventoryItemSchema = external_exports.object({
+      name: external_exports.string().trim().min(1),
+      kind: external_exports.enum(["color", "spacing", "radius", "typography", "effect", "unknown"]),
+      value: external_exports.unknown().optional(),
+      source: external_exports.enum(["variable-defs", "design-context", "metadata", "unknown"])
+    }).strict();
+    FigmaAssetInventoryItemSchema = external_exports.object({
+      nodeId: external_exports.string().trim().min(1),
+      name: external_exports.string().trim().min(1),
+      kind: external_exports.enum(["icon", "vector", "image", "unknown"]),
+      exportable: external_exports.boolean().optional()
+    }).strict();
+    FigmaProviderComparisonSchema = external_exports.object({
+      comparedProviderIds: external_exports.array(external_exports.string().trim().min(1)).default([]),
+      metadataMismatch: external_exports.boolean().default(false),
+      screenshotMissing: external_exports.boolean().default(false),
+      variableDefsMissing: external_exports.boolean().default(false),
+      codeConnectMissing: external_exports.boolean().default(false),
+      notes: external_exports.array(external_exports.string().trim().min(1)).default([])
+    }).strict();
+    FigmaDesignInventorySchema = external_exports.object({
+      sourceId: SourceIdSchema,
+      sourceDigest: Sha256DigestSchema.optional(),
+      generatedAt: IsoDateTimeSchema,
+      sourceArtifactIds: external_exports.array(ArtifactIdSchema).default([]),
+      components: external_exports.array(FigmaComponentInventoryItemSchema).default([]),
+      tokens: external_exports.array(FigmaTokenInventoryItemSchema).default([]),
+      assets: external_exports.array(FigmaAssetInventoryItemSchema).default([]),
+      providerComparison: FigmaProviderComparisonSchema,
+      gapIds: external_exports.array(GapIdSchema).default([])
+    }).strict();
+  }
+});
+
+// src/figma/figma-raw-parser.ts
+function parseComponentsFromText(content) {
+  const components = [];
+  const seen = /* @__PURE__ */ new Set();
+  const xmlLikeNodePattern = /id=["']([^"']+)["'][^>]*(?:name=["']([^"']+)["'])?[^>]*(?:type=["']([^"']+)["'])?/gi;
+  for (const match of content.matchAll(xmlLikeNodePattern)) {
+    const nodeId = match[1];
+    const type = match[3];
+    if (nodeId === void 0 || seen.has(nodeId)) continue;
+    const name = match[2] ?? nodeId;
+    const looksLikeComponent = /component|instance|button|input|chip|modal|sheet|card|navigation|tab/i.test(
+      `${name} ${type ?? ""}`
+    );
+    if (!looksLikeComponent) continue;
+    seen.add(nodeId);
+    components.push({
+      nodeId,
+      name,
+      ...type === void 0 ? {} : { type },
+      variantProperties: {},
+      mapped: false
+    });
+  }
+  return components;
+}
+function parseTokensFromText(content) {
+  const tokens = [];
+  const seen = /* @__PURE__ */ new Set();
+  const variableNamePattern = /(?:variable|style|token|color|spacing|radius|typography)[\s:/_-]+([A-Za-z0-9_.\-/]+)/gi;
+  for (const match of content.matchAll(variableNamePattern)) {
+    const name = match[1];
+    if (name === void 0 || seen.has(name)) continue;
+    seen.add(name);
+    tokens.push({
+      name,
+      kind: inferTokenKind(name),
+      source: "variable-defs"
+    });
+  }
+  return tokens;
+}
+function parseAssetsFromText(content) {
+  const assets = [];
+  const seen = /* @__PURE__ */ new Set();
+  const assetPattern = /id=["']([^"']+)["'][^>]*name=["']([^"']*(?:icon|image|vector|svg)[^"']*)["']/gi;
+  for (const match of content.matchAll(assetPattern)) {
+    const nodeId = match[1];
+    const name = match[2];
+    if (nodeId === void 0 || name === void 0 || seen.has(nodeId)) continue;
+    seen.add(nodeId);
+    assets.push({
+      nodeId,
+      name,
+      kind: inferAssetKind(name),
+      exportable: void 0
+    });
+  }
+  return assets;
+}
+function parseCodeConnectMap(content) {
+  const result = /* @__PURE__ */ new Map();
+  try {
+    const parsed = JSON.parse(content);
+    collectMappings(parsed, result);
+  } catch {
+    const nodePattern = /([0-9]+:[0-9]+).*?(?:componentName|component)[:=]["']?([A-Za-z0-9_.$-]+)/gi;
+    for (const match of content.matchAll(nodePattern)) {
+      const nodeId = match[1];
+      const componentName = match[2];
+      if (nodeId !== void 0) {
+        result.set(nodeId, compactMapping({ componentName }));
+      }
+    }
+  }
+  return result;
+}
+function collectMappings(value, result) {
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectMappings(item, result));
+    return;
+  }
+  if (typeof value !== "object" || value === null) return;
+  const record2 = value;
+  const nodeId = getString(record2, "nodeId") ?? getString(record2, "figmaNodeId") ?? getString(record2, "id");
+  if (nodeId !== void 0 && /^\d+:\d+/.test(nodeId)) {
+    result.set(
+      nodeId,
+      compactMapping({
+        componentName: getString(record2, "componentName") ?? getString(record2, "component"),
+        source: getString(record2, "source") ?? getString(record2, "importPath")
+      })
+    );
+  }
+  Object.values(record2).forEach((child) => collectMappings(child, result));
+}
+function getString(record2, key) {
+  const value = record2[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : void 0;
+}
+function compactMapping(input) {
+  return {
+    ...input.componentName === void 0 ? {} : { componentName: input.componentName },
+    ...input.source === void 0 ? {} : { source: input.source }
+  };
+}
+function inferTokenKind(name) {
+  if (/color|fill|background|foreground|border/i.test(name)) return "color";
+  if (/space|spacing|gap|padding|margin/i.test(name)) return "spacing";
+  if (/radius|round/i.test(name)) return "radius";
+  if (/font|text|typography|title|body|label/i.test(name)) return "typography";
+  if (/shadow|blur|effect/i.test(name)) return "effect";
+  return "unknown";
+}
+function inferAssetKind(name) {
+  if (/icon|svg/i.test(name)) return "icon";
+  if (/vector/i.test(name)) return "vector";
+  if (/image|photo|png|jpg|jpeg/i.test(name)) return "image";
+  return "unknown";
+}
+var init_figma_raw_parser = __esm({
+  "src/figma/figma-raw-parser.ts"() {
+    "use strict";
+  }
+});
+
+// src/application/figma-design-inventory-service.ts
+function findFigmaSource(sources, sourceId) {
+  const source = sources.find((item) => item.id === sourceId);
+  if (source === void 0) throw new Error(`Source not found: ${sourceId}`);
+  if (source.kind !== "figma" || source.locator.type !== "figma") {
+    throw new Error(`Source is not a Figma source: ${sourceId}`);
+  }
+  return source;
+}
+function figmaRawArtifactsForSource(run, sourceId) {
+  return run.artifacts.filter(
+    (artifact) => artifact.metadata["adapter"] === FIGMA_INTAKE_ADAPTER && artifact.metadata["sourceId"] === sourceId
+  );
+}
+async function readAllText(store, artifacts) {
+  const chunks = await Promise.all(
+    artifacts.map(async (artifact) => (await store.readContent(artifact.digest)).toString("utf8"))
+  );
+  return chunks.join("\n");
+}
+function createMissingArtifactGap(kind, sourceId, timestamp) {
+  return GapSchema.parse({
+    id: createGapId(),
+    category: "design",
+    severity: kind === "figma-screenshot" || kind === "figma-design-context" ? "major" : "minor",
+    status: "open",
+    title: `Missing ${kind} artifact`,
+    expected: `Figma source ${sourceId} should have a ${kind} artifact before design inventory analysis.`,
+    observed: `No ${kind} artifact was found for this Figma source.`,
+    impact: "Design inventory may be incomplete and downstream UI implementation needs manual review or fallback.",
+    sourceEvidenceIds: [],
+    owner: "evidence-verifier",
+    createdAt: timestamp,
+    updatedAt: timestamp
+  });
+}
+function createUnmappedComponentGap(name, nodeId, timestamp) {
+  return GapSchema.parse({
+    id: createGapId(),
+    category: "design",
+    severity: "minor",
+    status: "open",
+    title: `Unmapped Figma component: ${name}`,
+    expected: "Figma component instances should be mapped to project design-system components when possible.",
+    observed: `No Code Connect mapping was found for node ${nodeId} (${name}).`,
+    impact: "UI Agent may choose a less accurate component or create custom UI instead of reusing the design system.",
+    sourceEvidenceIds: [],
+    owner: "design-ui",
+    createdAt: timestamp,
+    updatedAt: timestamp
+  });
+}
+function createProviderMismatchGap(timestamp) {
+  return GapSchema.parse({
+    id: createGapId(),
+    category: "design",
+    severity: "major",
+    status: "open",
+    title: "Figma provider metadata mismatch",
+    expected: "Metadata from different Figma providers should describe the same target node consistently.",
+    observed: "Multiple metadata artifacts for this Figma source have different digests.",
+    impact: "Design inventory may depend on provider-specific output and requires manual review.",
+    sourceEvidenceIds: [],
+    owner: "evidence-verifier",
+    createdAt: timestamp,
+    updatedAt: timestamp
+  });
+}
+function findLatestInventoryArtifact(artifacts, sourceId, rawArtifactSetDigest) {
+  return artifacts.filter(
+    (artifact) => artifact.kind === "figma-design-inventory" && artifact.metadata["adapter"] === FIGMA_INVENTORY_ADAPTER && artifact.metadata["sourceId"] === sourceId && (rawArtifactSetDigest === void 0 || artifact.metadata["rawArtifactSetDigest"] === rawArtifactSetDigest)
+  ).at(-1);
+}
+function findProviderComparisonArtifact(artifacts, sourceId, rawArtifactSetDigest, generatedAt) {
+  return artifacts.filter(
+    (artifact) => artifact.kind === "figma-provider-comparison" && artifact.metadata["adapter"] === FIGMA_INVENTORY_ADAPTER && artifact.metadata["sourceId"] === sourceId && artifact.createdAt === generatedAt && (rawArtifactSetDigest === void 0 || artifact.metadata["rawArtifactSetDigest"] === rawArtifactSetDigest)
+  ).at(-1);
+}
+function digestArtifactSet(artifacts) {
+  const stable = artifacts.map((artifact) => ({
+    id: artifact.id,
+    kind: artifact.kind,
+    digest: artifact.digest,
+    providerId: artifact.metadata["providerId"],
+    figmaArtifactKind: artifact.metadata["figmaArtifactKind"]
+  })).sort((left, right) => left.id.localeCompare(right.id));
+  return sha256Digest(Buffer.from(JSON.stringify(stable), "utf8"));
+}
+function dedupeByNodeId(items) {
+  const seen = /* @__PURE__ */ new Set();
+  const result = [];
+  for (const item of items) {
+    if (seen.has(item.nodeId)) continue;
+    seen.add(item.nodeId);
+    result.push(item);
+  }
+  return result;
+}
+function dedupeByName(items) {
+  const seen = /* @__PURE__ */ new Set();
+  const result = [];
+  for (const item of items) {
+    if (seen.has(item.name)) continue;
+    seen.add(item.name);
+    result.push(item);
+  }
+  return result;
+}
+function uniqueStrings(values) {
+  return [...new Set(values)];
+}
+function metadataString(artifact, key) {
+  const value = artifact.metadata[key];
+  return typeof value === "string" ? value : void 0;
+}
+function compactMetadata(metadata) {
+  return Object.fromEntries(
+    Object.entries(metadata).filter(([, value]) => value !== void 0)
+  );
+}
+var AnalyzeFigmaDesignInventoryInputSchema, GetFigmaDesignInventoryInputSchema, FIGMA_INTAKE_ADAPTER, FIGMA_INVENTORY_ADAPTER, FigmaDesignInventoryService;
+var init_figma_design_inventory_service = __esm({
+  "src/application/figma-design-inventory-service.ts"() {
+    "use strict";
+    init_zod();
+    init_artifact_blob_store();
+    init_figma_design_inventory();
+    init_figma_raw_parser();
+    init_run2();
+    init_artifact();
+    init_gap();
+    init_id_factory();
+    init_ids();
+    init_scalars();
+    init_content_hash();
+    AnalyzeFigmaDesignInventoryInputSchema = external_exports.object({
+      runId: RunIdSchema,
+      sourceId: SourceIdSchema
+    }).strict();
+    GetFigmaDesignInventoryInputSchema = AnalyzeFigmaDesignInventoryInputSchema;
+    FIGMA_INTAKE_ADAPTER = "figma-intake-v1";
+    FIGMA_INVENTORY_ADAPTER = "figma-design-inventory-v1";
+    FigmaDesignInventoryService = class {
+      constructor(runStore, artifactStore, now = () => (/* @__PURE__ */ new Date()).toISOString()) {
+        this.runStore = runStore;
+        this.artifactStore = artifactStore;
+        this.now = now;
+      }
+      runStore;
+      artifactStore;
+      now;
+      async analyze(rawInput) {
+        const input = AnalyzeFigmaDesignInventoryInputSchema.parse(rawInput);
+        const run = await this.runStore.get(input.runId);
+        const timestamp = IsoDateTimeSchema.parse(this.now());
+        const source = findFigmaSource(run.sources, input.sourceId);
+        const figmaArtifacts = figmaRawArtifactsForSource(run, source.id);
+        const rawArtifactSetDigest = digestArtifactSet(figmaArtifacts);
+        const existing = findLatestInventoryArtifact(run.artifacts, source.id, rawArtifactSetDigest);
+        if (existing !== void 0) {
+          const inventory2 = await this.readInventory(existing);
+          return {
+            duplicate: true,
+            run: summarizeRun(run),
+            inventory: inventory2,
+            artifact: existing,
+            providerComparisonArtifact: findProviderComparisonArtifact(
+              run.artifacts,
+              source.id,
+              rawArtifactSetDigest,
+              inventory2.generatedAt
+            ),
+            gaps: run.gaps.filter((gap) => inventory2.gapIds.includes(gap.id))
+          };
+        }
+        const metadataArtifacts = figmaArtifacts.filter(
+          (artifact) => artifact.kind === "figma-metadata"
+        );
+        const designContextArtifacts = figmaArtifacts.filter(
+          (artifact) => artifact.kind === "figma-design-context"
+        );
+        const screenshotArtifacts = figmaArtifacts.filter(
+          (artifact) => artifact.kind === "figma-screenshot"
+        );
+        const variableArtifacts = figmaArtifacts.filter(
+          (artifact) => artifact.kind === "figma-variable-defs"
+        );
+        const codeConnectArtifacts = figmaArtifacts.filter(
+          (artifact) => artifact.kind === "figma-code-connect-map"
+        );
+        const gaps = [];
+        if (metadataArtifacts.length === 0) {
+          gaps.push(createMissingArtifactGap("figma-metadata", source.id, timestamp));
+        }
+        if (designContextArtifacts.length === 0) {
+          gaps.push(createMissingArtifactGap("figma-design-context", source.id, timestamp));
+        }
+        if (screenshotArtifacts.length === 0) {
+          gaps.push(createMissingArtifactGap("figma-screenshot", source.id, timestamp));
+        }
+        if (variableArtifacts.length === 0) {
+          gaps.push(createMissingArtifactGap("figma-variable-defs", source.id, timestamp));
+        }
+        if (codeConnectArtifacts.length === 0) {
+          gaps.push(createMissingArtifactGap("figma-code-connect-map", source.id, timestamp));
+        }
+        const metadataText = await readAllText(this.artifactStore, metadataArtifacts);
+        const designText = await readAllText(this.artifactStore, designContextArtifacts);
+        const variableText = await readAllText(this.artifactStore, variableArtifacts);
+        const codeConnectText = await readAllText(this.artifactStore, codeConnectArtifacts);
+        const components = dedupeByNodeId([
+          ...parseComponentsFromText(metadataText),
+          ...parseComponentsFromText(designText)
+        ]);
+        const tokens = dedupeByName([
+          ...parseTokensFromText(variableText),
+          ...parseTokensFromText(designText)
+        ]);
+        const assets = dedupeByNodeId(parseAssetsFromText(`${metadataText}
+${designText}`));
+        const codeConnectMap = parseCodeConnectMap(codeConnectText);
+        const mappedComponents = components.map((component) => {
+          const mapping = codeConnectMap.get(component.nodeId);
+          return {
+            ...component,
+            ...mapping?.componentName === void 0 ? {} : { codeConnectComponent: mapping.componentName },
+            ...mapping?.source === void 0 ? {} : { codeConnectSource: mapping.source },
+            mapped: mapping !== void 0
+          };
+        });
+        for (const component of mappedComponents) {
+          if (!component.mapped) {
+            gaps.push(createUnmappedComponentGap(component.name, component.nodeId, timestamp));
+          }
+        }
+        const providerComparison = FigmaProviderComparisonSchema.parse({
+          comparedProviderIds: uniqueStrings(
+            figmaArtifacts.map((artifact) => artifact.metadata["providerId"]).filter((value) => typeof value === "string")
+          ),
+          metadataMismatch: metadataArtifacts.length > 1 && new Set(metadataArtifacts.map((artifact) => artifact.digest)).size > 1,
+          screenshotMissing: screenshotArtifacts.length === 0,
+          variableDefsMissing: variableArtifacts.length === 0,
+          codeConnectMissing: codeConnectArtifacts.length === 0,
+          notes: []
+        });
+        if (providerComparison.metadataMismatch) {
+          gaps.push(createProviderMismatchGap(timestamp));
+        }
+        const inventory = FigmaDesignInventorySchema.parse({
+          sourceId: source.id,
+          ...source.digest === void 0 ? {} : { sourceDigest: source.digest },
+          generatedAt: timestamp,
+          sourceArtifactIds: figmaArtifacts.map((artifact) => artifact.id),
+          components: mappedComponents,
+          tokens,
+          assets,
+          providerComparison,
+          gapIds: gaps.map((gap) => gap.id)
+        });
+        const inventoryArtifact = await this.writeJsonArtifact({
+          kind: "figma-design-inventory",
+          label: "figma-design-inventory",
+          content: inventory,
+          timestamp,
+          metadata: {
+            adapter: FIGMA_INVENTORY_ADAPTER,
+            sourceId: source.id,
+            sourceDigest: source.digest,
+            rawArtifactSetDigest
+          }
+        });
+        const providerComparisonArtifact = await this.writeJsonArtifact({
+          kind: "figma-provider-comparison",
+          label: "figma-provider-comparison",
+          content: providerComparison,
+          timestamp,
+          metadata: {
+            adapter: FIGMA_INVENTORY_ADAPTER,
+            sourceId: source.id,
+            sourceDigest: source.digest,
+            rawArtifactSetDigest,
+            inventoryArtifactId: inventoryArtifact.id
+          }
+        });
+        const nextRun = RunManifestSchema.parse({
+          ...run,
+          revision: run.revision + 1,
+          updatedAt: timestamp,
+          artifacts: [...run.artifacts, inventoryArtifact, providerComparisonArtifact],
+          gaps: [...run.gaps, ...gaps]
+        });
+        await this.runStore.save(nextRun, run.revision);
+        return {
+          duplicate: false,
+          run: summarizeRun(nextRun),
+          inventory,
+          artifact: inventoryArtifact,
+          providerComparisonArtifact,
+          gaps
+        };
+      }
+      async getInventory(rawInput) {
+        const input = GetFigmaDesignInventoryInputSchema.parse(rawInput);
+        const run = await this.runStore.get(input.runId);
+        const source = findFigmaSource(run.sources, input.sourceId);
+        const latest = findLatestInventoryArtifact(run.artifacts, source.id);
+        if (latest === void 0) {
+          throw new Error(`No Figma design inventory found for source ${source.id}`);
+        }
+        const inventory = await this.readInventory(latest);
+        return {
+          inventory,
+          artifact: latest,
+          providerComparisonArtifact: findProviderComparisonArtifact(
+            run.artifacts,
+            source.id,
+            metadataString(latest, "rawArtifactSetDigest"),
+            inventory.generatedAt
+          ),
+          gaps: run.gaps.filter((gap) => inventory.gapIds.includes(gap.id))
+        };
+      }
+      async readInventory(artifact) {
+        const content = await this.artifactStore.readContent(artifact.digest);
+        return FigmaDesignInventorySchema.parse(JSON.parse(content.toString("utf8")));
+      }
+      async writeJsonArtifact(input) {
+        const blob = await this.artifactStore.writeBlob({
+          content: Buffer.from(`${JSON.stringify(input.content, null, 2)}
+`, "utf8"),
+          mediaType: "application/json",
+          storedAt: input.timestamp,
+          label: input.label
+        });
+        return ArtifactRefSchema.parse({
+          id: createArtifactId(),
+          kind: input.kind,
+          uri: blob.uri,
+          mediaType: "application/json",
+          digest: blob.digest,
+          producedBy: "evidence-verifier",
+          evidenceIds: [],
+          createdAt: input.timestamp,
+          metadata: compactMetadata(input.metadata)
+        });
+      }
+    };
+  }
+});
+
 // src/figma/figma-intake-contracts.ts
 function figmaKindToArtifactKind(kind) {
   switch (kind) {
@@ -34865,7 +35395,7 @@ var init_figma_url = __esm({
 });
 
 // src/application/figma-intake-service.ts
-function findFigmaSource(sources, sourceId) {
+function findFigmaSource2(sources, sourceId) {
   const source = sources.find((item) => item.id === sourceId);
   if (source === void 0) throw new Error(`Source not found: ${sourceId}`);
   if (source.kind !== "figma" || source.locator.type !== "figma") {
@@ -34890,7 +35420,7 @@ function createFigmaEvidence(input) {
     digest: input.digest,
     capturedAt: input.timestamp,
     metadata: {
-      adapter: FIGMA_INTAKE_ADAPTER,
+      adapter: FIGMA_INTAKE_ADAPTER2,
       providerId: input.providerId,
       sourceDigest: input.source.digest,
       figmaArtifactKind: input.kind,
@@ -34910,7 +35440,7 @@ function createFigmaArtifact(input) {
     evidenceIds: [input.evidenceId],
     createdAt: input.timestamp,
     metadata: {
-      adapter: FIGMA_INTAKE_ADAPTER,
+      adapter: FIGMA_INTAKE_ADAPTER2,
       providerId: input.providerId,
       sourceId: input.source.id,
       sourceDigest: input.source.digest,
@@ -34923,7 +35453,7 @@ function decodeBase64(value) {
   if (buffer.byteLength === 0) throw new Error("Decoded screenshot is empty");
   return buffer;
 }
-var RegisterFigmaSourceInputSchema, BaseRecordFigmaInputSchema, RecordFigmaTextArtifactInputSchema, RecordFigmaScreenshotInputSchema, FIGMA_INTAKE_ADAPTER, FigmaIntakeService;
+var RegisterFigmaSourceInputSchema, BaseRecordFigmaInputSchema, RecordFigmaTextArtifactInputSchema, RecordFigmaScreenshotInputSchema, FIGMA_INTAKE_ADAPTER2, FigmaIntakeService;
 var init_figma_intake_service = __esm({
   "src/application/figma-intake-service.ts"() {
     "use strict";
@@ -34957,7 +35487,7 @@ var init_figma_intake_service = __esm({
       imageBase64: external_exports.string().min(1),
       mediaType: external_exports.string().trim().min(1).default("image/png")
     }).strict();
-    FIGMA_INTAKE_ADAPTER = "figma-intake-v1";
+    FIGMA_INTAKE_ADAPTER2 = "figma-intake-v1";
     FigmaIntakeService = class {
       constructor(runStore, artifactStore, now = () => (/* @__PURE__ */ new Date()).toISOString()) {
         this.runStore = runStore;
@@ -35005,7 +35535,7 @@ var init_figma_intake_service = __esm({
           digest: locatorDigest,
           capturedAt: timestamp,
           metadata: {
-            adapter: FIGMA_INTAKE_ADAPTER,
+            adapter: FIGMA_INTAKE_ADAPTER2,
             rawUrl: parsed.rawUrl,
             canonicalUrl: parsed.canonicalUrl,
             figmaKind: parsed.kind,
@@ -35051,12 +35581,12 @@ var init_figma_intake_service = __esm({
       }
       async recordArtifact(input) {
         const run = await this.runStore.get(RunIdSchema.parse(input.runId));
-        const source = findFigmaSource(run.sources, input.sourceId);
+        const source = findFigmaSource2(run.sources, input.sourceId);
         const timestamp = IsoDateTimeSchema.parse(this.now());
         const providerId = input.providerId ?? "unknown";
         const contentDigest = sha256Digest(input.content);
         const duplicate = run.artifacts.find(
-          (artifact2) => artifact2.digest === contentDigest && artifact2.metadata["adapter"] === FIGMA_INTAKE_ADAPTER && artifact2.metadata["sourceId"] === source.id && artifact2.metadata["figmaArtifactKind"] === input.kind && artifact2.metadata["providerId"] === providerId
+          (artifact2) => artifact2.digest === contentDigest && artifact2.metadata["adapter"] === FIGMA_INTAKE_ADAPTER2 && artifact2.metadata["sourceId"] === source.id && artifact2.metadata["figmaArtifactKind"] === input.kind && artifact2.metadata["providerId"] === providerId
         );
         if (duplicate !== void 0) {
           return FigmaIntakeResultSchema.parse({
@@ -37921,6 +38451,47 @@ function createKernelServer(servicesProvider) {
     })
   );
   server.registerTool(
+    "analyze_figma_design_inventory",
+    {
+      title: "Analyze Figma design inventory",
+      description: "Parse Figma raw artifacts into a design-system inventory and cross-check report.",
+      inputSchema: AnalyzeFigmaDesignInventoryInputSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { figmaDesignInventoryService } = await servicesProvider();
+      const structuredContent = await figmaDesignInventoryService.analyze(input);
+      return {
+        text: `Generated Figma design inventory for source ${structuredContent.inventory.sourceId}.`,
+        structuredContent
+      };
+    })
+  );
+  server.registerTool(
+    "get_figma_design_inventory",
+    {
+      title: "Get Figma design inventory",
+      description: "Return the latest Figma design inventory artifact for a Run source.",
+      inputSchema: GetFigmaDesignInventoryInputSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { figmaDesignInventoryService } = await servicesProvider();
+      const structuredContent = await figmaDesignInventoryService.getInventory(input);
+      return {
+        text: `Loaded Figma design inventory for source ${structuredContent.inventory.sourceId}.`,
+        structuredContent
+      };
+    })
+  );
+  server.registerTool(
     "create_run",
     {
       title: "Create run",
@@ -38201,6 +38772,7 @@ var init_create_server = __esm({
     init_zod();
     init_brief_adapter_service();
     init_figma_capability_service();
+    init_figma_design_inventory_service();
     init_figma_intake_service();
     init_policy_service();
     init_profile_service();
@@ -38281,7 +38853,9 @@ var init_create_server = __esm({
       "record_figma_design_context",
       "record_figma_screenshot",
       "record_figma_variable_defs",
-      "record_figma_code_connect_map"
+      "record_figma_code_connect_map",
+      "analyze_figma_design_inventory",
+      "get_figma_design_inventory"
     ];
   }
 });
@@ -38627,6 +39201,7 @@ function createLazyServicesProvider() {
       sourceRegistryService: new SourceRegistryService(store, snapshotStore),
       briefAdapterService: new BriefAdapterService(store, snapshotStore),
       figmaCapabilityService: new FigmaCapabilityService(store, artifactStore),
+      figmaDesignInventoryService: new FigmaDesignInventoryService(store, artifactStore),
       figmaIntakeService: new FigmaIntakeService(store, artifactStore)
     };
     return services;
@@ -38642,6 +39217,7 @@ var init_run_service_provider = __esm({
     init_artifact_blob_store();
     init_brief_adapter_service();
     init_figma_capability_service();
+    init_figma_design_inventory_service();
     init_figma_intake_service();
     init_policy_service();
     init_profile_service();

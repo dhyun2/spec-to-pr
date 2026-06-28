@@ -8,6 +8,10 @@ import {
   RecordFigmaMcpCapabilitiesInputSchema,
 } from "../application/figma-capability-service.js";
 import {
+  AnalyzeFigmaDesignInventoryInputSchema,
+  GetFigmaDesignInventoryInputSchema,
+} from "../application/figma-design-inventory-service.js";
+import {
   RecordFigmaScreenshotInputSchema,
   RecordFigmaTextArtifactInputSchema,
   RegisterFigmaSourceInputSchema,
@@ -127,6 +131,8 @@ const TOOL_NAMES = [
   "record_figma_screenshot",
   "record_figma_variable_defs",
   "record_figma_code_connect_map",
+  "analyze_figma_design_inventory",
+  "get_figma_design_inventory",
 ] as const;
 
 export function createKernelServer(servicesProvider: ServicesProvider): McpServer {
@@ -601,6 +607,54 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
 
         return {
           text: `Recorded Figma screenshot for source ${structuredContent.sourceId}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "analyze_figma_design_inventory",
+    {
+      title: "Analyze Figma design inventory",
+      description:
+        "Parse Figma raw artifacts into a design-system inventory and cross-check report.",
+      inputSchema: AnalyzeFigmaDesignInventoryInputSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { figmaDesignInventoryService } = await servicesProvider();
+        const structuredContent = await figmaDesignInventoryService.analyze(input);
+
+        return {
+          text: `Generated Figma design inventory for source ${structuredContent.inventory.sourceId}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "get_figma_design_inventory",
+    {
+      title: "Get Figma design inventory",
+      description: "Return the latest Figma design inventory artifact for a Run source.",
+      inputSchema: GetFigmaDesignInventoryInputSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { figmaDesignInventoryService } = await servicesProvider();
+        const structuredContent = await figmaDesignInventoryService.getInventory(input);
+
+        return {
+          text: `Loaded Figma design inventory for source ${structuredContent.inventory.sourceId}.`,
           structuredContent,
         };
       }),
