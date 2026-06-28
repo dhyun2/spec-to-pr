@@ -22,3 +22,4 @@ export * from "./design-contract-service.js";
 export * from "./agent-runtime-service.js";
 export * from "./spec-bdd-agent-lane-service.js";
 export * from "./api-contract-agent-service.js";
+export * from "./design-ui-agent-lane-service.js";
