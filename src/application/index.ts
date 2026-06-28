@@ -17,3 +17,4 @@ export * from "./figma-intake-service.js";
 export * from "./openapi-intake-service.js";
 export * from "./openspec-change-service.js";
 export * from "./gherkin-test-matrix-service.js";
+export * from "./api-pipeline-service.js";
