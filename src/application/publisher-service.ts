@@ -226,7 +226,10 @@ export class PublisherService {
     const input = PublishReviewRequestInputSchema.parse(rawInput);
     const run = await this.runStore.get(input.runId);
     const timestamp = IsoDateTimeSchema.parse(this.now());
-    const plan = await this.plan(input);
+    const { confirm, ...planInput } = input;
+    void confirm;
+
+    const plan = await this.plan(planInput);
     const result = await this.executePublish({
       run,
       plan,
@@ -247,10 +250,13 @@ export class PublisherService {
     const input = UpdateReviewRequestBodyInputSchema.parse(rawInput);
     const run = await this.runStore.get(input.runId);
     const timestamp = IsoDateTimeSchema.parse(this.now());
-    const plan = await this.plan(input);
+    const { confirm, requestNumber, ...planInput } = input;
+    void confirm;
+
+    const plan = await this.plan(planInput);
     const result = await this.executeUpdateBody({
       plan,
-      requestNumber: input.requestNumber,
+      requestNumber,
       timestamp,
     });
 
