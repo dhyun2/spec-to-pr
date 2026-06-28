@@ -11,6 +11,8 @@
       "enum": [
         "project-profile",
         "source-snapshot",
+        "figma-mcp-capability-report",
+        "figma-provider-policy",
         "requirement-graph",
         "openspec",
         "gherkin",

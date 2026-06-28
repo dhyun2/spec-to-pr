@@ -6,6 +6,8 @@ import { AgentRoleSchema, IsoDateTimeSchema, Sha256DigestSchema } from "./scalar
 export const ArtifactKindSchema = z.enum([
   "project-profile",
   "source-snapshot",
+  "figma-mcp-capability-report",
+  "figma-provider-policy",
   "requirement-graph",
   "openspec",
   "gherkin",
