@@ -56,6 +56,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "create_intake_manifest",
       "create_run",
       "fail_stage",
+      "get_figma_provider_policy",
       "get_project_profile",
       "get_resume_plan",
       "get_run",
@@ -67,6 +68,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "list_project_profiles",
       "list_runs",
       "policy_info",
+      "record_figma_mcp_capabilities",
       "redact_text",
       "register_file_source",
       "skip_stage",
@@ -227,6 +229,43 @@ describe("spec-to-pr MCP stdio server", () => {
       duplicate: false,
       evidenceAdded: 3,
       gapsAdded: 2,
+    });
+
+    const figmaCapabilities = await client.callTool({
+      name: "record_figma_mcp_capabilities",
+      arguments: {
+        runId,
+        providers: [
+          {
+            providerId: "figma-local",
+            rawToolNames: ["get_metadata", "get_screenshot", "get_code_connect_map"],
+          },
+          {
+            providerId: "figma-remote",
+            rawToolNames: ["get_design_context", "get_variable_defs"],
+          },
+        ],
+      },
+    });
+
+    expect(figmaCapabilities.structuredContent).toMatchObject({
+      report: {
+        runId,
+        policy: {
+          metadataProviderId: "figma-local",
+        },
+      },
+    });
+
+    const figmaPolicy = await client.callTool({
+      name: "get_figma_provider_policy",
+      arguments: {
+        runId,
+      },
+    });
+
+    expect(figmaPolicy.structuredContent).toMatchObject({
+      metadataProviderId: "figma-local",
     });
 
     const intake = await client.callTool({
