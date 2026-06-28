@@ -58,3 +58,41 @@ Review Council approval does not guarantee that all commits apply cleanly togeth
 - MCP tools support prepare/get/apply/record-repair/finalize integration.
 - Skill `/spec-to-pr:run-integration` exists.
 - `agents/integrator.md` exists.
+
+## Verification
+
+Run:
+
+```bash
+pnpm format:check
+pnpm typecheck
+pnpm schemas:build
+pnpm build
+pnpm test
+pnpm audit
+```
+
+Expected:
+
+- Integration ordering tests pass
+- Repair policy tests pass
+- Integration contract tests pass
+- Git runner tests pass when Git is available
+- IntegrationService tests pass
+- MCP stdio integration lists:
+  - prepare_integration
+  - get_integration_plan
+  - apply_integration
+  - record_integration_repair
+  - finalize_integration
+- Skill `/spec-to-pr:run-integration` exists
+- Agent `integrator` exists
+
+## Known Limitations
+
+- Full quality gates are not run in Task 23.
+- Repair is bounded and may stop with unresolved conflicts.
+- Integrator Agent must be invoked explicitly when conflicts require semantic repair.
+- Integration does not push branches.
+- Integration does not publish PRs.
+- Integration does not close gaps.
