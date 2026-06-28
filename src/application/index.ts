@@ -26,3 +26,4 @@ export * from "./design-ui-agent-lane-service.js";
 export * from "./review-council-service.js";
 export * from "./integration-service.js";
 export * from "./architecture-guard-service.js";
+export * from "./quality-gate-service.js";
