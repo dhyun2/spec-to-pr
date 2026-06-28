@@ -7,6 +7,11 @@ import {
   GetFigmaProviderPolicyInputSchema,
   RecordFigmaMcpCapabilitiesInputSchema,
 } from "../application/figma-capability-service.js";
+import {
+  RecordFigmaScreenshotInputSchema,
+  RecordFigmaTextArtifactInputSchema,
+  RegisterFigmaSourceInputSchema,
+} from "../application/figma-intake-service.js";
 import { RedactTextInputSchema } from "../application/policy-service.js";
 import {
   CreateIntakeManifestInputSchema,
@@ -116,6 +121,12 @@ const TOOL_NAMES = [
   "analyze_brief_source",
   "record_figma_mcp_capabilities",
   "get_figma_provider_policy",
+  "register_figma_source",
+  "record_figma_metadata",
+  "record_figma_design_context",
+  "record_figma_screenshot",
+  "record_figma_variable_defs",
+  "record_figma_code_connect_map",
 ] as const;
 
 export function createKernelServer(servicesProvider: ServicesProvider): McpServer {
@@ -518,6 +529,84 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
   );
 
   server.registerTool(
+    "register_figma_source",
+    {
+      title: "Register Figma source",
+      description: "Parse a Figma URL and attach it as a Figma SourceRef to a Run.",
+      inputSchema: RegisterFigmaSourceInputSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { figmaIntakeService } = await servicesProvider();
+        const result = await figmaIntakeService.registerFigmaSource(input);
+
+        return {
+          text: result.duplicate
+            ? `Figma source ${result.source.id} was already registered.`
+            : `Registered Figma source ${result.source.id}.`,
+          structuredContent: result,
+        };
+      }),
+  );
+
+  registerFigmaTextRecorder(server, servicesProvider, {
+    toolName: "record_figma_metadata",
+    title: "Record Figma metadata",
+    kind: "metadata",
+    mediaType: "application/xml",
+  });
+
+  registerFigmaTextRecorder(server, servicesProvider, {
+    toolName: "record_figma_design_context",
+    title: "Record Figma design context",
+    kind: "design-context",
+    mediaType: "text/plain",
+  });
+
+  registerFigmaTextRecorder(server, servicesProvider, {
+    toolName: "record_figma_variable_defs",
+    title: "Record Figma variable definitions",
+    kind: "variable-defs",
+    mediaType: "text/plain",
+  });
+
+  registerFigmaTextRecorder(server, servicesProvider, {
+    toolName: "record_figma_code_connect_map",
+    title: "Record Figma Code Connect map",
+    kind: "code-connect-map",
+    mediaType: "application/json",
+  });
+
+  server.registerTool(
+    "record_figma_screenshot",
+    {
+      title: "Record Figma screenshot",
+      description: "Record a base64 screenshot from Figma MCP get_screenshot.",
+      inputSchema: RecordFigmaScreenshotInputSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { figmaIntakeService } = await servicesProvider();
+        const structuredContent = await figmaIntakeService.recordScreenshot(input);
+
+        return {
+          text: `Recorded Figma screenshot for source ${structuredContent.sourceId}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
     "create_run",
     {
       title: "Create run",
@@ -760,6 +849,47 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
   );
 
   return server;
+}
+
+type FigmaTextArtifactKind = "metadata" | "design-context" | "variable-defs" | "code-connect-map";
+
+function registerFigmaTextRecorder(
+  server: McpServer,
+  servicesProvider: ServicesProvider,
+  input: {
+    toolName: string;
+    title: string;
+    kind: FigmaTextArtifactKind;
+    mediaType: string;
+  },
+): void {
+  server.registerTool(
+    input.toolName,
+    {
+      title: input.title,
+      description: `Record Figma ${input.kind} output as a Run artifact.`,
+      inputSchema: RecordFigmaTextArtifactInputSchema.omit({ kind: true }).shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
+    },
+    async (rawInput: unknown) =>
+      handleTool(async () => {
+        const { figmaIntakeService } = await servicesProvider();
+        const structuredContent = await figmaIntakeService.recordTextArtifact({
+          ...(rawInput as Record<string, unknown>),
+          kind: input.kind,
+          mediaType: input.mediaType,
+        });
+
+        return {
+          text: `Recorded Figma ${input.kind} for source ${structuredContent.sourceId}.`,
+          structuredContent,
+        };
+      }),
+  );
 }
 
 async function handleTool<TStructuredContent>(

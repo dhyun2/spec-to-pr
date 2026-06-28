@@ -33329,6 +33329,11 @@ var init_artifact = __esm({
       "source-snapshot",
       "figma-mcp-capability-report",
       "figma-provider-policy",
+      "figma-metadata",
+      "figma-design-context",
+      "figma-screenshot",
+      "figma-variable-defs",
+      "figma-code-connect-map",
       "requirement-graph",
       "openspec",
       "gherkin",
@@ -34758,6 +34763,349 @@ var init_figma_capability_service = __esm({
         const content = await this.artifactStore.readContent(latest.digest);
         const report = FigmaCapabilityReportSchema.parse(JSON.parse(content.toString("utf8")));
         return report.policy;
+      }
+    };
+  }
+});
+
+// src/figma/figma-intake-contracts.ts
+function figmaKindToArtifactKind(kind) {
+  switch (kind) {
+    case "metadata":
+      return "figma-metadata";
+    case "design-context":
+      return "figma-design-context";
+    case "screenshot":
+      return "figma-screenshot";
+    case "variable-defs":
+      return "figma-variable-defs";
+    case "code-connect-map":
+      return "figma-code-connect-map";
+  }
+}
+var FigmaRecordedArtifactKindSchema, FigmaIntakeResultSchema;
+var init_figma_intake_contracts = __esm({
+  "src/figma/figma-intake-contracts.ts"() {
+    "use strict";
+    init_zod();
+    init_ids();
+    init_scalars();
+    FigmaRecordedArtifactKindSchema = external_exports.enum([
+      "metadata",
+      "design-context",
+      "screenshot",
+      "variable-defs",
+      "code-connect-map"
+    ]);
+    FigmaIntakeResultSchema = external_exports.object({
+      duplicate: external_exports.boolean(),
+      sourceId: SourceIdSchema,
+      evidenceId: EvidenceIdSchema.optional(),
+      artifactId: ArtifactIdSchema.optional(),
+      artifactDigest: Sha256DigestSchema.optional(),
+      kind: FigmaRecordedArtifactKindSchema.optional()
+    }).strict();
+  }
+});
+
+// src/figma/figma-url.ts
+function parseFigmaUrl(rawUrl) {
+  const url2 = new URL(rawUrl);
+  if (!isFigmaHost(url2.hostname)) {
+    throw new Error(`Expected a figma.com URL, received ${url2.hostname}`);
+  }
+  const parts = url2.pathname.split("/").filter(Boolean);
+  const kind = parts[0];
+  if (kind !== "design" && kind !== "file" && kind !== "proto") {
+    throw new Error(`Unsupported Figma URL kind: ${kind ?? "<missing>"}`);
+  }
+  const fileKey = parts[1];
+  if (fileKey === void 0 || fileKey.trim().length === 0) {
+    throw new Error("Figma URL is missing file key");
+  }
+  const nodeIdParam = url2.searchParams.get("node-id");
+  if (nodeIdParam === null || nodeIdParam.trim().length === 0) {
+    throw new Error("Figma URL must include node-id for design evidence");
+  }
+  const nodeId = normalizeFigmaNodeId(nodeIdParam);
+  const canonical = new URL(`https://www.figma.com/${kind}/${fileKey}`);
+  canonical.searchParams.set("node-id", nodeId.replaceAll(":", "-"));
+  return ParsedFigmaUrlSchema.parse({
+    rawUrl,
+    canonicalUrl: canonical.toString(),
+    kind,
+    fileKey,
+    nodeId
+  });
+}
+function normalizeFigmaNodeId(rawNodeId) {
+  const trimmed = rawNodeId.trim();
+  const normalized = trimmed.includes(":") ? trimmed : trimmed.replaceAll("-", ":");
+  return FigmaNodeIdSchema.parse(normalized);
+}
+function isFigmaHost(hostname3) {
+  return hostname3 === "figma.com" || hostname3 === "www.figma.com";
+}
+var FigmaFileKindSchema, FigmaNodeIdSchema, FigmaFileKeySchema, ParsedFigmaUrlSchema;
+var init_figma_url = __esm({
+  "src/figma/figma-url.ts"() {
+    "use strict";
+    init_zod();
+    FigmaFileKindSchema = external_exports.enum(["design", "file", "proto"]);
+    FigmaNodeIdSchema = external_exports.string().trim().min(1).regex(/^\d+:\d+(?::\d+)*$/, "Expected normalized Figma node id such as 238:941");
+    FigmaFileKeySchema = external_exports.string().trim().min(1).regex(/^[A-Za-z0-9_-]+$/, "Expected Figma file key");
+    ParsedFigmaUrlSchema = external_exports.object({
+      rawUrl: external_exports.string().url(),
+      canonicalUrl: external_exports.string().url(),
+      kind: FigmaFileKindSchema,
+      fileKey: FigmaFileKeySchema,
+      nodeId: FigmaNodeIdSchema
+    }).strict();
+  }
+});
+
+// src/application/figma-intake-service.ts
+function findFigmaSource(sources, sourceId) {
+  const source = sources.find((item) => item.id === sourceId);
+  if (source === void 0) throw new Error(`Source not found: ${sourceId}`);
+  if (source.kind !== "figma" || source.locator.type !== "figma") {
+    throw new Error(`Source is not a Figma source: ${sourceId}`);
+  }
+  if (source.locator.fileKey === void 0 || source.locator.nodeId === void 0) {
+    throw new Error(`Figma source is missing fileKey or nodeId: ${sourceId}`);
+  }
+  return source;
+}
+function createFigmaEvidence(input) {
+  if (input.source.locator.type !== "figma") throw new Error("Expected figma source locator");
+  return EvidenceRefSchema.parse({
+    id: createEvidenceId(),
+    sourceId: input.source.id,
+    location: {
+      type: "figma-node",
+      fileKey: input.source.locator.fileKey,
+      nodeId: input.source.locator.nodeId
+    },
+    summary: `Figma ${input.kind} evidence for node ${input.source.locator.nodeId}`,
+    digest: input.digest,
+    capturedAt: input.timestamp,
+    metadata: {
+      adapter: FIGMA_INTAKE_ADAPTER,
+      providerId: input.providerId,
+      sourceDigest: input.source.digest,
+      figmaArtifactKind: input.kind,
+      fileKey: input.source.locator.fileKey,
+      nodeId: input.source.locator.nodeId
+    }
+  });
+}
+function createFigmaArtifact(input) {
+  return ArtifactRefSchema.parse({
+    id: createArtifactId(),
+    kind: figmaKindToArtifactKind(input.kind),
+    uri: input.blobUri,
+    mediaType: input.mediaType,
+    digest: input.digest,
+    producedBy: "orchestrator",
+    evidenceIds: [input.evidenceId],
+    createdAt: input.timestamp,
+    metadata: {
+      adapter: FIGMA_INTAKE_ADAPTER,
+      providerId: input.providerId,
+      sourceId: input.source.id,
+      sourceDigest: input.source.digest,
+      figmaArtifactKind: input.kind
+    }
+  });
+}
+function decodeBase64(value) {
+  const buffer = Buffer.from(value, "base64");
+  if (buffer.byteLength === 0) throw new Error("Decoded screenshot is empty");
+  return buffer;
+}
+var RegisterFigmaSourceInputSchema, BaseRecordFigmaInputSchema, RecordFigmaTextArtifactInputSchema, RecordFigmaScreenshotInputSchema, FIGMA_INTAKE_ADAPTER, FigmaIntakeService;
+var init_figma_intake_service = __esm({
+  "src/application/figma-intake-service.ts"() {
+    "use strict";
+    init_zod();
+    init_artifact_blob_store();
+    init_figma_intake_contracts();
+    init_figma_url();
+    init_run2();
+    init_artifact();
+    init_id_factory();
+    init_ids();
+    init_scalars();
+    init_source();
+    init_content_hash();
+    RegisterFigmaSourceInputSchema = external_exports.object({
+      runId: RunIdSchema,
+      url: external_exports.string().url(),
+      label: external_exports.string().trim().min(1).max(200).optional()
+    }).strict();
+    BaseRecordFigmaInputSchema = external_exports.object({
+      runId: RunIdSchema,
+      sourceId: SourceIdSchema,
+      providerId: external_exports.string().trim().min(1).optional()
+    }).strict();
+    RecordFigmaTextArtifactInputSchema = BaseRecordFigmaInputSchema.extend({
+      kind: FigmaRecordedArtifactKindSchema.exclude(["screenshot"]),
+      content: external_exports.string().min(1),
+      mediaType: external_exports.string().trim().min(1).default("text/plain")
+    }).strict();
+    RecordFigmaScreenshotInputSchema = BaseRecordFigmaInputSchema.extend({
+      imageBase64: external_exports.string().min(1),
+      mediaType: external_exports.string().trim().min(1).default("image/png")
+    }).strict();
+    FIGMA_INTAKE_ADAPTER = "figma-intake-v1";
+    FigmaIntakeService = class {
+      constructor(runStore, artifactStore, now = () => (/* @__PURE__ */ new Date()).toISOString()) {
+        this.runStore = runStore;
+        this.artifactStore = artifactStore;
+        this.now = now;
+      }
+      runStore;
+      artifactStore;
+      now;
+      async registerFigmaSource(rawInput) {
+        const input = RegisterFigmaSourceInputSchema.parse(rawInput);
+        const run = await this.runStore.get(input.runId);
+        const parsed = parseFigmaUrl(input.url);
+        const timestamp = IsoDateTimeSchema.parse(this.now());
+        const locatorDigest = sha256Digest(
+          Buffer.from(
+            JSON.stringify({
+              type: "figma",
+              fileKey: parsed.fileKey,
+              nodeId: parsed.nodeId,
+              canonicalUrl: parsed.canonicalUrl
+            }),
+            "utf8"
+          )
+        );
+        const existing = run.sources.find(
+          (source2) => source2.kind === "figma" && source2.locator.type === "figma" && source2.locator.fileKey === parsed.fileKey && source2.locator.nodeId === parsed.nodeId && source2.digest === locatorDigest
+        );
+        if (existing !== void 0) {
+          return {
+            duplicate: true,
+            run: summarizeRun(run),
+            source: existing
+          };
+        }
+        const source = SourceRefSchema.parse({
+          id: createSourceId(),
+          kind: "figma",
+          locator: {
+            type: "figma",
+            url: parsed.canonicalUrl,
+            fileKey: parsed.fileKey,
+            nodeId: parsed.nodeId
+          },
+          digest: locatorDigest,
+          capturedAt: timestamp,
+          metadata: {
+            adapter: FIGMA_INTAKE_ADAPTER,
+            rawUrl: parsed.rawUrl,
+            canonicalUrl: parsed.canonicalUrl,
+            figmaKind: parsed.kind,
+            ...input.label === void 0 ? {} : { label: input.label }
+          }
+        });
+        const nextRun = RunManifestSchema.parse({
+          ...run,
+          revision: run.revision + 1,
+          updatedAt: timestamp,
+          sources: [...run.sources, source]
+        });
+        await this.runStore.save(nextRun, run.revision);
+        return {
+          duplicate: false,
+          run: summarizeRun(nextRun),
+          source
+        };
+      }
+      async recordTextArtifact(rawInput) {
+        const input = RecordFigmaTextArtifactInputSchema.parse(rawInput);
+        return this.recordArtifact({
+          runId: input.runId,
+          sourceId: input.sourceId,
+          ...input.providerId === void 0 ? {} : { providerId: input.providerId },
+          kind: input.kind,
+          content: Buffer.from(input.content, "utf8"),
+          mediaType: input.mediaType,
+          label: `figma-${input.kind}`
+        });
+      }
+      async recordScreenshot(rawInput) {
+        const input = RecordFigmaScreenshotInputSchema.parse(rawInput);
+        return this.recordArtifact({
+          runId: input.runId,
+          sourceId: input.sourceId,
+          ...input.providerId === void 0 ? {} : { providerId: input.providerId },
+          kind: "screenshot",
+          content: decodeBase64(input.imageBase64),
+          mediaType: input.mediaType,
+          label: "figma-screenshot"
+        });
+      }
+      async recordArtifact(input) {
+        const run = await this.runStore.get(RunIdSchema.parse(input.runId));
+        const source = findFigmaSource(run.sources, input.sourceId);
+        const timestamp = IsoDateTimeSchema.parse(this.now());
+        const providerId = input.providerId ?? "unknown";
+        const contentDigest = sha256Digest(input.content);
+        const duplicate = run.artifacts.find(
+          (artifact2) => artifact2.digest === contentDigest && artifact2.metadata["adapter"] === FIGMA_INTAKE_ADAPTER && artifact2.metadata["sourceId"] === source.id && artifact2.metadata["figmaArtifactKind"] === input.kind && artifact2.metadata["providerId"] === providerId
+        );
+        if (duplicate !== void 0) {
+          return FigmaIntakeResultSchema.parse({
+            duplicate: true,
+            sourceId: source.id,
+            artifactId: duplicate.id,
+            artifactDigest: duplicate.digest,
+            kind: input.kind
+          });
+        }
+        const blob = await this.artifactStore.writeBlob({
+          content: input.content,
+          mediaType: input.mediaType,
+          storedAt: timestamp,
+          label: input.label
+        });
+        const evidence = createFigmaEvidence({
+          source,
+          kind: input.kind,
+          digest: contentDigest,
+          timestamp,
+          providerId
+        });
+        const artifact = createFigmaArtifact({
+          kind: input.kind,
+          blobUri: blob.uri,
+          mediaType: input.mediaType,
+          digest: blob.digest,
+          evidenceId: evidence.id,
+          timestamp,
+          source,
+          providerId
+        });
+        const nextRun = RunManifestSchema.parse({
+          ...run,
+          revision: run.revision + 1,
+          updatedAt: timestamp,
+          evidence: [...run.evidence, evidence],
+          artifacts: [...run.artifacts, artifact]
+        });
+        await this.runStore.save(nextRun, run.revision);
+        return FigmaIntakeResultSchema.parse({
+          duplicate: false,
+          sourceId: source.id,
+          evidenceId: evidence.id,
+          artifactId: artifact.id,
+          artifactDigest: artifact.digest,
+          kind: input.kind
+        });
       }
     };
   }
@@ -37507,6 +37855,72 @@ function createKernelServer(servicesProvider) {
     })
   );
   server.registerTool(
+    "register_figma_source",
+    {
+      title: "Register Figma source",
+      description: "Parse a Figma URL and attach it as a Figma SourceRef to a Run.",
+      inputSchema: RegisterFigmaSourceInputSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { figmaIntakeService } = await servicesProvider();
+      const result = await figmaIntakeService.registerFigmaSource(input);
+      return {
+        text: result.duplicate ? `Figma source ${result.source.id} was already registered.` : `Registered Figma source ${result.source.id}.`,
+        structuredContent: result
+      };
+    })
+  );
+  registerFigmaTextRecorder(server, servicesProvider, {
+    toolName: "record_figma_metadata",
+    title: "Record Figma metadata",
+    kind: "metadata",
+    mediaType: "application/xml"
+  });
+  registerFigmaTextRecorder(server, servicesProvider, {
+    toolName: "record_figma_design_context",
+    title: "Record Figma design context",
+    kind: "design-context",
+    mediaType: "text/plain"
+  });
+  registerFigmaTextRecorder(server, servicesProvider, {
+    toolName: "record_figma_variable_defs",
+    title: "Record Figma variable definitions",
+    kind: "variable-defs",
+    mediaType: "text/plain"
+  });
+  registerFigmaTextRecorder(server, servicesProvider, {
+    toolName: "record_figma_code_connect_map",
+    title: "Record Figma Code Connect map",
+    kind: "code-connect-map",
+    mediaType: "application/json"
+  });
+  server.registerTool(
+    "record_figma_screenshot",
+    {
+      title: "Record Figma screenshot",
+      description: "Record a base64 screenshot from Figma MCP get_screenshot.",
+      inputSchema: RecordFigmaScreenshotInputSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { figmaIntakeService } = await servicesProvider();
+      const structuredContent = await figmaIntakeService.recordScreenshot(input);
+      return {
+        text: `Recorded Figma screenshot for source ${structuredContent.sourceId}.`,
+        structuredContent
+      };
+    })
+  );
+  server.registerTool(
     "create_run",
     {
       title: "Create run",
@@ -37719,6 +38133,33 @@ function createKernelServer(servicesProvider) {
   );
   return server;
 }
+function registerFigmaTextRecorder(server, servicesProvider, input) {
+  server.registerTool(
+    input.toolName,
+    {
+      title: input.title,
+      description: `Record Figma ${input.kind} output as a Run artifact.`,
+      inputSchema: RecordFigmaTextArtifactInputSchema.omit({ kind: true }).shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true
+      }
+    },
+    async (rawInput) => handleTool(async () => {
+      const { figmaIntakeService } = await servicesProvider();
+      const structuredContent = await figmaIntakeService.recordTextArtifact({
+        ...rawInput,
+        kind: input.kind,
+        mediaType: input.mediaType
+      });
+      return {
+        text: `Recorded Figma ${input.kind} for source ${structuredContent.sourceId}.`,
+        structuredContent
+      };
+    })
+  );
+}
 async function handleTool(operation) {
   try {
     const result = await operation();
@@ -37760,6 +38201,7 @@ var init_create_server = __esm({
     init_zod();
     init_brief_adapter_service();
     init_figma_capability_service();
+    init_figma_intake_service();
     init_policy_service();
     init_profile_service();
     init_run_service();
@@ -37833,7 +38275,13 @@ var init_create_server = __esm({
       "get_source_snapshot",
       "analyze_brief_source",
       "record_figma_mcp_capabilities",
-      "get_figma_provider_policy"
+      "get_figma_provider_policy",
+      "register_figma_source",
+      "record_figma_metadata",
+      "record_figma_design_context",
+      "record_figma_screenshot",
+      "record_figma_variable_defs",
+      "record_figma_code_connect_map"
     ];
   }
 });
@@ -38178,7 +38626,8 @@ function createLazyServicesProvider() {
       ),
       sourceRegistryService: new SourceRegistryService(store, snapshotStore),
       briefAdapterService: new BriefAdapterService(store, snapshotStore),
-      figmaCapabilityService: new FigmaCapabilityService(store, artifactStore)
+      figmaCapabilityService: new FigmaCapabilityService(store, artifactStore),
+      figmaIntakeService: new FigmaIntakeService(store, artifactStore)
     };
     return services;
   };
@@ -38193,6 +38642,7 @@ var init_run_service_provider = __esm({
     init_artifact_blob_store();
     init_brief_adapter_service();
     init_figma_capability_service();
+    init_figma_intake_service();
     init_policy_service();
     init_profile_service();
     init_run_service();
