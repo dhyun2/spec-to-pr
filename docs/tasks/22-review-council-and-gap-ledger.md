@@ -72,3 +72,36 @@ The system needs to determine whether:
 - Review report artifact is added to Run.
 - New gaps can be appended to Run.
 - MCP stdio test covers review council flow.
+
+## Verification
+
+Run:
+
+```bash
+pnpm format:check
+pnpm typecheck
+pnpm schemas:build
+pnpm build
+pnpm test
+pnpm audit
+```
+
+Expected:
+
+- review model tests pass
+- review precheck tests pass
+- review renderer tests pass
+- ReviewCouncilService tests pass
+- MCP stdio integration calls:
+  - prepare_review_council
+  - get_review_council_context
+  - record_review_council_result
+
+## Known Limitations
+
+- Review Council does not modify product code.
+- Review Council does not run tests.
+- Review Council does not run visual regression.
+- Semantic review depends on the review-council subagent output.
+- Deterministic prechecks are incomplete and will grow over time.
+- Gap resolution still requires resolution artifacts.
