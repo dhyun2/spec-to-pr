@@ -44,3 +44,22 @@ Tradeoffs:
 - Worktree cleanup is required.
 - Branch naming must be deterministic.
 - Some repositories with submodules may need extra handling.
+
+## Implementation Notes
+
+The first implementation exposes preparation through MCP tools, not agent execution.
+
+The service writes:
+
+- context packs under `.spec-to-pr/context-packs/<run-id>/<agent>/`
+- runtime reports under `.spec-to-pr/agent-runtime/<run-id>/`
+- worktrees under `.spec-to-pr/worktrees/<run-id>/<agent>/`
+
+The command runner is intentionally limited to `git` commands needed for repository detection,
+`HEAD` resolution, worktree creation, listing, removal, and pruning.
+
+## Deferred Decisions
+
+- Agent process execution is intentionally deferred.
+- Review council orchestration is intentionally deferred.
+- Commit, push, pull request, and merge behavior is intentionally deferred.
