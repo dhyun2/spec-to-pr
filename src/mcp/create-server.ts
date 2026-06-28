@@ -104,6 +104,18 @@ import {
   RecordObservabilityReviewResultSchema,
 } from "../application/observability-service.js";
 import { AnalyzeOpenApiSourceInputSchema } from "../application/openapi-intake-service.js";
+import {
+  ExecuteOpenSpecArchiveInputSchema,
+  ExecuteOpenSpecArchiveResultSchema,
+  GetOpenSpecArchiveResultInputSchema,
+  GetOpenSpecArchiveResultResultSchema,
+  PlanOpenSpecArchiveInputSchema,
+  PlanOpenSpecArchiveResultSchema,
+  RecordOpenSpecArchiveReviewInputSchema,
+  RecordOpenSpecArchiveReviewResultSchema,
+  VerifyReviewRequestMergedInputSchema,
+  VerifyReviewRequestMergedResultSchema,
+} from "../application/openspec-archive-service.js";
 import { GenerateOpenSpecChangeInputSchema } from "../application/openspec-change-service.js";
 import { RedactTextInputSchema } from "../application/policy-service.js";
 import {
@@ -266,6 +278,11 @@ const TOOL_NAMES = [
   "update_review_request_body",
   "get_publish_result",
   "record_publish_review",
+  "verify_review_request_merged",
+  "plan_openspec_archive",
+  "execute_openspec_archive",
+  "get_openspec_archive_result",
+  "record_openspec_archive_review",
   "analyze_architecture_boundaries",
   "generate_source_guard_tests",
   "run_quality_gates",
@@ -958,6 +975,136 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
 
         return {
           text: `Recorded publish review ${structuredContent.reviewArtifactId}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "verify_review_request_merged",
+    {
+      title: "Verify review request merged",
+      description:
+        "Record normalized PR/MR merge status evidence before OpenSpec archive planning.",
+      inputSchema: VerifyReviewRequestMergedInputSchema.shape,
+      outputSchema: VerifyReviewRequestMergedResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { openSpecArchiveService } = await servicesProvider();
+        const structuredContent = await openSpecArchiveService.verifyMerged(input);
+
+        return {
+          text: structuredContent.verification.verified
+            ? `Recorded merged review request status ${structuredContent.artifactId}.`
+            : `Recorded unmerged review request status ${structuredContent.artifactId}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "plan_openspec_archive",
+    {
+      title: "Plan OpenSpec archive",
+      description:
+        "Create an OpenSpec archive plan after merge-state and archive precondition checks.",
+      inputSchema: PlanOpenSpecArchiveInputSchema.shape,
+      outputSchema: PlanOpenSpecArchiveResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { openSpecArchiveService } = await servicesProvider();
+        const structuredContent = await openSpecArchiveService.plan(input);
+
+        return {
+          text: structuredContent.plan.canExecute
+            ? `OpenSpec archive plan for ${structuredContent.plan.changeName} is executable.`
+            : `OpenSpec archive plan for ${structuredContent.plan.changeName} is blocked.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "execute_openspec_archive",
+    {
+      title: "Execute OpenSpec archive",
+      description: "Execute OpenSpec archive command after merge-state and precondition checks.",
+      inputSchema: ExecuteOpenSpecArchiveInputSchema.shape,
+      outputSchema: ExecuteOpenSpecArchiveResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { openSpecArchiveService } = await servicesProvider();
+        const structuredContent = await openSpecArchiveService.execute(input);
+
+        return {
+          text: `OpenSpec archive ${structuredContent.result.status}: ${structuredContent.result.summary}`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "get_openspec_archive_result",
+    {
+      title: "Get OpenSpec archive result",
+      description: "Load the latest OpenSpec archive execution result artifact for a Run.",
+      inputSchema: GetOpenSpecArchiveResultInputSchema.shape,
+      outputSchema: GetOpenSpecArchiveResultResultSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { openSpecArchiveService } = await servicesProvider();
+        const structuredContent = await openSpecArchiveService.getResult(input);
+
+        return {
+          text: `Loaded OpenSpec archive result ${structuredContent.artifactId}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "record_openspec_archive_review",
+    {
+      title: "Record OpenSpec archive review",
+      description: "Record openspec-archive-reviewer findings for an archive plan or result.",
+      inputSchema: RecordOpenSpecArchiveReviewInputSchema.shape,
+      outputSchema: RecordOpenSpecArchiveReviewResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { openSpecArchiveService } = await servicesProvider();
+        const structuredContent = await openSpecArchiveService.recordReview(input);
+
+        return {
+          text: `Recorded OpenSpec archive review ${structuredContent.reviewArtifactId}.`,
           structuredContent,
         };
       }),
