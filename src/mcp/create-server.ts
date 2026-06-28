@@ -2,6 +2,7 @@ import packageJson from "../../package.json" with { type: "json" };
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
+import { GenerateApiPipelineInputSchema } from "../application/api-pipeline-service.js";
 import { AnalyzeBriefSourceInputSchema } from "../application/brief-adapter-service.js";
 import {
   BuildEvidenceGraphInputSchema,
@@ -148,6 +149,7 @@ const TOOL_NAMES = [
   "get_figma_design_inventory",
   "generate_openspec_change",
   "generate_gherkin_test_matrix",
+  "generate_api_pipeline",
 ] as const;
 
 export function createKernelServer(servicesProvider: ServicesProvider): McpServer {
@@ -704,6 +706,33 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
           text: structuredContent.duplicate
             ? `Gherkin test matrix for ${structuredContent.changeName} already exists.`
             : `Generated ${structuredContent.scenarioCount} Gherkin scenario(s) for ${structuredContent.changeName}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "generate_api_pipeline",
+    {
+      title: "Generate API pipeline",
+      description:
+        "Generate API types, Zod schemas, wrappers, mocks, contract tests, source guards, and pipeline reports from OpenAPI intake evidence.",
+      inputSchema: GenerateApiPipelineInputSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { apiPipelineService } = await servicesProvider();
+        const structuredContent = await apiPipelineService.generate(input);
+
+        return {
+          text: structuredContent.duplicate
+            ? `API pipeline for ${structuredContent.sourceKey} already exists.`
+            : `Generated API pipeline for ${structuredContent.sourceKey} with ${structuredContent.generatedFiles.length} files.`,
           structuredContent,
         };
       }),

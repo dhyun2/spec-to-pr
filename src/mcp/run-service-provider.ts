@@ -3,6 +3,7 @@ import path from "node:path";
 
 import packageJson from "../../package.json" with { type: "json" };
 import { ArtifactBlobStore } from "../artifact-registry/artifact-blob-store.js";
+import { ApiPipelineService } from "../application/api-pipeline-service.js";
 import { BriefAdapterService } from "../application/brief-adapter-service.js";
 import { EvidenceGraphService } from "../application/evidence-graph-service.js";
 import { FigmaCapabilityService } from "../application/figma-capability-service.js";
@@ -35,6 +36,7 @@ export type Services = {
   openApiIntakeService: OpenApiIntakeService;
   openSpecChangeService: OpenSpecChangeService;
   gherkinTestMatrixService: GherkinTestMatrixService;
+  apiPipelineService: ApiPipelineService;
 };
 
 export type ServicesProvider = () => Promise<Services>;
@@ -72,6 +74,7 @@ export function createLazyServicesProvider(): ServicesProvider {
       openApiIntakeService: new OpenApiIntakeService(store, snapshotStore, artifactStore),
       openSpecChangeService: new OpenSpecChangeService(store, artifactStore),
       gherkinTestMatrixService: new GherkinTestMatrixService(store),
+      apiPipelineService: new ApiPipelineService(store, artifactStore),
     };
 
     return services;
