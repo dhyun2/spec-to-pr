@@ -73,6 +73,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "generate_api_pipeline",
       "generate_figma_design_contract",
       "generate_gherkin_test_matrix",
+      "generate_observability_config",
       "generate_openspec_change",
       "generate_source_guard_tests",
       "get_accessibility_report",
@@ -83,6 +84,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "get_figma_design_inventory",
       "get_figma_provider_policy",
       "get_integration_plan",
+      "get_observability_report",
       "get_performance_report",
       "get_project_profile",
       "get_resume_plan",
@@ -101,6 +103,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "list_project_profiles",
       "list_runs",
       "plan_accessibility_gate",
+      "plan_observability",
       "plan_performance_gate",
       "plan_visual_regression",
       "policy_info",
@@ -120,6 +123,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "record_figma_screenshot",
       "record_figma_variable_defs",
       "record_integration_repair",
+      "record_observability_review",
       "record_performance_review",
       "record_review_council_result",
       "record_spec_bdd_agent_result",
@@ -425,6 +429,81 @@ describe("spec-to-pr MCP stdio server", () => {
     });
 
     expect(performanceReview.structuredContent).toMatchObject({
+      reviewArtifactId: expect.any(String),
+    });
+
+    const plannedObservability = await client.callTool({
+      name: "plan_observability",
+      arguments: {
+        runId,
+        target: "both",
+        serviceName: "rangepro",
+        serviceVersion: "1.0.0",
+        environment: "test",
+      },
+    });
+
+    expect(plannedObservability.structuredContent).toMatchObject({
+      plan: {
+        enableLogCorrelation: true,
+        enableOtelLogs: false,
+      },
+      gaps: [],
+    });
+
+    const observability = await client.callTool({
+      name: "generate_observability_config",
+      arguments: {
+        runId,
+        target: "both",
+        serviceName: "rangepro",
+        serviceVersion: "1.0.0",
+        environment: "test",
+      },
+    });
+
+    expect(observability.structuredContent).toMatchObject({
+      gapCount: 0,
+      reportArtifactId: expect.any(String),
+    });
+
+    const observabilityReportArtifactId = (
+      observability.structuredContent as {
+        reportArtifactId: string;
+      }
+    ).reportArtifactId;
+
+    const observabilityReport = await client.callTool({
+      name: "get_observability_report",
+      arguments: {
+        runId,
+        reportArtifactId: observabilityReportArtifactId,
+      },
+    });
+
+    expect(observabilityReport.structuredContent).toMatchObject({
+      report: {
+        runId,
+        plan: {
+          enableLogCorrelation: true,
+        },
+      },
+    });
+
+    const observabilityReview = await client.callTool({
+      name: "record_observability_review",
+      arguments: {
+        runId,
+        reportArtifactId: observabilityReportArtifactId,
+        review: {
+          status: "passed",
+          findings: [],
+          requiredFollowUps: [],
+        },
+      },
+    });
+
+    expect(observabilityReview.structuredContent).toMatchObject({
       reviewArtifactId: expect.any(String),
     });
 
