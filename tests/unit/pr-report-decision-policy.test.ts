@@ -35,8 +35,10 @@ describe("PR report decision policy", () => {
           observed: "API missing",
           impact: "Cannot implement",
           sourceEvidenceIds: [],
+          resolutionArtifactIds: [],
           createdAt: "2026-06-23T00:00:00.000Z",
           updatedAt: "2026-06-23T00:00:00.000Z",
+          metadata: {},
         },
       ],
     });
@@ -58,8 +60,10 @@ describe("PR report decision policy", () => {
           observed: "State missing",
           impact: "Visual uncertainty",
           sourceEvidenceIds: [],
+          resolutionArtifactIds: [],
           createdAt: "2026-06-23T00:00:00.000Z",
           updatedAt: "2026-06-23T00:00:00.000Z",
+          metadata: {},
         },
       ],
     });
