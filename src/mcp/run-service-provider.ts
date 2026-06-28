@@ -5,6 +5,7 @@ import packageJson from "../../package.json" with { type: "json" };
 import { ArtifactBlobStore } from "../artifact-registry/artifact-blob-store.js";
 import { ApiPipelineService } from "../application/api-pipeline-service.js";
 import { BriefAdapterService } from "../application/brief-adapter-service.js";
+import { DesignContractService } from "../application/design-contract-service.js";
 import { EvidenceGraphService } from "../application/evidence-graph-service.js";
 import { FigmaCapabilityService } from "../application/figma-capability-service.js";
 import { FigmaDesignInventoryService } from "../application/figma-design-inventory-service.js";
@@ -37,6 +38,7 @@ export type Services = {
   openSpecChangeService: OpenSpecChangeService;
   gherkinTestMatrixService: GherkinTestMatrixService;
   apiPipelineService: ApiPipelineService;
+  designContractService: DesignContractService;
 };
 
 export type ServicesProvider = () => Promise<Services>;
@@ -75,6 +77,7 @@ export function createLazyServicesProvider(): ServicesProvider {
       openSpecChangeService: new OpenSpecChangeService(store, artifactStore),
       gherkinTestMatrixService: new GherkinTestMatrixService(store),
       apiPipelineService: new ApiPipelineService(store, artifactStore),
+      designContractService: new DesignContractService(store, artifactStore),
     };
 
     return services;

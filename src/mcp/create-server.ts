@@ -5,6 +5,10 @@ import { z } from "zod";
 import { GenerateApiPipelineInputSchema } from "../application/api-pipeline-service.js";
 import { AnalyzeBriefSourceInputSchema } from "../application/brief-adapter-service.js";
 import {
+  GenerateDesignContractInputSchema,
+  GetDesignContractSummaryInputSchema,
+} from "../application/design-contract-service.js";
+import {
   BuildEvidenceGraphInputSchema,
   EvidenceGraphBuildResultSchema,
   GetTraceabilityMatrixInputSchema,
@@ -150,6 +154,8 @@ const TOOL_NAMES = [
   "generate_openspec_change",
   "generate_gherkin_test_matrix",
   "generate_api_pipeline",
+  "generate_figma_design_contract",
+  "get_figma_design_contract_summary",
 ] as const;
 
 export function createKernelServer(servicesProvider: ServicesProvider): McpServer {
@@ -733,6 +739,56 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
           text: structuredContent.duplicate
             ? `API pipeline for ${structuredContent.sourceKey} already exists.`
             : `Generated API pipeline for ${structuredContent.sourceKey} with ${structuredContent.generatedFiles.length} files.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "generate_figma_design_contract",
+    {
+      title: "Generate Figma design contract",
+      description:
+        "Generate component, token, typography, and asset mapping contracts from Figma inventory.",
+      inputSchema: GenerateDesignContractInputSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { designContractService } = await servicesProvider();
+        const structuredContent = await designContractService.generate(input);
+
+        return {
+          text: structuredContent.duplicate
+            ? `Design contract for ${structuredContent.changeName} already exists.`
+            : `Generated design contract for ${structuredContent.changeName} with ${structuredContent.changedFiles.length} changed files.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "get_figma_design_contract_summary",
+    {
+      title: "Get Figma design contract summary",
+      description: "Return summary counts for a generated Figma design contract.",
+      inputSchema: GetDesignContractSummaryInputSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { designContractService } = await servicesProvider();
+        const structuredContent = await designContractService.getSummary(input);
+
+        return {
+          text: `Loaded design contract summary for ${structuredContent.changeName}.`,
           structuredContent,
         };
       }),
