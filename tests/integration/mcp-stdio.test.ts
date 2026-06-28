@@ -71,6 +71,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "generate_openspec_change",
       "get_agent_context_pack",
       "get_api_contract_agent_context",
+      "get_design_ui_agent_context",
       "get_figma_design_contract_summary",
       "get_figma_design_inventory",
       "get_figma_provider_policy",
@@ -91,8 +92,10 @@ describe("spec-to-pr MCP stdio server", () => {
       "policy_info",
       "prepare_agent_runtime",
       "prepare_api_contract_agent",
+      "prepare_design_ui_agent",
       "prepare_spec_bdd_agent",
       "record_api_contract_agent_result",
+      "record_design_ui_agent_result",
       "record_figma_code_connect_map",
       "record_figma_design_context",
       "record_figma_mcp_capabilities",
@@ -732,6 +735,78 @@ components:
     expect(recordedApiContract.structuredContent).toMatchObject({
       runId,
       status: "passed",
+    });
+
+    const preparedDesignUi = await client.callTool({
+      name: "prepare_design_ui_agent",
+      arguments: {
+        runId,
+        changeName: "deliver-reservation-management",
+      },
+    });
+
+    expect(preparedDesignUi.structuredContent).toMatchObject({
+      context: {
+        runId,
+        changeName: "deliver-reservation-management",
+        agent: "design-ui",
+      },
+    });
+
+    const designUiContextArtifactId = (
+      preparedDesignUi.structuredContent as {
+        contextArtifactId: string;
+      }
+    ).contextArtifactId;
+
+    const loadedDesignUiContext = await client.callTool({
+      name: "get_design_ui_agent_context",
+      arguments: {
+        runId,
+        contextArtifactId: designUiContextArtifactId,
+      },
+    });
+
+    expect(loadedDesignUiContext.structuredContent).toMatchObject({
+      runId,
+      changeName: "deliver-reservation-management",
+      agent: "design-ui",
+    });
+
+    const recordedDesignUi = await client.callTool({
+      name: "record_design_ui_agent_result",
+      arguments: {
+        runId,
+        contextArtifactId: designUiContextArtifactId,
+        result: {
+          schemaVersion: "0.1.0",
+          id: "ar_22222222222222222222222222222222",
+          runId,
+          kind: "implementation",
+          agent: "design-ui",
+          status: "passed",
+          baseSha: apiWorktree.baseCommit,
+          commitSha: apiWorktree.baseCommit,
+          changedFiles: ["src/features/reservation/ui/reservation-list.tsx"],
+          evidenceIds: [],
+          artifactIds: [],
+          gapIds: [],
+          checks: [],
+          decisions: [],
+          startedAt: "2026-06-23T00:00:00.000Z",
+          completedAt: "2026-06-23T00:00:01.000Z",
+        },
+      },
+    });
+
+    expect(recordedDesignUi.structuredContent).toMatchObject({
+      run: {
+        id: runId,
+      },
+      result: {
+        agent: "design-ui",
+        status: "passed",
+      },
     });
 
     const contextPack = await client.callTool({
