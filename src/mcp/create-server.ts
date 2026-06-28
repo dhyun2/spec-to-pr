@@ -107,6 +107,14 @@ import { AnalyzeOpenApiSourceInputSchema } from "../application/openapi-intake-s
 import { GenerateOpenSpecChangeInputSchema } from "../application/openspec-change-service.js";
 import { RedactTextInputSchema } from "../application/policy-service.js";
 import {
+  GeneratePrReportInputSchema,
+  GeneratePrReportResultSchema,
+  GetPrReportInputSchema,
+  GetPrReportResultSchema,
+  RecordPrReportReviewInputSchema,
+  RecordPrReportReviewResultSchema,
+} from "../application/pr-report-service.js";
+import {
   CreateIntakeManifestInputSchema,
   GetProjectProfileInputSchema,
   InspectProjectInputSchema,
@@ -236,6 +244,9 @@ const TOOL_NAMES = [
   "generate_observability_config",
   "get_observability_report",
   "record_observability_review",
+  "generate_pr_report",
+  "get_pr_report",
+  "record_pr_report_review",
   "analyze_architecture_boundaries",
   "generate_source_guard_tests",
   "run_quality_gates",
@@ -701,6 +712,80 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
 
         return {
           text: `Recorded observability review ${structuredContent.reviewArtifactId}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "generate_pr_report",
+    {
+      title: "Generate PR report",
+      description: "Generate an evidence-driven PR/MR report body from Run artifacts.",
+      inputSchema: GeneratePrReportInputSchema.shape,
+      outputSchema: GeneratePrReportResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { prReportService } = await servicesProvider();
+        const structuredContent = await prReportService.generatePrReport(input);
+
+        return {
+          text: `Generated PR report with decision ${structuredContent.decision}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "get_pr_report",
+    {
+      title: "Get PR report",
+      description: "Read a generated PR/MR report markdown artifact.",
+      inputSchema: GetPrReportInputSchema.shape,
+      outputSchema: GetPrReportResultSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { prReportService } = await servicesProvider();
+        const structuredContent = await prReportService.getPrReport(input);
+
+        return {
+          text: `Loaded PR report ${structuredContent.artifactId}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "record_pr_report_review",
+    {
+      title: "Record PR report review",
+      description: "Record pr-report-reviewer consistency findings.",
+      inputSchema: RecordPrReportReviewInputSchema.shape,
+      outputSchema: RecordPrReportReviewResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { prReportService } = await servicesProvider();
+        const structuredContent = await prReportService.recordReview(input);
+
+        return {
+          text: `Recorded PR report review ${structuredContent.reviewArtifactId}.`,
           structuredContent,
         };
       }),

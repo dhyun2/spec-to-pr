@@ -22,6 +22,7 @@ import { ObservabilityService } from "../application/observability-service.js";
 import { OpenSpecChangeService } from "../application/openspec-change-service.js";
 import { PerformanceGateService } from "../application/performance-gate-service.js";
 import { PolicyService } from "../application/policy-service.js";
+import { PrReportService } from "../application/pr-report-service.js";
 import { ProjectProfileService } from "../application/profile-service.js";
 import { QualityGateService } from "../application/quality-gate-service.js";
 import { ReviewCouncilService } from "../application/review-council-service.js";
@@ -39,6 +40,7 @@ export type Services = {
   runService: RunService;
   accessibilityGateService: AccessibilityGateService;
   performanceGateService: PerformanceGateService;
+  prReportService: PrReportService;
   stageService: StageService;
   policyService: PolicyService;
   architectureGuardService: ArchitectureGuardService;
@@ -88,6 +90,7 @@ export function createLazyServicesProvider(): ServicesProvider {
       }),
       accessibilityGateService: new AccessibilityGateService(store, artifactStore),
       performanceGateService: new PerformanceGateService(store, artifactStore),
+      prReportService: new PrReportService(store, artifactStore),
       stageService: new StageService(store),
       policyService: new PolicyService(),
       architectureGuardService: new ArchitectureGuardService(store, artifactStore),
