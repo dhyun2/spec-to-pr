@@ -23,6 +23,12 @@ import {
   RecordApiContractAgentResultSchema,
 } from "../application/api-contract-agent-service.js";
 import { GenerateApiPipelineInputSchema } from "../application/api-pipeline-service.js";
+import {
+  AnalyzeArchitectureBoundariesInputSchema,
+  ArchitectureGuardResultSchema,
+  GenerateSourceGuardTestsInputSchema,
+  GenerateSourceGuardTestsResultSchema,
+} from "../application/architecture-guard-service.js";
 import { AnalyzeBriefSourceInputSchema } from "../application/brief-adapter-service.js";
 import {
   GenerateDesignContractInputSchema,
@@ -172,6 +178,8 @@ type ToolResult<TStructuredContent> = {
 const TOOL_NAMES = [
   "kernel_info",
   "kernel_ping",
+  "analyze_architecture_boundaries",
+  "generate_source_guard_tests",
   "create_run",
   "get_run",
   "list_runs",
@@ -333,6 +341,56 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
 
         return {
           text: "Security policy baseline is available.",
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "analyze_architecture_boundaries",
+    {
+      title: "Analyze architecture boundaries",
+      description: "Analyze FSD dependencies, public API usage, and API source guard boundaries.",
+      inputSchema: AnalyzeArchitectureBoundariesInputSchema.shape,
+      outputSchema: ArchitectureGuardResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { architectureGuardService } = await servicesProvider();
+        const structuredContent = await architectureGuardService.analyze(input);
+
+        return {
+          text: `Architecture guard found ${structuredContent.violationCount} violation(s).`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "generate_source_guard_tests",
+    {
+      title: "Generate source guard tests",
+      description: "Generate target repository source guard tests for architecture boundaries.",
+      inputSchema: GenerateSourceGuardTestsInputSchema.shape,
+      outputSchema: GenerateSourceGuardTestsResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { architectureGuardService } = await servicesProvider();
+        const structuredContent = await architectureGuardService.generateSourceGuardTests(input);
+
+        return {
+          text: `Generated source guard test at ${structuredContent.relativePath}.`,
           structuredContent,
         };
       }),

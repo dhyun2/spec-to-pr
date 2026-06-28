@@ -6,6 +6,7 @@ import { ArtifactBlobStore } from "../artifact-registry/artifact-blob-store.js";
 import { AgentRuntimeService } from "../application/agent-runtime-service.js";
 import { ApiContractAgentService } from "../application/api-contract-agent-service.js";
 import { ApiPipelineService } from "../application/api-pipeline-service.js";
+import { ArchitectureGuardService } from "../application/architecture-guard-service.js";
 import { BriefAdapterService } from "../application/brief-adapter-service.js";
 import { DesignContractService } from "../application/design-contract-service.js";
 import { DesignUiAgentLaneService } from "../application/design-ui-agent-lane-service.js";
@@ -33,6 +34,7 @@ export type Services = {
   runService: RunService;
   stageService: StageService;
   policyService: PolicyService;
+  architectureGuardService: ArchitectureGuardService;
   profileService: ProjectProfileService;
   sourceRegistryService: SourceRegistryService;
   briefAdapterService: BriefAdapterService;
@@ -76,6 +78,7 @@ export function createLazyServicesProvider(): ServicesProvider {
       }),
       stageService: new StageService(store),
       policyService: new PolicyService(),
+      architectureGuardService: new ArchitectureGuardService(store, artifactStore),
       profileService: new ProjectProfileService(
         new JsonProfileStore(path.join(dataDirectory, "profiles")),
       ),
