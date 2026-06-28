@@ -41,3 +41,23 @@ Tradeoffs:
 
 - The agent may need follow-up context if the pack is incomplete.
 - The lane prepares work but does not execute tests yet.
+
+## Implementation Notes
+
+The first Spec/BDD lane implementation exposes three MCP tools:
+
+- `prepare_spec_bdd_agent`
+- `get_spec_bdd_agent_context`
+- `record_spec_bdd_agent_result`
+
+The service writes context packs under `.spec-to-pr/runs/<run-id>/agents/spec-bdd/<change-name>/`.
+
+The record step writes review reports under `openspec/changes/<change-name>/artifacts/`,
+creates acceptance skeletons under `tests/acceptance/generated/<change-name>/`, and appends a
+validated `ImplementationAgentResult` for `agent: spec-bdd` to the Run ledger.
+
+## Deferred Decisions
+
+- The service does not directly invoke the subagent.
+- Acceptance skeleton files are non-executable markdown until a later test implementation task.
+- Review Council validation remains a later lane.
