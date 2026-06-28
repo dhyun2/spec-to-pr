@@ -26,6 +26,7 @@ import { RunService } from "../application/run-service.js";
 import { SourceRegistryService } from "../application/source-registry-service.js";
 import { SpecBddAgentLaneService } from "../application/spec-bdd-agent-lane-service.js";
 import { StageService } from "../application/stage-service.js";
+import { VisualRegressionService } from "../application/visual-regression-service.js";
 import { JsonProfileStore } from "../profile/profile-store.js";
 import { SourceSnapshotStore } from "../source-registry/snapshot-store.js";
 
@@ -55,6 +56,7 @@ export type Services = {
   reviewCouncilService: ReviewCouncilService;
   agentRuntimeService: AgentRuntimeService;
   specBddAgentLaneService: SpecBddAgentLaneService;
+  visualRegressionService: VisualRegressionService;
 };
 
 export type ServicesProvider = () => Promise<Services>;
@@ -102,6 +104,7 @@ export function createLazyServicesProvider(): ServicesProvider {
       reviewCouncilService: new ReviewCouncilService(store, artifactStore, dataDirectory),
       agentRuntimeService: new AgentRuntimeService(store),
       specBddAgentLaneService: new SpecBddAgentLaneService(store),
+      visualRegressionService: new VisualRegressionService(store, artifactStore),
     };
 
     return services;

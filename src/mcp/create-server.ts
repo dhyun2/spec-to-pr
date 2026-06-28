@@ -86,6 +86,18 @@ import {
   RunQualityGatesResultSchema,
 } from "../application/quality-gate-service.js";
 import {
+  CaptureBrowserScreenshotsInputSchema,
+  CaptureBrowserScreenshotsResultSchema,
+  CompareVisualSnapshotsInputSchema,
+  CompareVisualSnapshotsResultSchema,
+  GetVisualReportInputSchema,
+  GetVisualReportResultSchema,
+  PlanVisualRegressionInputSchema,
+  PlanVisualRegressionResultSchema,
+  RecordVisualReviewResultInputSchema,
+  RecordVisualReviewResultSchema,
+} from "../application/visual-regression-service.js";
+import {
   GetReviewCouncilContextInputSchema,
   GetReviewCouncilContextResultSchema,
   PrepareReviewCouncilInputSchema,
@@ -185,6 +197,11 @@ const TOOL_NAMES = [
   "analyze_architecture_boundaries",
   "generate_source_guard_tests",
   "run_quality_gates",
+  "plan_visual_regression",
+  "capture_browser_screenshots",
+  "compare_visual_snapshots",
+  "get_visual_report",
+  "record_visual_review_result",
   "create_run",
   "get_run",
   "list_runs",
@@ -422,6 +439,129 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
 
         return {
           text: `Quality gates ${structuredContent.status}: ${structuredContent.passedCount} passed, ${structuredContent.failedCount} failed, ${structuredContent.skippedCount} skipped.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "plan_visual_regression",
+    {
+      title: "Plan visual regression",
+      description: "Build visual comparison targets from stored Figma screenshot artifacts.",
+      inputSchema: PlanVisualRegressionInputSchema.shape,
+      outputSchema: PlanVisualRegressionResultSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { visualRegressionService } = await servicesProvider();
+        const structuredContent = await visualRegressionService.plan(input);
+
+        return {
+          text: `Planned ${structuredContent.targetCount} visual target(s).`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "capture_browser_screenshots",
+    {
+      title: "Capture browser screenshots",
+      description: "Capture browser screenshots for planned visual regression targets.",
+      inputSchema: CaptureBrowserScreenshotsInputSchema.shape,
+      outputSchema: CaptureBrowserScreenshotsResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { visualRegressionService } = await servicesProvider();
+        const structuredContent = await visualRegressionService.capture(input);
+
+        return {
+          text: `Captured ${structuredContent.capturedCount} browser screenshot(s).`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "compare_visual_snapshots",
+    {
+      title: "Compare visual snapshots",
+      description: "Compare stored Figma screenshots with browser screenshot artifacts.",
+      inputSchema: CompareVisualSnapshotsInputSchema.shape,
+      outputSchema: CompareVisualSnapshotsResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { visualRegressionService } = await servicesProvider();
+        const structuredContent = await visualRegressionService.compare(input);
+
+        return {
+          text: `Visual comparison completed for ${structuredContent.report.targetCount} target(s).`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "get_visual_report",
+    {
+      title: "Get visual report",
+      description: "Load the latest visual regression report for a Run.",
+      inputSchema: GetVisualReportInputSchema.shape,
+      outputSchema: GetVisualReportResultSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { visualRegressionService } = await servicesProvider();
+        const structuredContent = await visualRegressionService.getReport(input);
+
+        return {
+          text: `Loaded visual report ${structuredContent.reportArtifactId}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "record_visual_review_result",
+    {
+      title: "Record visual review result",
+      description: "Record visual-regression-reviewer triage output without changing pass/fail.",
+      inputSchema: RecordVisualReviewResultInputSchema.shape,
+      outputSchema: RecordVisualReviewResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { visualRegressionService } = await servicesProvider();
+        const structuredContent = await visualRegressionService.recordReviewResult(input);
+
+        return {
+          text: `Recorded ${structuredContent.findingCount} visual review finding(s).`,
           structuredContent,
         };
       }),
