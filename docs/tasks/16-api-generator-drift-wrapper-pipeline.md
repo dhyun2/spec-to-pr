@@ -70,3 +70,37 @@ Task 16 turns OpenAPI evidence into:
 - Source guard tests are generated.
 - API pipeline report artifact is recorded in Run.
 - MCP tool works through stdio integration tests.
+
+## Verification
+
+Run:
+
+```bash
+pnpm format:check
+pnpm typecheck
+pnpm schemas:build
+pnpm build
+pnpm test
+pnpm audit
+```
+
+Expected:
+
+- generator discovery tests pass
+- TypeScript fallback generator tests pass
+- Zod fallback generator tests pass
+- wrapper generator tests pass
+- mock generator tests pass
+- source guard generator tests pass
+- ApiPipelineService integration test passes
+- MCP stdio integration can call `generate_api_pipeline`
+
+## Known limitations
+
+- Fallback generator is conservative.
+- Existing project generator adapters require project-specific hardening.
+- External `$ref` must be bundled before full generation.
+- oneOf/anyOf/allOf support is limited.
+- Generated wrapper imports may need project-specific adapter updates.
+- Source guard avoids extra dependencies and uses Node filesystem traversal.
+- Live API contract tests are not executed in this task.
