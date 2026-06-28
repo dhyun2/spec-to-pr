@@ -14,6 +14,7 @@ import { FigmaCapabilityService } from "../application/figma-capability-service.
 import { FigmaDesignInventoryService } from "../application/figma-design-inventory-service.js";
 import { FigmaIntakeService } from "../application/figma-intake-service.js";
 import { GherkinTestMatrixService } from "../application/gherkin-test-matrix-service.js";
+import { IntegrationService } from "../application/integration-service.js";
 import { OpenApiIntakeService } from "../application/openapi-intake-service.js";
 import { OpenSpecChangeService } from "../application/openspec-change-service.js";
 import { PolicyService } from "../application/policy-service.js";
@@ -42,6 +43,7 @@ export type Services = {
   openApiIntakeService: OpenApiIntakeService;
   openSpecChangeService: OpenSpecChangeService;
   gherkinTestMatrixService: GherkinTestMatrixService;
+  integrationService: IntegrationService;
   apiPipelineService: ApiPipelineService;
   apiContractAgentService: ApiContractAgentService;
   designContractService: DesignContractService;
@@ -86,6 +88,7 @@ export function createLazyServicesProvider(): ServicesProvider {
       openApiIntakeService: new OpenApiIntakeService(store, snapshotStore, artifactStore),
       openSpecChangeService: new OpenSpecChangeService(store, artifactStore),
       gherkinTestMatrixService: new GherkinTestMatrixService(store),
+      integrationService: new IntegrationService(store, artifactStore, dataDirectory),
       apiPipelineService: new ApiPipelineService(store, artifactStore),
       apiContractAgentService: new ApiContractAgentService(store, dataDirectory),
       designContractService: new DesignContractService(store, artifactStore),

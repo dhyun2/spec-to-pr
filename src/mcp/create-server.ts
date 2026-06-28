@@ -54,6 +54,19 @@ import {
   RecordFigmaTextArtifactInputSchema,
   RegisterFigmaSourceInputSchema,
 } from "../application/figma-intake-service.js";
+import { GenerateGherkinTestMatrixInputSchema } from "../application/gherkin-test-matrix-service.js";
+import {
+  ApplyIntegrationInputSchema,
+  ApplyIntegrationResultSchema,
+  FinalizeIntegrationInputSchema,
+  FinalizeIntegrationResultSchema,
+  GetIntegrationPlanInputSchema,
+  GetIntegrationPlanResultSchema,
+  PrepareIntegrationInputSchema,
+  PrepareIntegrationResultSchema,
+  RecordIntegrationRepairInputSchema,
+  RecordIntegrationRepairResultSchema,
+} from "../application/integration-service.js";
 import { AnalyzeOpenApiSourceInputSchema } from "../application/openapi-intake-service.js";
 import { GenerateOpenSpecChangeInputSchema } from "../application/openspec-change-service.js";
 import { RedactTextInputSchema } from "../application/policy-service.js";
@@ -104,8 +117,6 @@ import { RunManifestSchema, RunSummarySchema } from "../run/index.js";
 import { CommandInvocationSchema } from "../security/command-policy.js";
 import { ValidateWorkspacePathInputSchema } from "../security/path-policy.js";
 import type { ServicesProvider } from "./run-service-provider.js";
-
-import { GenerateGherkinTestMatrixInputSchema } from "../application/gherkin-test-matrix-service.js";
 
 const CONTRACT_VERSION = "0.2.0" as const;
 const SERVER_NAME = "spec-to-pr-kernel" as const;
@@ -215,6 +226,11 @@ const TOOL_NAMES = [
   "prepare_review_council",
   "get_review_council_context",
   "record_review_council_result",
+  "prepare_integration",
+  "get_integration_plan",
+  "apply_integration",
+  "record_integration_repair",
+  "finalize_integration",
   "prepare_spec_bdd_agent",
   "record_spec_bdd_agent_result",
   "get_spec_bdd_agent_context",
@@ -1222,6 +1238,131 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
 
         return {
           text: `Recorded Review Council result with ${structuredContent.findingCount} finding(s) and ${structuredContent.newGapCount} new gap(s).`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "prepare_integration",
+    {
+      title: "Prepare integration",
+      description: "Create an integration worktree and integration plan from approved AgentResults.",
+      inputSchema: PrepareIntegrationInputSchema.shape,
+      outputSchema: PrepareIntegrationResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { integrationService } = await servicesProvider();
+        const structuredContent = await integrationService.prepareIntegration(input);
+
+        return {
+          text: `Prepared integration plan ${structuredContent.planArtifactId}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "get_integration_plan",
+    {
+      title: "Get integration plan",
+      description: "Load a prepared integration plan artifact.",
+      inputSchema: GetIntegrationPlanInputSchema.shape,
+      outputSchema: GetIntegrationPlanResultSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { integrationService } = await servicesProvider();
+        const structuredContent = await integrationService.getIntegrationPlan(input);
+
+        return {
+          text: `Loaded integration plan ${structuredContent.planArtifactId}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "apply_integration",
+    {
+      title: "Apply integration",
+      description:
+        "Apply integration plan commits into the integration worktree using bounded integration policy.",
+      inputSchema: ApplyIntegrationInputSchema.shape,
+      outputSchema: ApplyIntegrationResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { integrationService } = await servicesProvider();
+        const structuredContent = await integrationService.applyIntegration(input);
+
+        return {
+          text: `Integration apply result: ${structuredContent.result.status}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "record_integration_repair",
+    {
+      title: "Record integration repair",
+      description: "Record one bounded integrator repair attempt and update repair history.",
+      inputSchema: RecordIntegrationRepairInputSchema.shape,
+      outputSchema: RecordIntegrationRepairResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { integrationService } = await servicesProvider();
+        const structuredContent = await integrationService.recordRepair(input);
+
+        return {
+          text: `Recorded integration repair attempt ${structuredContent.repairAttemptCount}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "finalize_integration",
+    {
+      title: "Finalize integration",
+      description: "Finalize integration stage metadata. Full quality gates run in later tasks.",
+      inputSchema: FinalizeIntegrationInputSchema.shape,
+      outputSchema: FinalizeIntegrationResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { integrationService } = await servicesProvider();
+        const structuredContent = await integrationService.finalizeIntegration(input);
+
+        return {
+          text: structuredContent.message,
           structuredContent,
         };
       }),
