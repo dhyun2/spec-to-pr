@@ -34,3 +34,36 @@ Task 28 records:
 - Performance report artifact is produced.
 - Performance gaps are recorded.
 - Skill and reviewer agent are added.
+
+## Verification
+
+Run:
+
+```bash
+pnpm format:check
+pnpm typecheck
+pnpm schemas:build
+pnpm build
+pnpm test
+pnpm audit
+```
+
+Expected:
+
+- budget checker tests pass
+- Lighthouse parser tests pass
+- Web Vitals readiness tests pass
+- PerformanceGateService tests pass
+- MCP stdio integration can call:
+  - plan_performance_gate
+  - run_performance_gate
+  - get_performance_report
+  - record_performance_review
+
+## Known Limitations
+
+- Lighthouse execution may be delegated to CI or external runner.
+- Task 28 records lab results; it does not create production field data.
+- INP is treated as field/RUM readiness, not a direct Lighthouse metric.
+- No automatic optimization is performed.
+- Performance reviewer does not modify source code.
