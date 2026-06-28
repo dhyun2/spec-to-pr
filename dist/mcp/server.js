@@ -335,10 +335,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path29) {
-  if (!path29)
+function getElementAtPath(obj, path30) {
+  if (!path30)
     return obj;
-  return path29.reduce((acc, key) => acc?.[key], obj);
+  return path30.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -666,11 +666,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path29, issues) {
+function prefixIssues(path30, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path29);
+    iss.path.unshift(path30);
     return iss;
   });
 }
@@ -888,16 +888,16 @@ function flattenError(error51, mapper = (issue2) => issue2.message) {
 }
 function formatError(error51, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error52, path29 = []) => {
+  const processError = (error52, path30 = []) => {
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path29, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path30, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path29, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path30, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path29, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path30, ...issue2.path]);
       } else {
-        const fullpath = [...path29, ...issue2.path];
+        const fullpath = [...path30, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -924,17 +924,17 @@ function formatError(error51, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error51, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error52, path29 = []) => {
+  const processError = (error52, path30 = []) => {
     var _a3, _b;
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path29, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path30, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path29, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path30, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path29, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path30, ...issue2.path]);
       } else {
-        const fullpath = [...path29, ...issue2.path];
+        const fullpath = [...path30, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -966,8 +966,8 @@ function treeifyError(error51, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path29 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path29) {
+  const path30 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path30) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -14470,13 +14470,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path29 = ref.slice(1).split("/").filter(Boolean);
-  if (path29.length === 0) {
+  const path30 = ref.slice(1).split("/").filter(Boolean);
+  if (path30.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path29[0] === defsKey) {
-    const key = path29[1];
+  if (path30[0] === defsKey) {
+    const key = path30[1];
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -17318,8 +17318,8 @@ var init_parseUtil = __esm({
     init_errors3();
     init_en2();
     makeIssue = (params) => {
-      const { data, path: path29, errorMaps, issueData } = params;
-      const fullPath = [...path29, ...issueData.path || []];
+      const { data, path: path30, errorMaps, issueData } = params;
+      const fullPath = [...path30, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -17602,11 +17602,11 @@ var init_types2 = __esm({
     init_parseUtil();
     init_util2();
     ParseInputLazyPath = class {
-      constructor(parent, value, path29, key) {
+      constructor(parent, value, path30, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path29;
+        this._path = path30;
         this._key = key;
       }
       get path() {
@@ -26950,8 +26950,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path29) {
-      let input = path29;
+    function removeDotSegments(path30) {
+      let input = path30;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -27203,8 +27203,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path29, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path29 && path29 !== "/" ? path29 : void 0;
+        const [path30, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path30 && path30 !== "/" ? path30 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -33888,11 +33888,11 @@ function addUniqueValueIssues(collectionName, values, context) {
     seen.add(value);
   });
 }
-function addReferenceIssue(context, path29, reference) {
+function addReferenceIssue(context, path30, reference) {
   context.addIssue({
     code: "custom",
     message: `Unknown ${reference.kind} reference ${reference.id}`,
-    path: path29
+    path: path30
   });
 }
 var RunStatusSchema, RunManifestSchema, RunSummarySchema, CreateInitialRunInputSchema;
@@ -34169,7 +34169,7 @@ async function writeContextPack(input) {
   const paths = contextPackPaths(input.projectRoot, input.pack.runId, input.pack.agent.agent);
   const json2 = `${JSON.stringify(input.pack, null, 2)}
 `;
-  const markdown3 = renderAgentContextMarkdown(input.pack);
+  const markdown4 = renderAgentContextMarkdown(input.pack);
   assertInsideProjectRoot(input.projectRoot, paths.jsonPath);
   assertInsideProjectRoot(input.projectRoot, paths.markdownPath);
   await mkdir2(path3.dirname(paths.jsonPath), {
@@ -34180,7 +34180,7 @@ async function writeContextPack(input) {
     encoding: "utf8",
     mode: 384
   });
-  await writeFile(paths.markdownPath, markdown3, {
+  await writeFile(paths.markdownPath, markdown4, {
     encoding: "utf8",
     mode: 384
   });
@@ -34324,10 +34324,10 @@ var init_agent_runtime_service = __esm({
         const run = await this.runStore.get(input.runId);
         const paths = contextPackPaths(run.projectRoot, input.runId, input.agent);
         const rawJson = await readFile(paths.jsonPath, "utf8");
-        const markdown3 = await readFile(paths.markdownPath, "utf8");
+        const markdown4 = await readFile(paths.markdownPath, "utf8");
         return GetAgentContextPackResultSchema.parse({
           pack: AgentContextPackSchema.parse(JSON.parse(rawJson)),
-          markdown: markdown3,
+          markdown: markdown4,
           ...paths
         });
       }
@@ -35383,7 +35383,7 @@ function generateFeatureWrappers(input) {
 }
 function renderWrapper(input) {
   const method = input.operation.method.toUpperCase();
-  const path29 = input.operation.path;
+  const path30 = input.operation.path;
   return `// AUTO-GENERATED wrapper skeleton by spec-to-pr.
 // Review and adapt the generated client import to the target project's actual API client.
 // Do not import generated clients directly from UI components.
@@ -35398,7 +35398,7 @@ export type ${capitalize(input.wrapperName)}Input = {
 export async function ${input.wrapperName}(input: ${capitalize(input.wrapperName)}Input = {}) {
   return apiClient.request({
     method: ${JSON.stringify(method)},
-    path: ${JSON.stringify(path29)},
+    path: ${JSON.stringify(path30)},
     params: input.params,
     body: input.body,
   });
@@ -35450,8 +35450,8 @@ ${indent(handlers, 2)}
 }
 function renderHandler(operation) {
   const mswMethod = operation.method.toLowerCase();
-  const path29 = operation.path.replace(/{([^}]+)}/g, ":$1");
-  return `http.${mswMethod}(${JSON.stringify(path29)}, () => {
+  const path30 = operation.path.replace(/{([^}]+)}/g, ":$1");
+  return `http.${mswMethod}(${JSON.stringify(path30)}, () => {
   return HttpResponse.json({});
 }),`;
 }
@@ -38477,14 +38477,14 @@ function findDesignContractArtifact(artifacts, changeName) {
   );
 }
 async function readRepoArtifact(projectRoot, relativePath) {
-  const { readFile: readFile19 } = await import("fs/promises");
-  const path29 = await import("path");
-  const absolutePath = path29.join(projectRoot, relativePath);
-  const relative = path29.relative(projectRoot, absolutePath);
-  if (relative.startsWith("..") || path29.isAbsolute(relative)) {
+  const { readFile: readFile20 } = await import("fs/promises");
+  const path30 = await import("path");
+  const absolutePath = path30.join(projectRoot, relativePath);
+  const relative = path30.relative(projectRoot, absolutePath);
+  if (relative.startsWith("..") || path30.isAbsolute(relative)) {
     throw new Error(`Refusing to read outside project root: ${absolutePath}`);
   }
-  return readFile19(absolutePath, "utf8");
+  return readFile20(absolutePath, "utf8");
 }
 function metadataString(value) {
   return typeof value === "string" && value.trim().length > 0 ? value : void 0;
@@ -43939,15 +43939,727 @@ var init_profile_service = __esm({
   }
 });
 
-// src/application/run-service.ts
+// src/review/review-model.ts
+var ReviewFindingIdSchema, ReviewContradictionIdSchema, ReviewFindingCategorySchema, ReviewSeveritySchema, ReviewFindingStatusSchema, RequirementVerdictSchema, ReviewFindingSchema, RequirementReviewVerdictSchema, ReviewContradictionSchema, ReviewCouncilResultSchema;
+var init_review_model = __esm({
+  "src/review/review-model.ts"() {
+    "use strict";
+    init_zod();
+    init_gap();
+    init_ids();
+    init_scalars();
+    ReviewFindingIdSchema = external_exports.string().regex(/^rf_[a-f0-9]{32}$/);
+    ReviewContradictionIdSchema = external_exports.string().regex(/^rc_[a-f0-9]{32}$/);
+    ReviewFindingCategorySchema = external_exports.enum([
+      "missing-evidence",
+      "contradiction",
+      "gap-policy",
+      "ownership",
+      "api-contract",
+      "design-contract",
+      "test-coverage",
+      "implementation-claim",
+      "security",
+      "other"
+    ]);
+    ReviewSeveritySchema = external_exports.enum(["blocker", "major", "minor", "info"]);
+    ReviewFindingStatusSchema = external_exports.enum([
+      "open",
+      "converted-to-gap",
+      "accepted",
+      "rejected"
+    ]);
+    RequirementVerdictSchema = external_exports.enum([
+      "accepted",
+      "partial",
+      "blocked",
+      "rejected",
+      "unverified"
+    ]);
+    ReviewFindingSchema = external_exports.object({
+      id: ReviewFindingIdSchema,
+      category: ReviewFindingCategorySchema,
+      severity: ReviewSeveritySchema,
+      status: ReviewFindingStatusSchema,
+      title: external_exports.string().trim().min(1).max(200),
+      expected: external_exports.string().trim().min(1).max(4e3),
+      observed: external_exports.string().trim().min(1).max(4e3),
+      recommendation: external_exports.string().trim().min(1).max(2e3),
+      requirementId: external_exports.string().trim().min(1).optional(),
+      agentResultIds: external_exports.array(AgentResultIdSchema).default([]),
+      evidenceIds: external_exports.array(EvidenceIdSchema).default([]),
+      artifactIds: external_exports.array(ArtifactIdSchema).default([]),
+      gapIds: external_exports.array(GapIdSchema).default([]),
+      createdAt: IsoDateTimeSchema
+    }).strict();
+    RequirementReviewVerdictSchema = external_exports.object({
+      requirementId: external_exports.string().trim().min(1),
+      verdict: RequirementVerdictSchema,
+      reason: external_exports.string().trim().min(1).max(2e3),
+      evidenceIds: external_exports.array(EvidenceIdSchema).default([]),
+      artifactIds: external_exports.array(ArtifactIdSchema).default([]),
+      gapIds: external_exports.array(GapIdSchema).default([]),
+      findingIds: external_exports.array(ReviewFindingIdSchema).default([])
+    }).strict();
+    ReviewContradictionSchema = external_exports.object({
+      id: ReviewContradictionIdSchema,
+      severity: ReviewSeveritySchema,
+      left: external_exports.object({
+        kind: external_exports.enum(["requirement", "agent-result", "artifact", "gap", "evidence"]),
+        id: external_exports.string().trim().min(1),
+        summary: external_exports.string().trim().min(1)
+      }).strict(),
+      right: external_exports.object({
+        kind: external_exports.enum(["requirement", "agent-result", "artifact", "gap", "evidence"]),
+        id: external_exports.string().trim().min(1),
+        summary: external_exports.string().trim().min(1)
+      }).strict(),
+      explanation: external_exports.string().trim().min(1).max(2e3),
+      findingIds: external_exports.array(ReviewFindingIdSchema).default([])
+    }).strict();
+    ReviewCouncilResultSchema = external_exports.object({
+      schemaVersion: external_exports.literal("review-council-v1"),
+      runId: RunIdSchema,
+      agent: external_exports.literal("review-council"),
+      reviewer: AgentRoleSchema.default("review-council"),
+      generatedAt: IsoDateTimeSchema,
+      summary: external_exports.string().trim().min(1).max(4e3),
+      findings: external_exports.array(ReviewFindingSchema).default([]),
+      requirementVerdicts: external_exports.array(RequirementReviewVerdictSchema).default([]),
+      contradictions: external_exports.array(ReviewContradictionSchema).default([]),
+      newGapDrafts: external_exports.array(
+        external_exports.object({
+          findingId: ReviewFindingIdSchema,
+          category: GapCategorySchema,
+          severity: GapSeveritySchema,
+          title: external_exports.string().trim().min(1).max(200),
+          expected: external_exports.string().trim().min(1).max(4e3),
+          observed: external_exports.string().trim().min(1).max(4e3),
+          impact: external_exports.string().trim().min(1).max(2e3),
+          sourceEvidenceIds: external_exports.array(EvidenceIdSchema).default([]),
+          owner: AgentRoleSchema.optional()
+        }).strict()
+      ).default([]),
+      sourceArtifactIds: external_exports.array(ArtifactIdSchema).default([])
+    }).strict().superRefine((result, context) => {
+      const findingIds = new Set(result.findings.map((finding) => finding.id));
+      result.requirementVerdicts.forEach((verdict, verdictIndex) => {
+        verdict.findingIds.forEach((findingId, findingIndex) => {
+          if (!findingIds.has(findingId)) {
+            context.addIssue({
+              code: "custom",
+              message: `Unknown finding reference ${findingId}`,
+              path: ["requirementVerdicts", verdictIndex, "findingIds", findingIndex]
+            });
+          }
+        });
+      });
+      result.contradictions.forEach((contradiction, contradictionIndex) => {
+        contradiction.findingIds.forEach((findingId, findingIndex) => {
+          if (!findingIds.has(findingId)) {
+            context.addIssue({
+              code: "custom",
+              message: `Unknown finding reference ${findingId}`,
+              path: ["contradictions", contradictionIndex, "findingIds", findingIndex]
+            });
+          }
+        });
+      });
+      result.newGapDrafts.forEach((gapDraft, gapIndex) => {
+        if (!findingIds.has(gapDraft.findingId)) {
+          context.addIssue({
+            code: "custom",
+            message: `Unknown finding reference ${gapDraft.findingId}`,
+            path: ["newGapDrafts", gapIndex, "findingId"]
+          });
+        }
+      });
+    });
+  }
+});
+
+// src/review/review-renderer.ts
+function renderReviewCouncilReport(result) {
+  return markdown3([
+    "# Review Council Report",
+    "",
+    "## Summary",
+    "",
+    result.summary,
+    "",
+    "## Finding Summary",
+    "",
+    `- Findings: ${result.findings.length}`,
+    `- Requirement verdicts: ${result.requirementVerdicts.length}`,
+    `- Contradictions: ${result.contradictions.length}`,
+    `- New gap drafts: ${result.newGapDrafts.length}`,
+    "",
+    "## Findings",
+    "",
+    ...renderFindings(result.findings),
+    "",
+    "## Requirement Verdicts",
+    "",
+    ...renderRequirementVerdicts(result.requirementVerdicts),
+    "",
+    "## Contradictions",
+    "",
+    ...renderContradictions(result.contradictions),
+    "",
+    "## New Gap Drafts",
+    "",
+    ...result.newGapDrafts.length === 0 ? ["No new gap drafts."] : result.newGapDrafts.map(
+      (gap2) => `- ${gap2.severity.toUpperCase()} ${gap2.category}: ${gap2.title} (finding ${gap2.findingId})`
+    ),
+    ""
+  ]);
+}
+function renderFindings(findings) {
+  if (findings.length === 0) {
+    return ["No findings."];
+  }
+  return [
+    "| Finding | Severity | Category | Status | Title |",
+    "|---|---|---|---|---|",
+    ...findings.map(
+      (finding) => `| ${finding.id} | ${finding.severity} | ${finding.category} | ${finding.status} | ${escapeTableCell3(finding.title)} |`
+    )
+  ];
+}
+function renderRequirementVerdicts(verdicts) {
+  if (verdicts.length === 0) {
+    return ["No requirement verdicts."];
+  }
+  return [
+    "| Requirement | Verdict | Reason | Gaps | Findings |",
+    "|---|---|---|---|---|",
+    ...verdicts.map(
+      (verdict) => `| ${verdict.requirementId} | ${verdict.verdict} | ${escapeTableCell3(verdict.reason)} | ${joinIds(verdict.gapIds)} | ${joinIds(verdict.findingIds)} |`
+    )
+  ];
+}
+function renderContradictions(contradictions) {
+  if (contradictions.length === 0) {
+    return ["No contradictions."];
+  }
+  return [
+    "| Contradiction | Severity | Left | Right | Explanation |",
+    "|---|---|---|---|---|",
+    ...contradictions.map(
+      (item) => `| ${item.id} | ${item.severity} | ${escapeTableCell3(item.left.summary)} | ${escapeTableCell3(item.right.summary)} | ${escapeTableCell3(item.explanation)} |`
+    )
+  ];
+}
+function joinIds(ids) {
+  return ids.length === 0 ? "-" : ids.join("<br>");
+}
+function escapeTableCell3(value) {
+  return value.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
+}
+function markdown3(lines) {
+  return `${lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd()}
+`;
+}
+var init_review_renderer = __esm({
+  "src/review/review-renderer.ts"() {
+    "use strict";
+  }
+});
+
+// src/review/review-precheck.ts
 import { randomUUID as randomUUID3 } from "crypto";
-import { realpath as realpath4, stat as stat4 } from "fs/promises";
+function runReviewPrechecks(input) {
+  const findings = [];
+  findings.push(...findOpenBlockerGaps(input));
+  findings.push(...findPassedAgentResultsWithOpenGaps(input));
+  findings.push(...findImplementationResultsWithoutArtifacts(input));
+  findings.push(...findApiClaimsWithoutOpenApiEvidence(input));
+  findings.push(...findDesignClaimsWithoutFigmaEvidence(input));
+  return findings;
+}
+function findOpenBlockerGaps(input) {
+  return input.run.gaps.filter((gap2) => gap2.status === "open" && gap2.severity === "blocker").map(
+    (gap2) => ReviewFindingSchema.parse({
+      id: createReviewFindingId(),
+      category: "gap-policy",
+      severity: "blocker",
+      status: "open",
+      title: `Open blocker gap: ${gap2.title}`,
+      expected: "No open blocker gaps should remain before implementation is accepted.",
+      observed: gap2.observed,
+      recommendation: "Resolve the blocker with resolution artifacts or keep the requirement blocked.",
+      gapIds: [gap2.id],
+      evidenceIds: gap2.sourceEvidenceIds,
+      createdAt: input.generatedAt
+    })
+  );
+}
+function findPassedAgentResultsWithOpenGaps(input) {
+  return input.run.agentResults.flatMap((result) => {
+    if (result.status !== "passed") {
+      return [];
+    }
+    const openGaps = result.gapIds.map((gapId) => input.run.gaps.find((gap2) => gap2.id === gapId)).filter((gap2) => gap2 !== void 0 && gap2.status === "open");
+    if (openGaps.length === 0) {
+      return [];
+    }
+    return [
+      ReviewFindingSchema.parse({
+        id: createReviewFindingId(),
+        category: "implementation-claim",
+        severity: "major",
+        status: "open",
+        title: "Passed AgentResult references open gaps",
+        expected: "A passed agent result should not cite unresolved gaps as if work is complete.",
+        observed: `Agent ${result.agent} passed while referencing ${openGaps.length} open gap(s).`,
+        recommendation: "Change result to partial/blocked or resolve gaps with evidence.",
+        agentResultIds: [result.id],
+        gapIds: openGaps.map((gap2) => gap2.id),
+        createdAt: input.generatedAt
+      })
+    ];
+  });
+}
+function findImplementationResultsWithoutArtifacts(input) {
+  return input.run.agentResults.flatMap((result) => {
+    if (result.kind !== "implementation" || result.status !== "passed") {
+      return [];
+    }
+    if (result.artifactIds.length > 0 || result.checks.length > 0) {
+      return [];
+    }
+    return [
+      ReviewFindingSchema.parse({
+        id: createReviewFindingId(),
+        category: "implementation-claim",
+        severity: "major",
+        status: "open",
+        title: "Implementation result has no artifacts or checks",
+        expected: "Passed implementation results should cite artifacts or checks.",
+        observed: `Agent ${result.agent} passed without artifacts or checks.`,
+        recommendation: "Attach test report, source artifact, or check result evidence.",
+        agentResultIds: [result.id],
+        createdAt: input.generatedAt
+      })
+    ];
+  });
+}
+function findApiClaimsWithoutOpenApiEvidence(input) {
+  return input.run.agentResults.flatMap((result) => {
+    if (result.agent !== "api-contract" || result.status !== "passed") {
+      return [];
+    }
+    const hasOpenApiEvidence = result.evidenceIds.some((evidenceId) => {
+      const evidence = input.run.evidence.find((item) => item.id === evidenceId);
+      return evidence?.metadata["openapiEvidenceKind"] !== void 0;
+    });
+    if (hasOpenApiEvidence) {
+      return [];
+    }
+    return [
+      ReviewFindingSchema.parse({
+        id: createReviewFindingId(),
+        category: "api-contract",
+        severity: "major",
+        status: "open",
+        title: "API Contract result lacks OpenAPI evidence",
+        expected: "API Contract Agent results should cite OpenAPI operation/schema/security evidence.",
+        observed: "No OpenAPI evidence IDs were attached to the passed API Contract result.",
+        recommendation: "Attach OpenAPI intake evidence or keep undocumented work as API gap.",
+        agentResultIds: [result.id],
+        evidenceIds: result.evidenceIds,
+        artifactIds: result.artifactIds,
+        createdAt: input.generatedAt
+      })
+    ];
+  });
+}
+function findDesignClaimsWithoutFigmaEvidence(input) {
+  return input.run.agentResults.flatMap((result) => {
+    if (result.agent !== "design-ui" || result.status !== "passed") {
+      return [];
+    }
+    const hasFigmaEvidence = result.evidenceIds.some((evidenceId) => {
+      const evidence = input.run.evidence.find((item) => item.id === evidenceId);
+      return evidence?.location.type === "figma-node";
+    });
+    if (hasFigmaEvidence) {
+      return [];
+    }
+    return [
+      ReviewFindingSchema.parse({
+        id: createReviewFindingId(),
+        category: "design-contract",
+        severity: "major",
+        status: "open",
+        title: "Design/UI result lacks Figma evidence",
+        expected: "Design/UI Agent results should cite Figma node evidence or design contract artifacts.",
+        observed: "No Figma evidence IDs were attached to the passed Design/UI result.",
+        recommendation: "Attach Figma evidence or keep unsupported UI states as design gaps.",
+        agentResultIds: [result.id],
+        evidenceIds: result.evidenceIds,
+        artifactIds: result.artifactIds,
+        createdAt: input.generatedAt
+      })
+    ];
+  });
+}
+function createReviewFindingId() {
+  return `rf_${randomUUID3().replaceAll("-", "")}`;
+}
+var init_review_precheck = __esm({
+  "src/review/review-precheck.ts"() {
+    "use strict";
+    init_review_model();
+  }
+});
+
+// src/application/review-council-service.ts
+import { mkdir as mkdir10, readFile as readFile13, writeFile as writeFile10 } from "fs/promises";
 import path20 from "path";
+function findContextArtifact2(run, contextArtifactId) {
+  const candidates = run.artifacts.filter(
+    (artifact2) => artifact2.metadata["adapter"] === "review-council-v1" && artifact2.metadata["artifactRole"] === "context-pack"
+  );
+  const artifact = contextArtifactId === void 0 ? candidates.at(-1) : candidates.find((item) => item.id === contextArtifactId);
+  if (artifact === void 0) {
+    throw new Error(
+      contextArtifactId === void 0 ? "Review Council context artifact not found" : `Review Council context artifact not found: ${contextArtifactId}`
+    );
+  }
+  return artifact;
+}
+function buildReviewInstructions() {
+  return `# Review Council Instructions
+
+You are the review-council verification agent.
+
+## Mission
+
+Cross-review Spec/BDD, API Contract, and Design/UI agent outputs.
+
+## Rules
+
+- Do not edit product code.
+- Do not invent missing evidence.
+- Convert missing evidence into findings or gap drafts.
+- Reject completion claims that cite unresolved blocker gaps.
+- API implementation claims must cite OpenAPI evidence.
+- UI implementation claims must cite Figma or design contract evidence.
+- Requirement verdicts must be accepted, partial, blocked, rejected, or unverified.
+- Return only structured ReviewCouncilResult JSON.
+
+## Required output
+
+A JSON object matching ReviewCouncilResultSchema.
+`;
+}
+var PrepareReviewCouncilInputSchema, GetReviewCouncilContextInputSchema, RecordReviewCouncilResultInputSchema, ReviewCouncilContextPackSchema, PrepareReviewCouncilResultSchema, GetReviewCouncilContextResultSchema, RecordReviewCouncilResultSchema, ReviewCouncilService;
+var init_review_council_service = __esm({
+  "src/application/review-council-service.ts"() {
+    "use strict";
+    init_zod();
+    init_artifact_blob_store();
+    init_review_model();
+    init_review_renderer();
+    init_review_precheck();
+    init_run2();
+    init_agent_result();
+    init_artifact();
+    init_constants();
+    init_gap();
+    init_id_factory();
+    init_ids();
+    init_scalars();
+    PrepareReviewCouncilInputSchema = external_exports.object({
+      runId: RunIdSchema
+    }).strict();
+    GetReviewCouncilContextInputSchema = external_exports.object({
+      runId: RunIdSchema,
+      contextArtifactId: ArtifactIdSchema.optional()
+    }).strict();
+    RecordReviewCouncilResultInputSchema = external_exports.object({
+      runId: RunIdSchema,
+      contextArtifactId: ArtifactIdSchema,
+      result: ReviewCouncilResultSchema
+    }).strict();
+    ReviewCouncilContextPackSchema = external_exports.object({
+      schemaVersion: external_exports.literal("review-council-context-v1"),
+      runId: RunIdSchema,
+      generatedAt: IsoDateTimeSchema,
+      runSummary: external_exports.record(external_exports.string(), external_exports.unknown()),
+      evidenceCount: external_exports.number().int().nonnegative(),
+      artifactCount: external_exports.number().int().nonnegative(),
+      gapCount: external_exports.number().int().nonnegative(),
+      agentResults: external_exports.array(external_exports.record(external_exports.string(), external_exports.unknown())),
+      precheckFindings: external_exports.array(external_exports.record(external_exports.string(), external_exports.unknown())),
+      instructions: external_exports.string()
+    }).strict();
+    PrepareReviewCouncilResultSchema = external_exports.object({
+      run: RunSummarySchema,
+      contextArtifactId: ArtifactIdSchema,
+      contextPath: external_exports.string().trim().min(1),
+      instructionsPath: external_exports.string().trim().min(1),
+      precheckFindingCount: external_exports.number().int().nonnegative()
+    }).strict();
+    GetReviewCouncilContextResultSchema = external_exports.object({
+      contextArtifactId: ArtifactIdSchema,
+      contextPath: external_exports.string().trim().min(1),
+      instructionsPath: external_exports.string().trim().min(1),
+      context: ReviewCouncilContextPackSchema
+    }).strict();
+    RecordReviewCouncilResultSchema = external_exports.object({
+      run: RunSummarySchema,
+      reportArtifactId: ArtifactIdSchema,
+      resultArtifactId: ArtifactIdSchema,
+      agentResultId: external_exports.string().regex(/^ar_[a-f0-9]{32}$/),
+      newGapCount: external_exports.number().int().nonnegative(),
+      findingCount: external_exports.number().int().nonnegative(),
+      verdictCount: external_exports.number().int().nonnegative()
+    }).strict();
+    ReviewCouncilService = class {
+      constructor(runStore, artifactStore, dataDirectory, now = () => (/* @__PURE__ */ new Date()).toISOString()) {
+        this.runStore = runStore;
+        this.artifactStore = artifactStore;
+        this.dataDirectory = dataDirectory;
+        this.now = now;
+      }
+      runStore;
+      artifactStore;
+      dataDirectory;
+      now;
+      async prepare(rawInput) {
+        const input = PrepareReviewCouncilInputSchema.parse(rawInput);
+        const run = await this.runStore.get(input.runId);
+        const timestamp = IsoDateTimeSchema.parse(this.now());
+        const precheckFindings = runReviewPrechecks({
+          run,
+          generatedAt: timestamp
+        });
+        const instructions = buildReviewInstructions();
+        const contextPack = ReviewCouncilContextPackSchema.parse({
+          schemaVersion: "review-council-context-v1",
+          runId: run.id,
+          generatedAt: timestamp,
+          runSummary: summarizeRun(run),
+          evidenceCount: run.evidence.length,
+          artifactCount: run.artifacts.length,
+          gapCount: run.gaps.length,
+          agentResults: run.agentResults,
+          precheckFindings,
+          instructions
+        });
+        const contextJson = `${JSON.stringify(contextPack, null, 2)}
+`;
+        const blob = await this.artifactStore.writeBlob({
+          content: Buffer.from(contextJson, "utf8"),
+          mediaType: "application/json",
+          storedAt: timestamp,
+          label: "review-council-context"
+        });
+        const contextDirectory = path20.join(
+          this.dataDirectory,
+          "agent-contexts",
+          "review-council",
+          run.id
+        );
+        const contextPath = path20.join(contextDirectory, "review-council-context.json");
+        const instructionsPath = path20.join(contextDirectory, "review-instructions.md");
+        await mkdir10(contextDirectory, {
+          recursive: true,
+          mode: 448
+        });
+        await writeFile10(contextPath, contextJson, {
+          encoding: "utf8",
+          mode: 384
+        });
+        await writeFile10(instructionsPath, instructions, {
+          encoding: "utf8",
+          mode: 384
+        });
+        const contextArtifact = ArtifactRefSchema.parse({
+          id: createArtifactId(),
+          kind: "log",
+          uri: blob.uri,
+          mediaType: "application/json",
+          digest: blob.digest,
+          producedBy: "orchestrator",
+          evidenceIds: [],
+          createdAt: timestamp,
+          metadata: {
+            adapter: "review-council-v1",
+            artifactRole: "context-pack",
+            contextPath,
+            instructionsPath
+          }
+        });
+        const nextRun = RunManifestSchema.parse({
+          ...run,
+          revision: run.revision + 1,
+          updatedAt: timestamp,
+          artifacts: [...run.artifacts, contextArtifact]
+        });
+        await this.runStore.save(nextRun, run.revision);
+        return PrepareReviewCouncilResultSchema.parse({
+          run: summarizeRun(nextRun),
+          contextArtifactId: contextArtifact.id,
+          contextPath,
+          instructionsPath,
+          precheckFindingCount: precheckFindings.length
+        });
+      }
+      async getContext(rawInput) {
+        const input = GetReviewCouncilContextInputSchema.parse(rawInput);
+        const run = await this.runStore.get(input.runId);
+        const contextArtifact = findContextArtifact2(run, input.contextArtifactId);
+        const contextPath = contextArtifact.metadata["contextPath"];
+        const instructionsPath = contextArtifact.metadata["instructionsPath"];
+        if (typeof contextPath !== "string") {
+          throw new Error("Review Council context artifact is missing contextPath metadata");
+        }
+        if (typeof instructionsPath !== "string") {
+          throw new Error("Review Council context artifact is missing instructionsPath metadata");
+        }
+        const context = ReviewCouncilContextPackSchema.parse(
+          JSON.parse(await readFile13(contextPath, "utf8"))
+        );
+        return GetReviewCouncilContextResultSchema.parse({
+          contextArtifactId: contextArtifact.id,
+          contextPath,
+          instructionsPath,
+          context
+        });
+      }
+      async record(rawInput) {
+        const input = RecordReviewCouncilResultInputSchema.parse(rawInput);
+        const run = await this.runStore.get(input.runId);
+        const timestamp = IsoDateTimeSchema.parse(this.now());
+        const contextArtifact = findContextArtifact2(run, input.contextArtifactId);
+        const result = ReviewCouncilResultSchema.parse(input.result);
+        if (result.runId !== run.id) {
+          throw new Error("Review council result runId does not match Run");
+        }
+        const reportMd = renderReviewCouncilReport(result);
+        const reportBlob = await this.artifactStore.writeBlob({
+          content: Buffer.from(reportMd, "utf8"),
+          mediaType: "text/markdown",
+          storedAt: timestamp,
+          label: "review-council-report"
+        });
+        const resultBlob = await this.artifactStore.writeBlob({
+          content: Buffer.from(`${JSON.stringify(result, null, 2)}
+`, "utf8"),
+          mediaType: "application/json",
+          storedAt: timestamp,
+          label: "review-council-result"
+        });
+        const reportArtifact = ArtifactRefSchema.parse({
+          id: createArtifactId(),
+          kind: "log",
+          uri: reportBlob.uri,
+          mediaType: "text/markdown",
+          digest: reportBlob.digest,
+          producedBy: "review-council",
+          evidenceIds: [],
+          createdAt: timestamp,
+          metadata: {
+            adapter: "review-council-v1",
+            artifactRole: "report",
+            contextArtifactId: contextArtifact.id
+          }
+        });
+        const resultArtifact = ArtifactRefSchema.parse({
+          id: createArtifactId(),
+          kind: "log",
+          uri: resultBlob.uri,
+          mediaType: "application/json",
+          digest: resultBlob.digest,
+          producedBy: "review-council",
+          evidenceIds: [],
+          createdAt: timestamp,
+          metadata: {
+            adapter: "review-council-v1",
+            artifactRole: "structured-result",
+            contextArtifactId: contextArtifact.id
+          }
+        });
+        const newGaps = result.newGapDrafts.map(
+          (draft) => GapSchema.parse({
+            id: createGapId(),
+            category: draft.category,
+            severity: draft.severity,
+            status: "open",
+            title: draft.title,
+            expected: draft.expected,
+            observed: draft.observed,
+            impact: draft.impact,
+            sourceEvidenceIds: draft.sourceEvidenceIds,
+            owner: draft.owner,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            metadata: {
+              reviewFindingId: draft.findingId,
+              source: "review-council"
+            }
+          })
+        );
+        const blockerFinding = result.findings.some((finding) => finding.severity === "blocker");
+        const referencedGapIds = Array.from(
+          /* @__PURE__ */ new Set([
+            ...newGaps.map((gap2) => gap2.id),
+            ...result.findings.flatMap((finding) => finding.gapIds)
+          ])
+        );
+        const verificationStatus = blockerFinding && referencedGapIds.length > 0 ? "blocked" : blockerFinding ? "failed" : "passed";
+        const agentResult = AgentResultSchema.parse({
+          schemaVersion: RUNTIME_CONTRACT_VERSION,
+          id: createAgentResultId(),
+          runId: run.id,
+          kind: "verification",
+          agent: "review-council",
+          status: verificationStatus,
+          baseSha: run.baseCommit ?? "0000000",
+          changedFiles: [],
+          evidenceIds: [],
+          artifactIds: [reportArtifact.id, resultArtifact.id],
+          gapIds: referencedGapIds,
+          checks: [],
+          decisions: [],
+          startedAt: result.generatedAt,
+          completedAt: timestamp
+        });
+        const nextRun = RunManifestSchema.parse({
+          ...run,
+          revision: run.revision + 1,
+          updatedAt: timestamp,
+          gaps: [...run.gaps, ...newGaps],
+          artifacts: [...run.artifacts, reportArtifact, resultArtifact],
+          agentResults: [...run.agentResults, agentResult]
+        });
+        await this.runStore.save(nextRun, run.revision);
+        return RecordReviewCouncilResultSchema.parse({
+          run: summarizeRun(nextRun),
+          reportArtifactId: reportArtifact.id,
+          resultArtifactId: resultArtifact.id,
+          agentResultId: agentResult.id,
+          newGapCount: newGaps.length,
+          findingCount: result.findings.length,
+          verdictCount: result.requirementVerdicts.length
+        });
+      }
+    };
+  }
+});
+
+// src/application/run-service.ts
+import { randomUUID as randomUUID4 } from "crypto";
+import { realpath as realpath4, stat as stat4 } from "fs/promises";
+import path21 from "path";
 function createRunId() {
-  return RunIdSchema.parse(`run_${randomUUID3().replaceAll("-", "")}`);
+  return RunIdSchema.parse(`run_${randomUUID4().replaceAll("-", "")}`);
 }
 async function canonicalDirectory(rawPath) {
-  const absolute = path20.resolve(rawPath);
+  const absolute = path21.resolve(rawPath);
   const canonical = await realpath4(absolute);
   const metadata = await stat4(canonical);
   if (!metadata.isDirectory()) {
@@ -44100,13 +44812,13 @@ var init_canonical_content = __esm({
 
 // src/source-registry/path-scope.ts
 import { realpath as realpath5, stat as stat5 } from "fs/promises";
-import path21 from "path";
+import path22 from "path";
 async function resolveFileInsideRoot(input) {
   const projectRoot = await realpath5(input.projectRoot);
-  const candidate = path21.resolve(projectRoot, input.filePath);
+  const candidate = path22.resolve(projectRoot, input.filePath);
   const absolutePath = await realpath5(candidate);
-  const relative = path21.relative(projectRoot, absolutePath);
-  if (relative === "" || relative.startsWith("..") || path21.isAbsolute(relative)) {
+  const relative = path22.relative(projectRoot, absolutePath);
+  if (relative === "" || relative.startsWith("..") || path22.isAbsolute(relative)) {
     throw new Error(`File is outside project root: ${input.filePath}`);
   }
   const metadata = await stat5(absolutePath);
@@ -44120,7 +44832,7 @@ async function resolveFileInsideRoot(input) {
   };
 }
 function toPosixPath(value) {
-  return value.split(path21.sep).join("/");
+  return value.split(path22.sep).join("/");
 }
 var init_path_scope = __esm({
   "src/source-registry/path-scope.ts"() {
@@ -44130,11 +44842,11 @@ var init_path_scope = __esm({
 });
 
 // src/source-registry/snapshot-store.ts
-import { mkdir as mkdir10, readFile as readFile13, writeFile as writeFile10 } from "fs/promises";
-import path22 from "path";
+import { mkdir as mkdir11, readFile as readFile14, writeFile as writeFile11 } from "fs/promises";
+import path23 from "path";
 async function writeIfMissing2(filePath, content) {
   try {
-    await writeFile10(filePath, content, {
+    await writeFile11(filePath, content, {
       flag: "wx",
       mode: 384
     });
@@ -44174,10 +44886,10 @@ var init_snapshot_store = __esm({
       async writeSnapshot(input) {
         const digest = input.canonical.canonicalDigest;
         const { prefix, hex: hex3 } = digestPathSegments(digest);
-        const directory = path22.join(this.rootDirectory, "sha256", prefix, hex3);
-        const contentPath = path22.join(directory, "content");
-        const metadataPath = path22.join(directory, "metadata.json");
-        await mkdir10(directory, {
+        const directory = path23.join(this.rootDirectory, "sha256", prefix, hex3);
+        const contentPath = path23.join(directory, "content");
+        const metadataPath = path23.join(directory, "metadata.json");
+        await mkdir11(directory, {
           recursive: true,
           mode: 448
         });
@@ -44207,14 +44919,14 @@ var init_snapshot_store = __esm({
       async readMetadata(rawDigest) {
         const digest = Sha256DigestSchema.parse(rawDigest);
         const { prefix, hex: hex3 } = digestPathSegments(digest);
-        const metadataPath = path22.join(this.rootDirectory, "sha256", prefix, hex3, "metadata.json");
-        return SourceSnapshotMetadataSchema.parse(JSON.parse(await readFile13(metadataPath, "utf8")));
+        const metadataPath = path23.join(this.rootDirectory, "sha256", prefix, hex3, "metadata.json");
+        return SourceSnapshotMetadataSchema.parse(JSON.parse(await readFile14(metadataPath, "utf8")));
       }
       async readContent(rawDigest) {
         const digest = Sha256DigestSchema.parse(rawDigest);
         const { prefix, hex: hex3 } = digestPathSegments(digest);
-        const contentPath = path22.join(this.rootDirectory, "sha256", prefix, hex3, "content");
-        return readFile13(contentPath);
+        const contentPath = path23.join(this.rootDirectory, "sha256", prefix, hex3, "content");
+        return readFile14(contentPath);
       }
     };
   }
@@ -44232,7 +44944,7 @@ var init_source_registry = __esm({
 });
 
 // src/application/source-registry-service.ts
-import { readFile as readFile14 } from "fs/promises";
+import { readFile as readFile15 } from "fs/promises";
 function parseSourceRegistrationResult(result) {
   SourceRegistrationResultSchema.parse(result);
   return result;
@@ -44284,7 +44996,7 @@ var init_source_registry_service = __esm({
           projectRoot: run.projectRoot,
           filePath: input.path
         });
-        const rawContent = await readFile14(scopedPath.absolutePath);
+        const rawContent = await readFile15(scopedPath.absolutePath);
         const canonical = canonicalizeFileContent({
           path: scopedPath.relativePath,
           ...input.mediaType === void 0 ? {} : { mediaType: input.mediaType },
@@ -44438,10 +45150,10 @@ var init_test_matrix = __esm({
 });
 
 // src/spec-bdd/acceptance-skeleton-writer.ts
-import { mkdir as mkdir11, writeFile as writeFile11 } from "fs/promises";
-import path23 from "path";
+import { mkdir as mkdir12, writeFile as writeFile12 } from "fs/promises";
+import path24 from "path";
 async function writeAcceptanceSkeletons(input) {
-  const directory = path23.join(
+  const directory = path24.join(
     input.projectRoot,
     "tests",
     "acceptance",
@@ -44449,16 +45161,16 @@ async function writeAcceptanceSkeletons(input) {
     input.changeName
   );
   assertInsideProjectRoot4(input.projectRoot, directory);
-  await mkdir11(directory, {
+  await mkdir12(directory, {
     recursive: true,
     mode: 448
   });
   const files = [];
   for (const row of input.matrix.rows) {
     const fileName = `${sanitizeFileName(row.scenarioId)}.test.md`;
-    const absolutePath = path23.join(directory, fileName);
+    const absolutePath = path24.join(directory, fileName);
     const content = renderSkeleton(row);
-    await writeFile11(absolutePath, content, {
+    await writeFile12(absolutePath, content, {
       encoding: "utf8",
       mode: 384,
       flag: input.force === true ? "w" : "wx"
@@ -44468,10 +45180,10 @@ async function writeAcceptanceSkeletons(input) {
       }
       throw error51;
     });
-    files.push(path23.relative(input.projectRoot, absolutePath).split(path23.sep).join("/"));
+    files.push(path24.relative(input.projectRoot, absolutePath).split(path24.sep).join("/"));
   }
   return {
-    directory: path23.relative(input.projectRoot, directory).split(path23.sep).join("/"),
+    directory: path24.relative(input.projectRoot, directory).split(path24.sep).join("/"),
     files
   };
 }
@@ -44514,8 +45226,8 @@ function sanitizeFileName(value) {
   return value.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-|-$/g, "");
 }
 function assertInsideProjectRoot4(projectRoot, absolutePath) {
-  const relative = path23.relative(projectRoot, absolutePath);
-  if (relative.startsWith("..") || path23.isAbsolute(relative)) {
+  const relative = path24.relative(projectRoot, absolutePath);
+  if (relative.startsWith("..") || path24.isAbsolute(relative)) {
     throw new Error(`Refusing to write outside project root: ${absolutePath}`);
   }
 }
@@ -44589,18 +45301,18 @@ var init_spec_bdd_contracts = __esm({
 });
 
 // src/spec-bdd/spec-bdd-context.ts
-import { readFile as readFile15 } from "fs/promises";
-import path24 from "path";
+import { readFile as readFile16 } from "fs/promises";
+import path25 from "path";
 async function buildSpecBddContextPack(input) {
   const changeName = OpenSpecChangeNameSchema.parse(input.changeName);
   const paths = resolveOpenSpecChangePaths({
     projectRoot: input.run.projectRoot,
     changeName
   });
-  const featureDirectory = path24.join(paths.artifactsRoot, "gherkin");
-  const indexPath = path24.join(paths.artifactsRoot, "gherkin-index.json");
-  const testMatrixPath = path24.join(paths.artifactsRoot, "test-matrix.json");
-  const testMatrixMdPath = path24.join(paths.artifactsRoot, "test-matrix.md");
+  const featureDirectory = path25.join(paths.artifactsRoot, "gherkin");
+  const indexPath = path25.join(paths.artifactsRoot, "gherkin-index.json");
+  const testMatrixPath = path25.join(paths.artifactsRoot, "test-matrix.json");
+  const testMatrixMdPath = path25.join(paths.artifactsRoot, "test-matrix.md");
   await assertReadable(paths.manifestPath);
   await assertReadable(testMatrixPath);
   return SpecBddContextPackSchema.parse({
@@ -44674,7 +45386,7 @@ ${contextPack.expectedOutputs.map((item) => `- ${item}`).join("\n")}
 `;
 }
 async function assertReadable(filePath) {
-  await readFile15(filePath, "utf8");
+  await readFile16(filePath, "utf8");
 }
 var SpecBddContextPackSchema;
 var init_spec_bdd_context = __esm({
@@ -44757,16 +45469,16 @@ var init_spec_bdd_review_renderer = __esm({
 });
 
 // src/application/spec-bdd-agent-lane-service.ts
-import { mkdir as mkdir12, readFile as readFile16, writeFile as writeFile12 } from "fs/promises";
-import path25 from "path";
+import { mkdir as mkdir13, readFile as readFile17, writeFile as writeFile13 } from "fs/promises";
+import path26 from "path";
 async function readTestMatrix(projectRoot, relativePath) {
-  const absolutePath = path25.join(projectRoot, relativePath);
+  const absolutePath = path26.join(projectRoot, relativePath);
   assertInsideProjectRoot5(projectRoot, absolutePath);
-  const content = await readFile16(absolutePath, "utf8");
+  const content = await readFile17(absolutePath, "utf8");
   return TestMatrixSchema.parse(JSON.parse(content));
 }
 function specBddContextPaths(projectRoot, runId, changeName) {
-  const contextDirectory = path25.join(
+  const contextDirectory = path26.join(
     projectRoot,
     ".spec-to-pr",
     "runs",
@@ -44777,16 +45489,16 @@ function specBddContextPaths(projectRoot, runId, changeName) {
   );
   return {
     contextDirectory,
-    contextJsonPath: path25.join(contextDirectory, "context-pack.json"),
-    contextMdPath: path25.join(contextDirectory, "context-pack.md")
+    contextJsonPath: path26.join(contextDirectory, "context-pack.json"),
+    contextMdPath: path26.join(contextDirectory, "context-pack.md")
   };
 }
 function specBddReportPaths(projectRoot, changeName) {
-  const reportDirectory = path25.join(projectRoot, "openspec", "changes", changeName, "artifacts");
+  const reportDirectory = path26.join(projectRoot, "openspec", "changes", changeName, "artifacts");
   return {
     reportDirectory,
-    reportJsonPath: path25.join(reportDirectory, "spec-bdd-review.json"),
-    reportMdPath: path25.join(reportDirectory, "spec-bdd-review.md")
+    reportJsonPath: path26.join(reportDirectory, "spec-bdd-review.json"),
+    reportMdPath: path26.join(reportDirectory, "spec-bdd-review.md")
   };
 }
 async function currentHead(projectRoot, fallback) {
@@ -44805,11 +45517,11 @@ async function currentHead(projectRoot, fallback) {
   }
 }
 function toRepoRelative(projectRoot, absolutePath) {
-  return path25.relative(projectRoot, absolutePath).split(path25.sep).join("/");
+  return path26.relative(projectRoot, absolutePath).split(path26.sep).join("/");
 }
 function assertInsideProjectRoot5(projectRoot, absolutePath) {
-  const relative = path25.relative(projectRoot, absolutePath);
-  if (relative.startsWith("..") || path25.isAbsolute(relative)) {
+  const relative = path26.relative(projectRoot, absolutePath);
+  if (relative.startsWith("..") || path26.isAbsolute(relative)) {
     throw new Error(`Refusing to access outside project root: ${absolutePath}`);
   }
 }
@@ -44906,15 +45618,15 @@ var init_spec_bdd_agent_lane_service = __esm({
 `;
         const contextMd = renderSpecBddContextPackMarkdown(contextPack);
         assertInsideProjectRoot5(run.projectRoot, contextPaths.contextDirectory);
-        await mkdir12(contextPaths.contextDirectory, {
+        await mkdir13(contextPaths.contextDirectory, {
           recursive: true,
           mode: 448
         });
-        await writeFile12(contextPaths.contextJsonPath, contextJson, {
+        await writeFile13(contextPaths.contextJsonPath, contextJson, {
           encoding: "utf8",
           mode: 384
         });
-        await writeFile12(contextPaths.contextMdPath, contextMd, {
+        await writeFile13(contextPaths.contextMdPath, contextMd, {
           encoding: "utf8",
           mode: 384
         });
@@ -44932,8 +45644,8 @@ var init_spec_bdd_agent_lane_service = __esm({
         const input = GetSpecBddAgentContextInputSchema.parse(rawInput);
         const run = await this.runStore.get(input.runId);
         const contextPaths = specBddContextPaths(run.projectRoot, run.id, input.changeName);
-        const rawContext = await readFile16(contextPaths.contextJsonPath, "utf8");
-        const contextPackMarkdown = await readFile16(contextPaths.contextMdPath, "utf8");
+        const rawContext = await readFile17(contextPaths.contextJsonPath, "utf8");
+        const contextPackMarkdown = await readFile17(contextPaths.contextMdPath, "utf8");
         return GetSpecBddAgentContextResultSchema.parse({
           runId: run.id,
           changeName: input.changeName,
@@ -44977,15 +45689,15 @@ var init_spec_bdd_agent_lane_service = __esm({
 `;
         const reportMd = renderSpecBddReviewMarkdown(report);
         assertInsideProjectRoot5(run.projectRoot, reportPaths.reportDirectory);
-        await mkdir12(reportPaths.reportDirectory, {
+        await mkdir13(reportPaths.reportDirectory, {
           recursive: true,
           mode: 448
         });
-        await writeFile12(reportPaths.reportJsonPath, reportJson, {
+        await writeFile13(reportPaths.reportJsonPath, reportJson, {
           encoding: "utf8",
           mode: 384
         });
-        await writeFile12(reportPaths.reportMdPath, reportMd, {
+        await writeFile13(reportPaths.reportMdPath, reportMd, {
           encoding: "utf8",
           mode: 384
         });
@@ -45125,7 +45837,7 @@ var init_errors4 = __esm({
 });
 
 // src/state/stage-machine.ts
-import { randomUUID as randomUUID4 } from "crypto";
+import { randomUUID as randomUUID5 } from "crypto";
 function startStage(run, command, now) {
   const stage = findStage(run, command.stageName);
   const nowIso = now();
@@ -45334,7 +46046,7 @@ function mergeUnique(left, right) {
   return [.../* @__PURE__ */ new Set([...left, ...right])];
 }
 function createLeaseId() {
-  return LeaseIdSchema.parse(`lease_${randomUUID4().replaceAll("-", "")}`);
+  return LeaseIdSchema.parse(`lease_${randomUUID5().replaceAll("-", "")}`);
 }
 var DEFAULT_LEASE_TTL_MS, ALLOWED_TRANSITIONS;
 var init_stage_machine = __esm({
@@ -45890,17 +46602,17 @@ function renderMatrixRow(row) {
     row.layer,
     row.automation,
     row.status,
-    joinIds(row.briefEvidenceIds),
-    joinIds(row.figmaEvidenceIds),
-    joinIds(row.openApiEvidenceIds),
-    joinIds(row.gapIds),
-    escapeTableCell3(row.reason)
+    joinIds2(row.briefEvidenceIds),
+    joinIds2(row.figmaEvidenceIds),
+    joinIds2(row.openApiEvidenceIds),
+    joinIds2(row.gapIds),
+    escapeTableCell4(row.reason)
   ].join(" | ");
 }
-function joinIds(ids) {
+function joinIds2(ids) {
   return ids.length === 0 ? "-" : ids.join("<br>");
 }
-function escapeTableCell3(value) {
+function escapeTableCell4(value) {
   return value.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
 }
 function indent3(value, spaces) {
@@ -45914,35 +46626,35 @@ var init_gherkin_renderer = __esm({
 });
 
 // src/gherkin/gherkin-writer.ts
-import { mkdir as mkdir13, readFile as readFile17, writeFile as writeFile13 } from "fs/promises";
-import path26 from "path";
+import { mkdir as mkdir14, readFile as readFile18, writeFile as writeFile14 } from "fs/promises";
+import path27 from "path";
 async function writeGherkinArtifacts(input) {
   const changePaths = resolveOpenSpecChangePaths({
     projectRoot: input.projectRoot,
     changeName: input.changeName
   });
-  const gherkinRoot = path26.join(changePaths.artifactsRoot, "gherkin");
+  const gherkinRoot = path27.join(changePaths.artifactsRoot, "gherkin");
   const files = [
     ...input.rendered.featureFiles.map((file2) => ({
-      absolutePath: path26.join(gherkinRoot, file2.fileName),
+      absolutePath: path27.join(gherkinRoot, file2.fileName),
       content: file2.content,
       mediaType: "text/x-gherkin",
       kind: "gherkin"
     })),
     {
-      absolutePath: path26.join(changePaths.artifactsRoot, "gherkin-index.json"),
+      absolutePath: path27.join(changePaths.artifactsRoot, "gherkin-index.json"),
       content: input.rendered.gherkinIndexJson,
       mediaType: "application/json",
       kind: "gherkin"
     },
     {
-      absolutePath: path26.join(changePaths.artifactsRoot, "test-matrix.json"),
+      absolutePath: path27.join(changePaths.artifactsRoot, "test-matrix.json"),
       content: input.rendered.testMatrixJson,
       mediaType: "application/json",
       kind: "test-matrix"
     },
     {
-      absolutePath: path26.join(changePaths.artifactsRoot, "test-matrix.md"),
+      absolutePath: path27.join(changePaths.artifactsRoot, "test-matrix.md"),
       content: input.rendered.testMatrixMd,
       mediaType: "text/markdown",
       kind: "test-matrix"
@@ -45994,7 +46706,7 @@ async function writeGherkinArtifacts(input) {
   };
 }
 async function writeWithConflictPolicy2(input) {
-  await mkdir13(path26.dirname(input.absolutePath), {
+  await mkdir14(path27.dirname(input.absolutePath), {
     recursive: true,
     mode: 448
   });
@@ -46007,7 +46719,7 @@ async function writeWithConflictPolicy2(input) {
       throw new Error(`Generated Gherkin artifact already exists: ${input.absolutePath}`);
     }
   }
-  await writeFile13(input.absolutePath, input.content, {
+  await writeFile14(input.absolutePath, input.content, {
     encoding: "utf8",
     mode: 384
   });
@@ -46015,7 +46727,7 @@ async function writeWithConflictPolicy2(input) {
 }
 async function readExisting3(absolutePath) {
   try {
-    return await readFile17(absolutePath, "utf8");
+    return await readFile18(absolutePath, "utf8");
   } catch (error51) {
     if (error51 instanceof Error && "code" in error51 && error51.code === "ENOENT") {
       return void 0;
@@ -46024,8 +46736,8 @@ async function readExisting3(absolutePath) {
   }
 }
 function assertInsideProjectRoot6(projectRoot, absolutePath) {
-  const relative = path26.relative(projectRoot, absolutePath);
-  if (relative.startsWith("..") || path26.isAbsolute(relative)) {
+  const relative = path27.relative(projectRoot, absolutePath);
+  if (relative.startsWith("..") || path27.isAbsolute(relative)) {
     throw new Error(`Refusing to write outside project root: ${absolutePath}`);
   }
 }
@@ -46040,7 +46752,7 @@ var init_gherkin_writer = __esm({
 });
 
 // src/application/gherkin-test-matrix-service.ts
-import { readFile as readFile18 } from "fs/promises";
+import { readFile as readFile19 } from "fs/promises";
 var GenerateGherkinTestMatrixInputSchema, GenerateGherkinTestMatrixResultSchema, GherkinTestMatrixService;
 var init_gherkin_test_matrix_service = __esm({
   "src/application/gherkin-test-matrix-service.ts"() {
@@ -46135,7 +46847,7 @@ var init_gherkin_test_matrix_service = __esm({
           projectRoot,
           changeName: OpenSpecChangeNameSchema.parse(changeName)
         });
-        const raw = await readFile18(paths.manifestPath, "utf8");
+        const raw = await readFile19(paths.manifestPath, "utf8");
         return OpenSpecChangeModelSchema.parse(JSON.parse(raw));
       }
     };
@@ -46940,6 +47652,71 @@ function createKernelServer(servicesProvider) {
     })
   );
   server.registerTool(
+    "prepare_review_council",
+    {
+      title: "Prepare Review Council",
+      description: "Create a Review Council context pack and deterministic precheck findings.",
+      inputSchema: PrepareReviewCouncilInputSchema.shape,
+      outputSchema: PrepareReviewCouncilResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { reviewCouncilService } = await servicesProvider();
+      const structuredContent = await reviewCouncilService.prepare(input);
+      return {
+        text: `Prepared Review Council context with ${structuredContent.precheckFindingCount} precheck finding(s).`,
+        structuredContent
+      };
+    })
+  );
+  server.registerTool(
+    "get_review_council_context",
+    {
+      title: "Get Review Council context",
+      description: "Return the prepared Review Council context pack.",
+      inputSchema: GetReviewCouncilContextInputSchema.shape,
+      outputSchema: GetReviewCouncilContextResultSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { reviewCouncilService } = await servicesProvider();
+      const structuredContent = await reviewCouncilService.getContext(input);
+      return {
+        text: `Loaded Review Council context for run ${structuredContent.context.runId}.`,
+        structuredContent
+      };
+    })
+  );
+  server.registerTool(
+    "record_review_council_result",
+    {
+      title: "Record Review Council Result",
+      description: "Validate and persist a structured Review Council result.",
+      inputSchema: RecordReviewCouncilResultInputSchema.shape,
+      outputSchema: RecordReviewCouncilResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { reviewCouncilService } = await servicesProvider();
+      const structuredContent = await reviewCouncilService.record(input);
+      return {
+        text: `Recorded Review Council result with ${structuredContent.findingCount} finding(s) and ${structuredContent.newGapCount} new gap(s).`,
+        structuredContent
+      };
+    })
+  );
+  server.registerTool(
     "prepare_spec_bdd_agent",
     {
       title: "Prepare Spec/BDD agent",
@@ -47384,6 +48161,7 @@ var init_create_server = __esm({
     init_openspec_change_service();
     init_policy_service();
     init_profile_service();
+    init_review_council_service();
     init_run_service();
     init_source_registry_service();
     init_spec_bdd_agent_lane_service();
@@ -47487,6 +48265,9 @@ var init_create_server = __esm({
       "prepare_design_ui_agent",
       "get_design_ui_agent_context",
       "record_design_ui_agent_result",
+      "prepare_review_council",
+      "get_review_council_context",
+      "record_review_council_result",
       "prepare_spec_bdd_agent",
       "record_spec_bdd_agent_result",
       "get_spec_bdd_agent_context"
@@ -47533,7 +48314,7 @@ __export(sqlite_run_store_exports, {
   SqliteRunStore: () => SqliteRunStore
 });
 import { mkdirSync } from "fs";
-import path27 from "path";
+import path28 from "path";
 import { createRequire } from "module";
 function loadSqliteModule() {
   return require2("node:sqlite");
@@ -47575,7 +48356,7 @@ var init_sqlite_run_store = __esm({
     SqliteRunStore = class {
       database;
       constructor(databasePath) {
-        mkdirSync(path27.dirname(databasePath), {
+        mkdirSync(path28.dirname(databasePath), {
           recursive: true,
           mode: 448
         });
@@ -47811,7 +48592,7 @@ __export(run_service_provider_exports, {
   createLazyServicesProvider: () => createLazyServicesProvider
 });
 import os from "os";
-import path28 from "path";
+import path29 from "path";
 function createLazyServicesProvider() {
   let services;
   return async () => {
@@ -47820,9 +48601,9 @@ function createLazyServicesProvider() {
     }
     const { SqliteRunStore: SqliteRunStore2 } = await Promise.resolve().then(() => (init_sqlite_run_store(), sqlite_run_store_exports));
     const dataDirectory = resolveDataDirectory();
-    const store = new SqliteRunStore2(path28.join(dataDirectory, "runs.sqlite3"));
-    const snapshotStore = new SourceSnapshotStore(path28.join(dataDirectory, "source-snapshots"));
-    const artifactStore = new ArtifactBlobStore(path28.join(dataDirectory, "artifacts"));
+    const store = new SqliteRunStore2(path29.join(dataDirectory, "runs.sqlite3"));
+    const snapshotStore = new SourceSnapshotStore(path29.join(dataDirectory, "source-snapshots"));
+    const artifactStore = new ArtifactBlobStore(path29.join(dataDirectory, "artifacts"));
     services = {
       runService: new RunService(store, {
         pluginVersion: package_default.version
@@ -47830,7 +48611,7 @@ function createLazyServicesProvider() {
       stageService: new StageService(store),
       policyService: new PolicyService(),
       profileService: new ProjectProfileService(
-        new JsonProfileStore(path28.join(dataDirectory, "profiles"))
+        new JsonProfileStore(path29.join(dataDirectory, "profiles"))
       ),
       sourceRegistryService: new SourceRegistryService(store, snapshotStore),
       briefAdapterService: new BriefAdapterService(store, snapshotStore),
@@ -47845,6 +48626,7 @@ function createLazyServicesProvider() {
       apiContractAgentService: new ApiContractAgentService(store, dataDirectory),
       designContractService: new DesignContractService(store, artifactStore),
       designUiAgentLaneService: new DesignUiAgentLaneService(store, dataDirectory),
+      reviewCouncilService: new ReviewCouncilService(store, artifactStore, dataDirectory),
       agentRuntimeService: new AgentRuntimeService(store),
       specBddAgentLaneService: new SpecBddAgentLaneService(store)
     };
@@ -47852,7 +48634,7 @@ function createLazyServicesProvider() {
   };
 }
 function resolveDataDirectory() {
-  return process.env.SPEC_TO_PR_DATA_DIR ?? path28.join(os.tmpdir(), "spec-to-pr-plugin-data");
+  return process.env.SPEC_TO_PR_DATA_DIR ?? path29.join(os.tmpdir(), "spec-to-pr-plugin-data");
 }
 var init_run_service_provider = __esm({
   "src/mcp/run-service-provider.ts"() {
@@ -47874,6 +48656,7 @@ var init_run_service_provider = __esm({
     init_openspec_change_service();
     init_policy_service();
     init_profile_service();
+    init_review_council_service();
     init_run_service();
     init_source_registry_service();
     init_spec_bdd_agent_lane_service();
