@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, realpath } from "node:fs/promises";
 import path from "node:path";
 
 import { z } from "zod";
@@ -30,14 +30,15 @@ export type CreateAgentWorktreeInput = {
 
 export class GitWorktreeManager {
   public async createAgentWorktree(input: CreateAgentWorktreeInput): Promise<AgentWorktree> {
-    await this.assertGitRepository(input.projectRoot);
-    const baseCommit = GitObjectIdSchema.parse(input.baseCommit ?? (await this.currentHead(input.projectRoot)));
+    const projectRoot = await realpath(input.projectRoot);
+    await this.assertGitRepository(projectRoot);
+    const baseCommit = GitObjectIdSchema.parse(input.baseCommit ?? (await this.currentHead(projectRoot)));
     const branchName = branchNameFor(input.runId, input.agent);
-    const worktreePath = worktreePathFor(input.projectRoot, input.runId, input.agent);
+    const worktreePath = worktreePathFor(projectRoot, input.runId, input.agent);
 
     await mkdir(path.dirname(worktreePath), { recursive: true });
     await runCommand({
-      cwd: input.projectRoot,
+      cwd: projectRoot,
       command: "git",
       args: ["worktree", "add", "-B", branchName, worktreePath, baseCommit],
       timeoutMs: 30_000,
@@ -46,7 +47,7 @@ export class GitWorktreeManager {
     return AgentWorktreeSchema.parse({
       runId: input.runId,
       agent: input.agent,
-      projectRoot: input.projectRoot,
+      projectRoot,
       worktreePath,
       branchName,
       baseCommit,

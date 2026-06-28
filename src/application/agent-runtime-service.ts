@@ -10,6 +10,7 @@ import {
 } from "../agent-runtime/agent-runtime-report.js";
 import type { AgentWorktreeReport } from "../agent-runtime/agent-runtime-report.js";
 import {
+  AgentDescriptorSchema,
   getAgentDescriptor,
   listAgentDescriptors,
   RuntimeAgentKindSchema,
@@ -71,7 +72,7 @@ export const CleanupAgentWorktreeInputSchema = z
 
 export const ListAgentDescriptorsOutputSchema = z
   .object({
-    descriptors: z.array(z.custom<ReturnType<typeof listAgentDescriptors>[number]>()),
+    descriptors: z.array(AgentDescriptorSchema),
   })
   .strict();
 
