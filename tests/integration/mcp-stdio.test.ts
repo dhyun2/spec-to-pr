@@ -1,10 +1,14 @@
+import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+const execFileAsync = promisify(execFile);
 
 describe("spec-to-pr MCP stdio server", () => {
   let client: Client | undefined;
@@ -55,7 +59,9 @@ describe("spec-to-pr MCP stdio server", () => {
       "block_stage",
       "build_evidence_graph",
       "classify_command",
+      "cleanup_agent_worktree",
       "complete_stage",
+      "create_agent_worktree",
       "create_intake_manifest",
       "create_run",
       "fail_stage",
@@ -63,6 +69,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "generate_figma_design_contract",
       "generate_gherkin_test_matrix",
       "generate_openspec_change",
+      "get_agent_context_pack",
       "get_figma_design_contract_summary",
       "get_figma_design_inventory",
       "get_figma_provider_policy",
@@ -75,9 +82,12 @@ describe("spec-to-pr MCP stdio server", () => {
       "inspect_project",
       "kernel_info",
       "kernel_ping",
+      "list_agent_descriptors",
+      "list_agent_worktrees",
       "list_project_profiles",
       "list_runs",
       "policy_info",
+      "prepare_agent_runtime",
       "record_figma_code_connect_map",
       "record_figma_design_context",
       "record_figma_mcp_capabilities",
@@ -152,6 +162,8 @@ describe("spec-to-pr MCP stdio server", () => {
     expect(redacted.structuredContent).toMatchObject({
       redactionCount: 1,
     });
+
+    await initializeGitRepository(projectDirectory);
 
     const created = await client.callTool({
       name: "create_run",
@@ -548,6 +560,91 @@ components:
       changeName: "deliver-reservation-management",
     });
 
+    const descriptors = await client.callTool({
+      name: "list_agent_descriptors",
+      arguments: {},
+    });
+
+    expect(
+      (descriptors.structuredContent as { descriptors: Array<{ agent: string }> }).descriptors.map(
+        (descriptor) => descriptor.agent,
+      ),
+    ).toEqual(["spec-bdd", "api-contract", "design-ui", "integrator"]);
+
+    const preparedRuntime = await client.callTool({
+      name: "prepare_agent_runtime",
+      arguments: {
+        runId,
+        agents: ["spec-bdd"],
+      },
+    });
+
+    expect(preparedRuntime.structuredContent).toMatchObject({
+      runId,
+      worktrees: [
+        {
+          agent: "spec-bdd",
+        },
+      ],
+    });
+
+    const createdWorktree = await client.callTool({
+      name: "create_agent_worktree",
+      arguments: {
+        runId,
+        agent: "api-contract",
+      },
+    });
+
+    expect(createdWorktree.structuredContent).toMatchObject({
+      runId,
+      worktrees: [
+        {
+          agent: "api-contract",
+        },
+      ],
+    });
+
+    const contextPack = await client.callTool({
+      name: "get_agent_context_pack",
+      arguments: {
+        runId,
+        agent: "api-contract",
+      },
+    });
+
+    expect(contextPack.structuredContent).toMatchObject({
+      pack: {
+        agent: {
+          agent: "api-contract",
+        },
+      },
+    });
+
+    const listedWorktrees = await client.callTool({
+      name: "list_agent_worktrees",
+      arguments: {
+        runId,
+      },
+    });
+
+    expect(
+      (listedWorktrees.structuredContent as { worktrees: Array<{ path: string }> }).worktrees,
+    ).toHaveLength(2);
+
+    const cleanedWorktree = await client.callTool({
+      name: "cleanup_agent_worktree",
+      arguments: {
+        runId,
+        agent: "api-contract",
+      },
+    });
+
+    expect(cleanedWorktree.structuredContent).toMatchObject({
+      agent: "api-contract",
+      removed: true,
+    });
+
     const intake = await client.callTool({
       name: "create_intake_manifest",
       arguments: {
@@ -706,3 +803,19 @@ components:
     expect(runs.map((run) => run.id)).toContain(runId);
   });
 });
+
+async function initializeGitRepository(cwd: string): Promise<void> {
+  await runGit(cwd, ["init"]);
+  await runGit(cwd, ["config", "user.email", "test@example.com"]);
+  await runGit(cwd, ["config", "user.name", "Spec To PR Test"]);
+  await writeFile(path.join(cwd, "README.md"), "# Test Project\n");
+  await runGit(cwd, ["add", "README.md"]);
+  await runGit(cwd, ["commit", "-m", "initial"]);
+}
+
+async function runGit(cwd: string, args: string[]): Promise<void> {
+  await execFileAsync("git", args, {
+    cwd,
+    timeout: 15_000,
+  });
+}
