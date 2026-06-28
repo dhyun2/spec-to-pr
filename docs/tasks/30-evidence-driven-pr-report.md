@@ -64,3 +64,36 @@ Task 30 generates a deterministic Markdown report from Run artifacts.
 - Skill exists.
 - Reviewer agent exists.
 - MCP tool works in stdio integration tests.
+
+## Verification
+
+Run:
+
+```bash
+pnpm format:check
+pnpm typecheck
+pnpm schemas:build
+pnpm build
+pnpm test
+pnpm audit
+```
+
+Expected:
+
+- PR report collector tests pass
+- PR report decision policy tests pass
+- PR report renderer tests pass
+- PR report service tests pass
+- MCP stdio integration can call:
+  - generate_pr_report
+  - get_pr_report
+  - record_pr_report_review
+
+## Known Limitations
+
+- Report sections are only as complete as their upstream artifacts.
+- Task 30 does not publish PR/MR.
+- Task 30 does not re-run checks.
+- Task 30 does not approve gap waivers.
+- Task 30 does not archive OpenSpec changes.
+- Report reviewer agent can flag inconsistencies but cannot change deterministic decision.
