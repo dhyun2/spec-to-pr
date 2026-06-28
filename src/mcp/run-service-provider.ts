@@ -19,6 +19,7 @@ import { GherkinTestMatrixService } from "../application/gherkin-test-matrix-ser
 import { IntegrationService } from "../application/integration-service.js";
 import { OpenApiIntakeService } from "../application/openapi-intake-service.js";
 import { OpenSpecChangeService } from "../application/openspec-change-service.js";
+import { PerformanceGateService } from "../application/performance-gate-service.js";
 import { PolicyService } from "../application/policy-service.js";
 import { ProjectProfileService } from "../application/profile-service.js";
 import { QualityGateService } from "../application/quality-gate-service.js";
@@ -36,6 +37,7 @@ import type { RunStore } from "../store/run-store.js";
 export type Services = {
   runService: RunService;
   accessibilityGateService: AccessibilityGateService;
+  performanceGateService: PerformanceGateService;
   stageService: StageService;
   policyService: PolicyService;
   architectureGuardService: ArchitectureGuardService;
@@ -83,6 +85,7 @@ export function createLazyServicesProvider(): ServicesProvider {
         pluginVersion: packageJson.version,
       }),
       accessibilityGateService: new AccessibilityGateService(store, artifactStore),
+      performanceGateService: new PerformanceGateService(store, artifactStore),
       stageService: new StageService(store),
       policyService: new PolicyService(),
       architectureGuardService: new ArchitectureGuardService(store, artifactStore),

@@ -12,6 +12,16 @@ import {
   RunAccessibilityGateInputSchema,
   RunAccessibilityGateResultSchema,
 } from "../application/accessibility-gate-service.js";
+import {
+  GetPerformanceReportInputSchema,
+  GetPerformanceReportResultSchema,
+  PlanPerformanceGateInputSchema,
+  PlanPerformanceGateResultSchema,
+  RecordPerformanceReviewInputSchema,
+  RecordPerformanceReviewResultSchema,
+  RunPerformanceGateInputSchema,
+  RunPerformanceGateResultSchema,
+} from "../application/performance-gate-service.js";
 import { AgentRuntimePreparationResultSchema } from "../agent-runtime/agent-runtime-report.js";
 import {
   CleanupAgentWorktreeInputSchema,
@@ -208,6 +218,10 @@ const TOOL_NAMES = [
   "run_accessibility_gate",
   "get_accessibility_report",
   "record_accessibility_review",
+  "plan_performance_gate",
+  "run_performance_gate",
+  "get_performance_report",
+  "record_performance_review",
   "analyze_architecture_boundaries",
   "generate_source_guard_tests",
   "run_quality_gates",
@@ -475,6 +489,104 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
 
         return {
           text: `Recorded accessibility review artifact ${structuredContent.artifactId}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "plan_performance_gate",
+    {
+      title: "Plan performance gate",
+      description: "Create performance targets, budgets, and Lighthouse CI config for a Run.",
+      inputSchema: PlanPerformanceGateInputSchema.shape,
+      outputSchema: PlanPerformanceGateResultSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { performanceGateService } = await servicesProvider();
+        const structuredContent = await performanceGateService.plan(input);
+
+        return {
+          text: `Planned performance gate for ${structuredContent.plan.routes.length} route(s).`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "run_performance_gate",
+    {
+      title: "Run performance gate",
+      description: "Record Lighthouse, budget, and Web Vitals readiness results for a Run.",
+      inputSchema: RunPerformanceGateInputSchema.shape,
+      outputSchema: RunPerformanceGateResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { performanceGateService } = await servicesProvider();
+        const structuredContent = await performanceGateService.run(input);
+
+        return {
+          text: `Performance gate decision: ${structuredContent.decision}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "get_performance_report",
+    {
+      title: "Get performance report",
+      description: "Return latest performance report artifacts for a Run.",
+      inputSchema: GetPerformanceReportInputSchema.shape,
+      outputSchema: GetPerformanceReportResultSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { performanceGateService } = await servicesProvider();
+        const structuredContent = await performanceGateService.getReport(input);
+
+        return {
+          text: `Loaded performance report ${structuredContent.reportArtifactId}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "record_performance_review",
+    {
+      title: "Record performance review",
+      description: "Record performance-reviewer triage output.",
+      inputSchema: RecordPerformanceReviewInputSchema.shape,
+      outputSchema: RecordPerformanceReviewResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { performanceGateService } = await servicesProvider();
+        const structuredContent = await performanceGateService.recordReview(input);
+
+        return {
+          text: `Recorded performance review ${structuredContent.reviewArtifactId}.`,
           structuredContent,
         };
       }),
