@@ -1,10 +1,7 @@
 import { GapSchema } from "../runtime/gap.js";
 import { createGapId } from "../runtime/id-factory.js";
 import type { Gap } from "../runtime/gap.js";
-import type {
-  AccessibilityViolation,
-  AutomatedAccessibilityCheck,
-} from "./accessibility-model.js";
+import type { AccessibilityViolation, AutomatedAccessibilityCheck } from "./accessibility-model.js";
 
 export function mapAccessibilityChecksToGaps(input: {
   checks: AutomatedAccessibilityCheck[];

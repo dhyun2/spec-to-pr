@@ -151,9 +151,7 @@ export type AccessibilityViolation = z.infer<typeof AccessibilityViolationSchema
 export type AutomatedAccessibilityCheck = z.infer<typeof AutomatedAccessibilityCheckSchema>;
 export type KeyboardCheck = z.infer<typeof KeyboardCheckSchema>;
 export type FocusCheck = z.infer<typeof FocusCheckSchema>;
-export type ManualAccessibilityReviewItem = z.infer<
-  typeof ManualAccessibilityReviewItemSchema
->;
+export type ManualAccessibilityReviewItem = z.infer<typeof ManualAccessibilityReviewItemSchema>;
 export type AccessibilityReport = z.infer<typeof AccessibilityReportSchema>;
 export type AccessibilityGateDecision = z.infer<typeof AccessibilityGateDecisionSchema>;
 export type AccessibilityReviewRecord = z.infer<typeof AccessibilityReviewRecordSchema>;
