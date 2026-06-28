@@ -111,8 +111,10 @@ import {
   GetOpenSpecArchiveReportResultSchema,
   PlanOpenSpecArchiveInputSchema,
   PlanOpenSpecArchiveResultSchema,
-  RecordMergeAttestationInputSchema,
-  RecordMergeAttestationResultSchema,
+  RecordUserMergeAttestationInputSchema,
+  RecordUserMergeAttestationResultSchema,
+  ResolveArchiveTargetInputSchema,
+  ResolveArchiveTargetResultSchema,
   RunOpenSpecArchiveInputSchema,
   RunOpenSpecArchiveResultSchema,
 } from "../application/openspec-archive-service.js";
@@ -278,8 +280,9 @@ const TOOL_NAMES = [
   "update_review_request_body",
   "get_publish_result",
   "record_publish_review",
+  "resolve_archive_target",
   "plan_openspec_archive",
-  "record_merge_attestation",
+  "record_user_merge_attestation",
   "check_review_request_status_once",
   "run_openspec_archive",
   "get_openspec_archive_report",
@@ -981,6 +984,34 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
   );
 
   server.registerTool(
+    "resolve_archive_target",
+    {
+      title: "Resolve archive target",
+      description:
+        "Resolve the Run, OpenSpec change, and PR/MR URL for a manual post-merge archive command.",
+      inputSchema: ResolveArchiveTargetInputSchema.shape,
+      outputSchema: ResolveArchiveTargetResultSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { openSpecArchiveService } = await servicesProvider();
+        const structuredContent = await openSpecArchiveService.resolveTarget(input);
+
+        return {
+          text: structuredContent.resolved
+            ? `Resolved OpenSpec archive target ${structuredContent.runId}/${structuredContent.changeName}.`
+            : `Could not resolve OpenSpec archive target: ${structuredContent.reason}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
     "plan_openspec_archive",
     {
       title: "Plan OpenSpec archive",
@@ -1007,12 +1038,12 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
   );
 
   server.registerTool(
-    "record_merge_attestation",
+    "record_user_merge_attestation",
     {
-      title: "Record merge attestation",
+      title: "Record user merge attestation",
       description: "Record user-attested merge evidence for a PR/MR before OpenSpec archive.",
-      inputSchema: RecordMergeAttestationInputSchema.shape,
-      outputSchema: RecordMergeAttestationResultSchema.shape,
+      inputSchema: RecordUserMergeAttestationInputSchema.shape,
+      outputSchema: RecordUserMergeAttestationResultSchema.shape,
       annotations: {
         readOnlyHint: false,
         destructiveHint: false,
@@ -1022,7 +1053,7 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
     async (input: unknown) =>
       handleTool(async () => {
         const { openSpecArchiveService } = await servicesProvider();
-        const structuredContent = await openSpecArchiveService.recordMergeAttestation(input);
+        const structuredContent = await openSpecArchiveService.recordUserMergeAttestation(input);
 
         return {
           text: `Recorded user-attested merge evidence ${structuredContent.mergeEvidenceId}.`,

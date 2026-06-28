@@ -95,14 +95,25 @@ describe("OpenSpecArchiveService", () => {
     await store.create(run);
     await addPublishResult(run.id);
 
-    const attestation = await service.recordMergeAttestation({
+    const resolved = await service.resolveTarget({});
+
+    expect(resolved).toMatchObject({
+      resolved: true,
       runId: run.id,
+      changeName: "deliver-reservation-management",
+      reviewRequestUrl: "https://github.com/acme/spec-to-pr/pull/123",
+      source: "latest-published-run",
+    });
+
+    const attestation = await service.recordUserMergeAttestation({
+      runId: run.id,
+      changeName: "deliver-reservation-management",
       reviewRequestUrl: "https://github.com/acme/spec-to-pr/pull/123",
       statement: "The GitHub pull request has been merged.",
       attestedBy: "user",
     });
 
-    expect(attestation.type).toBe("user-attested");
+    expect(attestation.type).toBe("user-attested-merge");
 
     const plan = await service.plan({
       runId: run.id,

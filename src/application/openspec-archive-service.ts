@@ -1,3 +1,5 @@
+import { readdir } from "node:fs/promises";
+
 import { z } from "zod";
 
 import type { ArtifactBlobStore } from "../artifact-registry/artifact-blob-store.js";
@@ -17,8 +19,12 @@ import {
   type ReviewRequestProvider,
   type ReviewRequestStatus,
 } from "../archive/index.js";
-import { OpenSpecChangeNameSchema } from "../openspec/openspec-paths.js";
+import {
+  OpenSpecChangeNameSchema,
+  resolveOpenSpecChangePaths,
+} from "../openspec/openspec-paths.js";
 import { PublishResultSchema, readPublisherToken, redactSecrets } from "../publisher/index.js";
+import type { PublishResult } from "../publisher/index.js";
 import { encodeGitLabProjectId } from "../publisher/review-host.js";
 import { RunManifestSchema, RunSummarySchema, summarizeRun } from "../run/index.js";
 import { ArtifactRefSchema } from "../runtime/artifact.js";
@@ -32,6 +38,85 @@ const ARCHIVE_ADAPTER = "manual-openspec-archive-v1" as const;
 
 type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 
+export const ArchiveTargetSourceSchema = z.enum(["explicit", "active-run", "latest-published-run"]);
+
+export const ArchiveTargetResolutionReasonSchema = z.enum([
+  "no-candidates",
+  "multiple-candidates",
+  "missing-publish-result",
+  "missing-change",
+]);
+
+export const ArchiveTargetCandidateSchema = z
+  .object({
+    runId: RunIdSchema,
+    changeName: OpenSpecChangeNameSchema,
+    reviewRequestUrl: z.string().url(),
+    source: ArchiveTargetSourceSchema,
+    updatedAt: IsoDateTimeSchema,
+  })
+  .strict();
+
+export const ResolveArchiveTargetInputSchema = z
+  .object({
+    runId: RunIdSchema.optional(),
+    changeName: OpenSpecChangeNameSchema.optional(),
+  })
+  .strict();
+
+export const ResolveArchiveTargetResultSchema = z
+  .object({
+    resolved: z.boolean(),
+    runId: RunIdSchema.optional(),
+    changeName: OpenSpecChangeNameSchema.optional(),
+    reviewRequestUrl: z.string().url().optional(),
+    source: ArchiveTargetSourceSchema.optional(),
+    reason: ArchiveTargetResolutionReasonSchema.optional(),
+    candidates: z.array(ArchiveTargetCandidateSchema).default([]),
+  })
+  .strict()
+  .superRefine((result, context) => {
+    if (result.resolved) {
+      if (result.runId === undefined) {
+        context.addIssue({
+          code: "custom",
+          path: ["runId"],
+          message: "Resolved archive target requires runId",
+        });
+      }
+
+      if (result.changeName === undefined) {
+        context.addIssue({
+          code: "custom",
+          path: ["changeName"],
+          message: "Resolved archive target requires changeName",
+        });
+      }
+
+      if (result.reviewRequestUrl === undefined) {
+        context.addIssue({
+          code: "custom",
+          path: ["reviewRequestUrl"],
+          message: "Resolved archive target requires reviewRequestUrl",
+        });
+      }
+
+      if (result.source === undefined) {
+        context.addIssue({
+          code: "custom",
+          path: ["source"],
+          message: "Resolved archive target requires source",
+        });
+      }
+    } else if (result.reason === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["reason"],
+        message: "Unresolved archive target requires reason",
+      });
+    }
+  });
+
 export const PlanOpenSpecArchiveInputSchema = z
   .object({
     runId: RunIdSchema,
@@ -41,20 +126,21 @@ export const PlanOpenSpecArchiveInputSchema = z
 
 export const PlanOpenSpecArchiveResultSchema = OpenSpecArchivePlanSchema;
 
-export const RecordMergeAttestationInputSchema = z
+export const RecordUserMergeAttestationInputSchema = z
   .object({
     runId: RunIdSchema,
+    changeName: OpenSpecChangeNameSchema.optional(),
     reviewRequestUrl: z.string().url(),
     statement: z.string().trim().min(1),
     attestedBy: z.string().trim().min(1),
   })
   .strict();
 
-export const RecordMergeAttestationResultSchema = z
+export const RecordUserMergeAttestationResultSchema = z
   .object({
     run: RunSummarySchema,
     mergeEvidenceId: ArtifactIdSchema,
-    type: z.literal("user-attested"),
+    type: z.literal("user-attested-merge"),
     reviewRequestUrl: z.string().url(),
     evidence: MergeEvidenceSchema,
   })
@@ -131,6 +217,38 @@ export class OpenSpecArchiveService {
     private readonly fetchImpl: FetchLike = fetch,
   ) {}
 
+  public async resolveTarget(rawInput: unknown) {
+    const input = ResolveArchiveTargetInputSchema.parse(rawInput);
+
+    if (input.runId !== undefined) {
+      const run = await this.runStore.get(input.runId);
+      const candidates = await this.archiveTargetCandidatesForRun({
+        run,
+        ...(input.changeName === undefined ? {} : { changeName: input.changeName }),
+        source: "explicit",
+      });
+
+      return ResolveArchiveTargetResultSchema.parse(resolveCandidates(candidates));
+    }
+
+    const summaries = await this.runStore.list({ limit: 50 });
+    const candidates = (
+      await Promise.all(
+        summaries.map(async (summary) => {
+          const run = await this.runStore.get(summary.id);
+
+          return this.archiveTargetCandidatesForRun({
+            run,
+            ...(input.changeName === undefined ? {} : { changeName: input.changeName }),
+            source: "latest-published-run",
+          });
+        }),
+      )
+    ).flat();
+
+    return ResolveArchiveTargetResultSchema.parse(resolveCandidates(candidates));
+  }
+
   public async plan(rawInput: unknown) {
     const input = PlanOpenSpecArchiveInputSchema.parse(rawInput);
     const run = await this.runStore.get(input.runId);
@@ -149,8 +267,8 @@ export class OpenSpecArchiveService {
     );
   }
 
-  public async recordMergeAttestation(rawInput: unknown) {
-    const input = RecordMergeAttestationInputSchema.parse(rawInput);
+  public async recordUserMergeAttestation(rawInput: unknown) {
+    const input = RecordUserMergeAttestationInputSchema.parse(rawInput);
     const run = await this.runStore.get(input.runId);
     const timestamp = IsoDateTimeSchema.parse(this.now());
     const parsedReviewRequest = parseReviewRequestUrl(input.reviewRequestUrl);
@@ -172,6 +290,7 @@ export class OpenSpecArchiveService {
       metadata: {
         source: "manual-post-merge-command",
         number: parsedReviewRequest.number,
+        ...(input.changeName === undefined ? {} : { changeName: input.changeName }),
       },
     });
     const artifact = await this.writeJsonArtifact({
@@ -196,10 +315,10 @@ export class OpenSpecArchiveService {
 
     await this.runStore.save(nextRun, run.revision);
 
-    return RecordMergeAttestationResultSchema.parse({
+    return RecordUserMergeAttestationResultSchema.parse({
       run: summarizeRun(nextRun),
       mergeEvidenceId: evidence.id,
-      type: "user-attested",
+      type: "user-attested-merge",
       reviewRequestUrl: evidence.reviewRequestUrl,
       evidence,
     });
@@ -587,6 +706,12 @@ export class OpenSpecArchiveService {
   }
 
   private async latestPublishResultUrl(artifacts: ArtifactRef[]): Promise<string | undefined> {
+    return (await this.latestPublishResult(artifacts))?.result.request?.url;
+  }
+
+  private async latestPublishResult(
+    artifacts: ArtifactRef[],
+  ): Promise<{ artifact: ArtifactRef; result: PublishResult } | undefined> {
     const artifact = latestArtifactByReportKind(artifacts, "agent-result-report", "publish-result");
 
     if (artifact === undefined) {
@@ -597,7 +722,88 @@ export class OpenSpecArchiveService {
       JSON.parse((await this.artifactStore.readContent(artifact.digest)).toString("utf8")),
     );
 
-    return result.request?.url;
+    return {
+      artifact,
+      result,
+    };
+  }
+
+  private async archiveTargetCandidatesForRun(input: {
+    run: Awaited<ReturnType<RunStore["get"]>>;
+    changeName?: string;
+    source: z.infer<typeof ArchiveTargetSourceSchema>;
+  }): Promise<z.infer<typeof ArchiveTargetCandidateSchema>[]> {
+    const publishResult = await this.latestPublishResult(input.run.artifacts);
+    const reviewRequestUrl = publishResult?.result.request?.url;
+
+    if (reviewRequestUrl === undefined) {
+      return [];
+    }
+
+    const changeNames =
+      input.changeName === undefined
+        ? await this.openArchiveCandidateChangeNames(input.run)
+        : [OpenSpecChangeNameSchema.parse(input.changeName)];
+
+    return changeNames
+      .filter((changeName) => !hasPassedArchiveResult(input.run.artifacts, changeName))
+      .map((changeName) =>
+        ArchiveTargetCandidateSchema.parse({
+          runId: input.run.id,
+          changeName,
+          reviewRequestUrl,
+          source: input.source,
+          updatedAt: input.run.updatedAt,
+        }),
+      );
+  }
+
+  private async openArchiveCandidateChangeNames(
+    run: Awaited<ReturnType<RunStore["get"]>>,
+  ): Promise<string[]> {
+    const names = new Set<string>();
+
+    run.artifacts.forEach((artifact) => {
+      if (artifact.kind !== "openspec") {
+        return;
+      }
+
+      const changeName = artifact.metadata["changeName"];
+
+      if (
+        typeof changeName === "string" &&
+        OpenSpecChangeNameSchema.safeParse(changeName).success
+      ) {
+        names.add(changeName);
+      }
+    });
+
+    const changesRoot = resolveOpenSpecChangePaths({
+      projectRoot: run.projectRoot,
+      changeName: "placeholder-change",
+    }).changesRoot;
+
+    try {
+      const entries = await readdir(changesRoot, {
+        withFileTypes: true,
+      });
+
+      entries.forEach((entry) => {
+        if (!entry.isDirectory() || entry.name === "archive") {
+          return;
+        }
+
+        if (OpenSpecChangeNameSchema.safeParse(entry.name).success) {
+          names.add(entry.name);
+        }
+      });
+    } catch (error: unknown) {
+      if (!isMissingFile(error)) {
+        throw error;
+      }
+    }
+
+    return [...names].sort();
   }
 
   private async latestMergeEvidence(artifacts: ArtifactRef[]): Promise<MergeEvidence | undefined> {
@@ -704,6 +910,55 @@ function requireArtifact(artifacts: ArtifactRef[], artifactId: string): Artifact
   }
 
   return artifact;
+}
+
+function resolveCandidates(candidates: z.infer<typeof ArchiveTargetCandidateSchema>[]) {
+  if (candidates.length === 1) {
+    const candidate = candidates[0];
+
+    if (candidate === undefined) {
+      throw new Error("Archive target resolver expected one candidate.");
+    }
+
+    return {
+      resolved: true,
+      runId: candidate.runId,
+      changeName: candidate.changeName,
+      reviewRequestUrl: candidate.reviewRequestUrl,
+      source: candidate.source,
+      candidates,
+    };
+  }
+
+  if (candidates.length > 1) {
+    return {
+      resolved: false,
+      reason: "multiple-candidates",
+      candidates,
+    };
+  }
+
+  return {
+    resolved: false,
+    reason: "no-candidates",
+    candidates,
+  };
+}
+
+function hasPassedArchiveResult(artifacts: ArtifactRef[], changeName: string): boolean {
+  return artifacts.some(
+    (artifact) =>
+      artifact.kind === "openspec-archive-result" &&
+      artifact.metadata["reportKind"] === "openspec-archive-result" &&
+      artifact.metadata["changeName"] === changeName &&
+      artifact.metadata["status"] === "passed",
+  );
+}
+
+function isMissingFile(error: unknown): boolean {
+  return (
+    error instanceof Error && "code" in error && (error as { code?: unknown }).code === "ENOENT"
+  );
 }
 
 function safeErrorMessage(error: unknown): string {

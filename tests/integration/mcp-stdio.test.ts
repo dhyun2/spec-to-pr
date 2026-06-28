@@ -136,17 +136,18 @@ describe("spec-to-pr MCP stdio server", () => {
       "record_figma_screenshot",
       "record_figma_variable_defs",
       "record_integration_repair",
-      "record_merge_attestation",
       "record_observability_review",
       "record_performance_review",
       "record_pr_report_review",
       "record_publish_review",
       "record_review_council_result",
       "record_spec_bdd_agent_result",
+      "record_user_merge_attestation",
       "record_visual_review_result",
       "redact_text",
       "register_figma_source",
       "register_file_source",
+      "resolve_archive_target",
       "run_accessibility_gate",
       "run_openspec_archive",
       "run_performance_gate",
@@ -1041,10 +1042,25 @@ components:
       changeName: "deliver-reservation-management",
     });
 
-    const archiveAttestation = await client.callTool({
-      name: "record_merge_attestation",
+    const archiveTarget = await client.callTool({
+      name: "resolve_archive_target",
       arguments: {
         runId,
+        changeName: "deliver-reservation-management",
+      },
+    });
+
+    expect(archiveTarget.structuredContent).toMatchObject({
+      resolved: false,
+      reason: "no-candidates",
+      candidates: [],
+    });
+
+    const archiveAttestation = await client.callTool({
+      name: "record_user_merge_attestation",
+      arguments: {
+        runId,
+        changeName: "deliver-reservation-management",
         reviewRequestUrl: "https://github.com/acme/spec-to-pr/pull/123",
         statement: "The GitHub pull request has been merged.",
         attestedBy: "user",
@@ -1052,7 +1068,7 @@ components:
     });
 
     expect(archiveAttestation.structuredContent).toMatchObject({
-      type: "user-attested",
+      type: "user-attested-merge",
       reviewRequestUrl: "https://github.com/acme/spec-to-pr/pull/123",
       mergeEvidenceId: expect.any(String),
     });
