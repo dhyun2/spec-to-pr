@@ -59,3 +59,38 @@ The spec-to-pr workflow is long-running and multi-stage. Failures must be tracea
 - Structured log correlation fields are defined.
 - Observability report is stored as an artifact.
 - MCP tools work through stdio integration tests.
+
+## Verification
+
+Run:
+
+```bash
+pnpm format:check
+pnpm typecheck
+pnpm schemas:build
+pnpm build
+pnpm test
+pnpm audit
+```
+
+Expected:
+
+- telemetry redaction tests pass
+- telemetry resource tests pass
+- observability plan tests pass
+- config renderer tests pass
+- ObservabilityService tests pass
+- MCP stdio integration can call:
+  - plan_observability
+  - generate_observability_config
+  - get_observability_report
+  - record_observability_review
+
+## Known Limitations
+
+- No collector is deployed.
+- No vendor-specific integration is generated.
+- Node.js OTel logs are optional, not default.
+- Target app code is not modified by default.
+- API wrapper instrumentation is generated as a template.
+- Production field telemetry is not claimed.
