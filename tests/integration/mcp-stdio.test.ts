@@ -64,6 +64,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "apply_integration",
       "block_stage",
       "build_evidence_graph",
+      "build_release_package",
       "capture_browser_screenshots",
       "check_review_request_status_once",
       "classify_command",
@@ -82,6 +83,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "generate_observability_config",
       "generate_openspec_change",
       "generate_pr_report",
+      "generate_release_notes",
       "generate_source_guard_tests",
       "get_accessibility_report",
       "get_agent_context_pack",
@@ -110,6 +112,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "kernel_ping",
       "list_agent_descriptors",
       "list_agent_worktrees",
+      "list_eval_suites",
       "list_project_profiles",
       "list_runs",
       "plan_accessibility_gate",
@@ -149,13 +152,16 @@ describe("spec-to-pr MCP stdio server", () => {
       "register_file_source",
       "resolve_archive_target",
       "run_accessibility_gate",
+      "run_eval_suite",
       "run_openspec_archive",
       "run_performance_gate",
       "run_quality_gates",
+      "run_security_hardening_suite",
       "skip_stage",
       "start_stage",
       "update_review_request_body",
       "validate_path",
+      "verify_release_package",
     ]);
 
     const info = await client.callTool({
@@ -687,6 +693,95 @@ describe("spec-to-pr MCP stdio server", () => {
 
     expect(publishReview.structuredContent).toMatchObject({
       reviewArtifactId: expect.any(String),
+    });
+
+    const releaseOutputDirectory = path.join(dataDirectory, "release-output");
+    const evalSuites = await client.callTool({
+      name: "list_eval_suites",
+      arguments: {},
+    });
+
+    expect(evalSuites.structuredContent).toMatchObject({
+      suites: [
+        {
+          id: "default-release-readiness",
+        },
+      ],
+    });
+
+    const evalRun = await client.callTool({
+      name: "run_eval_suite",
+      arguments: {
+        outputDirectory: releaseOutputDirectory,
+      },
+    });
+
+    expect(evalRun.structuredContent).toMatchObject({
+      report: {
+        status: "passed",
+      },
+    });
+
+    const hardeningRun = await client.callTool({
+      name: "run_security_hardening_suite",
+      arguments: {
+        outputDirectory: releaseOutputDirectory,
+      },
+    });
+
+    expect(hardeningRun.structuredContent).toMatchObject({
+      report: {
+        status: "passed",
+      },
+    });
+
+    const releaseBuild = await client.callTool({
+      name: "build_release_package",
+      arguments: {
+        version: "0.1.0",
+        outputDirectory: releaseOutputDirectory,
+      },
+    });
+
+    expect(releaseBuild.structuredContent).toMatchObject({
+      build: {
+        sha256: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+      },
+      verification: {
+        status: "passed",
+      },
+      manifestPath: expect.any(String),
+    });
+
+    const releaseManifestPath = (
+      releaseBuild.structuredContent as {
+        manifestPath: string;
+      }
+    ).manifestPath;
+
+    const releaseVerification = await client.callTool({
+      name: "verify_release_package",
+      arguments: {
+        manifestPath: releaseManifestPath,
+      },
+    });
+
+    expect(releaseVerification.structuredContent).toMatchObject({
+      verification: {
+        status: "passed",
+      },
+    });
+
+    const releaseNotes = await client.callTool({
+      name: "generate_release_notes",
+      arguments: {
+        manifestPath: releaseManifestPath,
+        outputDirectory: releaseOutputDirectory,
+      },
+    });
+
+    expect(releaseNotes.structuredContent).toMatchObject({
+      notesPath: expect.any(String),
     });
 
     await mkdir(path.join(projectDirectory, "docs"), {
