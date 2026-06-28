@@ -29,6 +29,14 @@ import {
   GetDesignContractSummaryInputSchema,
 } from "../application/design-contract-service.js";
 import {
+  GetDesignUiAgentContextInputSchema,
+  GetDesignUiAgentContextResultSchema,
+  PrepareDesignUiAgentInputSchema,
+  PrepareDesignUiAgentResultSchema,
+  RecordDesignUiAgentResultInputSchema,
+  RecordDesignUiAgentResultSchema,
+} from "../application/design-ui-agent-lane-service.js";
+import {
   BuildEvidenceGraphInputSchema,
   EvidenceGraphBuildResultSchema,
   GetTraceabilityMatrixInputSchema,
@@ -193,6 +201,9 @@ const TOOL_NAMES = [
   "record_api_contract_agent_result",
   "generate_figma_design_contract",
   "get_figma_design_contract_summary",
+  "prepare_design_ui_agent",
+  "get_design_ui_agent_context",
+  "record_design_ui_agent_result",
   "prepare_spec_bdd_agent",
   "record_spec_bdd_agent_result",
   "get_spec_bdd_agent_context",
@@ -1052,6 +1063,80 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
 
         return {
           text: `Loaded design contract summary for ${structuredContent.changeName}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "prepare_design_ui_agent",
+    {
+      title: "Prepare Design/UI agent",
+      description: "Prepare the Design/UI agent worktree context pack.",
+      inputSchema: PrepareDesignUiAgentInputSchema.shape,
+      outputSchema: PrepareDesignUiAgentResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { designUiAgentLaneService } = await servicesProvider();
+        const structuredContent = await designUiAgentLaneService.prepare(input);
+
+        return {
+          text: `Prepared Design/UI agent context for run ${structuredContent.context.runId}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "get_design_ui_agent_context",
+    {
+      title: "Get Design/UI agent context",
+      description: "Return metadata for the prepared Design/UI context pack.",
+      inputSchema: GetDesignUiAgentContextInputSchema.shape,
+      outputSchema: GetDesignUiAgentContextResultSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { designUiAgentLaneService } = await servicesProvider();
+        const structuredContent = await designUiAgentLaneService.getContext(input);
+
+        return {
+          text: `Loaded Design/UI agent context for run ${structuredContent.runId}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "record_design_ui_agent_result",
+    {
+      title: "Record Design/UI agent result",
+      description: "Validate and record the structured Design/UI AgentResult.",
+      inputSchema: RecordDesignUiAgentResultInputSchema.shape,
+      outputSchema: RecordDesignUiAgentResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { designUiAgentLaneService } = await servicesProvider();
+        const structuredContent = await designUiAgentLaneService.recordResult(input);
+
+        return {
+          text: `Recorded Design/UI agent result ${structuredContent.result.id}.`,
           structuredContent,
         };
       }),

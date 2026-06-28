@@ -8,6 +8,7 @@ import { ApiContractAgentService } from "../application/api-contract-agent-servi
 import { ApiPipelineService } from "../application/api-pipeline-service.js";
 import { BriefAdapterService } from "../application/brief-adapter-service.js";
 import { DesignContractService } from "../application/design-contract-service.js";
+import { DesignUiAgentLaneService } from "../application/design-ui-agent-lane-service.js";
 import { EvidenceGraphService } from "../application/evidence-graph-service.js";
 import { FigmaCapabilityService } from "../application/figma-capability-service.js";
 import { FigmaDesignInventoryService } from "../application/figma-design-inventory-service.js";
@@ -43,6 +44,7 @@ export type Services = {
   apiPipelineService: ApiPipelineService;
   apiContractAgentService: ApiContractAgentService;
   designContractService: DesignContractService;
+  designUiAgentLaneService: DesignUiAgentLaneService;
   agentRuntimeService: AgentRuntimeService;
   specBddAgentLaneService: SpecBddAgentLaneService;
 };
@@ -85,6 +87,7 @@ export function createLazyServicesProvider(): ServicesProvider {
       apiPipelineService: new ApiPipelineService(store, artifactStore),
       apiContractAgentService: new ApiContractAgentService(store, dataDirectory),
       designContractService: new DesignContractService(store, artifactStore),
+      designUiAgentLaneService: new DesignUiAgentLaneService(store, dataDirectory),
       agentRuntimeService: new AgentRuntimeService(store),
       specBddAgentLaneService: new SpecBddAgentLaneService(store),
     };
