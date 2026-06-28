@@ -5,10 +5,7 @@ import { minimatch } from "minimatch";
 
 import type { ImplementationAgentResult } from "../runtime/agent-result.js";
 import { AgentResultSchema } from "../runtime/agent-result.js";
-import type {
-  DesignUiAllowedFiles,
-  DesignUiForbiddenImports,
-} from "./design-ui-context.js";
+import type { DesignUiAllowedFiles, DesignUiForbiddenImports } from "./design-ui-context.js";
 
 export type DesignUiValidationIssue = {
   path: string;

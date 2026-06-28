@@ -93,8 +93,7 @@ export class DesignUiAgentLaneService {
     assertArtifactExists(run, designContractArtifactId);
 
     const figmaInventoryArtifactId =
-      input.figmaInventoryArtifactId ??
-      latestArtifactId(run.artifacts, ["figma-design-inventory"]);
+      input.figmaInventoryArtifactId ?? latestArtifactId(run.artifacts, ["figma-design-inventory"]);
 
     if (figmaInventoryArtifactId !== undefined) {
       assertArtifactExists(run, figmaInventoryArtifactId);
@@ -103,7 +102,11 @@ export class DesignUiAgentLaneService {
     const openSpecArtifactIds =
       input.openSpecArtifactIds.length > 0
         ? input.openSpecArtifactIds
-        : artifactIdsByKind(run.artifacts, ["openspec", "requirement-graph", "traceability-matrix"]);
+        : artifactIdsByKind(run.artifacts, [
+            "openspec",
+            "requirement-graph",
+            "traceability-matrix",
+          ]);
     const gherkinArtifactIds =
       input.gherkinArtifactIds.length > 0
         ? input.gherkinArtifactIds
@@ -123,7 +126,8 @@ export class DesignUiAgentLaneService {
       assertArtifactExists(run, artifactId);
     }
 
-    const worktreePath = input.worktreePath ?? worktreePathFor(run.projectRoot, run.id, "design-ui");
+    const worktreePath =
+      input.worktreePath ?? worktreePathFor(run.projectRoot, run.id, "design-ui");
     const contextRoot = input.contextRoot ?? path.join(this.dataDirectory, "agent-contexts");
     const context = await buildDesignUiContextPack({
       runId: run.id,
@@ -215,7 +219,9 @@ export class DesignUiAgentLaneService {
     const run = await this.runStore.get(input.runId);
     const context = await this.getContext({
       runId: input.runId,
-      ...(input.contextArtifactId === undefined ? {} : { contextArtifactId: input.contextArtifactId }),
+      ...(input.contextArtifactId === undefined
+        ? {}
+        : { contextArtifactId: input.contextArtifactId }),
     });
     const result = AgentResultSchema.parse(input.result);
 
@@ -255,10 +261,7 @@ export class DesignUiAgentLaneService {
   }
 }
 
-function assertArtifactExists(
-  run: Awaited<ReturnType<RunStore["get"]>>,
-  artifactId: string,
-): void {
+function assertArtifactExists(run: Awaited<ReturnType<RunStore["get"]>>, artifactId: string): void {
   if (!run.artifacts.some((artifact) => artifact.id === artifactId)) {
     throw new Error(`Artifact not found in Run: ${artifactId}`);
   }
@@ -291,7 +294,9 @@ function artifactIdsByKind(
   artifacts: Array<{ id: string; kind: string }>,
   kinds: string[],
 ): string[] {
-  return artifacts.filter((artifact) => kinds.includes(artifact.kind)).map((artifact) => artifact.id);
+  return artifacts
+    .filter((artifact) => kinds.includes(artifact.kind))
+    .map((artifact) => artifact.id);
 }
 
 function findContextArtifact(

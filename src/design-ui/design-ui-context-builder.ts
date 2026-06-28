@@ -84,11 +84,7 @@ export async function buildDesignUiContextPack(
     "utf8",
   );
   await writeFile(files.allowedFiles, `${JSON.stringify(allowedFiles, null, 2)}\n`, "utf8");
-  await writeFile(
-    files.forbiddenImports,
-    `${JSON.stringify(forbiddenImports, null, 2)}\n`,
-    "utf8",
-  );
+  await writeFile(files.forbiddenImports, `${JSON.stringify(forbiddenImports, null, 2)}\n`, "utf8");
   await writeFile(files.implementationPlanTemplate, renderImplementationPlanTemplate(), "utf8");
 
   const resultJsonSchema = z.toJSONSchema(AgentResultSchema, {
@@ -196,7 +192,9 @@ function renderPlaceholderJson(key: string, value: unknown): string {
   return `${JSON.stringify({ [key]: value }, null, 2)}\n`;
 }
 
-function renderFigmaEvidenceSummary(input: z.infer<typeof BuildDesignUiContextInputSchema>): string {
+function renderFigmaEvidenceSummary(
+  input: z.infer<typeof BuildDesignUiContextInputSchema>,
+): string {
   return `# Figma Evidence Summary
 
 Figma inventory artifact: ${input.figmaInventoryArtifactId ?? "not provided"}
