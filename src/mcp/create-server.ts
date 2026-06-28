@@ -22,6 +22,7 @@ import {
   RegisterFigmaSourceInputSchema,
 } from "../application/figma-intake-service.js";
 import { AnalyzeOpenApiSourceInputSchema } from "../application/openapi-intake-service.js";
+import { GenerateOpenSpecChangeInputSchema } from "../application/openspec-change-service.js";
 import { RedactTextInputSchema } from "../application/policy-service.js";
 import {
   CreateIntakeManifestInputSchema,
@@ -55,7 +56,7 @@ import { CommandInvocationSchema } from "../security/command-policy.js";
 import { ValidateWorkspacePathInputSchema } from "../security/path-policy.js";
 import type { ServicesProvider } from "./run-service-provider.js";
 
-import { GenerateOpenSpecChangeInputSchema } from "../application/openspec-change-service.js";
+import { GenerateGherkinTestMatrixInputSchema } from "../application/gherkin-test-matrix-service.js";
 
 const CONTRACT_VERSION = "0.2.0" as const;
 const SERVER_NAME = "spec-to-pr-kernel" as const;
@@ -146,6 +147,7 @@ const TOOL_NAMES = [
   "analyze_figma_design_inventory",
   "get_figma_design_inventory",
   "generate_openspec_change",
+  "generate_gherkin_test_matrix",
 ] as const;
 
 export function createKernelServer(servicesProvider: ServicesProvider): McpServer {
@@ -675,6 +677,33 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
           text: structuredContent.duplicate
             ? `OpenSpec change ${structuredContent.changeName} already exists.`
             : `Generated OpenSpec change ${structuredContent.changeName} with ${structuredContent.changedFiles.length} changed files.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "generate_gherkin_test_matrix",
+    {
+      title: "Generate Gherkin and test matrix",
+      description:
+        "Generate Gherkin feature files and a test matrix from an OpenSpec change manifest.",
+      inputSchema: GenerateGherkinTestMatrixInputSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { gherkinTestMatrixService } = await servicesProvider();
+        const structuredContent = await gherkinTestMatrixService.generate(input);
+
+        return {
+          text: structuredContent.duplicate
+            ? `Gherkin test matrix for ${structuredContent.changeName} already exists.`
+            : `Generated ${structuredContent.scenarioCount} Gherkin scenario(s) for ${structuredContent.changeName}.`,
           structuredContent,
         };
       }),
