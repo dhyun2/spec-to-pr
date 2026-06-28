@@ -24,7 +24,7 @@ export const SafeCommandOutputSchema = z
   })
   .strict();
 
-export type SafeCommandInput = z.infer<typeof SafeCommandInputSchema>;
+export type SafeCommandInput = z.input<typeof SafeCommandInputSchema>;
 export type SafeCommandOutput = z.infer<typeof SafeCommandOutputSchema>;
 
 export async function runCommand(rawInput: SafeCommandInput): Promise<SafeCommandOutput> {
