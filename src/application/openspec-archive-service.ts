@@ -3,16 +3,23 @@ import { z } from "zod";
 import type { ArtifactBlobStore } from "../artifact-registry/artifact-blob-store.js";
 import {
   createOpenSpecArchivePlan,
-  executeOpenSpecArchive,
-  OpenSpecArchiveExecutionResultSchema,
+  latestArtifactByReportKind,
+  MergeEvidenceSchema,
   OpenSpecArchivePlanSchema,
-  ReviewRequestMergeStatusSchema,
-  ReviewRequestMergeVerificationSchema,
+  OpenSpecArchiveResultSchema,
+  parseReviewRequestUrl,
+  renderOpenSpecArchiveReport,
+  ReviewRequestProviderSchema,
+  ReviewRequestStatusSchema,
+  runOpenSpecArchiveCommand,
   type ArchiveCommandRunner,
-  type ReviewRequestMergeStatus,
-} from "../openspec-archive/index.js";
-import { OpenSpecChangeNameSchema, toOpenSpecChangeName } from "../openspec/openspec-paths.js";
-import { PublishResultSchema } from "../publisher/index.js";
+  type MergeEvidence,
+  type ReviewRequestProvider,
+  type ReviewRequestStatus,
+} from "../archive/index.js";
+import { OpenSpecChangeNameSchema } from "../openspec/openspec-paths.js";
+import { PublishResultSchema, readPublisherToken, redactSecrets } from "../publisher/index.js";
+import { encodeGitLabProjectId } from "../publisher/review-host.js";
 import { RunManifestSchema, RunSummarySchema, summarizeRun } from "../run/index.js";
 import { ArtifactRefSchema } from "../runtime/artifact.js";
 import { createArtifactId } from "../runtime/id-factory.js";
@@ -21,84 +28,97 @@ import { IsoDateTimeSchema } from "../runtime/scalars.js";
 import type { ArtifactRef } from "../runtime/index.js";
 import type { RunStore } from "../store/run-store.js";
 
-const ARCHIVE_ADAPTER = "openspec-archive-v1" as const;
+const ARCHIVE_ADAPTER = "manual-openspec-archive-v1" as const;
 
-export const VerifyReviewRequestMergedInputSchema = z
+type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
+
+export const PlanOpenSpecArchiveInputSchema = z
   .object({
     runId: RunIdSchema,
-    review: ReviewRequestMergeStatusSchema.optional(),
-    publishResultArtifactId: ArtifactIdSchema.optional(),
+    changeName: OpenSpecChangeNameSchema,
   })
   .strict();
 
-export const VerifyReviewRequestMergedResultSchema = z
+export const PlanOpenSpecArchiveResultSchema = OpenSpecArchivePlanSchema;
+
+export const RecordMergeAttestationInputSchema = z
   .object({
-    run: RunSummarySchema,
-    verification: ReviewRequestMergeVerificationSchema,
-    artifactId: ArtifactIdSchema,
+    runId: RunIdSchema,
+    reviewRequestUrl: z.string().url(),
+    statement: z.string().trim().min(1),
+    attestedBy: z.string().trim().min(1),
   })
   .strict();
 
-const BaseArchiveInputShape = {
-  runId: RunIdSchema,
-  changeName: OpenSpecChangeNameSchema,
-  review: ReviewRequestMergeStatusSchema.optional(),
-  mergeStatusArtifactId: ArtifactIdSchema.optional(),
-} as const;
-
-export const PlanOpenSpecArchiveInputSchema = z.object(BaseArchiveInputShape).strict();
-
-export const PlanOpenSpecArchiveResultSchema = z
+export const RecordMergeAttestationResultSchema = z
   .object({
     run: RunSummarySchema,
-    plan: OpenSpecArchivePlanSchema,
-    artifactId: ArtifactIdSchema,
+    mergeEvidenceId: ArtifactIdSchema,
+    type: z.literal("user-attested"),
+    reviewRequestUrl: z.string().url(),
+    evidence: MergeEvidenceSchema,
   })
   .strict();
 
-export const ExecuteOpenSpecArchiveInputSchema = z.object(BaseArchiveInputShape).strict();
+export const CheckReviewRequestStatusOnceInputSchema = z
+  .object({
+    runId: RunIdSchema,
+    provider: ReviewRequestProviderSchema,
+    reviewRequestUrl: z.string().url(),
+  })
+  .strict();
 
-export const ExecuteOpenSpecArchiveResultSchema = z
+export const CheckReviewRequestStatusOnceResultSchema = z
   .object({
     run: RunSummarySchema,
-    plan: OpenSpecArchivePlanSchema,
-    result: OpenSpecArchiveExecutionResultSchema,
-    artifactIds: z.array(ArtifactIdSchema),
-    planArtifactId: ArtifactIdSchema,
-    resultArtifactId: ArtifactIdSchema,
+    mergeEvidenceId: ArtifactIdSchema,
+    provider: ReviewRequestProviderSchema,
+    status: ReviewRequestStatusSchema,
+    checkedAt: IsoDateTimeSchema,
+    evidence: MergeEvidenceSchema,
+  })
+  .strict();
+
+export const RunOpenSpecArchiveInputSchema = z
+  .object({
+    runId: RunIdSchema,
+    changeName: OpenSpecChangeNameSchema,
+    mergeEvidenceId: ArtifactIdSchema,
+    yes: z.literal(true),
+  })
+  .strict();
+
+export const RunOpenSpecArchiveResultSchema = z
+  .object({
+    run: RunSummarySchema,
+    archiveResultId: ArtifactIdSchema,
+    exitCode: z.number().int().optional(),
+    status: z.enum(["passed", "failed", "blocked"]),
+    archivePath: z.string().trim().min(1).optional(),
+    followUpCommitRequired: z.boolean(),
+    stdoutArtifactId: ArtifactIdSchema.optional(),
+    stderrArtifactId: ArtifactIdSchema.optional(),
     reportArtifactId: ArtifactIdSchema,
   })
   .strict();
 
-export const GetOpenSpecArchiveResultInputSchema = z
+export const GetOpenSpecArchiveReportInputSchema = z
   .object({
     runId: RunIdSchema,
-    artifactId: ArtifactIdSchema.optional(),
+    archiveResultId: ArtifactIdSchema,
   })
   .strict();
 
-export const GetOpenSpecArchiveResultResultSchema = z
+export const GetOpenSpecArchiveReportResultSchema = z
   .object({
     run: RunSummarySchema,
-    artifactId: ArtifactIdSchema,
-    result: OpenSpecArchiveExecutionResultSchema,
-  })
-  .strict();
-
-export const RecordOpenSpecArchiveReviewInputSchema = z
-  .object({
-    runId: RunIdSchema,
-    planArtifactId: ArtifactIdSchema.optional(),
-    archiveResultArtifactId: ArtifactIdSchema.optional(),
-    review: z.record(z.string(), z.unknown()),
-  })
-  .strict();
-
-export const RecordOpenSpecArchiveReviewResultSchema = z
-  .object({
-    run: RunSummarySchema,
-    reviewArtifactId: ArtifactIdSchema,
-    findingCount: z.number().int().nonnegative(),
+    status: z.enum(["passed", "failed", "blocked"]),
+    changeName: OpenSpecChangeNameSchema,
+    archivePath: z.string().trim().min(1).optional(),
+    stdoutArtifactId: ArtifactIdSchema.optional(),
+    stderrArtifactId: ArtifactIdSchema.optional(),
+    reportArtifactId: ArtifactIdSchema,
+    result: OpenSpecArchiveResultSchema,
   })
   .strict();
 
@@ -108,87 +128,63 @@ export class OpenSpecArchiveService {
     private readonly artifactStore: ArtifactBlobStore,
     private readonly now: () => string = () => new Date().toISOString(),
     private readonly commandRunner?: ArchiveCommandRunner,
+    private readonly fetchImpl: FetchLike = fetch,
   ) {}
-
-  public async verifyMerged(rawInput: unknown) {
-    const input = VerifyReviewRequestMergedInputSchema.parse(rawInput);
-    const run = await this.runStore.get(input.runId);
-    const timestamp = IsoDateTimeSchema.parse(this.now());
-    const publishResultArtifact =
-      input.publishResultArtifactId === undefined
-        ? latestOptionalPublishResultArtifact(run.artifacts)
-        : requireArtifact(run.artifacts, input.publishResultArtifactId);
-    const publishResult =
-      publishResultArtifact === undefined
-        ? undefined
-        : PublishResultSchema.parse(
-            JSON.parse(
-              (await this.artifactStore.readContent(publishResultArtifact.digest)).toString("utf8"),
-            ),
-          );
-    const review = input.review ?? reviewFromPublishResult(publishResult);
-    const verification = ReviewRequestMergeVerificationSchema.parse({
-      runId: run.id,
-      review,
-      verified: review.merged,
-      warnings: buildMergeVerificationWarnings({
-        review,
-        ...(publishResult === undefined ? {} : { publishResult }),
-      }),
-      ...(publishResultArtifact === undefined
-        ? {}
-        : { publishResultArtifactId: publishResultArtifact.id }),
-      verifiedAt: timestamp,
-    });
-    const artifact = await this.writeJsonArtifact({
-      artifactId: createArtifactId(),
-      label: "review-merge-status",
-      kind: "openspec-archive-result",
-      value: verification,
-      timestamp,
-      metadata: {
-        reportKind: "review-merge-status",
-        provider: review.provider,
-        merged: review.merged,
-      },
-    });
-    const nextRun = RunManifestSchema.parse({
-      ...run,
-      revision: run.revision + 1,
-      updatedAt: timestamp,
-      artifacts: [...run.artifacts, artifact],
-    });
-
-    await this.runStore.save(nextRun, run.revision);
-
-    return VerifyReviewRequestMergedResultSchema.parse({
-      run: summarizeRun(nextRun),
-      verification,
-      artifactId: artifact.id,
-    });
-  }
 
   public async plan(rawInput: unknown) {
     const input = PlanOpenSpecArchiveInputSchema.parse(rawInput);
     const run = await this.runStore.get(input.runId);
     const timestamp = IsoDateTimeSchema.parse(this.now());
-    const review = await this.resolveReview(run.artifacts, input);
-    const plan = await createOpenSpecArchivePlan({
-      run,
-      changeName: toOpenSpecChangeName(input.changeName),
-      review,
-      generatedAt: timestamp,
+    const publishResultUrl = await this.latestPublishResultUrl(run.artifacts);
+    const mergeEvidence = await this.latestMergeEvidence(run.artifacts);
+
+    return PlanOpenSpecArchiveResultSchema.parse(
+      await createOpenSpecArchivePlan({
+        run,
+        changeName: input.changeName,
+        ...(publishResultUrl === undefined ? {} : { publishResultUrl }),
+        ...(mergeEvidence === undefined ? {} : { mergeEvidence }),
+        generatedAt: timestamp,
+      }),
+    );
+  }
+
+  public async recordMergeAttestation(rawInput: unknown) {
+    const input = RecordMergeAttestationInputSchema.parse(rawInput);
+    const run = await this.runStore.get(input.runId);
+    const timestamp = IsoDateTimeSchema.parse(this.now());
+    const parsedReviewRequest = parseReviewRequestUrl(input.reviewRequestUrl);
+
+    if (parsedReviewRequest === undefined) {
+      throw new Error(`Unsupported review request URL: ${input.reviewRequestUrl}`);
+    }
+
+    const evidence = MergeEvidenceSchema.parse({
+      id: createArtifactId(),
+      runId: run.id,
+      kind: "user-attested",
+      provider: parsedReviewRequest.provider,
+      reviewRequestUrl: input.reviewRequestUrl,
+      status: "merged",
+      statement: input.statement,
+      checkedAt: timestamp,
+      attestedBy: input.attestedBy,
+      metadata: {
+        source: "manual-post-merge-command",
+        number: parsedReviewRequest.number,
+      },
     });
     const artifact = await this.writeJsonArtifact({
-      artifactId: createArtifactId(),
-      label: "openspec-archive-plan",
-      kind: "openspec-archive-plan",
-      value: plan,
+      artifactId: evidence.id,
+      kind: "merge-evidence",
+      label: "merge-evidence-user-attested",
+      value: evidence,
       timestamp,
       metadata: {
-        reportKind: "openspec-archive-plan",
-        changeName: plan.changeName,
-        canExecute: plan.canExecute,
+        reportKind: "merge-evidence",
+        evidenceKind: evidence.kind,
+        status: evidence.status,
+        reviewRequestUrl: evidence.reviewRequestUrl,
       },
     });
     const nextRun = RunManifestSchema.parse({
@@ -200,102 +196,142 @@ export class OpenSpecArchiveService {
 
     await this.runStore.save(nextRun, run.revision);
 
-    return PlanOpenSpecArchiveResultSchema.parse({
+    return RecordMergeAttestationResultSchema.parse({
       run: summarizeRun(nextRun),
-      plan,
-      artifactId: artifact.id,
+      mergeEvidenceId: evidence.id,
+      type: "user-attested",
+      reviewRequestUrl: evidence.reviewRequestUrl,
+      evidence,
     });
   }
 
-  public async execute(rawInput: unknown) {
-    const input = ExecuteOpenSpecArchiveInputSchema.parse(rawInput);
+  public async checkReviewRequestStatusOnce(rawInput: unknown) {
+    const input = CheckReviewRequestStatusOnceInputSchema.parse(rawInput);
     const run = await this.runStore.get(input.runId);
-    const startedAt = IsoDateTimeSchema.parse(this.now());
-    const review = await this.resolveReview(run.artifacts, input);
-    const plan = await createOpenSpecArchivePlan({
-      run,
-      changeName: toOpenSpecChangeName(input.changeName),
-      review,
-      generatedAt: startedAt,
+    const timestamp = IsoDateTimeSchema.parse(this.now());
+    const evidence = await this.remoteCheckedEvidence({
+      runId: run.id,
+      provider: input.provider,
+      reviewRequestUrl: input.reviewRequestUrl,
+      checkedAt: timestamp,
     });
-    const planArtifact = await this.writeJsonArtifact({
-      artifactId: createArtifactId(),
-      label: "openspec-archive-plan",
-      kind: "openspec-archive-plan",
-      value: plan,
-      timestamp: startedAt,
+    const artifact = await this.writeJsonArtifact({
+      artifactId: evidence.id,
+      kind: "merge-evidence",
+      label: "merge-evidence-remote-checked",
+      value: evidence,
+      timestamp,
       metadata: {
-        reportKind: "openspec-archive-plan",
-        changeName: plan.changeName,
-        canExecute: plan.canExecute,
+        reportKind: "merge-evidence",
+        evidenceKind: evidence.kind,
+        provider: evidence.provider,
+        status: evidence.status,
+        reviewRequestUrl: evidence.reviewRequestUrl,
       },
     });
-    const completedAt = IsoDateTimeSchema.parse(this.now());
-    const execution = await executeOpenSpecArchive({
-      plan,
-      projectRoot: run.projectRoot,
-      artifactStore: this.artifactStore,
-      startedAt,
-      completedAt,
-      ...(this.commandRunner === undefined ? {} : { commandRunner: this.commandRunner }),
+    const nextRun = RunManifestSchema.parse({
+      ...run,
+      revision: run.revision + 1,
+      updatedAt: timestamp,
+      artifacts: [...run.artifacts, artifact],
     });
-    const reportArtifact = await this.writeMarkdownArtifact({
-      artifactId: createArtifactId(),
+
+    await this.runStore.save(nextRun, run.revision);
+
+    return CheckReviewRequestStatusOnceResultSchema.parse({
+      run: summarizeRun(nextRun),
+      mergeEvidenceId: evidence.id,
+      provider: input.provider,
+      status: evidence.status,
+      checkedAt: timestamp,
+      evidence,
+    });
+  }
+
+  public async runArchive(rawInput: unknown) {
+    const input = RunOpenSpecArchiveInputSchema.parse(rawInput);
+    const run = await this.runStore.get(input.runId);
+    const startedAt = IsoDateTimeSchema.parse(this.now());
+    const publishResultUrl = await this.latestPublishResultUrl(run.artifacts);
+    const mergeEvidence = await this.requireMergeEvidence(run.artifacts, input.mergeEvidenceId);
+    const plan = await createOpenSpecArchivePlan({
+      run,
+      changeName: input.changeName,
+      ...(publishResultUrl === undefined ? {} : { publishResultUrl }),
+      mergeEvidence,
+      generatedAt: startedAt,
+    });
+    const execution = await this.executeOrBlock({
+      run,
+      plan,
+      startedAt,
+    });
+    const completedAt = IsoDateTimeSchema.parse(this.now());
+    const reportArtifactId = createArtifactId();
+    const result = OpenSpecArchiveResultSchema.parse({
+      ...execution.result,
+      completedAt,
+      reportArtifactId,
+    });
+    const reportArtifact = await this.writeTextArtifact({
+      artifactId: reportArtifactId,
+      kind: "openspec-archive-report",
       label: "openspec-archive-report",
-      content: renderArchiveReport(plan, execution.result),
+      content: renderOpenSpecArchiveReport({
+        plan,
+        result,
+      }),
+      mediaType: "text/markdown",
       timestamp: completedAt,
       metadata: {
         reportKind: "openspec-archive-report",
         changeName: plan.changeName,
-        status: execution.result.status,
+        status: result.status,
       },
     });
-    const resultArtifactId = createArtifactId();
-    const result = OpenSpecArchiveExecutionResultSchema.parse({
-      ...execution.result,
-      resultArtifactId,
-      reportArtifactId: reportArtifact.id,
-    });
     const resultArtifact = await this.writeJsonArtifact({
-      artifactId: resultArtifactId,
-      label: "openspec-archive-result",
+      artifactId: createArtifactId(),
       kind: "openspec-archive-result",
+      label: "openspec-archive-result",
       value: result,
       timestamp: completedAt,
       metadata: {
         reportKind: "openspec-archive-result",
         changeName: plan.changeName,
         status: result.status,
+        reportArtifactId: reportArtifact.id,
       },
     });
-    const artifacts = [planArtifact, ...execution.artifacts, resultArtifact, reportArtifact];
     const nextRun = RunManifestSchema.parse({
       ...run,
       revision: run.revision + 1,
       updatedAt: completedAt,
-      artifacts: [...run.artifacts, ...artifacts],
+      artifacts: [...run.artifacts, ...execution.artifacts, resultArtifact, reportArtifact],
     });
 
     await this.runStore.save(nextRun, run.revision);
 
-    return ExecuteOpenSpecArchiveResultSchema.parse({
+    return RunOpenSpecArchiveResultSchema.parse({
       run: summarizeRun(nextRun),
-      plan,
-      result,
-      artifactIds: artifacts.map((artifact) => artifact.id),
-      planArtifactId: planArtifact.id,
-      resultArtifactId: resultArtifact.id,
+      archiveResultId: resultArtifact.id,
+      ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
+      status: result.status,
+      ...(result.archivePath === undefined ? {} : { archivePath: result.archivePath }),
+      followUpCommitRequired: result.followUpCommitRequired,
+      ...(result.stdoutArtifactId === undefined
+        ? {}
+        : { stdoutArtifactId: result.stdoutArtifactId }),
+      ...(result.stderrArtifactId === undefined
+        ? {}
+        : { stderrArtifactId: result.stderrArtifactId }),
       reportArtifactId: reportArtifact.id,
     });
   }
 
-  public async getResult(rawInput: unknown) {
-    const input = GetOpenSpecArchiveResultInputSchema.parse(rawInput);
+  public async getReport(rawInput: unknown) {
+    const input = GetOpenSpecArchiveReportInputSchema.parse(rawInput);
     const run = await this.runStore.get(input.runId);
-    const artifact =
-      input.artifactId === undefined
-        ? latestArchiveResultArtifact(run.artifacts)
-        : requireArtifact(run.artifacts, input.artifactId);
+    const artifact = requireArtifact(run.artifacts, input.archiveResultId);
 
     if (
       artifact.kind !== "openspec-archive-result" ||
@@ -304,83 +340,300 @@ export class OpenSpecArchiveService {
       throw new Error(`Artifact is not an OpenSpec archive result artifact: ${artifact.id}`);
     }
 
-    const result = OpenSpecArchiveExecutionResultSchema.parse(
+    const result = OpenSpecArchiveResultSchema.parse(
       JSON.parse((await this.artifactStore.readContent(artifact.digest)).toString("utf8")),
     );
 
-    return GetOpenSpecArchiveResultResultSchema.parse({
+    return GetOpenSpecArchiveReportResultSchema.parse({
       run: summarizeRun(run),
-      artifactId: artifact.id,
+      status: result.status,
+      changeName: result.changeName,
+      ...(result.archivePath === undefined ? {} : { archivePath: result.archivePath }),
+      ...(result.stdoutArtifactId === undefined
+        ? {}
+        : { stdoutArtifactId: result.stdoutArtifactId }),
+      ...(result.stderrArtifactId === undefined
+        ? {}
+        : { stderrArtifactId: result.stderrArtifactId }),
+      reportArtifactId: result.reportArtifactId,
       result,
     });
   }
 
-  public async recordReview(rawInput: unknown) {
-    const input = RecordOpenSpecArchiveReviewInputSchema.parse(rawInput);
-    const run = await this.runStore.get(input.runId);
-    const timestamp = IsoDateTimeSchema.parse(this.now());
-    const reviewArtifact = await this.writeJsonArtifact({
-      artifactId: createArtifactId(),
-      label: "openspec-archive-review",
-      kind: "openspec-archive-report",
-      value: input.review,
-      timestamp,
-      metadata: {
-        reportKind: "openspec-archive-review",
-        ...(input.planArtifactId === undefined ? {} : { planArtifactId: input.planArtifactId }),
-        ...(input.archiveResultArtifactId === undefined
-          ? {}
-          : { archiveResultArtifactId: input.archiveResultArtifactId }),
-      },
-    });
-    const nextRun = RunManifestSchema.parse({
-      ...run,
-      revision: run.revision + 1,
-      updatedAt: timestamp,
-      artifacts: [...run.artifacts, reviewArtifact],
-    });
+  private async executeOrBlock(input: {
+    run: Awaited<ReturnType<RunStore["get"]>>;
+    plan: z.infer<typeof OpenSpecArchivePlanSchema>;
+    startedAt: string;
+  }): Promise<{
+    result: z.infer<typeof OpenSpecArchiveResultSchema>;
+    artifacts: ArtifactRef[];
+  }> {
+    if (input.plan.status !== "ready") {
+      return {
+        result: OpenSpecArchiveResultSchema.parse({
+          runId: input.run.id,
+          changeName: input.plan.changeName,
+          status: "blocked",
+          startedAt: input.startedAt,
+          completedAt: input.startedAt,
+          archiveCommand: input.plan.archiveCommand,
+          polling: false,
+          followUpCommitRequired: input.plan.followUpCommitRequired,
+          summary: `OpenSpec archive blocked: ${input.plan.blockingReasons.join("; ")}`,
+        }),
+        artifacts: [],
+      };
+    }
 
-    await this.runStore.save(nextRun, run.revision);
+    try {
+      const execution = await runOpenSpecArchiveCommand({
+        projectRoot: input.run.projectRoot,
+        changeName: input.plan.changeName,
+        ...(this.commandRunner === undefined ? {} : { commandRunner: this.commandRunner }),
+      });
+      const completedAt = IsoDateTimeSchema.parse(this.now());
+      const stdoutArtifact = await this.writeTextArtifact({
+        artifactId: createArtifactId(),
+        kind: "log",
+        label: "openspec-archive-stdout",
+        content: execution.stdout,
+        mediaType: "text/plain",
+        timestamp: completedAt,
+        metadata: {
+          reportKind: "openspec-archive-log",
+          stream: "stdout",
+        },
+      });
+      const stderrArtifact = await this.writeTextArtifact({
+        artifactId: createArtifactId(),
+        kind: "log",
+        label: "openspec-archive-stderr",
+        content: execution.stderr,
+        mediaType: "text/plain",
+        timestamp: completedAt,
+        metadata: {
+          reportKind: "openspec-archive-log",
+          stream: "stderr",
+        },
+      });
+      const status = execution.exitCode === 0 ? "passed" : "failed";
 
-    return RecordOpenSpecArchiveReviewResultSchema.parse({
-      run: summarizeRun(nextRun),
-      reviewArtifactId: reviewArtifact.id,
-      findingCount: findingCount(input.review),
-    });
+      return {
+        result: OpenSpecArchiveResultSchema.parse({
+          runId: input.run.id,
+          changeName: input.plan.changeName,
+          status,
+          startedAt: input.startedAt,
+          completedAt,
+          archiveCommand: input.plan.archiveCommand,
+          polling: false,
+          exitCode: execution.exitCode,
+          ...(status === "passed" ? { archivePath: input.plan.expectedArchiveRoot } : {}),
+          stdoutArtifactId: stdoutArtifact.id,
+          stderrArtifactId: stderrArtifact.id,
+          followUpCommitRequired: input.plan.followUpCommitRequired,
+          summary:
+            status === "passed"
+              ? `Archived OpenSpec change ${input.plan.changeName}.`
+              : `OpenSpec archive failed with exit code ${execution.exitCode}.`,
+        }),
+        artifacts: [stdoutArtifact, stderrArtifact],
+      };
+    } catch (error: unknown) {
+      const completedAt = IsoDateTimeSchema.parse(this.now());
+      const stderrArtifact = await this.writeTextArtifact({
+        artifactId: createArtifactId(),
+        kind: "log",
+        label: "openspec-archive-stderr",
+        content: safeErrorMessage(error),
+        mediaType: "text/plain",
+        timestamp: completedAt,
+        metadata: {
+          reportKind: "openspec-archive-log",
+          stream: "stderr",
+        },
+      });
+      const commandMissing = errorCode(error) === "ENOENT";
+
+      return {
+        result: OpenSpecArchiveResultSchema.parse({
+          runId: input.run.id,
+          changeName: input.plan.changeName,
+          status: commandMissing ? "blocked" : "failed",
+          startedAt: input.startedAt,
+          completedAt,
+          archiveCommand: input.plan.archiveCommand,
+          polling: false,
+          stderrArtifactId: stderrArtifact.id,
+          followUpCommitRequired: input.plan.followUpCommitRequired,
+          summary: commandMissing
+            ? "OpenSpec archive blocked: OpenSpec CLI is unavailable."
+            : `OpenSpec archive failed: ${safeErrorMessage(error)}`,
+        }),
+        artifacts: [stderrArtifact],
+      };
+    }
   }
 
-  private async resolveReview(
-    artifacts: ArtifactRef[],
-    input: {
-      review?: ReviewRequestMergeStatus | undefined;
-      mergeStatusArtifactId?: string | undefined;
-    },
-  ): Promise<ReviewRequestMergeStatus> {
-    if (input.review !== undefined) {
-      return input.review;
+  private async remoteCheckedEvidence(input: {
+    runId: string;
+    provider: ReviewRequestProvider;
+    reviewRequestUrl: string;
+    checkedAt: string;
+  }): Promise<MergeEvidence> {
+    try {
+      const status = await this.fetchReviewStatus(input.provider, input.reviewRequestUrl);
+
+      return MergeEvidenceSchema.parse({
+        id: createArtifactId(),
+        runId: input.runId,
+        kind: "remote-checked",
+        provider: input.provider,
+        reviewRequestUrl: input.reviewRequestUrl,
+        status,
+        statement: `Checked ${input.provider} review request status once: ${status}.`,
+        checkedAt: input.checkedAt,
+        metadata: {
+          polling: false,
+        },
+      });
+    } catch (error: unknown) {
+      return MergeEvidenceSchema.parse({
+        id: createArtifactId(),
+        runId: input.runId,
+        kind: "remote-checked",
+        provider: input.provider,
+        reviewRequestUrl: input.reviewRequestUrl,
+        status: "unknown",
+        statement: `One-shot ${input.provider} status check failed: ${safeErrorMessage(error)}.`,
+        checkedAt: input.checkedAt,
+        metadata: {
+          polling: false,
+          error: safeErrorMessage(error),
+        },
+      });
+    }
+  }
+
+  private async fetchReviewStatus(
+    provider: ReviewRequestProvider,
+    reviewRequestUrl: string,
+  ): Promise<ReviewRequestStatus> {
+    const parsed = parseReviewRequestUrl(reviewRequestUrl);
+
+    if (parsed === undefined || parsed.provider !== provider) {
+      throw new Error(`Review request URL does not match provider ${provider}.`);
     }
 
-    if (input.mergeStatusArtifactId === undefined) {
-      throw new Error("OpenSpec archive plan requires review or mergeStatusArtifactId.");
+    const token = readPublisherToken(provider).token;
+
+    if (provider === "github") {
+      if (parsed.owner === undefined || parsed.repo === undefined) {
+        throw new Error("GitHub review request URL is missing owner or repo.");
+      }
+
+      const response = await this.fetchImpl(
+        `https://api.github.com/repos/${parsed.owner}/${parsed.repo}/pulls/${parsed.number}`,
+        {
+          method: "GET",
+          headers: {
+            Accept: "application/vnd.github+json",
+            Authorization: `Bearer ${token}`,
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(`GitHub status check failed: ${response.status} ${await response.text()}`);
+      }
+
+      const pull = (await response.json()) as Record<string, unknown>;
+
+      if (pull["merged"] === true) {
+        return "merged";
+      }
+
+      return pull["state"] === "open" ? "open" : "closed_unmerged";
     }
 
-    const artifact = requireArtifact(artifacts, input.mergeStatusArtifactId);
-
-    if (artifact.metadata["reportKind"] !== "review-merge-status") {
-      throw new Error(`Artifact is not a review merge-status artifact: ${artifact.id}`);
+    if (parsed.projectPath === undefined) {
+      throw new Error("GitLab review request URL is missing project path.");
     }
 
-    const verification = ReviewRequestMergeVerificationSchema.parse(
+    const project = encodeGitLabProjectId(parsed.projectPath);
+    const response = await this.fetchImpl(
+      `https://gitlab.com/api/v4/projects/${project}/merge_requests/${parsed.number}`,
+      {
+        method: "GET",
+        headers: {
+          "PRIVATE-TOKEN": token,
+        },
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`GitLab status check failed: ${response.status} ${await response.text()}`);
+    }
+
+    const mr = (await response.json()) as Record<string, unknown>;
+    const state = String(mr["state"] ?? "");
+
+    if (state === "merged") {
+      return "merged";
+    }
+
+    return state === "opened" ? "open" : "closed_unmerged";
+  }
+
+  private async latestPublishResultUrl(artifacts: ArtifactRef[]): Promise<string | undefined> {
+    const artifact = latestArtifactByReportKind(artifacts, "agent-result-report", "publish-result");
+
+    if (artifact === undefined) {
+      return undefined;
+    }
+
+    const result = PublishResultSchema.parse(
       JSON.parse((await this.artifactStore.readContent(artifact.digest)).toString("utf8")),
     );
 
-    return verification.review;
+    return result.request?.url;
+  }
+
+  private async latestMergeEvidence(artifacts: ArtifactRef[]): Promise<MergeEvidence | undefined> {
+    const artifact = latestArtifactByReportKind(artifacts, "merge-evidence", "merge-evidence");
+
+    if (artifact === undefined) {
+      return undefined;
+    }
+
+    return MergeEvidenceSchema.parse(
+      JSON.parse((await this.artifactStore.readContent(artifact.digest)).toString("utf8")),
+    );
+  }
+
+  private async requireMergeEvidence(
+    artifacts: ArtifactRef[],
+    artifactId: string,
+  ): Promise<MergeEvidence> {
+    const artifact = requireArtifact(artifacts, artifactId);
+
+    if (
+      artifact.kind !== "merge-evidence" ||
+      artifact.metadata["reportKind"] !== "merge-evidence"
+    ) {
+      throw new Error(`Artifact is not a merge evidence artifact: ${artifact.id}`);
+    }
+
+    return MergeEvidenceSchema.parse(
+      JSON.parse((await this.artifactStore.readContent(artifact.digest)).toString("utf8")),
+    );
   }
 
   private async writeJsonArtifact(input: {
     artifactId: string;
+    kind: "merge-evidence" | "openspec-archive-result";
     label: string;
-    kind: "openspec-archive-plan" | "openspec-archive-result" | "openspec-archive-report";
     value: unknown;
     timestamp: string;
     metadata: Record<string, unknown>;
@@ -409,25 +662,27 @@ export class OpenSpecArchiveService {
     });
   }
 
-  private async writeMarkdownArtifact(input: {
+  private async writeTextArtifact(input: {
     artifactId: string;
+    kind: "log" | "openspec-archive-report";
     label: string;
     content: string;
+    mediaType: string;
     timestamp: string;
     metadata: Record<string, unknown>;
   }): Promise<ArtifactRef> {
     const blob = await this.artifactStore.writeBlob({
       content: Buffer.from(input.content, "utf8"),
-      mediaType: "text/markdown",
+      mediaType: input.mediaType,
       storedAt: input.timestamp,
       label: input.label,
     });
 
     return ArtifactRefSchema.parse({
       id: input.artifactId,
-      kind: "openspec-archive-report",
+      kind: input.kind,
       uri: blob.uri,
-      mediaType: "text/markdown",
+      mediaType: input.mediaType,
       digest: blob.digest,
       producedBy: "orchestrator",
       evidenceIds: [],
@@ -441,77 +696,6 @@ export class OpenSpecArchiveService {
   }
 }
 
-function reviewFromPublishResult(
-  publishResult: z.infer<typeof PublishResultSchema> | undefined,
-): ReviewRequestMergeStatus {
-  if (publishResult?.request !== undefined) {
-    return ReviewRequestMergeStatusSchema.parse({
-      provider: publishResult.request.host,
-      reviewRequestUrl: publishResult.request.url,
-      number: publishResult.request.number,
-      merged: false,
-      sourceBranch: publishResult.request.sourceBranch,
-      targetBranch: publishResult.request.targetBranch,
-      raw: {
-        note: "Publish result records the review request but does not prove merge.",
-      },
-    });
-  }
-
-  return ReviewRequestMergeStatusSchema.parse({
-    provider: publishResult?.target?.host ?? "manual",
-    merged: false,
-    raw: {
-      note: "No merge status was provided.",
-    },
-  });
-}
-
-function buildMergeVerificationWarnings(input: {
-  review: ReviewRequestMergeStatus;
-  publishResult?: z.infer<typeof PublishResultSchema>;
-}): string[] {
-  const warnings: string[] = [];
-
-  if (!input.review.merged) {
-    warnings.push("Review request is not merged; OpenSpec archive execution must stay blocked.");
-  }
-
-  if (input.publishResult === undefined) {
-    warnings.push("No publish result artifact was available for cross-checking.");
-    return warnings;
-  }
-
-  if (input.publishResult.status !== "passed") {
-    warnings.push(`Publish result status is ${input.publishResult.status}.`);
-  }
-
-  if (
-    input.publishResult.request !== undefined &&
-    input.publishResult.request.host !== input.review.provider
-  ) {
-    warnings.push("Merge status provider does not match publish result provider.");
-  }
-
-  if (
-    input.publishResult.request?.url !== undefined &&
-    input.review.reviewRequestUrl !== undefined &&
-    input.publishResult.request.url !== input.review.reviewRequestUrl
-  ) {
-    warnings.push("Merge status URL does not match publish result URL.");
-  }
-
-  if (
-    input.publishResult.request?.number !== undefined &&
-    input.review.number !== undefined &&
-    input.publishResult.request.number !== input.review.number
-  ) {
-    warnings.push("Merge status number does not match publish result number.");
-  }
-
-  return warnings;
-}
-
 function requireArtifact(artifacts: ArtifactRef[], artifactId: string): ArtifactRef {
   const artifact = artifacts.find((item) => item.id === artifactId);
 
@@ -522,71 +706,16 @@ function requireArtifact(artifacts: ArtifactRef[], artifactId: string): Artifact
   return artifact;
 }
 
-function latestOptionalPublishResultArtifact(artifacts: ArtifactRef[]): ArtifactRef | undefined {
-  return artifacts
-    .filter(
-      (item) =>
-        item.kind === "agent-result-report" && item.metadata["reportKind"] === "publish-result",
-    )
-    .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))[0];
+function safeErrorMessage(error: unknown): string {
+  return redactSecrets(error instanceof Error ? error.message : String(error));
 }
 
-function latestArchiveResultArtifact(artifacts: ArtifactRef[]): ArtifactRef {
-  const artifact = artifacts
-    .filter(
-      (item) =>
-        item.kind === "openspec-archive-result" &&
-        item.metadata["reportKind"] === "openspec-archive-result",
-    )
-    .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))[0];
-
-  if (artifact === undefined) {
-    throw new Error("No OpenSpec archive result artifact found.");
+function errorCode(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return undefined;
   }
 
-  return artifact;
-}
+  const code = (error as { code?: unknown }).code;
 
-function renderArchiveReport(
-  plan: z.infer<typeof OpenSpecArchivePlanSchema>,
-  result: z.infer<typeof OpenSpecArchiveExecutionResultSchema>,
-): string {
-  return [
-    `# OpenSpec Archive Report - ${plan.changeName}`,
-    "",
-    "## Plan",
-    "",
-    `- Can execute: ${plan.canExecute}`,
-    `- Expected change root: ${plan.expectedChangeRoot}`,
-    `- Expected archive root: ${plan.expectedArchiveRoot ?? "-"}`,
-    `- Command: \`${plan.command.join(" ")}\``,
-    `- Requires follow-up commit: ${plan.requiresFollowUpCommit}`,
-    "",
-    "## Preconditions",
-    "",
-    "| ID | Status | Blocking | Summary |",
-    "|---|---|---:|---|",
-    ...plan.preconditions.map(
-      (item) =>
-        `| ${item.id} | ${item.status} | ${String(item.blocking)} | ${escapeTable(item.summary)} |`,
-    ),
-    "",
-    "## Result",
-    "",
-    `- Status: ${result.status}`,
-    `- Exit code: ${result.exitCode ?? "-"}`,
-    `- Archive path: ${result.archivePath ?? "-"}`,
-    `- Summary: ${result.summary}`,
-    "",
-  ].join("\n");
-}
-
-function findingCount(review: Record<string, unknown>): number {
-  const findings = review["findings"];
-
-  return Array.isArray(findings) ? findings.length : 0;
-}
-
-function escapeTable(value: string): string {
-  return value.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
+  return typeof code === "string" ? code : undefined;
 }
