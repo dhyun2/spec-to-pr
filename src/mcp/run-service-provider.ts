@@ -27,6 +27,7 @@ import { PrReportService } from "../application/pr-report-service.js";
 import { ProjectProfileService } from "../application/profile-service.js";
 import { PublisherService } from "../application/publisher-service.js";
 import { QualityGateService } from "../application/quality-gate-service.js";
+import { ReleaseService } from "../application/release-service.js";
 import { ReviewCouncilService } from "../application/review-council-service.js";
 import { RunService } from "../application/run-service.js";
 import { SourceRegistryService } from "../application/source-registry-service.js";
@@ -69,6 +70,7 @@ export type Services = {
   agentRuntimeService: AgentRuntimeService;
   specBddAgentLaneService: SpecBddAgentLaneService;
   visualRegressionService: VisualRegressionService;
+  releaseService: ReleaseService;
 };
 
 export type ServicesProvider = () => Promise<Services>;
@@ -123,6 +125,7 @@ export function createLazyServicesProvider(): ServicesProvider {
       agentRuntimeService: new AgentRuntimeService(store),
       specBddAgentLaneService: new SpecBddAgentLaneService(store),
       visualRegressionService: new VisualRegressionService(store, artifactStore),
+      releaseService: new ReleaseService(process.cwd()),
     };
 
     return services;

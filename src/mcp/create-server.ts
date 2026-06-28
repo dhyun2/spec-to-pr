@@ -129,6 +129,19 @@ import {
   RecordPrReportReviewResultSchema,
 } from "../application/pr-report-service.js";
 import {
+  BuildReleasePackageInputSchema,
+  BuildReleasePackageResultSchema,
+  GenerateReleaseNotesInputSchema,
+  GenerateReleaseNotesResultSchema,
+  ListEvalSuitesResultSchema,
+  RunEvalSuiteInputSchema,
+  RunEvalSuiteResultSchema,
+  RunSecurityHardeningSuiteInputSchema,
+  RunSecurityHardeningSuiteResultSchema,
+  VerifyReleasePackageInputSchema,
+  VerifyReleasePackageResultSchema,
+} from "../application/release-service.js";
+import {
   CreateIntakeManifestInputSchema,
   GetProjectProfileInputSchema,
   InspectProjectInputSchema,
@@ -280,6 +293,12 @@ const TOOL_NAMES = [
   "update_review_request_body",
   "get_publish_result",
   "record_publish_review",
+  "list_eval_suites",
+  "run_eval_suite",
+  "run_security_hardening_suite",
+  "build_release_package",
+  "verify_release_package",
+  "generate_release_notes",
   "resolve_archive_target",
   "plan_openspec_archive",
   "record_user_merge_attestation",
@@ -978,6 +997,154 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
 
         return {
           text: `Recorded publish review ${structuredContent.reviewArtifactId}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "list_eval_suites",
+    {
+      title: "List eval suites",
+      description: "List release-readiness eval suites.",
+      outputSchema: ListEvalSuitesResultSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async () =>
+      handleTool(async () => {
+        const { releaseService } = await servicesProvider();
+        const structuredContent = releaseService.listEvalSuites();
+
+        return {
+          text: `Found ${structuredContent.suites.length} eval suite(s).`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "run_eval_suite",
+    {
+      title: "Run eval suite",
+      description: "Run release-readiness eval fixtures.",
+      inputSchema: RunEvalSuiteInputSchema.shape,
+      outputSchema: RunEvalSuiteResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { releaseService } = await servicesProvider();
+        const structuredContent = await releaseService.runEvalSuite(input);
+
+        return {
+          text: `Eval suite ${structuredContent.report.suiteId}: ${structuredContent.report.status}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "run_security_hardening_suite",
+    {
+      title: "Run security hardening suite",
+      description: "Run release security hardening fixtures.",
+      inputSchema: RunSecurityHardeningSuiteInputSchema.shape,
+      outputSchema: RunSecurityHardeningSuiteResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { releaseService } = await servicesProvider();
+        const structuredContent = await releaseService.runSecurityHardeningSuite(input);
+
+        return {
+          text: `Security hardening suite: ${structuredContent.report.status}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "build_release_package",
+    {
+      title: "Build release package",
+      description:
+        "Build a deterministic release ZIP, checksum, release manifest, and initial release notes.",
+      inputSchema: BuildReleasePackageInputSchema.shape,
+      outputSchema: BuildReleasePackageResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { releaseService } = await servicesProvider();
+        const structuredContent = await releaseService.buildReleasePackage(input);
+
+        return {
+          text: `Built release package ${structuredContent.build.packagePath}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "verify_release_package",
+    {
+      title: "Verify release package",
+      description: "Verify release package manifest contents against required and forbidden files.",
+      inputSchema: VerifyReleasePackageInputSchema.shape,
+      outputSchema: VerifyReleasePackageResultSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { releaseService } = await servicesProvider();
+        const structuredContent = await releaseService.verifyReleasePackage(input);
+
+        return {
+          text: `Release package verification: ${structuredContent.verification.status}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "generate_release_notes",
+    {
+      title: "Generate release notes",
+      description: "Generate release notes from a release manifest.",
+      inputSchema: GenerateReleaseNotesInputSchema.shape,
+      outputSchema: GenerateReleaseNotesResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { releaseService } = await servicesProvider();
+        const structuredContent = await releaseService.generateReleaseNotes(input);
+
+        return {
+          text: `Generated release notes ${structuredContent.notesPath}.`,
           structuredContent,
         };
       }),
