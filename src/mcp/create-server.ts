@@ -2,6 +2,16 @@ import packageJson from "../../package.json" with { type: "json" };
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
+import {
+  GetAccessibilityReportInputSchema,
+  GetAccessibilityReportResultSchema,
+  PlanAccessibilityGateInputSchema,
+  PlanAccessibilityGateResultSchema,
+  RecordAccessibilityReviewInputSchema,
+  RecordAccessibilityReviewResultSchema,
+  RunAccessibilityGateInputSchema,
+  RunAccessibilityGateResultSchema,
+} from "../application/accessibility-gate-service.js";
 import { AgentRuntimePreparationResultSchema } from "../agent-runtime/agent-runtime-report.js";
 import {
   CleanupAgentWorktreeInputSchema,
@@ -194,6 +204,10 @@ type ToolResult<TStructuredContent> = {
 const TOOL_NAMES = [
   "kernel_info",
   "kernel_ping",
+  "plan_accessibility_gate",
+  "run_accessibility_gate",
+  "get_accessibility_report",
+  "record_accessibility_review",
   "analyze_architecture_boundaries",
   "generate_source_guard_tests",
   "run_quality_gates",
@@ -363,6 +377,104 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
 
         return {
           text: "Security policy baseline is available.",
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "plan_accessibility_gate",
+    {
+      title: "Plan accessibility gate",
+      description: "Plan accessibility targets and recommended checks.",
+      inputSchema: PlanAccessibilityGateInputSchema.shape,
+      outputSchema: PlanAccessibilityGateResultSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { accessibilityGateService } = await servicesProvider();
+        const structuredContent = await accessibilityGateService.plan(input);
+
+        return {
+          text: `Planned accessibility gate for ${structuredContent.targetCount} target(s).`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "run_accessibility_gate",
+    {
+      title: "Run accessibility gate",
+      description: "Run or record accessibility checks and persist accessibility report artifacts.",
+      inputSchema: RunAccessibilityGateInputSchema.shape,
+      outputSchema: RunAccessibilityGateResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { accessibilityGateService } = await servicesProvider();
+        const structuredContent = await accessibilityGateService.run(input);
+
+        return {
+          text: `Accessibility gate decision: ${structuredContent.decision}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "get_accessibility_report",
+    {
+      title: "Get accessibility report",
+      description: "Read an accessibility report artifact.",
+      inputSchema: GetAccessibilityReportInputSchema.shape,
+      outputSchema: GetAccessibilityReportResultSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { accessibilityGateService } = await servicesProvider();
+        const structuredContent = await accessibilityGateService.getReport(input);
+
+        return {
+          text: `Loaded accessibility report for run ${structuredContent.report.runId}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "record_accessibility_review",
+    {
+      title: "Record accessibility review",
+      description: "Record accessibility reviewer triage notes as an artifact.",
+      inputSchema: RecordAccessibilityReviewInputSchema.shape,
+      outputSchema: RecordAccessibilityReviewResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { accessibilityGateService } = await servicesProvider();
+        const structuredContent = await accessibilityGateService.recordReview(input);
+
+        return {
+          text: `Recorded accessibility review artifact ${structuredContent.artifactId}.`,
           structuredContent,
         };
       }),

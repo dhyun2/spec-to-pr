@@ -3,6 +3,7 @@ import path from "node:path";
 
 import packageJson from "../../package.json" with { type: "json" };
 import { ArtifactBlobStore } from "../artifact-registry/artifact-blob-store.js";
+import { AccessibilityGateService } from "../application/accessibility-gate-service.js";
 import { AgentRuntimeService } from "../application/agent-runtime-service.js";
 import { ApiContractAgentService } from "../application/api-contract-agent-service.js";
 import { ApiPipelineService } from "../application/api-pipeline-service.js";
@@ -34,6 +35,7 @@ import type { RunStore } from "../store/run-store.js";
 
 export type Services = {
   runService: RunService;
+  accessibilityGateService: AccessibilityGateService;
   stageService: StageService;
   policyService: PolicyService;
   architectureGuardService: ArchitectureGuardService;
@@ -80,6 +82,7 @@ export function createLazyServicesProvider(): ServicesProvider {
       runService: new RunService(store, {
         pluginVersion: packageJson.version,
       }),
+      accessibilityGateService: new AccessibilityGateService(store, artifactStore),
       stageService: new StageService(store),
       policyService: new PolicyService(),
       architectureGuardService: new ArchitectureGuardService(store, artifactStore),
