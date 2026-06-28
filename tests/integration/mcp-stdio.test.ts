@@ -83,6 +83,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "get_figma_design_inventory",
       "get_figma_provider_policy",
       "get_integration_plan",
+      "get_performance_report",
       "get_project_profile",
       "get_resume_plan",
       "get_review_council_context",
@@ -100,6 +101,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "list_project_profiles",
       "list_runs",
       "plan_accessibility_gate",
+      "plan_performance_gate",
       "plan_visual_regression",
       "policy_info",
       "prepare_agent_runtime",
@@ -118,6 +120,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "record_figma_screenshot",
       "record_figma_variable_defs",
       "record_integration_repair",
+      "record_performance_review",
       "record_review_council_result",
       "record_spec_bdd_agent_result",
       "record_visual_review_result",
@@ -125,6 +128,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "register_figma_source",
       "register_file_source",
       "run_accessibility_gate",
+      "run_performance_gate",
       "run_quality_gates",
       "skip_stage",
       "start_stage",
@@ -300,6 +304,128 @@ describe("spec-to-pr MCP stdio server", () => {
 
     expect(accessibilityReview.structuredContent).toMatchObject({
       artifactId: expect.any(String),
+    });
+
+    const performanceRoutes = [
+      {
+        id: "reservation-list",
+        urlPath: "/reservations",
+        label: "Reservation list",
+      },
+    ];
+
+    const plannedPerformance = await client.callTool({
+      name: "plan_performance_gate",
+      arguments: {
+        runId,
+        baseUrl: "http://localhost:4173",
+        routes: performanceRoutes,
+      },
+    });
+
+    expect(plannedPerformance.structuredContent).toMatchObject({
+      plan: {
+        routes: [
+          {
+            id: "reservation-list",
+          },
+        ],
+      },
+    });
+
+    const performance = await client.callTool({
+      name: "run_performance_gate",
+      arguments: {
+        runId,
+        baseUrl: "http://localhost:4173",
+        routes: performanceRoutes,
+        lighthouseReports: [
+          {
+            requestedUrl: "http://localhost:4173/reservations",
+            categories: {
+              performance: {
+                score: 0.91,
+              },
+            },
+            audits: {
+              "largest-contentful-paint": {
+                numericValue: 2100,
+              },
+              "cumulative-layout-shift": {
+                numericValue: 0.04,
+              },
+              "total-blocking-time": {
+                numericValue: 120,
+              },
+            },
+          },
+        ],
+        assets: [
+          {
+            path: "assets/main.js",
+            type: "script",
+            transferBytes: 120_000,
+            initial: true,
+          },
+        ],
+        packageJson: {
+          dependencies: {
+            "web-vitals": "^5.0.0",
+          },
+        },
+        sourceTexts: [
+          {
+            path: "src/report-web-vitals.ts",
+            content:
+              "import { onLCP, onINP, onCLS } from 'web-vitals'; export function reportWebVitals(){ onLCP(sendToAnalytics); onINP(sendToAnalytics); onCLS(sendToAnalytics); const release = 'test'; return redact(release); }",
+          },
+        ],
+      },
+    });
+
+    expect(performance.structuredContent).toMatchObject({
+      decision: "passed",
+      report: {
+        fieldDataCaveat: "lab-only",
+      },
+    });
+
+    const performanceReportArtifactId = (
+      performance.structuredContent as {
+        reportArtifactId: string;
+      }
+    ).reportArtifactId;
+
+    const performanceReport = await client.callTool({
+      name: "get_performance_report",
+      arguments: {
+        runId,
+        reportArtifactId: performanceReportArtifactId,
+      },
+    });
+
+    expect(performanceReport.structuredContent).toMatchObject({
+      report: {
+        runId,
+        decision: "passed",
+      },
+    });
+
+    const performanceReview = await client.callTool({
+      name: "record_performance_review",
+      arguments: {
+        runId,
+        reportArtifactId: performanceReportArtifactId,
+        review: {
+          summary: "No performance regression found in lab evidence.",
+          findings: [],
+          fieldDataCaveat: "lab-only",
+        },
+      },
+    });
+
+    expect(performanceReview.structuredContent).toMatchObject({
+      reviewArtifactId: expect.any(String),
     });
 
     await mkdir(path.join(projectDirectory, "docs"), {
