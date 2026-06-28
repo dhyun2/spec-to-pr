@@ -18,6 +18,7 @@ import { PolicyService } from "../application/policy-service.js";
 import { ProjectProfileService } from "../application/profile-service.js";
 import { RunService } from "../application/run-service.js";
 import { SourceRegistryService } from "../application/source-registry-service.js";
+import { SpecBddAgentLaneService } from "../application/spec-bdd-agent-lane-service.js";
 import { StageService } from "../application/stage-service.js";
 import { JsonProfileStore } from "../profile/profile-store.js";
 import { SourceSnapshotStore } from "../source-registry/snapshot-store.js";
@@ -41,6 +42,7 @@ export type Services = {
   apiPipelineService: ApiPipelineService;
   designContractService: DesignContractService;
   agentRuntimeService: AgentRuntimeService;
+  specBddAgentLaneService: SpecBddAgentLaneService;
 };
 
 export type ServicesProvider = () => Promise<Services>;
@@ -81,6 +83,7 @@ export function createLazyServicesProvider(): ServicesProvider {
       apiPipelineService: new ApiPipelineService(store, artifactStore),
       designContractService: new DesignContractService(store, artifactStore),
       agentRuntimeService: new AgentRuntimeService(store),
+      specBddAgentLaneService: new SpecBddAgentLaneService(store),
     };
 
     return services;

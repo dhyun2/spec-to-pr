@@ -56,6 +56,14 @@ import {
   RegisterFileSourceInputSchema,
   SourceRegistrationResultSchema,
 } from "../application/source-registry-service.js";
+import {
+  GetSpecBddAgentContextInputSchema,
+  GetSpecBddAgentContextResultSchema,
+  PrepareSpecBddAgentInputSchema,
+  PrepareSpecBddAgentResultSchema,
+  RecordSpecBddAgentResultInputSchema,
+  RecordSpecBddAgentResultSchema,
+} from "../application/spec-bdd-agent-lane-service.js";
 import { BriefAnalysisResultSchema } from "../brief/brief-analysis.js";
 import {
   BlockStageInputSchema,
@@ -174,6 +182,9 @@ const TOOL_NAMES = [
   "generate_api_pipeline",
   "generate_figma_design_contract",
   "get_figma_design_contract_summary",
+  "prepare_spec_bdd_agent",
+  "record_spec_bdd_agent_result",
+  "get_spec_bdd_agent_context",
 ] as const;
 
 export function createKernelServer(servicesProvider: ServicesProvider): McpServer {
@@ -956,6 +967,80 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
 
         return {
           text: `Loaded design contract summary for ${structuredContent.changeName}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "prepare_spec_bdd_agent",
+    {
+      title: "Prepare Spec/BDD agent",
+      description: "Prepare context pack for the Spec/BDD agent lane.",
+      inputSchema: PrepareSpecBddAgentInputSchema.shape,
+      outputSchema: PrepareSpecBddAgentResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { specBddAgentLaneService } = await servicesProvider();
+        const structuredContent = await specBddAgentLaneService.prepare(input);
+
+        return {
+          text: `Prepared Spec/BDD context pack for ${structuredContent.changeName}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "record_spec_bdd_agent_result",
+    {
+      title: "Record Spec/BDD agent result",
+      description: "Record Spec/BDD review report artifacts after the agent lane finishes.",
+      inputSchema: RecordSpecBddAgentResultInputSchema.shape,
+      outputSchema: RecordSpecBddAgentResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { specBddAgentLaneService } = await servicesProvider();
+        const structuredContent = await specBddAgentLaneService.recordResult(input);
+
+        return {
+          text: `Recorded Spec/BDD agent result with ${structuredContent.artifactIds.length} artifacts.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "get_spec_bdd_agent_context",
+    {
+      title: "Get Spec/BDD agent context",
+      description: "Load the prepared context pack for a Spec/BDD agent lane.",
+      inputSchema: GetSpecBddAgentContextInputSchema.shape,
+      outputSchema: GetSpecBddAgentContextResultSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { specBddAgentLaneService } = await servicesProvider();
+        const structuredContent = await specBddAgentLaneService.getContext(input);
+
+        return {
+          text: `Loaded Spec/BDD context pack for ${structuredContent.changeName}.`,
           structuredContent,
         };
       }),
