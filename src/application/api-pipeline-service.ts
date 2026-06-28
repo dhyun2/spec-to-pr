@@ -16,10 +16,7 @@ import {
   generateZodSchemas,
   renderApiPipelineReportMarkdown,
 } from "../api-pipeline/index.js";
-import type {
-  ApiGeneratedFile,
-  ApiOperationPipelineItem,
-} from "../api-pipeline/index.js";
+import type { ApiGeneratedFile, ApiOperationPipelineItem } from "../api-pipeline/index.js";
 import { OpenApiInventorySchema } from "../openapi/openapi-inventory.js";
 import type {
   OpenApiInventory,
@@ -180,7 +177,9 @@ export class ApiPipelineService {
       wrapperRoot: plan.wrapperRoot,
       operations: inventory.operations,
     });
-    const wrapperByOperationKey = new Map(wrappers.map((wrapper) => [wrapper.operationKey, wrapper]));
+    const wrapperByOperationKey = new Map(
+      wrappers.map((wrapper) => [wrapper.operationKey, wrapper]),
+    );
 
     for (const wrapper of wrappers) {
       await this.writeProjectFile({
@@ -452,7 +451,8 @@ export class ApiPipelineService {
       artifactRefs.push(
         ArtifactRefSchema.parse({
           id: createArtifactId(),
-          kind: blob.format === "generated-file-manifest" ? "generated-code" : "api-contract-report",
+          kind:
+            blob.format === "generated-file-manifest" ? "generated-code" : "api-contract-report",
           uri: stored.uri,
           mediaType: blob.mediaType,
           digest: stored.digest,
@@ -553,8 +553,8 @@ function rawComponentSchemas(document: unknown): Record<string, Record<string, u
   }
 
   return Object.fromEntries(
-    Object.entries(schemas).filter(
-      (entry): entry is [string, Record<string, unknown>] => isRecord(entry[1]),
+    Object.entries(schemas).filter((entry): entry is [string, Record<string, unknown>] =>
+      isRecord(entry[1]),
     ),
   );
 }

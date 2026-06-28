@@ -60,6 +60,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "create_run",
       "fail_stage",
       "generate_gherkin_test_matrix",
+      "generate_api_pipeline",
       "generate_openspec_change",
       "get_figma_design_inventory",
       "get_figma_provider_policy",
@@ -301,6 +302,36 @@ components:
       operationCount: 1,
       schemaCount: 1,
       gapsAdded: 0,
+    });
+
+    const openApiRun = await client.callTool({
+      name: "get_run",
+      arguments: {
+        runId,
+      },
+    });
+    const openApiIntakeArtifactId = (
+      openApiRun.structuredContent as {
+        artifacts: Array<{
+          id: string;
+          kind: string;
+        }>;
+      }
+    ).artifacts.find((artifact) => artifact.kind === "openapi-intake-report")!.id;
+
+    const apiPipeline = await client.callTool({
+      name: "generate_api_pipeline",
+      arguments: {
+        runId,
+        openApiIntakeArtifactId,
+        sourceKey: "staff",
+      },
+    });
+
+    expect(apiPipeline.structuredContent).toMatchObject({
+      duplicate: false,
+      sourceKey: "staff",
+      mode: "fallback-generator",
     });
 
     const figmaCapabilities = await client.callTool({
