@@ -34,3 +34,4 @@ export * from "./performance-gate-service.js";
 export * from "./observability-service.js";
 export * from "./pr-report-service.js";
 export * from "./publisher-service.js";
+export * from "./release-service.js";

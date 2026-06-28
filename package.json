@@ -14,6 +14,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "schemas:build": "tsx scripts/export-runtime-schemas.ts",
+    "release:build": "tsx scripts/build-release.ts",
     "check": "pnpm format:check && pnpm typecheck && pnpm schemas:build && pnpm build && pnpm test",
     "plugin:validate": "claude plugin validate . --strict"
   },
