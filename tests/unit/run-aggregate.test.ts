@@ -146,6 +146,7 @@ describe("Run aggregate", () => {
       updatedAt: now,
       resolutionArtifactIds: [],
       waiver: undefined,
+      metadata: {},
     });
 
     run.agentResults.push({

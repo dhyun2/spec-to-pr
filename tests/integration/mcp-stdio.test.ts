@@ -51,6 +51,7 @@ describe("spec-to-pr MCP stdio server", () => {
     expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
       "analyze_brief_source",
       "analyze_figma_design_inventory",
+      "analyze_openapi_source",
       "block_stage",
       "classify_command",
       "complete_stage",
@@ -237,6 +238,65 @@ describe("spec-to-pr MCP stdio server", () => {
       duplicate: false,
       evidenceAdded: 3,
       gapsAdded: 2,
+    });
+
+    await writeFile(
+      path.join(projectDirectory, "docs", "openapi.yaml"),
+      `
+openapi: 3.1.0
+info:
+  title: Reservation API
+  version: 1.0.0
+paths:
+  /reservations:
+    get:
+      operationId: getReservations
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad Request
+components:
+  schemas:
+    Reservation:
+      type: object
+`,
+    );
+
+    const openApiSource = await client.callTool({
+      name: "register_file_source",
+      arguments: {
+        runId,
+        kind: "openapi",
+        path: "docs/openapi.yaml",
+        mediaType: "application/yaml",
+      },
+    });
+
+    expect(openApiSource.structuredContent).toMatchObject({
+      source: {
+        kind: "openapi",
+        locator: {
+          type: "file",
+          path: "docs/openapi.yaml",
+        },
+      },
+      duplicate: false,
+    });
+
+    const openApiAnalysis = await client.callTool({
+      name: "analyze_openapi_source",
+      arguments: {
+        runId,
+        sourceId: (openApiSource.structuredContent as { source: { id: string } }).source.id,
+      },
+    });
+
+    expect(openApiAnalysis.structuredContent).toMatchObject({
+      duplicate: false,
+      operationCount: 1,
+      schemaCount: 1,
+      gapsAdded: 0,
     });
 
     const figmaCapabilities = await client.callTool({
