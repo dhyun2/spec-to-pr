@@ -32,7 +32,9 @@ export class GitWorktreeManager {
   public async createAgentWorktree(input: CreateAgentWorktreeInput): Promise<AgentWorktree> {
     const projectRoot = await realpath(input.projectRoot);
     await this.assertGitRepository(projectRoot);
-    const baseCommit = GitObjectIdSchema.parse(input.baseCommit ?? (await this.currentHead(projectRoot)));
+    const baseCommit = GitObjectIdSchema.parse(
+      input.baseCommit ?? (await this.currentHead(projectRoot)),
+    );
     const branchName = branchNameFor(input.runId, input.agent);
     const worktreePath = worktreePathFor(projectRoot, input.runId, input.agent);
 
@@ -126,7 +128,9 @@ export function branchNameFor(runId: RunId, agent: RuntimeAgentKind): string {
   return `spec-to-pr/${shortRunId}/${agent}`;
 }
 
-function parseWorktreeList(stdout: string): Array<{ path: string; head?: string; branch?: string }> {
+function parseWorktreeList(
+  stdout: string,
+): Array<{ path: string; head?: string; branch?: string }> {
   const worktrees: Array<{ path: string; head?: string; branch?: string }> = [];
   let current: { path?: string; head?: string; branch?: string } = {};
 

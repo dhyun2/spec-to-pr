@@ -31,11 +31,7 @@ beforeEach(async () => {
     pluginVersion: "0.1.0",
     now: () => "2026-06-28T00:00:00.000Z",
   });
-  agentRuntimeService = new AgentRuntimeService(
-    store,
-    undefined,
-    () => "2026-06-28T00:00:01.000Z",
-  );
+  agentRuntimeService = new AgentRuntimeService(store, undefined, () => "2026-06-28T00:00:01.000Z");
 });
 
 afterEach(async () => {

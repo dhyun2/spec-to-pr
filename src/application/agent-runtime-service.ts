@@ -21,10 +21,7 @@ import {
   buildAgentContextPack,
   renderAgentContextMarkdown,
 } from "../agent-runtime/context-pack.js";
-import {
-  GitWorktreeManager,
-  worktreePathFor,
-} from "../agent-runtime/worktree-manager.js";
+import { GitWorktreeManager, worktreePathFor } from "../agent-runtime/worktree-manager.js";
 import { toRepoRelativePath } from "../openspec/openspec-paths.js";
 import { RunManifestSchema } from "../run/index.js";
 import { ArtifactRefSchema } from "../runtime/artifact.js";
@@ -39,7 +36,10 @@ const DEFAULT_AGENT_SELECTION = ["spec-bdd", "api-contract", "design-ui", "integ
 export const PrepareAgentRuntimeInputSchema = z
   .object({
     runId: RunIdSchema,
-    agents: z.array(RuntimeAgentKindSchema).min(1).default([...DEFAULT_AGENT_SELECTION]),
+    agents: z
+      .array(RuntimeAgentKindSchema)
+      .min(1)
+      .default([...DEFAULT_AGENT_SELECTION]),
   })
   .strict();
 

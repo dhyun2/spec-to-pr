@@ -215,8 +215,6 @@ export const AGENT_FILE_POLICIES: Record<RuntimeAgentKind, AgentFileOwnershipPol
   }),
 };
 
-export function getAgentFileOwnershipPolicy(
-  agent: RuntimeAgentKind,
-): AgentFileOwnershipPolicy {
+export function getAgentFileOwnershipPolicy(agent: RuntimeAgentKind): AgentFileOwnershipPolicy {
   return AGENT_FILE_POLICIES[RuntimeAgentKindSchema.parse(agent)];
 }

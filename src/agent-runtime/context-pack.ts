@@ -146,7 +146,10 @@ function selectArtifactsForAgent(artifacts: ArtifactRef[], agent: RuntimeAgentKi
   return artifacts;
 }
 
-function selectEvidenceForArtifacts(evidence: EvidenceRef[], artifacts: ArtifactRef[]): EvidenceRef[] {
+function selectEvidenceForArtifacts(
+  evidence: EvidenceRef[],
+  artifacts: ArtifactRef[],
+): EvidenceRef[] {
   const evidenceIds = new Set(artifacts.flatMap((artifact) => artifact.evidenceIds));
 
   return evidence.filter((item) => evidenceIds.has(item.id));

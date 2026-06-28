@@ -14,17 +14,13 @@ describe("agent file ownership policy", () => {
     const policy = getAgentFileOwnershipPolicy("design-ui");
 
     expect(policy.write.map((rule) => rule.pattern)).toContain("src/features/**/ui/**");
-    expect(policy.forbidden.map((rule) => rule.pattern)).toContain(
-      "src/shared/api/generated/**",
-    );
+    expect(policy.forbidden.map((rule) => rule.pattern)).toContain("src/shared/api/generated/**");
   });
 
   it("keeps integrator write access focused on public wiring boundaries", () => {
     const policy = getAgentFileOwnershipPolicy("integrator");
 
     expect(policy.write.map((rule) => rule.pattern)).toContain("src/app/**");
-    expect(policy.forbidden.map((rule) => rule.pattern)).toContain(
-      "src/shared/api/generated/**",
-    );
+    expect(policy.forbidden.map((rule) => rule.pattern)).toContain("src/shared/api/generated/**");
   });
 });
