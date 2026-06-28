@@ -3,7 +3,7 @@ import { z } from "zod";
 import { ArtifactBlobStore } from "../artifact-registry/artifact-blob-store.js";
 import {
   buildOpenSpecChangeModel,
-  TraceabilityMatrixLikeSchema,
+  parseTraceabilityMatrixLike,
 } from "../openspec/openspec-model-builder.js";
 import { renderOpenSpecChange } from "../openspec/openspec-renderer.js";
 import { writeOpenSpecChange } from "../openspec/openspec-writer.js";
@@ -62,9 +62,9 @@ export class OpenSpecChangeService {
     const model = buildOpenSpecChangeModel({
       run,
       matrix,
-      changeName: changeName ?? "",
-      title: input.title ?? "",
-      summary: input.summary ?? "",
+      ...(changeName === undefined ? {} : { changeName }),
+      ...(input.title === undefined ? {} : { title: input.title }),
+      ...(input.summary === undefined ? {} : { summary: input.summary }),
       generatedAt: timestamp,
     });
 
@@ -125,6 +125,6 @@ export class OpenSpecChangeService {
     const content = await this.artifactStore.readContent(digest as never);
     const parsed = JSON.parse(content.toString("utf8"));
 
-    return TraceabilityMatrixLikeSchema.parse(parsed);
+    return parseTraceabilityMatrixLike(parsed);
   }
 }

@@ -59,6 +59,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "create_intake_manifest",
       "create_run",
       "fail_stage",
+      "generate_openspec_change",
       "get_figma_design_inventory",
       "get_figma_provider_policy",
       "get_project_profile",
@@ -444,6 +445,24 @@ components:
     });
 
     expect(Array.isArray((matrix.structuredContent as { matrix: unknown }).matrix)).toBe(true);
+
+    const graphContent = graph.structuredContent as {
+      matrixArtifactId: string;
+    };
+
+    const generatedOpenSpec = await client.callTool({
+      name: "generate_openspec_change",
+      arguments: {
+        runId,
+        traceabilityArtifactId: graphContent.matrixArtifactId,
+        changeName: "deliver-reservation-management",
+      },
+    });
+
+    expect(generatedOpenSpec.structuredContent).toMatchObject({
+      duplicate: false,
+      changeName: "deliver-reservation-management",
+    });
 
     const intake = await client.callTool({
       name: "create_intake_manifest",

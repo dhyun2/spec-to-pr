@@ -334,10 +334,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path12) {
-  if (!path12)
+function getElementAtPath(obj, path14) {
+  if (!path14)
     return obj;
-  return path12.reduce((acc, key) => acc?.[key], obj);
+  return path14.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -665,11 +665,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path12, issues) {
+function prefixIssues(path14, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path12);
+    iss.path.unshift(path14);
     return iss;
   });
 }
@@ -887,16 +887,16 @@ function flattenError(error51, mapper = (issue2) => issue2.message) {
 }
 function formatError(error51, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error52, path12 = []) => {
+  const processError = (error52, path14 = []) => {
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path12, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path14, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path12, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path14, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path12, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path14, ...issue2.path]);
       } else {
-        const fullpath = [...path12, ...issue2.path];
+        const fullpath = [...path14, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -923,17 +923,17 @@ function formatError(error51, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error51, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error52, path12 = []) => {
+  const processError = (error52, path14 = []) => {
     var _a3, _b;
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path12, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path14, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path12, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path14, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path12, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path14, ...issue2.path]);
       } else {
-        const fullpath = [...path12, ...issue2.path];
+        const fullpath = [...path14, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -965,8 +965,8 @@ function treeifyError(error51, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path12 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path12) {
+  const path14 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path14) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -14469,13 +14469,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path12 = ref.slice(1).split("/").filter(Boolean);
-  if (path12.length === 0) {
+  const path14 = ref.slice(1).split("/").filter(Boolean);
+  if (path14.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path12[0] === defsKey) {
-    const key = path12[1];
+  if (path14[0] === defsKey) {
+    const key = path14[1];
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -17317,8 +17317,8 @@ var init_parseUtil = __esm({
     init_errors3();
     init_en2();
     makeIssue = (params) => {
-      const { data, path: path12, errorMaps, issueData } = params;
-      const fullPath = [...path12, ...issueData.path || []];
+      const { data, path: path14, errorMaps, issueData } = params;
+      const fullPath = [...path14, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -17601,11 +17601,11 @@ var init_types2 = __esm({
     init_parseUtil();
     init_util2();
     ParseInputLazyPath = class {
-      constructor(parent, value, path12, key) {
+      constructor(parent, value, path14, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path12;
+        this._path = path14;
         this._key = key;
       }
       get path() {
@@ -26949,8 +26949,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path12) {
-      let input = path12;
+    function removeDotSegments(path14) {
+      let input = path14;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -27202,8 +27202,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path12, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path12 && path12 !== "/" ? path12 : void 0;
+        const [path14, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path14 && path14 !== "/" ? path14 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -33791,11 +33791,11 @@ function addUniqueValueIssues(collectionName, values, context) {
     seen.add(value);
   });
 }
-function addReferenceIssue(context, path12, reference) {
+function addReferenceIssue(context, path14, reference) {
   context.addIssue({
     code: "custom",
     message: `Unknown ${reference.kind} reference ${reference.id}`,
-    path: path12
+    path: path14
   });
 }
 var RunStatusSchema, RunManifestSchema, RunSummarySchema, CreateInitialRunInputSchema;
@@ -39660,6 +39660,762 @@ var init_stage_service = __esm({
   }
 });
 
+// src/openspec/openspec-paths.ts
+import path10 from "path";
+function toOpenSpecChangeName(input) {
+  if (/[\\/]/.test(input) || input.split(/[\s_-]+/).includes("..")) {
+    throw new Error("OpenSpec change name must not contain path separators or traversal segments");
+  }
+  const normalized = input.normalize("NFKD").replace(/[^\w\s-]/g, "").trim().toLowerCase().replace(/[_\s]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  return OpenSpecChangeNameSchema.parse(normalized);
+}
+function resolveOpenSpecChangePaths(input) {
+  const openspecRoot = path10.join(input.projectRoot, "openspec");
+  const changesRoot = path10.join(openspecRoot, "changes");
+  const changeRoot = path10.join(changesRoot, input.changeName);
+  const specsRoot = path10.join(changeRoot, "specs");
+  const artifactsRoot = path10.join(changeRoot, "artifacts");
+  return {
+    openspecRoot,
+    changesRoot,
+    changeRoot,
+    proposalPath: path10.join(changeRoot, "proposal.md"),
+    designPath: path10.join(changeRoot, "design.md"),
+    tasksPath: path10.join(changeRoot, "tasks.md"),
+    specsRoot,
+    artifactsRoot,
+    evidenceSummaryPath: path10.join(artifactsRoot, "evidence-summary.md"),
+    traceabilityMatrixPath: path10.join(artifactsRoot, "traceability-matrix.md"),
+    gapSummaryPath: path10.join(artifactsRoot, "gap-summary.md"),
+    manifestPath: path10.join(artifactsRoot, "change-manifest.json")
+  };
+}
+function specFilePath(input) {
+  return path10.join(input.specsRoot, input.area, "spec.md");
+}
+function toRepoRelativePath(projectRoot, absolutePath) {
+  return path10.relative(projectRoot, absolutePath).split(path10.sep).join("/");
+}
+var OpenSpecChangeNameSchema, OpenSpecSpecAreaSchema;
+var init_openspec_paths = __esm({
+  "src/openspec/openspec-paths.ts"() {
+    "use strict";
+    init_zod();
+    OpenSpecChangeNameSchema = external_exports.string().trim().min(3).max(120).regex(
+      /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
+      "Expected kebab-case change name such as deliver-reservation-management"
+    );
+    OpenSpecSpecAreaSchema = external_exports.string().trim().min(2).max(80).regex(
+      /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
+      "Expected kebab-case spec area such as reservation-management"
+    );
+  }
+});
+
+// src/openspec/openspec-model.ts
+var OpenSpecRequirementStatusSchema, OpenSpecRequirementModelSchema, OpenSpecChangeModelSchema;
+var init_openspec_model = __esm({
+  "src/openspec/openspec-model.ts"() {
+    "use strict";
+    init_zod();
+    init_ids();
+    init_openspec_paths();
+    OpenSpecRequirementStatusSchema = external_exports.enum(["ready", "blocked", "partial", "gap-only"]);
+    OpenSpecRequirementModelSchema = external_exports.object({
+      id: external_exports.string().trim().min(1),
+      area: OpenSpecSpecAreaSchema,
+      title: external_exports.string().trim().min(1),
+      summary: external_exports.string().trim().min(1),
+      status: OpenSpecRequirementStatusSchema,
+      briefEvidenceIds: external_exports.array(EvidenceIdSchema).default([]),
+      figmaEvidenceIds: external_exports.array(EvidenceIdSchema).default([]),
+      openApiEvidenceIds: external_exports.array(EvidenceIdSchema).default([]),
+      gapIds: external_exports.array(GapIdSchema).default([]),
+      tags: external_exports.array(external_exports.string().trim().min(1)).default([])
+    }).strict();
+    OpenSpecChangeModelSchema = external_exports.object({
+      runId: RunIdSchema,
+      changeName: OpenSpecChangeNameSchema,
+      title: external_exports.string().trim().min(1),
+      summary: external_exports.string().trim().min(1),
+      generatedAt: external_exports.string().datetime({ offset: true }),
+      sourceArtifactIds: external_exports.array(ArtifactIdSchema).default([]),
+      requirements: external_exports.array(OpenSpecRequirementModelSchema),
+      gapIds: external_exports.array(GapIdSchema).default([]),
+      specAreas: external_exports.array(OpenSpecSpecAreaSchema)
+    }).strict();
+  }
+});
+
+// src/openspec/openspec-model-builder.ts
+function parseTraceabilityMatrixLike(rawMatrix) {
+  const direct = TraceabilityMatrixLikeSchema.safeParse(rawMatrix);
+  if (direct.success) {
+    return direct.data;
+  }
+  const graphMatrix = EvidenceGraphMatrixSchema.parse(rawMatrix);
+  return TraceabilityMatrixLikeSchema.parse({
+    rows: graphMatrix.map((row, index) => ({
+      requirementId: `REQ-${String(index + 1).padStart(3, "0")}`,
+      title: row.requirementLabel,
+      summary: row.requirementLabel,
+      briefEvidenceIds: row.briefEvidenceIds,
+      figmaEvidenceIds: [],
+      openApiEvidenceIds: [],
+      gapIds: row.gapIds,
+      tags: [row.status]
+    })),
+    artifactIds: []
+  });
+}
+function buildOpenSpecChangeModel(input) {
+  const run = RunManifestSchema.parse(input.run);
+  const matrix = parseTraceabilityMatrixLike(input.matrix);
+  const changeName = OpenSpecChangeNameSchema.parse(
+    input.changeName === void 0 ? inferChangeName(matrix) : toOpenSpecChangeName(input.changeName)
+  );
+  const requirements = matrix.rows.map((row) => {
+    const briefEvidence = resolveEvidence(run.evidence, row.briefEvidenceIds);
+    const figmaEvidence = resolveEvidence(run.evidence, row.figmaEvidenceIds);
+    const openApiEvidence = resolveEvidence(run.evidence, row.openApiEvidenceIds);
+    const gaps = resolveGaps(run.gaps, row.gapIds);
+    const status = computeRequirementStatus({
+      briefEvidence,
+      figmaEvidence,
+      openApiEvidence,
+      gaps
+    });
+    if (briefEvidence.length === 0) {
+      return void 0;
+    }
+    const area = inferSpecArea(row, briefEvidence);
+    return {
+      id: row.requirementId,
+      area,
+      title: row.title ?? row.summary,
+      summary: row.summary,
+      status,
+      briefEvidenceIds: briefEvidence.map((evidence) => evidence.id),
+      figmaEvidenceIds: figmaEvidence.map((evidence) => evidence.id),
+      openApiEvidenceIds: openApiEvidence.map((evidence) => evidence.id),
+      gapIds: gaps.map((gap2) => gap2.id),
+      tags: row.tags
+    };
+  }).filter((item) => item !== void 0);
+  const specAreas = [...new Set(requirements.map((requirement) => requirement.area))];
+  return OpenSpecChangeModelSchema.parse({
+    runId: run.id,
+    changeName,
+    title: input.title ?? titleFromChangeName(changeName),
+    summary: input.summary ?? `Evidence-backed OpenSpec change generated from ${requirements.length} requirement rows.`,
+    generatedAt: input.generatedAt,
+    sourceArtifactIds: matrix.artifactIds,
+    requirements,
+    gapIds: [...new Set(requirements.flatMap((requirement) => requirement.gapIds))],
+    specAreas
+  });
+}
+function computeRequirementStatus(input) {
+  if (input.gaps.some((gap2) => gap2.severity === "blocker")) {
+    return "blocked";
+  }
+  if (input.gaps.length > 0) {
+    return "partial";
+  }
+  if (input.briefEvidence.length === 0) {
+    return "gap-only";
+  }
+  return "ready";
+}
+function resolveEvidence(evidence, ids) {
+  const idSet = new Set(ids);
+  return evidence.filter((item) => idSet.has(item.id));
+}
+function resolveGaps(gaps, ids) {
+  const idSet = new Set(ids);
+  return gaps.filter((item) => idSet.has(item.id));
+}
+function inferSpecArea(row, evidence) {
+  const text = `${row.title ?? ""} ${row.summary} ${evidence.map((item) => item.summary).join(" ")}`;
+  if (/schedule|스케줄|일간|주간|slot|슬롯/i.test(text)) {
+    return OpenSpecSpecAreaSchema.parse("reservation-schedule-management");
+  }
+  if (/reservation|예약/i.test(text)) {
+    return OpenSpecSpecAreaSchema.parse("reservation-management");
+  }
+  return OpenSpecSpecAreaSchema.parse("product-change");
+}
+function inferChangeName(matrix) {
+  const text = matrix.rows.slice(0, 5).map((row) => `${row.title ?? ""} ${row.summary}`).join(" ");
+  if (/schedule|스케줄/i.test(text) && /reservation|예약/i.test(text)) {
+    return "deliver-reservation-schedule-management";
+  }
+  if (/reservation|예약/i.test(text)) {
+    return "deliver-reservation-management";
+  }
+  return "deliver-product-change";
+}
+function titleFromChangeName(changeName) {
+  return changeName.split("-").map((part) => part.slice(0, 1).toUpperCase() + part.slice(1)).join(" ");
+}
+var TraceabilityMatrixRowLikeSchema, TraceabilityMatrixLikeSchema, EvidenceGraphMatrixRowSchema, EvidenceGraphMatrixSchema;
+var init_openspec_model_builder = __esm({
+  "src/openspec/openspec-model-builder.ts"() {
+    "use strict";
+    init_zod();
+    init_run2();
+    init_openspec_model();
+    init_openspec_paths();
+    TraceabilityMatrixRowLikeSchema = external_exports.object({
+      requirementId: external_exports.string().trim().min(1),
+      title: external_exports.string().trim().min(1).optional(),
+      summary: external_exports.string().trim().min(1),
+      briefEvidenceIds: external_exports.array(external_exports.string()).default([]),
+      figmaEvidenceIds: external_exports.array(external_exports.string()).default([]),
+      openApiEvidenceIds: external_exports.array(external_exports.string()).default([]),
+      gapIds: external_exports.array(external_exports.string()).default([]),
+      tags: external_exports.array(external_exports.string()).default([])
+    }).strict();
+    TraceabilityMatrixLikeSchema = external_exports.object({
+      rows: external_exports.array(TraceabilityMatrixRowLikeSchema),
+      artifactIds: external_exports.array(external_exports.string()).default([])
+    }).strict();
+    EvidenceGraphMatrixRowSchema = external_exports.object({
+      requirementNodeId: external_exports.string().trim().min(1),
+      requirementLabel: external_exports.string().trim().min(1),
+      briefEvidenceIds: external_exports.array(external_exports.string()).default([]),
+      apiNodeIds: external_exports.array(external_exports.string()).default([]),
+      figmaNodeIds: external_exports.array(external_exports.string()).default([]),
+      gapIds: external_exports.array(external_exports.string()).default([]),
+      status: external_exports.string().trim().min(1)
+    }).strict();
+    EvidenceGraphMatrixSchema = external_exports.array(EvidenceGraphMatrixRowSchema);
+  }
+});
+
+// src/openspec/openspec-renderer.ts
+function renderOpenSpecChange(input) {
+  const evidenceById = new Map(input.run.evidence.map((evidence) => [evidence.id, evidence]));
+  const gapById = new Map(input.run.gaps.map((gap2) => [gap2.id, gap2]));
+  return {
+    proposalMd: renderProposal(input.model, evidenceById, gapById),
+    designMd: renderDesign(input.model, evidenceById, gapById),
+    tasksMd: renderTasks(input.model),
+    specs: input.model.specAreas.map((area) => ({
+      area,
+      content: renderSpec(
+        area,
+        input.model.requirements.filter((item) => item.area === area)
+      )
+    })),
+    evidenceSummaryMd: renderEvidenceSummary(input.model, evidenceById),
+    traceabilityMatrixMd: renderTraceabilityMatrix(input.model),
+    gapSummaryMd: renderGapSummary(input.model, gapById),
+    manifestJson: `${JSON.stringify(input.model, null, 2)}
+`
+  };
+}
+function renderProposal(model, evidenceById, gapById) {
+  const readyCount = model.requirements.filter((item) => item.status === "ready").length;
+  const partialCount = model.requirements.filter((item) => item.status === "partial").length;
+  const blockedCount = model.requirements.filter((item) => item.status === "blocked").length;
+  return markdown([
+    `# ${model.title}`,
+    "",
+    "## Summary",
+    "",
+    model.summary,
+    "",
+    "## Change",
+    "",
+    `This change introduces ${model.requirements.length} evidence-backed requirement(s).`,
+    "",
+    "- Ready requirements: " + readyCount,
+    "- Partial requirements: " + partialCount,
+    "- Blocked requirements: " + blockedCount,
+    "",
+    "## Why",
+    "",
+    "This change is generated from collected product, Figma, and OpenAPI evidence. Each requirement below preserves links to its source Evidence IDs.",
+    "",
+    "## Scope",
+    "",
+    ...model.specAreas.map((area) => `- ${area}`),
+    "",
+    "## Requirement Evidence",
+    "",
+    ...model.requirements.flatMap(
+      (requirement) => renderRequirementEvidenceBullets(requirement, evidenceById)
+    ),
+    "",
+    "## Known Gaps",
+    "",
+    ...model.gapIds.length === 0 ? ["No known gaps were linked to this change."] : model.gapIds.map((gapId) => {
+      const gap2 = gapById.get(gapId);
+      return `- ${gapId}${gap2 === void 0 ? "" : ` \u2014 ${gap2.title} (${gap2.severity})`}`;
+    }),
+    ""
+  ]);
+}
+function renderDesign(model, evidenceById, gapById) {
+  return markdown([
+    `# Design \u2014 ${model.title}`,
+    "",
+    "## Evidence Policy",
+    "",
+    "- Implementation must not add behavior that lacks product Evidence.",
+    "- Missing API, Figma, or product details must remain as Gap entries.",
+    "- UI work must use Figma Evidence when available.",
+    "- API work must use OpenAPI Evidence when available.",
+    "",
+    "## Architecture Approach",
+    "",
+    "- Keep UI code inside the target project architecture boundaries.",
+    "- API access should go through feature/entity wrappers instead of direct generated client imports from UI.",
+    "- Generated or external contract code should not be manually edited.",
+    "",
+    "## Requirement Design Notes",
+    "",
+    ...model.requirements.flatMap((requirement) => [
+      `### ${requirement.id} \u2014 ${requirement.title}`,
+      "",
+      `Status: ${requirement.status}`,
+      "",
+      requirement.summary,
+      "",
+      "Evidence:",
+      ...renderEvidenceLines(requirement, evidenceById),
+      "",
+      "Gaps:",
+      ...requirement.gapIds.length === 0 ? ["- None"] : requirement.gapIds.map((gapId) => {
+        const gap2 = gapById.get(gapId);
+        return `- ${gapId}${gap2 === void 0 ? "" : ` \u2014 ${gap2.title}`}`;
+      }),
+      ""
+    ])
+  ]);
+}
+function renderTasks(model) {
+  return markdown([
+    `# Tasks \u2014 ${model.title}`,
+    "",
+    "## 1. Specification",
+    "",
+    "- [ ] Review generated proposal/design/tasks/spec files.",
+    "- [ ] Confirm all ready requirements have source evidence.",
+    "- [ ] Confirm partial or blocked requirements have linked gaps.",
+    "",
+    "## 2. API",
+    "",
+    "- [ ] Use OpenAPI Evidence only for documented operations.",
+    "- [ ] Do not invent missing endpoints.",
+    "- [ ] Keep API gaps open until source documentation is updated.",
+    "",
+    "## 3. Design",
+    "",
+    "- [ ] Use Figma metadata/design context/screenshot/variables when available.",
+    "- [ ] Do not invent unsupported Figma states without recording a design gap.",
+    "",
+    "## 4. Implementation",
+    "",
+    ...model.requirements.map(
+      (requirement) => `- [ ] Implement ${requirement.id}: ${requirement.title}`
+    ),
+    "",
+    "## 5. Verification",
+    "",
+    "- [ ] Add or update unit/component/contract tests.",
+    "- [ ] Run quality gates.",
+    "- [ ] Record visual evidence where Figma screenshots exist.",
+    "- [ ] Update gap statuses only with resolution artifacts.",
+    ""
+  ]);
+}
+function renderSpec(area, requirements) {
+  return markdown([
+    `# ${area}`,
+    "",
+    "## ADDED Requirements",
+    "",
+    ...requirements.length === 0 ? ["No requirements generated for this area."] : requirements.flatMap((requirement) => [
+      `### Requirement: ${requirement.title}`,
+      "",
+      `The system SHALL ${toShallStatement(requirement.summary)}`,
+      "",
+      "#### Scenario: Evidence-backed behavior",
+      "",
+      `- **GIVEN** the relevant source evidence for ${requirement.id}`,
+      "- **WHEN** the user performs the described workflow",
+      "- **THEN** the system behavior must satisfy the requirement",
+      "",
+      `Traceability: ${requirement.id}`,
+      "",
+      `Evidence: ${[
+        ...requirement.briefEvidenceIds,
+        ...requirement.figmaEvidenceIds,
+        ...requirement.openApiEvidenceIds
+      ].join(", ") || "none"}`,
+      "",
+      `Gaps: ${requirement.gapIds.join(", ") || "none"}`,
+      ""
+    ])
+  ]);
+}
+function renderEvidenceSummary(model, evidenceById) {
+  return markdown([
+    `# Evidence Summary \u2014 ${model.title}`,
+    "",
+    "| Requirement | Brief Evidence | Figma Evidence | OpenAPI Evidence |",
+    "|---|---|---|---|",
+    ...model.requirements.map(
+      (requirement) => [
+        requirement.id,
+        renderEvidenceCell(requirement.briefEvidenceIds, evidenceById),
+        renderEvidenceCell(requirement.figmaEvidenceIds, evidenceById),
+        renderEvidenceCell(requirement.openApiEvidenceIds, evidenceById)
+      ].join(" | ")
+    ),
+    ""
+  ]);
+}
+function renderTraceabilityMatrix(model) {
+  return markdown([
+    `# Traceability Matrix \u2014 ${model.title}`,
+    "",
+    "| Requirement | Area | Status | Brief | Figma | OpenAPI | Gaps |",
+    "|---|---|---|---|---|---|---|",
+    ...model.requirements.map(
+      (requirement) => [
+        requirement.id,
+        requirement.area,
+        requirement.status,
+        requirement.briefEvidenceIds.join("<br>") || "-",
+        requirement.figmaEvidenceIds.join("<br>") || "-",
+        requirement.openApiEvidenceIds.join("<br>") || "-",
+        requirement.gapIds.join("<br>") || "-"
+      ].join(" | ")
+    ),
+    ""
+  ]);
+}
+function renderGapSummary(model, gapById) {
+  return markdown([
+    `# Gap Summary \u2014 ${model.title}`,
+    "",
+    ...model.gapIds.length === 0 ? ["No gaps linked to this OpenSpec change.", ""] : [
+      "| Gap | Category | Severity | Status | Title |",
+      "|---|---|---|---|---|",
+      ...model.gapIds.map((gapId) => {
+        const gap2 = gapById.get(gapId);
+        if (gap2 === void 0) {
+          return `| ${gapId} | - | - | - | Missing gap object |`;
+        }
+        return `| ${gap2.id} | ${gap2.category} | ${gap2.severity} | ${gap2.status} | ${escapeTableCell(gap2.title)} |`;
+      }),
+      ""
+    ]
+  ]);
+}
+function renderRequirementEvidenceBullets(requirement, evidenceById) {
+  return [
+    `- ${requirement.id}: ${requirement.title}`,
+    ...renderEvidenceLines(requirement, evidenceById).map((line) => `  ${line}`)
+  ];
+}
+function renderEvidenceLines(requirement, evidenceById) {
+  const ids = [
+    ...requirement.briefEvidenceIds,
+    ...requirement.figmaEvidenceIds,
+    ...requirement.openApiEvidenceIds
+  ];
+  if (ids.length === 0) {
+    return ["- No evidence linked"];
+  }
+  return ids.map((id) => {
+    const evidence = evidenceById.get(id);
+    if (evidence === void 0) {
+      return `- ${id}`;
+    }
+    return `- ${id}: ${evidence.summary}`;
+  });
+}
+function renderEvidenceCell(ids, evidenceById) {
+  if (ids.length === 0) {
+    return "-";
+  }
+  return ids.map((id) => {
+    const evidence = evidenceById.get(id);
+    return evidence === void 0 ? id : `${id}<br>${escapeTableCell(evidence.summary)}`;
+  }).join("<br>");
+}
+function toShallStatement(summary) {
+  const normalized = summary.trim();
+  if (/^(allow|provide|show|display|support|enable|validate|persist|fetch|update)\b/i.test(normalized)) {
+    return normalized;
+  }
+  return normalized.charAt(0).toLowerCase() + normalized.slice(1);
+}
+function markdown(lines) {
+  return `${lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd()}
+`;
+}
+function escapeTableCell(value) {
+  return value.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
+}
+var init_openspec_renderer = __esm({
+  "src/openspec/openspec-renderer.ts"() {
+    "use strict";
+  }
+});
+
+// src/openspec/openspec-writer.ts
+import { mkdir as mkdir4, readFile as readFile6, writeFile as writeFile4 } from "fs/promises";
+import path11 from "path";
+async function writeOpenSpecChange(input) {
+  const paths = resolveOpenSpecChangePaths({
+    projectRoot: input.projectRoot,
+    changeName: input.changeName
+  });
+  const filesToWrite = [
+    {
+      absolutePath: paths.proposalPath,
+      content: input.rendered.proposalMd,
+      kind: "openspec"
+    },
+    {
+      absolutePath: paths.designPath,
+      content: input.rendered.designMd,
+      kind: "openspec"
+    },
+    {
+      absolutePath: paths.tasksPath,
+      content: input.rendered.tasksMd,
+      kind: "openspec"
+    },
+    {
+      absolutePath: paths.evidenceSummaryPath,
+      content: input.rendered.evidenceSummaryMd,
+      kind: "openspec"
+    },
+    {
+      absolutePath: paths.traceabilityMatrixPath,
+      content: input.rendered.traceabilityMatrixMd,
+      kind: "openspec"
+    },
+    {
+      absolutePath: paths.gapSummaryPath,
+      content: input.rendered.gapSummaryMd,
+      kind: "openspec"
+    },
+    {
+      absolutePath: paths.manifestPath,
+      content: input.rendered.manifestJson,
+      kind: "openspec"
+    },
+    ...input.rendered.specs.map((spec) => ({
+      absolutePath: specFilePath({
+        specsRoot: paths.specsRoot,
+        area: spec.area
+      }),
+      content: spec.content,
+      kind: "openspec"
+    }))
+  ];
+  const writtenFiles = [];
+  for (const file2 of filesToWrite) {
+    assertInsideProjectRoot(input.projectRoot, file2.absolutePath);
+    const content = ensureFinalNewline(file2.content);
+    const changed = await writeFileWithConflictPolicy({
+      absolutePath: file2.absolutePath,
+      content,
+      force: input.policy?.force === true
+    });
+    writtenFiles.push({
+      absolutePath: file2.absolutePath,
+      relativePath: toRepoRelativePath(input.projectRoot, file2.absolutePath),
+      digest: sha256Digest(Buffer.from(content, "utf8")),
+      changed
+    });
+  }
+  const artifactRefs = writtenFiles.map(
+    (file2) => ArtifactRefSchema.parse({
+      id: createArtifactId(),
+      kind: "openspec",
+      uri: `repo://${file2.relativePath}`,
+      mediaType: file2.relativePath.endsWith(".json") ? "application/json" : "text/markdown",
+      digest: file2.digest,
+      producedBy: "orchestrator",
+      evidenceIds: [],
+      createdAt: input.generatedAt,
+      metadata: {
+        relativePath: file2.relativePath,
+        changed: file2.changed,
+        changeName: input.changeName
+      }
+    })
+  );
+  return {
+    files: writtenFiles,
+    artifactRefs
+  };
+}
+async function writeFileWithConflictPolicy(input) {
+  await mkdir4(path11.dirname(input.absolutePath), {
+    recursive: true,
+    mode: 448
+  });
+  const existing = await readExisting(input.absolutePath);
+  if (existing !== void 0) {
+    if (existing === input.content) {
+      return false;
+    }
+    if (!input.force) {
+      throw new Error(`OpenSpec file already exists with different content: ${input.absolutePath}`);
+    }
+  }
+  await writeFile4(input.absolutePath, input.content, {
+    encoding: "utf8",
+    mode: 384
+  });
+  return true;
+}
+async function readExisting(absolutePath) {
+  try {
+    return await readFile6(absolutePath, "utf8");
+  } catch (error51) {
+    if (error51 instanceof Error && "code" in error51 && error51.code === "ENOENT") {
+      return void 0;
+    }
+    throw error51;
+  }
+}
+function assertInsideProjectRoot(projectRoot, absolutePath) {
+  const relative = path11.relative(projectRoot, absolutePath);
+  if (relative.startsWith("..") || path11.isAbsolute(relative)) {
+    throw new Error(`Refusing to write outside project root: ${absolutePath}`);
+  }
+}
+function ensureFinalNewline(content) {
+  return content.endsWith("\n") ? content : `${content}
+`;
+}
+var init_openspec_writer = __esm({
+  "src/openspec/openspec-writer.ts"() {
+    "use strict";
+    init_content_hash();
+    init_artifact();
+    init_id_factory();
+    init_openspec_paths();
+  }
+});
+
+// src/application/openspec-change-service.ts
+var GenerateOpenSpecChangeInputSchema, GenerateOpenSpecChangeResultSchema, OpenSpecChangeService;
+var init_openspec_change_service = __esm({
+  "src/application/openspec-change-service.ts"() {
+    "use strict";
+    init_zod();
+    init_artifact_blob_store();
+    init_openspec_model_builder();
+    init_openspec_renderer();
+    init_openspec_writer();
+    init_openspec_paths();
+    init_run2();
+    init_ids();
+    init_scalars();
+    GenerateOpenSpecChangeInputSchema = external_exports.object({
+      runId: RunIdSchema,
+      traceabilityArtifactId: ArtifactIdSchema,
+      changeName: external_exports.string().trim().min(3).optional(),
+      title: external_exports.string().trim().min(1).optional(),
+      summary: external_exports.string().trim().min(1).optional(),
+      force: external_exports.boolean().default(false)
+    }).strict();
+    GenerateOpenSpecChangeResultSchema = external_exports.object({
+      duplicate: external_exports.boolean(),
+      run: external_exports.custom(),
+      changeName: OpenSpecChangeNameSchema,
+      artifactIds: external_exports.array(ArtifactIdSchema),
+      changedFiles: external_exports.array(external_exports.string())
+    }).strict();
+    OpenSpecChangeService = class {
+      constructor(runStore, artifactStore, now = () => (/* @__PURE__ */ new Date()).toISOString()) {
+        this.runStore = runStore;
+        this.artifactStore = artifactStore;
+        this.now = now;
+      }
+      runStore;
+      artifactStore;
+      now;
+      async generateOpenSpecChange(rawInput) {
+        const input = GenerateOpenSpecChangeInputSchema.parse(rawInput);
+        const run = await this.runStore.get(input.runId);
+        const timestamp = IsoDateTimeSchema.parse(this.now());
+        const traceabilityArtifact = run.artifacts.find(
+          (artifact) => artifact.id === input.traceabilityArtifactId
+        );
+        if (traceabilityArtifact === void 0) {
+          throw new Error(`Traceability artifact not found: ${input.traceabilityArtifactId}`);
+        }
+        const matrix = await this.readTraceabilityMatrix(traceabilityArtifact.digest);
+        const changeName = input.changeName === void 0 ? void 0 : toOpenSpecChangeName(input.changeName);
+        const model = buildOpenSpecChangeModel({
+          run,
+          matrix,
+          ...changeName === void 0 ? {} : { changeName },
+          ...input.title === void 0 ? {} : { title: input.title },
+          ...input.summary === void 0 ? {} : { summary: input.summary },
+          generatedAt: timestamp
+        });
+        const existingOpenSpecArtifact = run.artifacts.find(
+          (artifact) => artifact.kind === "openspec" && artifact.metadata["changeName"] === model.changeName && artifact.metadata["relativePath"] === `openspec/changes/${model.changeName}/artifacts/change-manifest.json`
+        );
+        if (existingOpenSpecArtifact !== void 0 && !input.force) {
+          return GenerateOpenSpecChangeResultSchema.parse({
+            duplicate: true,
+            run: summarizeRun(run),
+            changeName: model.changeName,
+            artifactIds: [existingOpenSpecArtifact.id],
+            changedFiles: []
+          });
+        }
+        const rendered = renderOpenSpecChange({
+          model,
+          run
+        });
+        const writeResult = await writeOpenSpecChange({
+          projectRoot: run.projectRoot,
+          changeName: model.changeName,
+          rendered,
+          generatedAt: timestamp,
+          policy: {
+            force: input.force
+          }
+        });
+        const nextRun = RunManifestSchema.parse({
+          ...run,
+          revision: run.revision + 1,
+          updatedAt: timestamp,
+          artifacts: [...run.artifacts, ...writeResult.artifactRefs]
+        });
+        await this.runStore.save(nextRun, run.revision);
+        return GenerateOpenSpecChangeResultSchema.parse({
+          duplicate: false,
+          run: summarizeRun(nextRun),
+          changeName: model.changeName,
+          artifactIds: writeResult.artifactRefs.map((artifact) => artifact.id),
+          changedFiles: writeResult.files.filter((file2) => file2.changed).map((file2) => file2.relativePath)
+        });
+      }
+      async readTraceabilityMatrix(digest) {
+        const content = await this.artifactStore.readContent(digest);
+        const parsed = JSON.parse(content.toString("utf8"));
+        return parseTraceabilityMatrixLike(parsed);
+      }
+    };
+  }
+});
+
 // src/mcp/create-server.ts
 var create_server_exports = {};
 __export(create_server_exports, {
@@ -40095,6 +40851,27 @@ function createKernelServer(servicesProvider) {
       };
     })
   );
+  server.registerTool(
+    "generate_openspec_change",
+    {
+      title: "Generate OpenSpec change",
+      description: "Generate OpenSpec change files from a traceability matrix artifact.",
+      inputSchema: GenerateOpenSpecChangeInputSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { openSpecChangeService } = await servicesProvider();
+      const structuredContent = await openSpecChangeService.generateOpenSpecChange(input);
+      return {
+        text: structuredContent.duplicate ? `OpenSpec change ${structuredContent.changeName} already exists.` : `Generated OpenSpec change ${structuredContent.changeName} with ${structuredContent.changedFiles.length} changed files.`,
+        structuredContent
+      };
+    })
+  );
   registerFigmaTextRecorder(server, servicesProvider, {
     toolName: "record_figma_metadata",
     title: "Record Figma metadata",
@@ -40477,6 +41254,7 @@ var init_create_server = __esm({
     init_run2();
     init_command_policy();
     init_path_policy();
+    init_openspec_change_service();
     CONTRACT_VERSION = "0.2.0";
     SERVER_NAME = "spec-to-pr-kernel";
     MINIMUM_NODE_MAJOR = 22;
@@ -40551,7 +41329,8 @@ var init_create_server = __esm({
       "record_figma_variable_defs",
       "record_figma_code_connect_map",
       "analyze_figma_design_inventory",
-      "get_figma_design_inventory"
+      "get_figma_design_inventory",
+      "generate_openspec_change"
     ];
   }
 });
@@ -40595,7 +41374,7 @@ __export(sqlite_run_store_exports, {
   SqliteRunStore: () => SqliteRunStore
 });
 import { mkdirSync } from "fs";
-import path10 from "path";
+import path12 from "path";
 import { createRequire } from "module";
 function loadSqliteModule() {
   return require2("node:sqlite");
@@ -40637,7 +41416,7 @@ var init_sqlite_run_store = __esm({
     SqliteRunStore = class {
       database;
       constructor(databasePath) {
-        mkdirSync(path10.dirname(databasePath), {
+        mkdirSync(path12.dirname(databasePath), {
           recursive: true,
           mode: 448
         });
@@ -40873,7 +41652,7 @@ __export(run_service_provider_exports, {
   createLazyServicesProvider: () => createLazyServicesProvider
 });
 import os from "os";
-import path11 from "path";
+import path13 from "path";
 function createLazyServicesProvider() {
   let services;
   return async () => {
@@ -40882,9 +41661,9 @@ function createLazyServicesProvider() {
     }
     const { SqliteRunStore: SqliteRunStore2 } = await Promise.resolve().then(() => (init_sqlite_run_store(), sqlite_run_store_exports));
     const dataDirectory = resolveDataDirectory();
-    const store = new SqliteRunStore2(path11.join(dataDirectory, "runs.sqlite3"));
-    const snapshotStore = new SourceSnapshotStore(path11.join(dataDirectory, "source-snapshots"));
-    const artifactStore = new ArtifactBlobStore(path11.join(dataDirectory, "artifacts"));
+    const store = new SqliteRunStore2(path13.join(dataDirectory, "runs.sqlite3"));
+    const snapshotStore = new SourceSnapshotStore(path13.join(dataDirectory, "source-snapshots"));
+    const artifactStore = new ArtifactBlobStore(path13.join(dataDirectory, "artifacts"));
     services = {
       runService: new RunService(store, {
         pluginVersion: package_default.version
@@ -40892,7 +41671,7 @@ function createLazyServicesProvider() {
       stageService: new StageService(store),
       policyService: new PolicyService(),
       profileService: new ProjectProfileService(
-        new JsonProfileStore(path11.join(dataDirectory, "profiles"))
+        new JsonProfileStore(path13.join(dataDirectory, "profiles"))
       ),
       sourceRegistryService: new SourceRegistryService(store, snapshotStore),
       briefAdapterService: new BriefAdapterService(store, snapshotStore),
@@ -40900,13 +41679,14 @@ function createLazyServicesProvider() {
       figmaCapabilityService: new FigmaCapabilityService(store, artifactStore),
       figmaDesignInventoryService: new FigmaDesignInventoryService(store, artifactStore),
       figmaIntakeService: new FigmaIntakeService(store, artifactStore),
-      openApiIntakeService: new OpenApiIntakeService(store, snapshotStore, artifactStore)
+      openApiIntakeService: new OpenApiIntakeService(store, snapshotStore, artifactStore),
+      openSpecChangeService: new OpenSpecChangeService(store, artifactStore)
     };
     return services;
   };
 }
 function resolveDataDirectory() {
-  return process.env.SPEC_TO_PR_DATA_DIR ?? path11.join(os.tmpdir(), "spec-to-pr-plugin-data");
+  return process.env.SPEC_TO_PR_DATA_DIR ?? path13.join(os.tmpdir(), "spec-to-pr-plugin-data");
 }
 var init_run_service_provider = __esm({
   "src/mcp/run-service-provider.ts"() {
@@ -40926,6 +41706,7 @@ var init_run_service_provider = __esm({
     init_stage_service();
     init_profile_store();
     init_snapshot_store();
+    init_openspec_change_service();
   }
 });
 

@@ -32,18 +32,56 @@ export const TraceabilityMatrixLikeSchema = z
   })
   .strict();
 
+export const EvidenceGraphMatrixRowSchema = z
+  .object({
+    requirementNodeId: z.string().trim().min(1),
+    requirementLabel: z.string().trim().min(1),
+    briefEvidenceIds: z.array(z.string()).default([]),
+    apiNodeIds: z.array(z.string()).default([]),
+    figmaNodeIds: z.array(z.string()).default([]),
+    gapIds: z.array(z.string()).default([]),
+    status: z.string().trim().min(1),
+  })
+  .strict();
+
+export const EvidenceGraphMatrixSchema = z.array(EvidenceGraphMatrixRowSchema);
+
 export type TraceabilityMatrixLike = z.infer<typeof TraceabilityMatrixLikeSchema>;
+
+export function parseTraceabilityMatrixLike(rawMatrix: unknown): TraceabilityMatrixLike {
+  const direct = TraceabilityMatrixLikeSchema.safeParse(rawMatrix);
+
+  if (direct.success) {
+    return direct.data;
+  }
+
+  const graphMatrix = EvidenceGraphMatrixSchema.parse(rawMatrix);
+
+  return TraceabilityMatrixLikeSchema.parse({
+    rows: graphMatrix.map((row, index) => ({
+      requirementId: `REQ-${String(index + 1).padStart(3, "0")}`,
+      title: row.requirementLabel,
+      summary: row.requirementLabel,
+      briefEvidenceIds: row.briefEvidenceIds,
+      figmaEvidenceIds: [],
+      openApiEvidenceIds: [],
+      gapIds: row.gapIds,
+      tags: [row.status],
+    })),
+    artifactIds: [],
+  });
+}
 
 export function buildOpenSpecChangeModel(input: {
   run: RunManifest;
-  matrix: TraceabilityMatrixLike;
+  matrix: unknown;
   changeName?: string;
   title?: string;
   summary?: string;
   generatedAt: string;
 }): OpenSpecChangeModel {
   const run = RunManifestSchema.parse(input.run);
-  const matrix = TraceabilityMatrixLikeSchema.parse(input.matrix);
+  const matrix = parseTraceabilityMatrixLike(input.matrix);
 
   const changeName = OpenSpecChangeNameSchema.parse(
     input.changeName === undefined

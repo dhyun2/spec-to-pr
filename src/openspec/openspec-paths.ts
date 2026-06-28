@@ -41,6 +41,10 @@ export type OpenSpecChangePaths = {
 };
 
 export function toOpenSpecChangeName(input: string): OpenSpecChangeName {
+  if (/[\\/]/.test(input) || input.split(/[\s_-]+/).includes("..")) {
+    throw new Error("OpenSpec change name must not contain path separators or traversal segments");
+  }
+
   const normalized = input
     .normalize("NFKD")
     .replace(/[^\w\s-]/g, "")
