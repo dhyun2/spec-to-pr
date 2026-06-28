@@ -34827,12 +34827,13 @@ var init_figma_design_inventory = __esm({
 function parseComponentsFromText(content) {
   const components = [];
   const seen = /* @__PURE__ */ new Set();
-  const xmlLikeNodePattern = /id=["']([^"']+)["'][^>]*(?:name=["']([^"']+)["'])?[^>]*(?:type=["']([^"']+)["'])?/gi;
+  const xmlLikeNodePattern = /<[^>]*\bid=["'][^"']+["'][^>]*>/gi;
   for (const match of content.matchAll(xmlLikeNodePattern)) {
-    const nodeId = match[1];
-    const type = match[3];
+    const node = match[0];
+    const nodeId = readXmlAttribute(node, "id");
+    const type = readXmlAttribute(node, "type");
     if (nodeId === void 0 || seen.has(nodeId)) continue;
-    const name = match[2] ?? nodeId;
+    const name = readXmlAttribute(node, "name") ?? nodeId;
     const looksLikeComponent = /component|instance|button|input|chip|modal|sheet|card|navigation|tab/i.test(
       `${name} ${type ?? ""}`
     );
@@ -34867,11 +34868,14 @@ function parseTokensFromText(content) {
 function parseAssetsFromText(content) {
   const assets = [];
   const seen = /* @__PURE__ */ new Set();
-  const assetPattern = /id=["']([^"']+)["'][^>]*name=["']([^"']*(?:icon|image|vector|svg)[^"']*)["']/gi;
+  const assetPattern = /<[^>]*\bid=["'][^"']+["'][^>]*>/gi;
   for (const match of content.matchAll(assetPattern)) {
-    const nodeId = match[1];
-    const name = match[2];
-    if (nodeId === void 0 || name === void 0 || seen.has(nodeId)) continue;
+    const node = match[0];
+    const nodeId = readXmlAttribute(node, "id");
+    const name = readXmlAttribute(node, "name");
+    if (nodeId === void 0 || name === void 0 || !/icon|image|vector|svg/i.test(name) || seen.has(nodeId)) {
+      continue;
+    }
     seen.add(nodeId);
     assets.push({
       nodeId,
@@ -34921,6 +34925,10 @@ function collectMappings(value, result) {
 function getString(record2, key) {
   const value = record2[key];
   return typeof value === "string" && value.trim().length > 0 ? value : void 0;
+}
+function readXmlAttribute(node, attribute) {
+  const match = new RegExp(`\\b${attribute}=["']([^"']+)["']`, "i").exec(node);
+  return match?.[1];
 }
 function compactMapping(input) {
   return {

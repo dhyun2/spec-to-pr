@@ -50,12 +50,14 @@ describe("spec-to-pr MCP stdio server", () => {
 
     expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
       "analyze_brief_source",
+      "analyze_figma_design_inventory",
       "block_stage",
       "classify_command",
       "complete_stage",
       "create_intake_manifest",
       "create_run",
       "fail_stage",
+      "get_figma_design_inventory",
       "get_figma_provider_policy",
       "get_project_profile",
       "get_resume_plan",
@@ -308,6 +310,56 @@ describe("spec-to-pr MCP stdio server", () => {
       duplicate: false,
       kind: "metadata",
       sourceId: (figmaSource.structuredContent as { source: { id: string } }).source.id,
+    });
+
+    await client.callTool({
+      name: "record_figma_variable_defs",
+      arguments: {
+        runId,
+        sourceId: (figmaSource.structuredContent as { source: { id: string } }).source.id,
+        content: "variable color/primary variable spacing/4",
+      },
+    });
+
+    await client.callTool({
+      name: "record_figma_code_connect_map",
+      arguments: {
+        runId,
+        sourceId: (figmaSource.structuredContent as { source: { id: string } }).source.id,
+        content: JSON.stringify({
+          nodeId: "238:941",
+          componentName: "ProductFrame",
+          source: "@/features/product/ui/product-frame",
+        }),
+      },
+    });
+
+    const figmaInventory = await client.callTool({
+      name: "analyze_figma_design_inventory",
+      arguments: {
+        runId,
+        sourceId: (figmaSource.structuredContent as { source: { id: string } }).source.id,
+      },
+    });
+
+    expect(figmaInventory.structuredContent).toMatchObject({
+      inventory: {
+        sourceId: (figmaSource.structuredContent as { source: { id: string } }).source.id,
+      },
+    });
+
+    const loadedFigmaInventory = await client.callTool({
+      name: "get_figma_design_inventory",
+      arguments: {
+        runId,
+        sourceId: (figmaSource.structuredContent as { source: { id: string } }).source.id,
+      },
+    });
+
+    expect(loadedFigmaInventory.structuredContent).toMatchObject({
+      inventory: {
+        sourceId: (figmaSource.structuredContent as { source: { id: string } }).source.id,
+      },
     });
 
     const intake = await client.callTool({

@@ -8,16 +8,16 @@ export function parseComponentsFromText(content: string): FigmaComponentInventor
   const components: FigmaComponentInventoryItem[] = [];
   const seen = new Set<string>();
 
-  const xmlLikeNodePattern =
-    /id=["']([^"']+)["'][^>]*(?:name=["']([^"']+)["'])?[^>]*(?:type=["']([^"']+)["'])?/gi;
+  const xmlLikeNodePattern = /<[^>]*\bid=["'][^"']+["'][^>]*>/gi;
 
   for (const match of content.matchAll(xmlLikeNodePattern)) {
-    const nodeId = match[1];
-    const type = match[3];
+    const node = match[0];
+    const nodeId = readXmlAttribute(node, "id");
+    const type = readXmlAttribute(node, "type");
 
     if (nodeId === undefined || seen.has(nodeId)) continue;
 
-    const name = match[2] ?? nodeId;
+    const name = readXmlAttribute(node, "name") ?? nodeId;
     const looksLikeComponent =
       /component|instance|button|input|chip|modal|sheet|card|navigation|tab/i.test(
         `${name} ${type ?? ""}`,
@@ -67,14 +67,21 @@ export function parseAssetsFromText(content: string): FigmaAssetInventoryItem[] 
   const assets: FigmaAssetInventoryItem[] = [];
   const seen = new Set<string>();
 
-  const assetPattern =
-    /id=["']([^"']+)["'][^>]*name=["']([^"']*(?:icon|image|vector|svg)[^"']*)["']/gi;
+  const assetPattern = /<[^>]*\bid=["'][^"']+["'][^>]*>/gi;
 
   for (const match of content.matchAll(assetPattern)) {
-    const nodeId = match[1];
-    const name = match[2];
+    const node = match[0];
+    const nodeId = readXmlAttribute(node, "id");
+    const name = readXmlAttribute(node, "name");
 
-    if (nodeId === undefined || name === undefined || seen.has(nodeId)) continue;
+    if (
+      nodeId === undefined ||
+      name === undefined ||
+      !/icon|image|vector|svg/i.test(name) ||
+      seen.has(nodeId)
+    ) {
+      continue;
+    }
 
     seen.add(nodeId);
 
@@ -147,6 +154,12 @@ function getString(record: Record<string, unknown>, key: string): string | undef
   const value = record[key];
 
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function readXmlAttribute(node: string, attribute: string): string | undefined {
+  const match = new RegExp(`\\b${attribute}=["']([^"']+)["']`, "i").exec(node);
+
+  return match?.[1];
 }
 
 function compactMapping(input: {
