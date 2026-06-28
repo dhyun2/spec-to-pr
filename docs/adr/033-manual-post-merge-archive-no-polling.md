@@ -22,19 +22,23 @@ The archive lifecycle requires explicit merge evidence:
 
 The workflow does not poll, does not watch in the background, and does not infer merge state.
 
+The Skill resolves the archive target before planning. Users may provide `runId` and `changeName`, but the common path is to resolve the latest suitable published Run and unarchived OpenSpec change automatically. If multiple candidates exist, the user must choose.
+
 Archive execution is split into:
 
-1. record or check merge evidence
-2. plan archive
-3. optionally run archive with `yes: true`
-4. record result and report artifacts
-5. report follow-up commit requirement
+1. resolve archive target
+2. record or check merge evidence
+3. plan archive
+4. optionally run archive with `yes: true`
+5. record result and report artifacts
+6. report follow-up commit requirement
 
 ## Consequences
 
 Good:
 
 - Archive timing stays under user control.
+- Users do not need to remember Run IDs for the common path.
 - No background token usage or polling cost.
 - Merge evidence is auditable.
 - Archive failures are visible instead of hidden by automatic revert.

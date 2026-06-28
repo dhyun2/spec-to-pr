@@ -14,8 +14,8 @@ Task 32 is not a background worker.
 
 ## Inputs
 
-- Run ID
-- OpenSpec change name
+- optional Run ID fallback
+- optional OpenSpec change name fallback
 - Task 31 publish result artifact already recorded in the Run
 - merge evidence:
   - user-attested
@@ -31,6 +31,28 @@ Task 32 is not a background worker.
 - archive report artifact
 - stdout/stderr log artifacts when the archive command runs
 - follow-up commit requirement
+
+## User Experience
+
+The normal user path should be short:
+
+```text
+PR 머지했어. archive 해줘.
+```
+
+Or as a slash command:
+
+```text
+/spec-to-pr:archive-openspec --merge-confirmed
+```
+
+Run ID and change name are fallback inputs, not required in the common path:
+
+```text
+/spec-to-pr:archive-openspec --run <run-id> --change <change-name> --merge-confirmed --execute
+```
+
+The Skill resolves the archive target from RunStore before planning.
 
 ## Non-Goals
 
@@ -51,6 +73,7 @@ Task 32 is not a background worker.
 - Task 32 is a user-triggered post-merge command.
 - Archive requires explicit merge evidence.
 - `plan_openspec_archive` is read-only and reports `polling: false`.
+- `resolve_archive_target` is read-only and resolves Run, change, and PR/MR URL when the user omits them.
 - `check_review_request_status_once` performs at most one remote status check per call.
 - `run_openspec_archive` recalculates the plan server-side before executing.
 - `run_openspec_archive` requires `yes: true`.
@@ -60,8 +83,9 @@ Task 32 is not a background worker.
 
 ## Tooling
 
+- `resolve_archive_target`
 - `plan_openspec_archive`
-- `record_merge_attestation`
+- `record_user_merge_attestation`
 - `check_review_request_status_once`
 - `run_openspec_archive`
 - `get_openspec_archive_report`
@@ -72,9 +96,23 @@ Task 32 is not a background worker.
 
 The Skill must be user-triggered and has `disable-model-invocation: true`.
 
+## Archive Target Resolver
+
+`resolve_archive_target` accepts optional `runId` and `changeName`.
+
+- If `runId` is supplied, resolve within that Run.
+- If `changeName` is supplied, use it as an explicit fallback.
+- If neither is supplied, inspect recent Runs for a Task 31 publish result and an unarchived OpenSpec change.
+- If one candidate exists, return it.
+- If multiple candidates exist, return them and require user choice.
+- If no candidate exists, return unresolved and do not plan archive.
+
+The resolver does not use polling, background watching, or merge-state inference.
+
 ## Definition of Done
 
 - Merge evidence contracts exist.
+- Archive target resolver supports omitted Run ID and change name.
 - Archive plan contract includes `polling: false`.
 - User attestation records a merge evidence artifact.
 - One-shot remote status check records a merge evidence artifact.
@@ -82,7 +120,7 @@ The Skill must be user-triggered and has `disable-model-invocation: true`.
 - Archive execution records stdout, stderr, exit code, result, and report.
 - MCP exposes the manual archive tools.
 - Skill documents the manual, no-polling workflow.
-- Tests cover plan, attestation, one-shot status, archive result, and MCP stdio.
+- Tests cover target resolution, plan, attestation, one-shot status, archive result, and MCP stdio.
 
 ## Verification
 
