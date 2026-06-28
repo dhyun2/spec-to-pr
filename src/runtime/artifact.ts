@@ -41,6 +41,8 @@ export const ArtifactKindSchema = z.enum([
   "accessibility-report",
   "performance-report",
   "telemetry-config",
+  "agent-context-pack",
+  "agent-result-report",
   "pr-report",
   "log",
   "other",
