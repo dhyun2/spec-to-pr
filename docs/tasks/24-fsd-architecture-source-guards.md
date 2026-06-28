@@ -65,3 +65,36 @@ The plugin must detect:
 - Architecture report artifact is recorded in Run.
 - Optional source guard test is generated in the target repository.
 - MCP tools work through stdio integration tests.
+
+## Verification
+
+Run:
+
+```bash
+pnpm format:check
+pnpm typecheck
+pnpm schemas:build
+pnpm build
+pnpm test
+pnpm audit
+```
+
+Expected:
+
+- import parser tests pass
+- project boundary tests pass
+- FSD rule tests pass
+- source guard rule tests pass
+- ArchitectureGuardService tests pass
+- MCP stdio integration lists:
+  - analyze_architecture_boundaries
+  - generate_source_guard_tests
+
+## Known limitations
+
+- Alias resolution is basic and may need project profile integration.
+- TypeScript compiler API increases bundle size.
+- Generated source guard test is intentionally simpler than plugin analysis.
+- Dynamic import paths that are not string literals are ignored.
+- No auto-fix is performed.
+- No lint/typecheck/test execution is performed in this Task.
