@@ -334,10 +334,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path17) {
-  if (!path17)
+function getElementAtPath(obj, path19) {
+  if (!path19)
     return obj;
-  return path17.reduce((acc, key) => acc?.[key], obj);
+  return path19.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -665,11 +665,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path17, issues) {
+function prefixIssues(path19, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path17);
+    iss.path.unshift(path19);
     return iss;
   });
 }
@@ -887,16 +887,16 @@ function flattenError(error51, mapper = (issue2) => issue2.message) {
 }
 function formatError(error51, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error52, path17 = []) => {
+  const processError = (error52, path19 = []) => {
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path17, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path19, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path17, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path19, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path17, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path19, ...issue2.path]);
       } else {
-        const fullpath = [...path17, ...issue2.path];
+        const fullpath = [...path19, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -923,17 +923,17 @@ function formatError(error51, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error51, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error52, path17 = []) => {
+  const processError = (error52, path19 = []) => {
     var _a3, _b;
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path17, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path19, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path17, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path19, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path17, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path19, ...issue2.path]);
       } else {
-        const fullpath = [...path17, ...issue2.path];
+        const fullpath = [...path19, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -965,8 +965,8 @@ function treeifyError(error51, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path17 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path17) {
+  const path19 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path19) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -14469,13 +14469,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path17 = ref.slice(1).split("/").filter(Boolean);
-  if (path17.length === 0) {
+  const path19 = ref.slice(1).split("/").filter(Boolean);
+  if (path19.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path17[0] === defsKey) {
-    const key = path17[1];
+  if (path19[0] === defsKey) {
+    const key = path19[1];
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -17317,8 +17317,8 @@ var init_parseUtil = __esm({
     init_errors3();
     init_en2();
     makeIssue = (params) => {
-      const { data, path: path17, errorMaps, issueData } = params;
-      const fullPath = [...path17, ...issueData.path || []];
+      const { data, path: path19, errorMaps, issueData } = params;
+      const fullPath = [...path19, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -17601,11 +17601,11 @@ var init_types2 = __esm({
     init_parseUtil();
     init_util2();
     ParseInputLazyPath = class {
-      constructor(parent, value, path17, key) {
+      constructor(parent, value, path19, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path17;
+        this._path = path19;
         this._key = key;
       }
       get path() {
@@ -26949,8 +26949,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path17) {
-      let input = path17;
+    function removeDotSegments(path19) {
+      let input = path19;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -27202,8 +27202,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path17, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path17 && path17 !== "/" ? path17 : void 0;
+        const [path19, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path19 && path19 !== "/" ? path19 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -32775,7 +32775,7 @@ function generateFeatureWrappers(input) {
 }
 function renderWrapper(input) {
   const method = input.operation.method.toUpperCase();
-  const path17 = input.operation.path;
+  const path19 = input.operation.path;
   return `// AUTO-GENERATED wrapper skeleton by spec-to-pr.
 // Review and adapt the generated client import to the target project's actual API client.
 // Do not import generated clients directly from UI components.
@@ -32790,7 +32790,7 @@ export type ${capitalize(input.wrapperName)}Input = {
 export async function ${input.wrapperName}(input: ${capitalize(input.wrapperName)}Input = {}) {
   return apiClient.request({
     method: ${JSON.stringify(method)},
-    path: ${JSON.stringify(path17)},
+    path: ${JSON.stringify(path19)},
     params: input.params,
     body: input.body,
   });
@@ -32842,8 +32842,8 @@ ${indent(handlers, 2)}
 }
 function renderHandler(operation) {
   const mswMethod = operation.method.toLowerCase();
-  const path17 = operation.path.replace(/{([^}]+)}/g, ":$1");
-  return `http.${mswMethod}(${JSON.stringify(path17)}, () => {
+  const path19 = operation.path.replace(/{([^}]+)}/g, ":$1");
+  return `http.${mswMethod}(${JSON.stringify(path19)}, () => {
   return HttpResponse.json({});
 }),`;
 }
@@ -33735,6 +33735,9 @@ var init_artifact = __esm({
       "figma-code-connect-map",
       "figma-design-inventory",
       "figma-provider-comparison",
+      "figma-design-contract",
+      "design-system-map",
+      "ui-implementation-rules",
       "openapi-normalized-document",
       "openapi-operation-inventory",
       "openapi-schema-inventory",
@@ -34189,11 +34192,11 @@ function addUniqueValueIssues(collectionName, values, context) {
     seen.add(value);
   });
 }
-function addReferenceIssue(context, path17, reference) {
+function addReferenceIssue(context, path19, reference) {
   context.addIssue({
     code: "custom",
     message: `Unknown ${reference.kind} reference ${reference.id}`,
-    path: path17
+    path: path19
   });
 }
 var RunStatusSchema, RunManifestSchema, RunSummarySchema, CreateInitialRunInputSchema;
@@ -35994,6 +35997,1191 @@ var init_artifact_blob_store = __esm({
   }
 });
 
+// src/design-contract/design-contract-model.ts
+var MappingConfidenceSchema, MappingSourceSchema, ComponentMappingSchema, TokenMappingSchema, TypographyMappingSchema, AssetMappingSchema, DesignContractGapSummarySchema, FigmaDesignContractSchema;
+var init_design_contract_model = __esm({
+  "src/design-contract/design-contract-model.ts"() {
+    "use strict";
+    init_zod();
+    init_ids();
+    MappingConfidenceSchema = external_exports.enum(["high", "medium", "low", "missing"]);
+    MappingSourceSchema = external_exports.enum([
+      "code-connect",
+      "name-match",
+      "token-match",
+      "manual",
+      "missing"
+    ]);
+    ComponentMappingSchema = external_exports.object({
+      figmaNodeId: external_exports.string().trim().min(1),
+      figmaName: external_exports.string().trim().min(1),
+      figmaType: external_exports.string().trim().min(1).optional(),
+      codeComponent: external_exports.string().trim().min(1).optional(),
+      importPath: external_exports.string().trim().min(1).optional(),
+      propsHint: external_exports.record(external_exports.string(), external_exports.unknown()).default({}),
+      source: MappingSourceSchema,
+      confidence: MappingConfidenceSchema,
+      evidenceIds: external_exports.array(EvidenceIdSchema).default([]),
+      gapIds: external_exports.array(GapIdSchema).default([])
+    }).strict();
+    TokenMappingSchema = external_exports.object({
+      figmaVariable: external_exports.string().trim().min(1),
+      figmaValue: external_exports.string().trim().optional(),
+      tokenName: external_exports.string().trim().min(1).optional(),
+      cssVariable: external_exports.string().trim().min(1).optional(),
+      className: external_exports.string().trim().min(1).optional(),
+      category: external_exports.enum(["color", "spacing", "radius", "shadow", "typography", "unknown"]),
+      source: MappingSourceSchema,
+      confidence: MappingConfidenceSchema,
+      evidenceIds: external_exports.array(EvidenceIdSchema).default([]),
+      gapIds: external_exports.array(GapIdSchema).default([])
+    }).strict();
+    TypographyMappingSchema = external_exports.object({
+      figmaTextStyle: external_exports.string().trim().min(1),
+      fontFamily: external_exports.string().trim().optional(),
+      fontSize: external_exports.string().trim().optional(),
+      lineHeight: external_exports.string().trim().optional(),
+      codeClassName: external_exports.string().trim().min(1).optional(),
+      tokenName: external_exports.string().trim().min(1).optional(),
+      source: MappingSourceSchema,
+      confidence: MappingConfidenceSchema,
+      evidenceIds: external_exports.array(EvidenceIdSchema).default([]),
+      gapIds: external_exports.array(GapIdSchema).default([])
+    }).strict();
+    AssetMappingSchema = external_exports.object({
+      figmaNodeId: external_exports.string().trim().min(1),
+      figmaName: external_exports.string().trim().min(1),
+      assetType: external_exports.enum(["icon", "image", "vector", "illustration", "unknown"]),
+      codeAssetPath: external_exports.string().trim().min(1).optional(),
+      codeComponent: external_exports.string().trim().min(1).optional(),
+      exportRequired: external_exports.boolean(),
+      source: MappingSourceSchema,
+      confidence: MappingConfidenceSchema,
+      evidenceIds: external_exports.array(EvidenceIdSchema).default([]),
+      gapIds: external_exports.array(GapIdSchema).default([])
+    }).strict();
+    DesignContractGapSummarySchema = external_exports.object({
+      unmappedComponents: external_exports.number().int().nonnegative(),
+      unmappedTokens: external_exports.number().int().nonnegative(),
+      unmappedTypography: external_exports.number().int().nonnegative(),
+      unmappedAssets: external_exports.number().int().nonnegative(),
+      blockerGaps: external_exports.number().int().nonnegative(),
+      majorGaps: external_exports.number().int().nonnegative()
+    }).strict();
+    FigmaDesignContractSchema = external_exports.object({
+      schemaVersion: external_exports.literal("figma-design-contract-v1"),
+      runId: RunIdSchema,
+      changeName: external_exports.string().trim().min(1),
+      generatedAt: external_exports.string().datetime({ offset: true }),
+      sourceArtifactIds: external_exports.array(ArtifactIdSchema).default([]),
+      componentMappings: external_exports.array(ComponentMappingSchema).default([]),
+      tokenMappings: external_exports.array(TokenMappingSchema).default([]),
+      typographyMappings: external_exports.array(TypographyMappingSchema).default([]),
+      assetMappings: external_exports.array(AssetMappingSchema).default([]),
+      gapIds: external_exports.array(GapIdSchema).default([]),
+      gapSummary: DesignContractGapSummarySchema
+    }).strict();
+  }
+});
+
+// src/design-contract/design-contract-mapper.ts
+function buildFigmaDesignContract(input) {
+  const inventory = FigmaInventoryLikeSchema.parse(input.figmaInventory);
+  const gaps = [];
+  const variables = [...inventory.variables, ...inventory.tokens];
+  const componentMappings = inventory.components.map(
+    (component) => mapComponent({
+      component,
+      projectDesignSystem: input.projectDesignSystem,
+      evidence: input.evidence,
+      gaps,
+      generatedAt: input.generatedAt
+    })
+  );
+  const tokenMappings = variables.map(
+    (variable) => mapToken({
+      variable,
+      projectDesignSystem: input.projectDesignSystem,
+      evidence: input.evidence,
+      gaps,
+      generatedAt: input.generatedAt
+    })
+  );
+  const typographyMappings = inventory.textStyles.map(
+    (textStyle) => mapTypography({
+      textStyle,
+      projectDesignSystem: input.projectDesignSystem,
+      evidence: input.evidence,
+      gaps,
+      generatedAt: input.generatedAt
+    })
+  );
+  const assetMappings = inventory.assets.map(
+    (asset) => mapAsset({
+      asset,
+      projectDesignSystem: input.projectDesignSystem,
+      evidence: input.evidence,
+      gaps,
+      generatedAt: input.generatedAt
+    })
+  );
+  const blockerGaps = gaps.filter((gap2) => gap2.severity === "blocker").length;
+  const majorGaps = gaps.filter((gap2) => gap2.severity === "major").length;
+  const sourceArtifactIds = inventory.sourceArtifactIds.length === 0 ? inventory.artifactIds : inventory.sourceArtifactIds;
+  const contract = FigmaDesignContractSchema.parse({
+    schemaVersion: "figma-design-contract-v1",
+    runId: input.runId,
+    changeName: input.changeName,
+    generatedAt: input.generatedAt,
+    sourceArtifactIds,
+    componentMappings,
+    tokenMappings,
+    typographyMappings,
+    assetMappings,
+    gapIds: gaps.map((gap2) => gap2.id),
+    gapSummary: {
+      unmappedComponents: componentMappings.filter((mapping) => mapping.confidence === "missing").length,
+      unmappedTokens: tokenMappings.filter((mapping) => mapping.confidence === "missing").length,
+      unmappedTypography: typographyMappings.filter((mapping) => mapping.confidence === "missing").length,
+      unmappedAssets: assetMappings.filter((mapping) => mapping.confidence === "missing").length,
+      blockerGaps,
+      majorGaps
+    }
+  });
+  return { contract, gaps };
+}
+function mapComponent(input) {
+  const figmaName = readName(input.component);
+  const figmaNodeId = readNodeId(input.component);
+  const figmaType = readString(input.component, "type");
+  const codeConnect = readRecord(input.component, "codeConnect");
+  const codeConnectComponent = readString(codeConnect, "component") ?? readString(input.component, "codeConnectComponent");
+  const codeConnectImportPath = readString(codeConnect, "importPath") ?? readString(input.component, "codeConnectSource");
+  if (codeConnectComponent !== void 0) {
+    return ComponentMappingSchema.parse({
+      figmaNodeId,
+      figmaName,
+      ...figmaType === void 0 ? {} : { figmaType },
+      codeComponent: codeConnectComponent,
+      ...codeConnectImportPath === void 0 ? {} : { importPath: codeConnectImportPath },
+      propsHint: readRecord(codeConnect, "props"),
+      source: "code-connect",
+      confidence: "high",
+      evidenceIds: evidenceForNode(input.evidence, figmaNodeId),
+      gapIds: []
+    });
+  }
+  const normalizedFigmaName = normalizeName(figmaName);
+  const candidate = input.projectDesignSystem.components.find((component) => {
+    const normalizedComponent = normalizeName(component.name);
+    return normalizedComponent === normalizedFigmaName || normalizedFigmaName.includes(normalizedComponent) || normalizedComponent.includes(normalizedFigmaName);
+  });
+  if (candidate !== void 0) {
+    return ComponentMappingSchema.parse({
+      figmaNodeId,
+      figmaName,
+      ...figmaType === void 0 ? {} : { figmaType },
+      codeComponent: candidate.name,
+      importPath: candidate.importPath,
+      propsHint: {},
+      source: "name-match",
+      confidence: "medium",
+      evidenceIds: evidenceForNode(input.evidence, figmaNodeId),
+      gapIds: []
+    });
+  }
+  const gap2 = createDesignGap({
+    title: `Unmapped Figma component: ${figmaName}`,
+    expected: "Every reusable Figma component should map to an existing code component or an approved new component plan.",
+    observed: `No code component mapping was found for Figma node ${figmaNodeId} (${figmaName}).`,
+    impact: "UI Agent may create duplicate UI or hard-code layout instead of using the design system.",
+    evidenceIds: evidenceForNode(input.evidence, figmaNodeId),
+    severity: "major",
+    generatedAt: input.generatedAt
+  });
+  input.gaps.push(gap2);
+  return ComponentMappingSchema.parse({
+    figmaNodeId,
+    figmaName,
+    ...figmaType === void 0 ? {} : { figmaType },
+    source: "missing",
+    confidence: "missing",
+    evidenceIds: evidenceForNode(input.evidence, figmaNodeId),
+    gapIds: [gap2.id]
+  });
+}
+function mapToken(input) {
+  const figmaVariable = readName(input.variable);
+  const figmaValue = readString(input.variable, "value");
+  const category = inferTokenCategory(figmaVariable, readString(input.variable, "kind"));
+  const normalizedVariable = normalizeName(figmaVariable);
+  const candidate = input.projectDesignSystem.tokens.find((token) => {
+    const normalizedToken = normalizeName(token.name);
+    return normalizedToken === normalizedVariable || normalizedToken.includes(normalizedVariable) || normalizedVariable.includes(normalizedToken);
+  });
+  if (candidate !== void 0) {
+    return TokenMappingSchema.parse({
+      figmaVariable,
+      ...figmaValue === void 0 ? {} : { figmaValue },
+      ...candidate.kind === "token-export" ? { tokenName: candidate.name } : {},
+      ...candidate.kind === "css-variable" ? { cssVariable: candidate.name } : {},
+      ...candidate.kind === "class-name" ? { className: candidate.name } : {},
+      category,
+      source: "token-match",
+      confidence: "medium",
+      evidenceIds: [],
+      gapIds: []
+    });
+  }
+  const gap2 = createDesignGap({
+    title: `Unmapped Figma variable: ${figmaVariable}`,
+    expected: "Figma variables should map to existing code tokens or classes.",
+    observed: `No token mapping was found for ${figmaVariable}.`,
+    impact: "UI Agent may hard-code visual values instead of using semantic tokens.",
+    evidenceIds: [],
+    severity: "major",
+    generatedAt: input.generatedAt
+  });
+  input.gaps.push(gap2);
+  return TokenMappingSchema.parse({
+    figmaVariable,
+    ...figmaValue === void 0 ? {} : { figmaValue },
+    category,
+    source: "missing",
+    confidence: "missing",
+    evidenceIds: [],
+    gapIds: [gap2.id]
+  });
+}
+function mapTypography(input) {
+  const figmaTextStyle = readName(input.textStyle);
+  const candidate = input.projectDesignSystem.tokens.find((token) => {
+    const normalized = normalizeName(token.name);
+    const style = normalizeName(figmaTextStyle);
+    return normalized.includes(style) || style.includes(normalized);
+  });
+  if (candidate !== void 0) {
+    return TypographyMappingSchema.parse({
+      figmaTextStyle,
+      ...candidate.kind === "class-name" ? { codeClassName: candidate.name } : {},
+      ...candidate.kind === "token-export" ? { tokenName: candidate.name } : {},
+      ...optionalString(input.textStyle, "fontFamily"),
+      ...optionalString(input.textStyle, "fontSize"),
+      ...optionalString(input.textStyle, "lineHeight"),
+      source: "token-match",
+      confidence: "medium",
+      evidenceIds: [],
+      gapIds: []
+    });
+  }
+  const gap2 = createDesignGap({
+    title: `Unmapped Figma text style: ${figmaTextStyle}`,
+    expected: "Figma text styles should map to existing typography classes or tokens.",
+    observed: `No typography mapping was found for ${figmaTextStyle}.`,
+    impact: "UI Agent may use arbitrary font sizes or line heights.",
+    evidenceIds: [],
+    severity: "minor",
+    generatedAt: input.generatedAt
+  });
+  input.gaps.push(gap2);
+  return TypographyMappingSchema.parse({
+    figmaTextStyle,
+    ...optionalString(input.textStyle, "fontFamily"),
+    ...optionalString(input.textStyle, "fontSize"),
+    ...optionalString(input.textStyle, "lineHeight"),
+    source: "missing",
+    confidence: "missing",
+    evidenceIds: [],
+    gapIds: [gap2.id]
+  });
+}
+function mapAsset(input) {
+  const figmaName = readName(input.asset);
+  const figmaNodeId = readNodeId(input.asset);
+  const assetType = inferAssetType(figmaName, readString(input.asset, "type"));
+  const componentCandidate = input.projectDesignSystem.components.find((component) => {
+    const normalizedComponent = normalizeName(component.name);
+    const normalizedAsset = normalizeName(figmaName);
+    return normalizedComponent.includes(normalizedAsset) || normalizedAsset.includes(normalizedComponent);
+  });
+  if (componentCandidate !== void 0) {
+    return AssetMappingSchema.parse({
+      figmaNodeId,
+      figmaName,
+      assetType,
+      codeComponent: componentCandidate.name,
+      exportRequired: false,
+      source: "name-match",
+      confidence: "medium",
+      evidenceIds: evidenceForNode(input.evidence, figmaNodeId),
+      gapIds: []
+    });
+  }
+  const gap2 = createDesignGap({
+    title: `Unmapped Figma asset: ${figmaName}`,
+    expected: "Figma vector/image assets should map to existing icon components or exported asset files.",
+    observed: `No asset mapping was found for Figma node ${figmaNodeId} (${figmaName}).`,
+    impact: "UI Agent may recreate the asset incorrectly or omit it.",
+    evidenceIds: evidenceForNode(input.evidence, figmaNodeId),
+    severity: "minor",
+    generatedAt: input.generatedAt
+  });
+  input.gaps.push(gap2);
+  return AssetMappingSchema.parse({
+    figmaNodeId,
+    figmaName,
+    assetType,
+    exportRequired: true,
+    source: "missing",
+    confidence: "missing",
+    evidenceIds: evidenceForNode(input.evidence, figmaNodeId),
+    gapIds: [gap2.id]
+  });
+}
+function createDesignGap(input) {
+  return GapSchema.parse({
+    id: createGapId(),
+    category: "design",
+    severity: input.severity,
+    status: "open",
+    title: input.title,
+    expected: input.expected,
+    observed: input.observed,
+    impact: input.impact,
+    sourceEvidenceIds: input.evidenceIds,
+    owner: "design-ui",
+    createdAt: input.generatedAt,
+    updatedAt: input.generatedAt,
+    metadata: {
+      adapter: "figma-design-contract-v1"
+    }
+  });
+}
+function evidenceForNode(evidence, nodeId) {
+  return evidence.filter((item) => item.location.type === "figma-node" && item.location.nodeId === nodeId).map((item) => item.id);
+}
+function readName(value) {
+  return readString(value, "name") ?? readString(value, "figmaName") ?? "Unnamed";
+}
+function readNodeId(value) {
+  return readString(value, "nodeId") ?? readString(value, "figmaNodeId") ?? "0:0";
+}
+function readString(value, key) {
+  const raw = value[key];
+  if (typeof raw === "string" && raw.trim().length > 0) {
+    return raw;
+  }
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return String(raw);
+  }
+  return void 0;
+}
+function readRecord(value, key) {
+  const raw = value[key];
+  return typeof raw === "object" && raw !== null && !Array.isArray(raw) ? raw : {};
+}
+function optionalString(value, key) {
+  const parsed = readString(value, key);
+  return parsed === void 0 ? {} : { [key]: parsed };
+}
+function normalizeName(value) {
+  return value.toLowerCase().replace(/[^a-z0-9가-힣]+/g, "").trim();
+}
+function inferTokenCategory(value, rawKind) {
+  const lower = `${value} ${rawKind ?? ""}`.toLowerCase();
+  if (/color|fill|paint|색/.test(lower)) {
+    return "color";
+  }
+  if (/space|spacing|gap|padding|margin/.test(lower)) {
+    return "spacing";
+  }
+  if (/radius|corner/.test(lower)) {
+    return "radius";
+  }
+  if (/shadow|effect/.test(lower)) {
+    return "shadow";
+  }
+  if (/font|type|text|typography|타이포/.test(lower)) {
+    return "typography";
+  }
+  return "unknown";
+}
+function inferAssetType(name, type) {
+  const lower = `${name} ${type ?? ""}`.toLowerCase();
+  if (/icon|ico|아이콘/.test(lower)) {
+    return "icon";
+  }
+  if (/image|img|png|jpg|jpeg/.test(lower)) {
+    return "image";
+  }
+  if (/vector|svg/.test(lower)) {
+    return "vector";
+  }
+  if (/illustration|일러스트/.test(lower)) {
+    return "illustration";
+  }
+  return "unknown";
+}
+var FigmaInventoryLikeSchema;
+var init_design_contract_mapper = __esm({
+  "src/design-contract/design-contract-mapper.ts"() {
+    "use strict";
+    init_zod();
+    init_gap();
+    init_id_factory();
+    init_design_contract_model();
+    FigmaInventoryLikeSchema = external_exports.object({
+      components: external_exports.array(external_exports.record(external_exports.string(), external_exports.unknown())).default([]),
+      variables: external_exports.array(external_exports.record(external_exports.string(), external_exports.unknown())).default([]),
+      tokens: external_exports.array(external_exports.record(external_exports.string(), external_exports.unknown())).default([]),
+      textStyles: external_exports.array(external_exports.record(external_exports.string(), external_exports.unknown())).default([]),
+      assets: external_exports.array(external_exports.record(external_exports.string(), external_exports.unknown())).default([]),
+      artifactIds: external_exports.array(external_exports.string()).default([]),
+      sourceArtifactIds: external_exports.array(external_exports.string()).default([])
+    }).passthrough();
+  }
+});
+
+// src/design-contract/design-contract-renderer.ts
+function renderDesignContract(input) {
+  return {
+    contractJson: `${JSON.stringify(input.contract, null, 2)}
+`,
+    contractMd: renderContractMarkdown(input.contract),
+    componentMapJson: `${JSON.stringify(input.contract.componentMappings, null, 2)}
+`,
+    tokenMapJson: `${JSON.stringify(input.contract.tokenMappings, null, 2)}
+`,
+    typographyMapJson: `${JSON.stringify(input.contract.typographyMappings, null, 2)}
+`,
+    assetMapJson: `${JSON.stringify(input.contract.assetMappings, null, 2)}
+`,
+    uiImplementationRulesMd: renderUiRules(input.contract),
+    designGapSummaryMd: renderGapSummary(input.gaps)
+  };
+}
+function renderContractMarkdown(contract) {
+  return markdown([
+    `# Figma Design Contract \u2014 ${contract.changeName}`,
+    "",
+    "## Summary",
+    "",
+    `- Component mappings: ${contract.componentMappings.length}`,
+    `- Token mappings: ${contract.tokenMappings.length}`,
+    `- Typography mappings: ${contract.typographyMappings.length}`,
+    `- Asset mappings: ${contract.assetMappings.length}`,
+    `- Gaps: ${contract.gapIds.length}`,
+    "",
+    "## Component Mappings",
+    "",
+    "| Figma | Code Component | Import | Source | Confidence | Gaps |",
+    "|---|---|---|---|---|---|",
+    ...contract.componentMappings.map(
+      (mapping) => [
+        escapeCell(mapping.figmaName),
+        mapping.codeComponent ?? "-",
+        mapping.importPath ?? "-",
+        mapping.source,
+        mapping.confidence,
+        mapping.gapIds.join("<br>") || "-"
+      ].join(" | ")
+    ),
+    "",
+    "## Token Mappings",
+    "",
+    "| Figma Variable | Code Token | CSS Var | Class | Category | Confidence | Gaps |",
+    "|---|---|---|---|---|---|---|",
+    ...contract.tokenMappings.map(
+      (mapping) => [
+        escapeCell(mapping.figmaVariable),
+        mapping.tokenName ?? "-",
+        mapping.cssVariable ?? "-",
+        mapping.className ?? "-",
+        mapping.category,
+        mapping.confidence,
+        mapping.gapIds.join("<br>") || "-"
+      ].join(" | ")
+    ),
+    "",
+    "## Typography Mappings",
+    "",
+    "| Figma Text Style | Code Class | Token | Confidence | Gaps |",
+    "|---|---|---|---|---|",
+    ...contract.typographyMappings.map(
+      (mapping) => [
+        escapeCell(mapping.figmaTextStyle),
+        mapping.codeClassName ?? "-",
+        mapping.tokenName ?? "-",
+        mapping.confidence,
+        mapping.gapIds.join("<br>") || "-"
+      ].join(" | ")
+    ),
+    "",
+    "## Asset Mappings",
+    "",
+    "| Figma Asset | Code Component | Code Asset | Export Required | Confidence | Gaps |",
+    "|---|---|---|---|---|---|",
+    ...contract.assetMappings.map(
+      (mapping) => [
+        escapeCell(mapping.figmaName),
+        mapping.codeComponent ?? "-",
+        mapping.codeAssetPath ?? "-",
+        String(mapping.exportRequired),
+        mapping.confidence,
+        mapping.gapIds.join("<br>") || "-"
+      ].join(" | ")
+    )
+  ]);
+}
+function renderUiRules(contract) {
+  return markdown([
+    `# UI Implementation Rules \u2014 ${contract.changeName}`,
+    "",
+    "## Mandatory Rules",
+    "",
+    "1. Use mapped code components when `component-map.json` contains a mapping.",
+    "2. Use mapped tokens/classes/css variables when `token-map.json` contains a mapping.",
+    "3. Do not create ad-hoc CSS values for unmapped Figma variables.",
+    "4. Do not invent states missing from Figma without opening or referencing a design gap.",
+    "5. Prefer Code Connect mappings over name-based mappings.",
+    "6. If a mapping has `confidence: missing`, do not implement that visual detail as if it were approved.",
+    "7. Keep design gaps open until a resolution artifact exists.",
+    "",
+    "## Agent Consumption",
+    "",
+    "The Design/UI Agent must read:",
+    "",
+    "- `figma-design-contract.json`",
+    "- `component-map.json`",
+    "- `token-map.json`",
+    "- `typography-map.json`",
+    "- `asset-map.json`",
+    "- `ui-implementation-rules.md`",
+    "",
+    "The agent must cite the relevant mapping or gap in its AgentResult decisions."
+  ]);
+}
+function renderGapSummary(gaps) {
+  return markdown([
+    "# Design Gap Summary",
+    "",
+    ...gaps.length === 0 ? ["No design gaps were created."] : [
+      "| Gap | Severity | Status | Title |",
+      "|---|---|---|---|",
+      ...gaps.map(
+        (gap2) => [gap2.id, gap2.severity, gap2.status, escapeCell(gap2.title)].join(" | ")
+      )
+    ]
+  ]);
+}
+function markdown(lines) {
+  return `${lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd()}
+`;
+}
+function escapeCell(value) {
+  return value.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
+}
+var init_design_contract_renderer = __esm({
+  "src/design-contract/design-contract-renderer.ts"() {
+    "use strict";
+  }
+});
+
+// src/openspec/openspec-paths.ts
+import path5 from "path";
+function toOpenSpecChangeName(input) {
+  if (/[\\/]/.test(input) || input.split(/[\s_-]+/).includes("..")) {
+    throw new Error("OpenSpec change name must not contain path separators or traversal segments");
+  }
+  const normalized = input.normalize("NFKD").replace(/[^\w\s-]/g, "").trim().toLowerCase().replace(/[_\s]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  return OpenSpecChangeNameSchema.parse(normalized);
+}
+function resolveOpenSpecChangePaths(input) {
+  const openspecRoot = path5.join(input.projectRoot, "openspec");
+  const changesRoot = path5.join(openspecRoot, "changes");
+  const changeRoot = path5.join(changesRoot, input.changeName);
+  const specsRoot = path5.join(changeRoot, "specs");
+  const artifactsRoot = path5.join(changeRoot, "artifacts");
+  return {
+    openspecRoot,
+    changesRoot,
+    changeRoot,
+    proposalPath: path5.join(changeRoot, "proposal.md"),
+    designPath: path5.join(changeRoot, "design.md"),
+    tasksPath: path5.join(changeRoot, "tasks.md"),
+    specsRoot,
+    artifactsRoot,
+    evidenceSummaryPath: path5.join(artifactsRoot, "evidence-summary.md"),
+    traceabilityMatrixPath: path5.join(artifactsRoot, "traceability-matrix.md"),
+    gapSummaryPath: path5.join(artifactsRoot, "gap-summary.md"),
+    manifestPath: path5.join(artifactsRoot, "change-manifest.json")
+  };
+}
+function specFilePath(input) {
+  return path5.join(input.specsRoot, input.area, "spec.md");
+}
+function toRepoRelativePath(projectRoot, absolutePath) {
+  return path5.relative(projectRoot, absolutePath).split(path5.sep).join("/");
+}
+var OpenSpecChangeNameSchema, OpenSpecSpecAreaSchema;
+var init_openspec_paths = __esm({
+  "src/openspec/openspec-paths.ts"() {
+    "use strict";
+    init_zod();
+    OpenSpecChangeNameSchema = external_exports.string().trim().min(3).max(120).regex(
+      /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
+      "Expected kebab-case change name such as deliver-reservation-management"
+    );
+    OpenSpecSpecAreaSchema = external_exports.string().trim().min(2).max(80).regex(
+      /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
+      "Expected kebab-case spec area such as reservation-management"
+    );
+  }
+});
+
+// src/design-contract/design-contract-writer.ts
+import { mkdir as mkdir3, readFile as readFile4, writeFile as writeFile3 } from "fs/promises";
+import path6 from "path";
+async function writeDesignContractArtifacts(input) {
+  const changePaths = resolveOpenSpecChangePaths({
+    projectRoot: input.projectRoot,
+    changeName: input.changeName
+  });
+  const root = path6.join(changePaths.artifactsRoot, "design-contract");
+  const files = [
+    {
+      name: "figma-design-contract.json",
+      content: input.rendered.contractJson,
+      mediaType: "application/json",
+      kind: "figma-design-contract"
+    },
+    {
+      name: "figma-design-contract.md",
+      content: input.rendered.contractMd,
+      mediaType: "text/markdown",
+      kind: "figma-design-contract"
+    },
+    {
+      name: "component-map.json",
+      content: input.rendered.componentMapJson,
+      mediaType: "application/json",
+      kind: "design-system-map"
+    },
+    {
+      name: "token-map.json",
+      content: input.rendered.tokenMapJson,
+      mediaType: "application/json",
+      kind: "design-system-map"
+    },
+    {
+      name: "typography-map.json",
+      content: input.rendered.typographyMapJson,
+      mediaType: "application/json",
+      kind: "design-system-map"
+    },
+    {
+      name: "asset-map.json",
+      content: input.rendered.assetMapJson,
+      mediaType: "application/json",
+      kind: "design-system-map"
+    },
+    {
+      name: "ui-implementation-rules.md",
+      content: input.rendered.uiImplementationRulesMd,
+      mediaType: "text/markdown",
+      kind: "ui-implementation-rules"
+    },
+    {
+      name: "design-gap-summary.md",
+      content: input.rendered.designGapSummaryMd,
+      mediaType: "text/markdown",
+      kind: "figma-design-contract"
+    }
+  ];
+  const written = [];
+  for (const file2 of files) {
+    const absolutePath = path6.join(root, file2.name);
+    assertInsideProjectRoot(input.projectRoot, absolutePath);
+    const changed = await writeWithConflictPolicy({
+      absolutePath,
+      content: file2.content,
+      force: input.force === true
+    });
+    written.push({
+      ...file2,
+      absolutePath,
+      changed,
+      relativePath: toRepoRelativePath(input.projectRoot, absolutePath)
+    });
+  }
+  const artifactRefs = written.map(
+    (file2) => ArtifactRefSchema.parse({
+      id: createArtifactId(),
+      kind: file2.kind,
+      uri: `repo://${file2.relativePath}`,
+      mediaType: file2.mediaType,
+      digest: sha256Digest(Buffer.from(file2.content, "utf8")),
+      producedBy: "orchestrator",
+      evidenceIds: [],
+      createdAt: input.generatedAt,
+      metadata: {
+        changeName: input.changeName,
+        relativePath: file2.relativePath,
+        changed: file2.changed
+      }
+    })
+  );
+  return {
+    files: written.map((file2) => ({
+      relativePath: file2.relativePath,
+      changed: file2.changed
+    })),
+    artifactRefs
+  };
+}
+async function writeWithConflictPolicy(input) {
+  await mkdir3(path6.dirname(input.absolutePath), {
+    recursive: true,
+    mode: 448
+  });
+  const existing = await readExisting(input.absolutePath);
+  if (existing !== void 0) {
+    if (existing === input.content) {
+      return false;
+    }
+    if (!input.force) {
+      throw new Error(`Design contract file already exists: ${input.absolutePath}`);
+    }
+  }
+  await writeFile3(input.absolutePath, input.content, {
+    encoding: "utf8",
+    mode: 384
+  });
+  return true;
+}
+async function readExisting(absolutePath) {
+  try {
+    return await readFile4(absolutePath, "utf8");
+  } catch (error51) {
+    if (error51 instanceof Error && "code" in error51 && error51.code === "ENOENT") {
+      return void 0;
+    }
+    throw error51;
+  }
+}
+function assertInsideProjectRoot(projectRoot, absolutePath) {
+  const relative = path6.relative(projectRoot, absolutePath);
+  if (relative.startsWith("..") || path6.isAbsolute(relative)) {
+    throw new Error(`Refusing to write outside project root: ${absolutePath}`);
+  }
+}
+var init_design_contract_writer = __esm({
+  "src/design-contract/design-contract-writer.ts"() {
+    "use strict";
+    init_openspec_paths();
+    init_artifact();
+    init_id_factory();
+    init_content_hash();
+  }
+});
+
+// src/design-contract/project-design-system-scanner.ts
+import { readdir, readFile as readFile5, stat } from "fs/promises";
+import path7 from "path";
+async function scanProjectDesignSystem(projectRoot) {
+  const components = [];
+  const tokens = [];
+  const scannedPaths = [];
+  for (const relativeRoot of COMPONENT_ROOT_CANDIDATES) {
+    const absoluteRoot = path7.join(projectRoot, relativeRoot);
+    if (!await existsDirectory(absoluteRoot)) {
+      continue;
+    }
+    scannedPaths.push(relativeRoot);
+    const discovered = await scanComponentsInDirectory(projectRoot, absoluteRoot, relativeRoot);
+    components.push(...discovered);
+  }
+  const tokenFiles = await findTokenLikeFiles(projectRoot);
+  for (const file2 of tokenFiles) {
+    scannedPaths.push(file2.relativePath);
+    tokens.push(...await scanTokensFromFile(file2.absolutePath, file2.relativePath));
+  }
+  return ProjectDesignSystemInventorySchema.parse({
+    components: dedupeComponents(components),
+    tokens: dedupeTokens(tokens),
+    scannedPaths
+  });
+}
+async function scanComponentsInDirectory(projectRoot, absoluteRoot, relativeRoot) {
+  const result = [];
+  const entries = await walk2(absoluteRoot);
+  for (const file2 of entries) {
+    if (!/\.(tsx|ts|jsx|js)$/.test(file2)) {
+      continue;
+    }
+    const content = await readFile5(file2, "utf8");
+    const relativePath = toPosix(path7.relative(projectRoot, file2));
+    const names = extractExportedComponentNames(content, file2);
+    for (const name of names) {
+      result.push(
+        CodeComponentCandidateSchema.parse({
+          name,
+          importPath: inferImportPath(relativePath),
+          filePath: relativePath,
+          source: inferComponentSource(relativeRoot)
+        })
+      );
+    }
+  }
+  return result;
+}
+function extractExportedComponentNames(content, filePath) {
+  const names = /* @__PURE__ */ new Set();
+  for (const match of content.matchAll(/export\s+(?:function|const)\s+([A-Z][A-Za-z0-9_]*)/g)) {
+    names.add(match[1]);
+  }
+  for (const match of content.matchAll(/export\s*\{\s*([^}]+)\s*\}/g)) {
+    const parts = match[1].split(",").map((part) => part.trim());
+    for (const part of parts) {
+      const name = part.split(/\s+as\s+/i).pop()?.trim();
+      if (name !== void 0 && /^[A-Z][A-Za-z0-9_]*$/.test(name)) {
+        names.add(name);
+      }
+    }
+  }
+  if (names.size === 0) {
+    const baseName = path7.basename(filePath).replace(/\.(tsx|ts|jsx|js)$/, "");
+    if (/^[A-Z][A-Za-z0-9_]*$/.test(baseName)) {
+      names.add(baseName);
+    }
+  }
+  return [...names];
+}
+async function findTokenLikeFiles(projectRoot) {
+  const files = await walk2(projectRoot);
+  const result = [];
+  for (const file2 of files) {
+    const relativePath = toPosix(path7.relative(projectRoot, file2));
+    const lower = relativePath.toLowerCase();
+    if (TOKEN_FILE_PATTERNS.some((pattern) => lower.includes(pattern)) && /\.(css|scss|ts|tsx|js|json)$/.test(lower)) {
+      result.push({
+        absolutePath: file2,
+        relativePath
+      });
+    }
+  }
+  return result.slice(0, 200);
+}
+async function scanTokensFromFile(filePath, relativePath) {
+  const content = await readFile5(filePath, "utf8");
+  const result = [];
+  for (const match of content.matchAll(/(--[A-Za-z0-9_-]+)\s*:\s*([^;]+);/g)) {
+    result.push(
+      CodeTokenCandidateSchema.parse({
+        name: match[1],
+        kind: "css-variable",
+        filePath: relativePath,
+        value: match[2].trim()
+      })
+    );
+  }
+  for (const match of content.matchAll(
+    /["'`]([A-Za-z0-9_-]*(?:color|text|bg|border|radius|shadow|spacing)[A-Za-z0-9_-]*)["'`]/gi
+  )) {
+    result.push(
+      CodeTokenCandidateSchema.parse({
+        name: match[1],
+        kind: "class-name",
+        filePath: relativePath
+      })
+    );
+  }
+  for (const match of content.matchAll(/export\s+const\s+([A-Za-z0-9_]+)\s*=/g)) {
+    result.push(
+      CodeTokenCandidateSchema.parse({
+        name: match[1],
+        kind: "token-export",
+        filePath: relativePath
+      })
+    );
+  }
+  return result;
+}
+async function walk2(root) {
+  const result = [];
+  const entries = await readdir(root, { withFileTypes: true });
+  for (const entry of entries) {
+    if (IGNORED_DIRECTORIES.has(entry.name)) {
+      continue;
+    }
+    const absolutePath = path7.join(root, entry.name);
+    if (entry.isDirectory()) {
+      result.push(...await walk2(absolutePath));
+      continue;
+    }
+    if (entry.isFile()) {
+      result.push(absolutePath);
+    }
+  }
+  return result;
+}
+async function existsDirectory(absolutePath) {
+  try {
+    const metadata = await stat(absolutePath);
+    return metadata.isDirectory();
+  } catch {
+    return false;
+  }
+}
+function inferImportPath(relativePath) {
+  const withoutExtension = relativePath.replace(/\.(tsx|ts|jsx|js)$/, "");
+  if (withoutExtension.endsWith("/index")) {
+    return `@/${withoutExtension.slice(0, -"/index".length)}`;
+  }
+  return `@/${withoutExtension}`;
+}
+function inferComponentSource(relativeRoot) {
+  if (relativeRoot.includes("shared/ui")) {
+    return "shared-ui";
+  }
+  if (relativeRoot.includes("components")) {
+    return "components";
+  }
+  if (relativeRoot.includes("packages")) {
+    return "package-ui";
+  }
+  return "unknown";
+}
+function dedupeComponents(components) {
+  const byKey = /* @__PURE__ */ new Map();
+  for (const component of components) {
+    byKey.set(`${component.name}:${component.importPath}`, component);
+  }
+  return [...byKey.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+function dedupeTokens(tokens) {
+  const byKey = /* @__PURE__ */ new Map();
+  for (const token of tokens) {
+    byKey.set(`${token.name}:${token.kind}:${token.filePath}`, token);
+  }
+  return [...byKey.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+function toPosix(value) {
+  return value.split(path7.sep).join("/");
+}
+var CodeComponentCandidateSchema, CodeTokenCandidateSchema, ProjectDesignSystemInventorySchema, COMPONENT_ROOT_CANDIDATES, TOKEN_FILE_PATTERNS, IGNORED_DIRECTORIES;
+var init_project_design_system_scanner = __esm({
+  "src/design-contract/project-design-system-scanner.ts"() {
+    "use strict";
+    init_zod();
+    CodeComponentCandidateSchema = external_exports.object({
+      name: external_exports.string().trim().min(1),
+      importPath: external_exports.string().trim().min(1),
+      filePath: external_exports.string().trim().min(1),
+      source: external_exports.enum(["shared-ui", "components", "package-ui", "unknown"])
+    }).strict();
+    CodeTokenCandidateSchema = external_exports.object({
+      name: external_exports.string().trim().min(1),
+      kind: external_exports.enum(["css-variable", "class-name", "token-export", "unknown"]),
+      filePath: external_exports.string().trim().min(1),
+      value: external_exports.string().trim().optional()
+    }).strict();
+    ProjectDesignSystemInventorySchema = external_exports.object({
+      components: external_exports.array(CodeComponentCandidateSchema).default([]),
+      tokens: external_exports.array(CodeTokenCandidateSchema).default([]),
+      scannedPaths: external_exports.array(external_exports.string()).default([])
+    }).strict();
+    COMPONENT_ROOT_CANDIDATES = [
+      "src/shared/ui",
+      "src/shared/design-system",
+      "src/components",
+      "packages/ui",
+      "packages/design-system",
+      "apps"
+    ];
+    TOKEN_FILE_PATTERNS = ["tokens", "theme", "variables.css", "tailwind.config", "foundation"];
+    IGNORED_DIRECTORIES = /* @__PURE__ */ new Set(["node_modules", ".git", "dist", "coverage", ".next"]);
+  }
+});
+
+// src/application/design-contract-service.ts
+function findDesignContractArtifact(artifacts, changeName) {
+  return artifacts.find(
+    (artifact) => artifact.kind === "figma-design-contract" && artifact.metadata["changeName"] === changeName && artifact.metadata["relativePath"] === `openspec/changes/${changeName}/artifacts/design-contract/figma-design-contract.json`
+  );
+}
+async function readRepoArtifact(projectRoot, relativePath) {
+  const { readFile: readFile13 } = await import("fs/promises");
+  const path19 = await import("path");
+  const absolutePath = path19.join(projectRoot, relativePath);
+  const relative = path19.relative(projectRoot, absolutePath);
+  if (relative.startsWith("..") || path19.isAbsolute(relative)) {
+    throw new Error(`Refusing to read outside project root: ${absolutePath}`);
+  }
+  return readFile13(absolutePath, "utf8");
+}
+function metadataString(value) {
+  return typeof value === "string" && value.trim().length > 0 ? value : void 0;
+}
+var GenerateDesignContractInputSchema, GetDesignContractSummaryInputSchema, DesignContractSummarySchema, GenerateDesignContractResultSchema, DesignContractService;
+var init_design_contract_service = __esm({
+  "src/application/design-contract-service.ts"() {
+    "use strict";
+    init_zod();
+    init_artifact_blob_store();
+    init_design_contract_mapper();
+    init_design_contract_renderer();
+    init_design_contract_writer();
+    init_design_contract_model();
+    init_project_design_system_scanner();
+    init_openspec_paths();
+    init_run2();
+    init_ids();
+    init_scalars();
+    GenerateDesignContractInputSchema = external_exports.object({
+      runId: RunIdSchema,
+      changeName: external_exports.string().trim().min(3),
+      figmaInventoryArtifactId: ArtifactIdSchema,
+      force: external_exports.boolean().default(false)
+    }).strict();
+    GetDesignContractSummaryInputSchema = external_exports.object({
+      runId: RunIdSchema,
+      changeName: external_exports.string().trim().min(3)
+    }).strict();
+    DesignContractSummarySchema = external_exports.object({
+      changeName: OpenSpecChangeNameSchema,
+      artifactId: ArtifactIdSchema,
+      componentMappings: external_exports.number().int().nonnegative(),
+      tokenMappings: external_exports.number().int().nonnegative(),
+      typographyMappings: external_exports.number().int().nonnegative(),
+      assetMappings: external_exports.number().int().nonnegative(),
+      gapIds: external_exports.array(GapIdSchema),
+      relativePath: external_exports.string().trim().min(1)
+    }).strict();
+    GenerateDesignContractResultSchema = external_exports.object({
+      duplicate: external_exports.boolean(),
+      run: external_exports.custom(),
+      changeName: OpenSpecChangeNameSchema,
+      artifactIds: external_exports.array(ArtifactIdSchema),
+      gapIds: external_exports.array(GapIdSchema),
+      changedFiles: external_exports.array(external_exports.string()),
+      componentMappings: external_exports.number().int().nonnegative(),
+      tokenMappings: external_exports.number().int().nonnegative(),
+      typographyMappings: external_exports.number().int().nonnegative(),
+      assetMappings: external_exports.number().int().nonnegative()
+    }).strict();
+    DesignContractService = class {
+      constructor(runStore, artifactStore, now = () => (/* @__PURE__ */ new Date()).toISOString()) {
+        this.runStore = runStore;
+        this.artifactStore = artifactStore;
+        this.now = now;
+      }
+      runStore;
+      artifactStore;
+      now;
+      async generate(rawInput) {
+        const input = GenerateDesignContractInputSchema.parse(rawInput);
+        const run = await this.runStore.get(input.runId);
+        const timestamp = IsoDateTimeSchema.parse(this.now());
+        const changeName = toOpenSpecChangeName(input.changeName);
+        const existing = findDesignContractArtifact(run.artifacts, changeName);
+        if (existing !== void 0 && !input.force) {
+          return GenerateDesignContractResultSchema.parse({
+            duplicate: true,
+            run: summarizeRun(run),
+            changeName,
+            artifactIds: [existing.id],
+            gapIds: [],
+            changedFiles: [],
+            componentMappings: 0,
+            tokenMappings: 0,
+            typographyMappings: 0,
+            assetMappings: 0
+          });
+        }
+        const inventoryArtifact = run.artifacts.find(
+          (artifact) => artifact.id === input.figmaInventoryArtifactId
+        );
+        if (inventoryArtifact === void 0) {
+          throw new Error(`Figma inventory artifact not found: ${input.figmaInventoryArtifactId}`);
+        }
+        if (inventoryArtifact.kind !== "figma-design-inventory") {
+          throw new Error(`Artifact is not a Figma design inventory: ${inventoryArtifact.id}`);
+        }
+        const inventoryContent = await this.artifactStore.readContent(
+          Sha256DigestSchema.parse(inventoryArtifact.digest)
+        );
+        const figmaInventory = JSON.parse(inventoryContent.toString("utf8"));
+        const projectDesignSystem = await scanProjectDesignSystem(run.projectRoot);
+        const built = buildFigmaDesignContract({
+          runId: run.id,
+          changeName,
+          generatedAt: timestamp,
+          figmaInventory,
+          projectDesignSystem,
+          evidence: run.evidence
+        });
+        const rendered = renderDesignContract({
+          contract: built.contract,
+          gaps: built.gaps
+        });
+        const written = await writeDesignContractArtifacts({
+          projectRoot: run.projectRoot,
+          changeName,
+          rendered,
+          generatedAt: timestamp,
+          force: input.force
+        });
+        const nextRun = RunManifestSchema.parse({
+          ...run,
+          revision: run.revision + 1,
+          updatedAt: timestamp,
+          gaps: [...run.gaps, ...built.gaps],
+          artifacts: [...run.artifacts, ...written.artifactRefs]
+        });
+        await this.runStore.save(nextRun, run.revision);
+        return GenerateDesignContractResultSchema.parse({
+          duplicate: false,
+          run: summarizeRun(nextRun),
+          changeName,
+          artifactIds: written.artifactRefs.map((artifact) => artifact.id),
+          gapIds: built.gaps.map((gap2) => gap2.id),
+          changedFiles: written.files.filter((file2) => file2.changed).map((file2) => file2.relativePath),
+          componentMappings: built.contract.componentMappings.length,
+          tokenMappings: built.contract.tokenMappings.length,
+          typographyMappings: built.contract.typographyMappings.length,
+          assetMappings: built.contract.assetMappings.length
+        });
+      }
+      async getSummary(rawInput) {
+        const input = GetDesignContractSummaryInputSchema.parse(rawInput);
+        const run = await this.runStore.get(input.runId);
+        const changeName = toOpenSpecChangeName(input.changeName);
+        const artifact = findDesignContractArtifact(run.artifacts, changeName);
+        if (artifact === void 0) {
+          throw new Error(`Design contract not found for change ${changeName}`);
+        }
+        const relativePath = metadataString(artifact.metadata["relativePath"]);
+        if (relativePath === void 0) {
+          throw new Error(`Design contract artifact has no relativePath metadata: ${artifact.id}`);
+        }
+        const content = await readRepoArtifact(run.projectRoot, relativePath);
+        const contract = FigmaDesignContractSchema.parse(JSON.parse(content));
+        return DesignContractSummarySchema.parse({
+          changeName,
+          artifactId: artifact.id,
+          componentMappings: contract.componentMappings.length,
+          tokenMappings: contract.tokenMappings.length,
+          typographyMappings: contract.typographyMappings.length,
+          assetMappings: contract.assetMappings.length,
+          gapIds: contract.gapIds,
+          relativePath
+        });
+      }
+    };
+  }
+});
+
 // src/traceability/traceability-contracts.ts
 var TraceNodeIdSchema, TraceEdgeIdSchema, TraceNodeKindSchema, TraceEdgeKindSchema, TraceLinkConfidenceSchema, TraceNodeSchema, TraceEdgeSchema, TraceabilityMatrixRowSchema, EvidenceGraphSchema;
 var init_traceability_contracts = __esm({
@@ -37320,7 +38508,7 @@ function dedupeByName(items) {
 function uniqueStrings(values) {
   return [...new Set(values)];
 }
-function metadataString(artifact, key) {
+function metadataString2(artifact, key) {
   const value = artifact.metadata[key];
   return typeof value === "string" ? value : void 0;
 }
@@ -37525,7 +38713,7 @@ ${designText}`));
           providerComparisonArtifact: findProviderComparisonArtifact(
             run.artifacts,
             source.id,
-            metadataString(latest, "rawArtifactSetDigest"),
+            metadataString2(latest, "rawArtifactSetDigest"),
             inventory.generatedAt
           ),
           gaps: run.gaps.filter((gap2) => inventory.gapIds.includes(gap2.id))
@@ -38434,58 +39622,6 @@ var init_openapi_intake_service = __esm({
   }
 });
 
-// src/openspec/openspec-paths.ts
-import path5 from "path";
-function toOpenSpecChangeName(input) {
-  if (/[\\/]/.test(input) || input.split(/[\s_-]+/).includes("..")) {
-    throw new Error("OpenSpec change name must not contain path separators or traversal segments");
-  }
-  const normalized = input.normalize("NFKD").replace(/[^\w\s-]/g, "").trim().toLowerCase().replace(/[_\s]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
-  return OpenSpecChangeNameSchema.parse(normalized);
-}
-function resolveOpenSpecChangePaths(input) {
-  const openspecRoot = path5.join(input.projectRoot, "openspec");
-  const changesRoot = path5.join(openspecRoot, "changes");
-  const changeRoot = path5.join(changesRoot, input.changeName);
-  const specsRoot = path5.join(changeRoot, "specs");
-  const artifactsRoot = path5.join(changeRoot, "artifacts");
-  return {
-    openspecRoot,
-    changesRoot,
-    changeRoot,
-    proposalPath: path5.join(changeRoot, "proposal.md"),
-    designPath: path5.join(changeRoot, "design.md"),
-    tasksPath: path5.join(changeRoot, "tasks.md"),
-    specsRoot,
-    artifactsRoot,
-    evidenceSummaryPath: path5.join(artifactsRoot, "evidence-summary.md"),
-    traceabilityMatrixPath: path5.join(artifactsRoot, "traceability-matrix.md"),
-    gapSummaryPath: path5.join(artifactsRoot, "gap-summary.md"),
-    manifestPath: path5.join(artifactsRoot, "change-manifest.json")
-  };
-}
-function specFilePath(input) {
-  return path5.join(input.specsRoot, input.area, "spec.md");
-}
-function toRepoRelativePath(projectRoot, absolutePath) {
-  return path5.relative(projectRoot, absolutePath).split(path5.sep).join("/");
-}
-var OpenSpecChangeNameSchema, OpenSpecSpecAreaSchema;
-var init_openspec_paths = __esm({
-  "src/openspec/openspec-paths.ts"() {
-    "use strict";
-    init_zod();
-    OpenSpecChangeNameSchema = external_exports.string().trim().min(3).max(120).regex(
-      /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
-      "Expected kebab-case change name such as deliver-reservation-management"
-    );
-    OpenSpecSpecAreaSchema = external_exports.string().trim().min(2).max(80).regex(
-      /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
-      "Expected kebab-case spec area such as reservation-management"
-    );
-  }
-});
-
 // src/openspec/openspec-model.ts
 var OpenSpecRequirementStatusSchema, OpenSpecRequirementModelSchema, OpenSpecChangeModelSchema;
 var init_openspec_model = __esm({
@@ -38684,7 +39820,7 @@ function renderOpenSpecChange(input) {
     })),
     evidenceSummaryMd: renderEvidenceSummary(input.model, evidenceById),
     traceabilityMatrixMd: renderTraceabilityMatrix(input.model),
-    gapSummaryMd: renderGapSummary(input.model, gapById),
+    gapSummaryMd: renderGapSummary2(input.model, gapById),
     manifestJson: `${JSON.stringify(input.model, null, 2)}
 `
   };
@@ -38693,7 +39829,7 @@ function renderProposal(model, evidenceById, gapById) {
   const readyCount = model.requirements.filter((item) => item.status === "ready").length;
   const partialCount = model.requirements.filter((item) => item.status === "partial").length;
   const blockedCount = model.requirements.filter((item) => item.status === "blocked").length;
-  return markdown([
+  return markdown2([
     `# ${model.title}`,
     "",
     "## Summary",
@@ -38732,7 +39868,7 @@ function renderProposal(model, evidenceById, gapById) {
   ]);
 }
 function renderDesign(model, evidenceById, gapById) {
-  return markdown([
+  return markdown2([
     `# Design \u2014 ${model.title}`,
     "",
     "## Evidence Policy",
@@ -38770,7 +39906,7 @@ function renderDesign(model, evidenceById, gapById) {
   ]);
 }
 function renderTasks(model) {
-  return markdown([
+  return markdown2([
     `# Tasks \u2014 ${model.title}`,
     "",
     "## 1. Specification",
@@ -38806,7 +39942,7 @@ function renderTasks(model) {
   ]);
 }
 function renderSpec(area, requirements) {
-  return markdown([
+  return markdown2([
     `# ${area}`,
     "",
     "## ADDED Requirements",
@@ -38836,7 +39972,7 @@ function renderSpec(area, requirements) {
   ]);
 }
 function renderEvidenceSummary(model, evidenceById) {
-  return markdown([
+  return markdown2([
     `# Evidence Summary \u2014 ${model.title}`,
     "",
     "| Requirement | Brief Evidence | Figma Evidence | OpenAPI Evidence |",
@@ -38853,7 +39989,7 @@ function renderEvidenceSummary(model, evidenceById) {
   ]);
 }
 function renderTraceabilityMatrix(model) {
-  return markdown([
+  return markdown2([
     `# Traceability Matrix \u2014 ${model.title}`,
     "",
     "| Requirement | Area | Status | Brief | Figma | OpenAPI | Gaps |",
@@ -38872,8 +40008,8 @@ function renderTraceabilityMatrix(model) {
     ""
   ]);
 }
-function renderGapSummary(model, gapById) {
-  return markdown([
+function renderGapSummary2(model, gapById) {
+  return markdown2([
     `# Gap Summary \u2014 ${model.title}`,
     "",
     ...model.gapIds.length === 0 ? ["No gaps linked to this OpenSpec change.", ""] : [
@@ -38929,7 +40065,7 @@ function toShallStatement(summary) {
   }
   return normalized.charAt(0).toLowerCase() + normalized.slice(1);
 }
-function markdown(lines) {
+function markdown2(lines) {
   return `${lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd()}
 `;
 }
@@ -38943,8 +40079,8 @@ var init_openspec_renderer = __esm({
 });
 
 // src/openspec/openspec-writer.ts
-import { mkdir as mkdir3, readFile as readFile4, writeFile as writeFile3 } from "fs/promises";
-import path6 from "path";
+import { mkdir as mkdir4, readFile as readFile6, writeFile as writeFile4 } from "fs/promises";
+import path8 from "path";
 async function writeOpenSpecChange(input) {
   const paths = resolveOpenSpecChangePaths({
     projectRoot: input.projectRoot,
@@ -38997,7 +40133,7 @@ async function writeOpenSpecChange(input) {
   ];
   const writtenFiles = [];
   for (const file2 of filesToWrite) {
-    assertInsideProjectRoot(input.projectRoot, file2.absolutePath);
+    assertInsideProjectRoot2(input.projectRoot, file2.absolutePath);
     const content = ensureFinalNewline(file2.content);
     const changed = await writeFileWithConflictPolicy({
       absolutePath: file2.absolutePath,
@@ -39034,11 +40170,11 @@ async function writeOpenSpecChange(input) {
   };
 }
 async function writeFileWithConflictPolicy(input) {
-  await mkdir3(path6.dirname(input.absolutePath), {
+  await mkdir4(path8.dirname(input.absolutePath), {
     recursive: true,
     mode: 448
   });
-  const existing = await readExisting(input.absolutePath);
+  const existing = await readExisting2(input.absolutePath);
   if (existing !== void 0) {
     if (existing === input.content) {
       return false;
@@ -39047,15 +40183,15 @@ async function writeFileWithConflictPolicy(input) {
       throw new Error(`OpenSpec file already exists with different content: ${input.absolutePath}`);
     }
   }
-  await writeFile3(input.absolutePath, input.content, {
+  await writeFile4(input.absolutePath, input.content, {
     encoding: "utf8",
     mode: 384
   });
   return true;
 }
-async function readExisting(absolutePath) {
+async function readExisting2(absolutePath) {
   try {
-    return await readFile4(absolutePath, "utf8");
+    return await readFile6(absolutePath, "utf8");
   } catch (error51) {
     if (error51 instanceof Error && "code" in error51 && error51.code === "ENOENT") {
       return void 0;
@@ -39063,9 +40199,9 @@ async function readExisting(absolutePath) {
     throw error51;
   }
 }
-function assertInsideProjectRoot(projectRoot, absolutePath) {
-  const relative = path6.relative(projectRoot, absolutePath);
-  if (relative.startsWith("..") || path6.isAbsolute(relative)) {
+function assertInsideProjectRoot2(projectRoot, absolutePath) {
+  const relative = path8.relative(projectRoot, absolutePath);
+  if (relative.startsWith("..") || path8.isAbsolute(relative)) {
     throw new Error(`Refusing to write outside project root: ${absolutePath}`);
   }
 }
@@ -39255,7 +40391,7 @@ var init_policy = __esm({
 });
 
 // src/security/command-policy.ts
-import path7 from "path";
+import path9 from "path";
 function classifyCommand(rawCommand) {
   const command = CommandInvocationSchema.parse(rawCommand);
   const normalizedCommand = normalizeExecutable(command.command);
@@ -39449,7 +40585,7 @@ function classifyPackageManager(manager, args, intent) {
   );
 }
 function normalizeExecutable(command) {
-  return path7.basename(command).toLowerCase();
+  return path9.basename(command).toLowerCase();
 }
 function findShellCharacters(parts) {
   const found = /* @__PURE__ */ new Set();
@@ -39543,15 +40679,15 @@ var init_command_policy = __esm({
 });
 
 // src/security/path-policy.ts
-import { realpath, stat } from "fs/promises";
-import path8 from "path";
+import { realpath, stat as stat2 } from "fs/promises";
+import path10 from "path";
 async function validateWorkspacePath(rawInput) {
   const input = ValidateWorkspacePathInputSchema.parse(rawInput);
   if (hasNullByte(input.candidatePath) || hasNullByte(input.workspaceRoot)) {
     return deniedPath(input, "NULL_BYTE", "Paths must not contain null bytes.");
   }
-  const workspaceRootRealPath = await realpath(path8.resolve(input.workspaceRoot));
-  const candidateAbsolutePath = path8.resolve(workspaceRootRealPath, input.candidatePath);
+  const workspaceRootRealPath = await realpath(path10.resolve(input.workspaceRoot));
+  const candidateAbsolutePath = path10.resolve(workspaceRootRealPath, input.candidatePath);
   if (!isInsideOrEqual(workspaceRootRealPath, candidateAbsolutePath)) {
     return {
       workspaceRoot: input.workspaceRoot,
@@ -39588,7 +40724,7 @@ async function validateWorkspacePath(rawInput) {
         )
       };
     }
-    const metadata = await stat(candidateRealPath);
+    const metadata = await stat2(candidateRealPath);
     if (input.mode === "write" && metadata.isDirectory()) {
       return {
         workspaceRoot: input.workspaceRoot,
@@ -39631,7 +40767,7 @@ async function validateWorkspacePath(rawInput) {
   }
 }
 async function validateCreatePath(input, workspaceRootRealPath, candidateAbsolutePath) {
-  const parentPath = path8.dirname(candidateAbsolutePath);
+  const parentPath = path10.dirname(candidateAbsolutePath);
   try {
     const parentRealPath = await realpath(parentPath);
     if (!isInsideOrEqual(workspaceRootRealPath, parentRealPath)) {
@@ -39680,9 +40816,9 @@ async function validateCreatePath(input, workspaceRootRealPath, candidateAbsolut
 function deniedPath(input, code, message) {
   return {
     workspaceRoot: input.workspaceRoot,
-    workspaceRootRealPath: path8.resolve(input.workspaceRoot),
+    workspaceRootRealPath: path10.resolve(input.workspaceRoot),
     candidatePath: input.candidatePath,
-    candidateAbsolutePath: path8.resolve(input.workspaceRoot, input.candidatePath),
+    candidateAbsolutePath: path10.resolve(input.workspaceRoot, input.candidatePath),
     mode: input.mode,
     decision: deny(code, message, "critical", ["path"])
   };
@@ -39691,8 +40827,8 @@ function hasNullByte(value) {
   return value.includes("\0");
 }
 function isInsideOrEqual(root, candidate) {
-  const relative = path8.relative(root, candidate);
-  return relative === "" || !relative.startsWith("..") && !path8.isAbsolute(relative);
+  const relative = path10.relative(root, candidate);
+  return relative === "" || !relative.startsWith("..") && !path10.isAbsolute(relative);
 }
 var PathAccessModeSchema, ValidateWorkspacePathInputSchema, ValidatedWorkspacePathSchema;
 var init_path_policy = __esm({
@@ -40119,17 +41255,17 @@ var init_package_manager_detector = __esm({
 
 // src/profile/probe.ts
 import { execFile } from "child_process";
-import { access, readdir, readFile as readFile5, realpath as realpath2, stat as stat2 } from "fs/promises";
-import path9 from "path";
+import { access, readdir as readdir2, readFile as readFile7, realpath as realpath2, stat as stat3 } from "fs/promises";
+import path11 from "path";
 import { promisify } from "util";
 async function createProjectProbe(projectRoot) {
   const realRoot = await realpath2(projectRoot);
-  const metadata = await stat2(realRoot);
+  const metadata = await stat3(realRoot);
   if (!metadata.isDirectory()) {
     throw new Error(`Project root is not a directory: ${realRoot}`);
   }
   async function resolveInside(relativePath) {
-    const candidate = path9.resolve(realRoot, relativePath);
+    const candidate = path11.resolve(realRoot, relativePath);
     const realCandidate = await realpathOrParent(candidate);
     if (!isInside(realRoot, realCandidate)) {
       throw new Error(`Path escapes project root: ${relativePath}`);
@@ -40151,11 +41287,11 @@ async function createProjectProbe(projectRoot) {
     async readText(relativePath, maxBytes = 1024 * 1024) {
       const absolute = await resolveInside(relativePath);
       try {
-        const metadata2 = await stat2(absolute);
+        const metadata2 = await stat3(absolute);
         if (!metadata2.isFile() || metadata2.size > maxBytes) {
           return void 0;
         }
-        return await readFile5(absolute, "utf8");
+        return await readFile7(absolute, "utf8");
       } catch {
         return void 0;
       }
@@ -40174,7 +41310,7 @@ async function createProjectProbe(projectRoot) {
     async list(relativePath) {
       const absolute = await resolveInside(relativePath);
       try {
-        return await readdir(absolute);
+        return await readdir2(absolute);
       } catch {
         return [];
       }
@@ -40203,26 +41339,26 @@ async function createProjectProbe(projectRoot) {
       }
     },
     toRelative(absolutePath) {
-      return normalizeRelative(path9.relative(realRoot, absolutePath));
+      return normalizeRelative(path11.relative(realRoot, absolutePath));
     },
     resolveInside
   };
   return probe;
 }
 function normalizeRelative(value) {
-  return value.split(path9.sep).join("/");
+  return value.split(path11.sep).join("/");
 }
 function isInside(root, candidate) {
-  const relative = path9.relative(root, candidate);
-  return relative === "" || !relative.startsWith("..") && !path9.isAbsolute(relative);
+  const relative = path11.relative(root, candidate);
+  return relative === "" || !relative.startsWith("..") && !path11.isAbsolute(relative);
 }
 async function realpathOrParent(candidate) {
   let current = candidate;
-  while (current !== path9.dirname(current)) {
+  while (current !== path11.dirname(current)) {
     try {
       return await realpath2(current);
     } catch {
-      current = path9.dirname(current);
+      current = path11.dirname(current);
     }
   }
   try {
@@ -40539,8 +41675,8 @@ var init_project_profiler = __esm({
 });
 
 // src/profile/profile-store.ts
-import { mkdir as mkdir4, readdir as readdir2, readFile as readFile6, writeFile as writeFile4 } from "fs/promises";
-import path10 from "path";
+import { mkdir as mkdir5, readdir as readdir3, readFile as readFile8, writeFile as writeFile5 } from "fs/promises";
+import path12 from "path";
 var JsonProfileStore;
 var init_profile_store = __esm({
   "src/profile/profile-store.ts"() {
@@ -40552,12 +41688,12 @@ var init_profile_store = __esm({
       }
       directory;
       async saveManifest(manifest) {
-        await mkdir4(this.directory, {
+        await mkdir5(this.directory, {
           recursive: true,
           mode: 448
         });
-        await writeFile4(
-          path10.join(this.directory, `${manifest.runId}.intake.json`),
+        await writeFile5(
+          path12.join(this.directory, `${manifest.runId}.intake.json`),
           `${JSON.stringify(IntakeManifestSchema.parse(manifest), null, 2)}
 `,
           {
@@ -40567,16 +41703,16 @@ var init_profile_store = __esm({
         );
       }
       async getManifest(runId) {
-        const text = await readFile6(path10.join(this.directory, `${runId}.intake.json`), "utf8");
+        const text = await readFile8(path12.join(this.directory, `${runId}.intake.json`), "utf8");
         return IntakeManifestSchema.parse(JSON.parse(text));
       }
       async saveProfile(profile) {
-        await mkdir4(this.directory, {
+        await mkdir5(this.directory, {
           recursive: true,
           mode: 448
         });
-        await writeFile4(
-          path10.join(this.directory, `${profile.runId}.profile.json`),
+        await writeFile5(
+          path12.join(this.directory, `${profile.runId}.profile.json`),
           `${JSON.stringify(ProjectProfileSchema.parse(profile), null, 2)}
 `,
           {
@@ -40586,19 +41722,19 @@ var init_profile_store = __esm({
         );
       }
       async getProfile(runId) {
-        const text = await readFile6(path10.join(this.directory, `${runId}.profile.json`), "utf8");
+        const text = await readFile8(path12.join(this.directory, `${runId}.profile.json`), "utf8");
         return ProjectProfileSchema.parse(JSON.parse(text));
       }
       async listProfiles() {
-        await mkdir4(this.directory, {
+        await mkdir5(this.directory, {
           recursive: true,
           mode: 448
         });
-        const files = await readdir2(this.directory);
+        const files = await readdir3(this.directory);
         const profileFiles = files.filter((file2) => file2.endsWith(".profile.json"));
         const profiles = await Promise.all(
           profileFiles.map(async (file2) => {
-            const text = await readFile6(path10.join(this.directory, file2), "utf8");
+            const text = await readFile8(path12.join(this.directory, file2), "utf8");
             return ProjectProfileSchema.parse(JSON.parse(text));
           })
         );
@@ -40676,15 +41812,15 @@ var init_profile_service = __esm({
 
 // src/application/run-service.ts
 import { randomUUID as randomUUID3 } from "crypto";
-import { realpath as realpath3, stat as stat3 } from "fs/promises";
-import path11 from "path";
+import { realpath as realpath3, stat as stat4 } from "fs/promises";
+import path13 from "path";
 function createRunId() {
   return RunIdSchema.parse(`run_${randomUUID3().replaceAll("-", "")}`);
 }
 async function canonicalDirectory(rawPath) {
-  const absolute = path11.resolve(rawPath);
+  const absolute = path13.resolve(rawPath);
   const canonical = await realpath3(absolute);
-  const metadata = await stat3(canonical);
+  const metadata = await stat4(canonical);
   if (!metadata.isDirectory()) {
     throw new Error(`Project root is not a directory: ${canonical}`);
   }
@@ -40834,17 +41970,17 @@ var init_canonical_content = __esm({
 });
 
 // src/source-registry/path-scope.ts
-import { realpath as realpath4, stat as stat4 } from "fs/promises";
-import path12 from "path";
+import { realpath as realpath4, stat as stat5 } from "fs/promises";
+import path14 from "path";
 async function resolveFileInsideRoot(input) {
   const projectRoot = await realpath4(input.projectRoot);
-  const candidate = path12.resolve(projectRoot, input.filePath);
+  const candidate = path14.resolve(projectRoot, input.filePath);
   const absolutePath = await realpath4(candidate);
-  const relative = path12.relative(projectRoot, absolutePath);
-  if (relative === "" || relative.startsWith("..") || path12.isAbsolute(relative)) {
+  const relative = path14.relative(projectRoot, absolutePath);
+  if (relative === "" || relative.startsWith("..") || path14.isAbsolute(relative)) {
     throw new Error(`File is outside project root: ${input.filePath}`);
   }
-  const metadata = await stat4(absolutePath);
+  const metadata = await stat5(absolutePath);
   if (!metadata.isFile()) {
     throw new Error(`Source path is not a file: ${input.filePath}`);
   }
@@ -40855,7 +41991,7 @@ async function resolveFileInsideRoot(input) {
   };
 }
 function toPosixPath(value) {
-  return value.split(path12.sep).join("/");
+  return value.split(path14.sep).join("/");
 }
 var init_path_scope = __esm({
   "src/source-registry/path-scope.ts"() {
@@ -40865,11 +42001,11 @@ var init_path_scope = __esm({
 });
 
 // src/source-registry/snapshot-store.ts
-import { mkdir as mkdir5, readFile as readFile7, writeFile as writeFile5 } from "fs/promises";
-import path13 from "path";
+import { mkdir as mkdir6, readFile as readFile9, writeFile as writeFile6 } from "fs/promises";
+import path15 from "path";
 async function writeIfMissing2(filePath, content) {
   try {
-    await writeFile5(filePath, content, {
+    await writeFile6(filePath, content, {
       flag: "wx",
       mode: 384
     });
@@ -40909,10 +42045,10 @@ var init_snapshot_store = __esm({
       async writeSnapshot(input) {
         const digest = input.canonical.canonicalDigest;
         const { prefix, hex: hex3 } = digestPathSegments(digest);
-        const directory = path13.join(this.rootDirectory, "sha256", prefix, hex3);
-        const contentPath = path13.join(directory, "content");
-        const metadataPath = path13.join(directory, "metadata.json");
-        await mkdir5(directory, {
+        const directory = path15.join(this.rootDirectory, "sha256", prefix, hex3);
+        const contentPath = path15.join(directory, "content");
+        const metadataPath = path15.join(directory, "metadata.json");
+        await mkdir6(directory, {
           recursive: true,
           mode: 448
         });
@@ -40942,14 +42078,14 @@ var init_snapshot_store = __esm({
       async readMetadata(rawDigest) {
         const digest = Sha256DigestSchema.parse(rawDigest);
         const { prefix, hex: hex3 } = digestPathSegments(digest);
-        const metadataPath = path13.join(this.rootDirectory, "sha256", prefix, hex3, "metadata.json");
-        return SourceSnapshotMetadataSchema.parse(JSON.parse(await readFile7(metadataPath, "utf8")));
+        const metadataPath = path15.join(this.rootDirectory, "sha256", prefix, hex3, "metadata.json");
+        return SourceSnapshotMetadataSchema.parse(JSON.parse(await readFile9(metadataPath, "utf8")));
       }
       async readContent(rawDigest) {
         const digest = Sha256DigestSchema.parse(rawDigest);
         const { prefix, hex: hex3 } = digestPathSegments(digest);
-        const contentPath = path13.join(this.rootDirectory, "sha256", prefix, hex3, "content");
-        return readFile7(contentPath);
+        const contentPath = path15.join(this.rootDirectory, "sha256", prefix, hex3, "content");
+        return readFile9(contentPath);
       }
     };
   }
@@ -40967,7 +42103,7 @@ var init_source_registry = __esm({
 });
 
 // src/application/source-registry-service.ts
-import { readFile as readFile8 } from "fs/promises";
+import { readFile as readFile10 } from "fs/promises";
 function parseSourceRegistrationResult(result) {
   SourceRegistrationResultSchema.parse(result);
   return result;
@@ -41019,7 +42155,7 @@ var init_source_registry_service = __esm({
           projectRoot: run.projectRoot,
           filePath: input.path
         });
-        const rawContent = await readFile8(scopedPath.absolutePath);
+        const rawContent = await readFile10(scopedPath.absolutePath);
         const canonical = canonicalizeFileContent({
           path: scopedPath.relativePath,
           ...input.mediaType === void 0 ? {} : { mediaType: input.mediaType },
@@ -42007,35 +43143,35 @@ var init_gherkin_renderer = __esm({
 });
 
 // src/gherkin/gherkin-writer.ts
-import { mkdir as mkdir6, readFile as readFile9, writeFile as writeFile6 } from "fs/promises";
-import path14 from "path";
+import { mkdir as mkdir7, readFile as readFile11, writeFile as writeFile7 } from "fs/promises";
+import path16 from "path";
 async function writeGherkinArtifacts(input) {
   const changePaths = resolveOpenSpecChangePaths({
     projectRoot: input.projectRoot,
     changeName: input.changeName
   });
-  const gherkinRoot = path14.join(changePaths.artifactsRoot, "gherkin");
+  const gherkinRoot = path16.join(changePaths.artifactsRoot, "gherkin");
   const files = [
     ...input.rendered.featureFiles.map((file2) => ({
-      absolutePath: path14.join(gherkinRoot, file2.fileName),
+      absolutePath: path16.join(gherkinRoot, file2.fileName),
       content: file2.content,
       mediaType: "text/x-gherkin",
       kind: "gherkin"
     })),
     {
-      absolutePath: path14.join(changePaths.artifactsRoot, "gherkin-index.json"),
+      absolutePath: path16.join(changePaths.artifactsRoot, "gherkin-index.json"),
       content: input.rendered.gherkinIndexJson,
       mediaType: "application/json",
       kind: "gherkin"
     },
     {
-      absolutePath: path14.join(changePaths.artifactsRoot, "test-matrix.json"),
+      absolutePath: path16.join(changePaths.artifactsRoot, "test-matrix.json"),
       content: input.rendered.testMatrixJson,
       mediaType: "application/json",
       kind: "test-matrix"
     },
     {
-      absolutePath: path14.join(changePaths.artifactsRoot, "test-matrix.md"),
+      absolutePath: path16.join(changePaths.artifactsRoot, "test-matrix.md"),
       content: input.rendered.testMatrixMd,
       mediaType: "text/markdown",
       kind: "test-matrix"
@@ -42043,8 +43179,8 @@ async function writeGherkinArtifacts(input) {
   ];
   const writtenFiles = [];
   for (const file2 of files) {
-    assertInsideProjectRoot2(input.projectRoot, file2.absolutePath);
-    const changed = await writeWithConflictPolicy({
+    assertInsideProjectRoot3(input.projectRoot, file2.absolutePath);
+    const changed = await writeWithConflictPolicy2({
       absolutePath: file2.absolutePath,
       content: file2.content,
       force: input.force === true
@@ -42086,12 +43222,12 @@ async function writeGherkinArtifacts(input) {
     artifactRefs
   };
 }
-async function writeWithConflictPolicy(input) {
-  await mkdir6(path14.dirname(input.absolutePath), {
+async function writeWithConflictPolicy2(input) {
+  await mkdir7(path16.dirname(input.absolutePath), {
     recursive: true,
     mode: 448
   });
-  const existing = await readExisting2(input.absolutePath);
+  const existing = await readExisting3(input.absolutePath);
   if (existing !== void 0) {
     if (existing === input.content) {
       return false;
@@ -42100,15 +43236,15 @@ async function writeWithConflictPolicy(input) {
       throw new Error(`Generated Gherkin artifact already exists: ${input.absolutePath}`);
     }
   }
-  await writeFile6(input.absolutePath, input.content, {
+  await writeFile7(input.absolutePath, input.content, {
     encoding: "utf8",
     mode: 384
   });
   return true;
 }
-async function readExisting2(absolutePath) {
+async function readExisting3(absolutePath) {
   try {
-    return await readFile9(absolutePath, "utf8");
+    return await readFile11(absolutePath, "utf8");
   } catch (error51) {
     if (error51 instanceof Error && "code" in error51 && error51.code === "ENOENT") {
       return void 0;
@@ -42116,9 +43252,9 @@ async function readExisting2(absolutePath) {
     throw error51;
   }
 }
-function assertInsideProjectRoot2(projectRoot, absolutePath) {
-  const relative = path14.relative(projectRoot, absolutePath);
-  if (relative.startsWith("..") || path14.isAbsolute(relative)) {
+function assertInsideProjectRoot3(projectRoot, absolutePath) {
+  const relative = path16.relative(projectRoot, absolutePath);
+  if (relative.startsWith("..") || path16.isAbsolute(relative)) {
     throw new Error(`Refusing to write outside project root: ${absolutePath}`);
   }
 }
@@ -42133,7 +43269,7 @@ var init_gherkin_writer = __esm({
 });
 
 // src/application/gherkin-test-matrix-service.ts
-import { readFile as readFile10 } from "fs/promises";
+import { readFile as readFile12 } from "fs/promises";
 var GenerateGherkinTestMatrixInputSchema, GenerateGherkinTestMatrixResultSchema, GherkinTestMatrixService;
 var init_gherkin_test_matrix_service = __esm({
   "src/application/gherkin-test-matrix-service.ts"() {
@@ -42228,7 +43364,7 @@ var init_gherkin_test_matrix_service = __esm({
           projectRoot,
           changeName: OpenSpecChangeNameSchema.parse(changeName)
         });
-        const raw = await readFile10(paths.manifestPath, "utf8");
+        const raw = await readFile12(paths.manifestPath, "utf8");
         return OpenSpecChangeModelSchema.parse(JSON.parse(raw));
       }
     };
@@ -42733,6 +43869,47 @@ function createKernelServer(servicesProvider) {
       };
     })
   );
+  server.registerTool(
+    "generate_figma_design_contract",
+    {
+      title: "Generate Figma design contract",
+      description: "Generate component, token, typography, and asset mapping contracts from Figma inventory.",
+      inputSchema: GenerateDesignContractInputSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { designContractService } = await servicesProvider();
+      const structuredContent = await designContractService.generate(input);
+      return {
+        text: structuredContent.duplicate ? `Design contract for ${structuredContent.changeName} already exists.` : `Generated design contract for ${structuredContent.changeName} with ${structuredContent.changedFiles.length} changed files.`,
+        structuredContent
+      };
+    })
+  );
+  server.registerTool(
+    "get_figma_design_contract_summary",
+    {
+      title: "Get Figma design contract summary",
+      description: "Return summary counts for a generated Figma design contract.",
+      inputSchema: GetDesignContractSummaryInputSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true
+      }
+    },
+    async (input) => handleTool(async () => {
+      const { designContractService } = await servicesProvider();
+      const structuredContent = await designContractService.getSummary(input);
+      return {
+        text: `Loaded design contract summary for ${structuredContent.changeName}.`,
+        structuredContent
+      };
+    })
+  );
   registerFigmaTextRecorder(server, servicesProvider, {
     toolName: "record_figma_metadata",
     title: "Record Figma metadata",
@@ -43100,6 +44277,7 @@ var init_create_server = __esm({
     init_zod();
     init_api_pipeline_service();
     init_brief_adapter_service();
+    init_design_contract_service();
     init_evidence_graph_service();
     init_figma_capability_service();
     init_figma_design_inventory_service();
@@ -43195,7 +44373,9 @@ var init_create_server = __esm({
       "get_figma_design_inventory",
       "generate_openspec_change",
       "generate_gherkin_test_matrix",
-      "generate_api_pipeline"
+      "generate_api_pipeline",
+      "generate_figma_design_contract",
+      "get_figma_design_contract_summary"
     ];
   }
 });
@@ -43239,7 +44419,7 @@ __export(sqlite_run_store_exports, {
   SqliteRunStore: () => SqliteRunStore
 });
 import { mkdirSync } from "fs";
-import path15 from "path";
+import path17 from "path";
 import { createRequire } from "module";
 function loadSqliteModule() {
   return require2("node:sqlite");
@@ -43281,7 +44461,7 @@ var init_sqlite_run_store = __esm({
     SqliteRunStore = class {
       database;
       constructor(databasePath) {
-        mkdirSync(path15.dirname(databasePath), {
+        mkdirSync(path17.dirname(databasePath), {
           recursive: true,
           mode: 448
         });
@@ -43517,7 +44697,7 @@ __export(run_service_provider_exports, {
   createLazyServicesProvider: () => createLazyServicesProvider
 });
 import os from "os";
-import path16 from "path";
+import path18 from "path";
 function createLazyServicesProvider() {
   let services;
   return async () => {
@@ -43526,9 +44706,9 @@ function createLazyServicesProvider() {
     }
     const { SqliteRunStore: SqliteRunStore2 } = await Promise.resolve().then(() => (init_sqlite_run_store(), sqlite_run_store_exports));
     const dataDirectory = resolveDataDirectory();
-    const store = new SqliteRunStore2(path16.join(dataDirectory, "runs.sqlite3"));
-    const snapshotStore = new SourceSnapshotStore(path16.join(dataDirectory, "source-snapshots"));
-    const artifactStore = new ArtifactBlobStore(path16.join(dataDirectory, "artifacts"));
+    const store = new SqliteRunStore2(path18.join(dataDirectory, "runs.sqlite3"));
+    const snapshotStore = new SourceSnapshotStore(path18.join(dataDirectory, "source-snapshots"));
+    const artifactStore = new ArtifactBlobStore(path18.join(dataDirectory, "artifacts"));
     services = {
       runService: new RunService(store, {
         pluginVersion: package_default.version
@@ -43536,7 +44716,7 @@ function createLazyServicesProvider() {
       stageService: new StageService(store),
       policyService: new PolicyService(),
       profileService: new ProjectProfileService(
-        new JsonProfileStore(path16.join(dataDirectory, "profiles"))
+        new JsonProfileStore(path18.join(dataDirectory, "profiles"))
       ),
       sourceRegistryService: new SourceRegistryService(store, snapshotStore),
       briefAdapterService: new BriefAdapterService(store, snapshotStore),
@@ -43547,13 +44727,14 @@ function createLazyServicesProvider() {
       openApiIntakeService: new OpenApiIntakeService(store, snapshotStore, artifactStore),
       openSpecChangeService: new OpenSpecChangeService(store, artifactStore),
       gherkinTestMatrixService: new GherkinTestMatrixService(store),
-      apiPipelineService: new ApiPipelineService(store, artifactStore)
+      apiPipelineService: new ApiPipelineService(store, artifactStore),
+      designContractService: new DesignContractService(store, artifactStore)
     };
     return services;
   };
 }
 function resolveDataDirectory() {
-  return process.env.SPEC_TO_PR_DATA_DIR ?? path16.join(os.tmpdir(), "spec-to-pr-plugin-data");
+  return process.env.SPEC_TO_PR_DATA_DIR ?? path18.join(os.tmpdir(), "spec-to-pr-plugin-data");
 }
 var init_run_service_provider = __esm({
   "src/mcp/run-service-provider.ts"() {
@@ -43562,6 +44743,7 @@ var init_run_service_provider = __esm({
     init_artifact_blob_store();
     init_api_pipeline_service();
     init_brief_adapter_service();
+    init_design_contract_service();
     init_evidence_graph_service();
     init_figma_capability_service();
     init_figma_design_inventory_service();
