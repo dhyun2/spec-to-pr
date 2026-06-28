@@ -155,15 +155,15 @@ PR Report
 
 선택 기준은 provider 이름이 아니라 capability입니다.
 
-| 목적 | 우선 정책 |
-|---|---|
-| 현재 desktop 선택 node 확인 | local desktop MCP가 있으면 우선 |
-| URL 기반 metadata | local과 remote가 둘 다 있으면 cross-check |
-| design context | 가장 풍부한 context를 반환하는 provider를 사용하고 핵심 node는 cross-check |
-| screenshot baseline | target node screenshot에 성공한 provider를 사용하고 provider identity 기록 |
-| variables/styles | `get_variable_defs` 유사 capability가 있는 provider 우선 |
-| Code Connect | 비어 있지 않은 Code Connect map을 제공하는 provider 우선 |
-| Figma에 쓰기/generate | write/generate tool을 명시적으로 지원하는 provider 사용 |
+| 목적                        | 우선 정책                                                                  |
+| --------------------------- | -------------------------------------------------------------------------- |
+| 현재 desktop 선택 node 확인 | local desktop MCP가 있으면 우선                                            |
+| URL 기반 metadata           | local과 remote가 둘 다 있으면 cross-check                                  |
+| design context              | 가장 풍부한 context를 반환하는 provider를 사용하고 핵심 node는 cross-check |
+| screenshot baseline         | target node screenshot에 성공한 provider를 사용하고 provider identity 기록 |
+| variables/styles            | `get_variable_defs` 유사 capability가 있는 provider 우선                   |
+| Code Connect                | 비어 있지 않은 Code Connect map을 제공하는 provider 우선                   |
+| Figma에 쓰기/generate       | write/generate tool을 명시적으로 지원하는 provider 사용                    |
 
 ### Figma Cross-check 지점
 
@@ -178,41 +178,41 @@ Figma는 여러 단계에서 다시 검증합니다.
 
 ## Task 상태
 
-| Task | 이름 | 상태 | 비고 |
-|---:|---|---|---|
-| 01 | Executable Plugin Shell | In Progress | Claude Code → plugin → MCP stdio 경로 증명 |
-| 02 | Shared Runtime Contracts | Pending | Source, Evidence, Artifact, Gap, Check, Decision, AgentResult 정의 |
-| 03 | Run Aggregate and SQLite Persistence | Pending | 영속 실행 장부 생성 |
-| 04 | State Machine and Resumability | Pending | stage 전이, retry, resume 추가 |
-| 05 | Security and Policy Baseline | Pending | path, command, secret, prompt-injection 보호 |
-| 06 | Intake Manifest and Project Profiler | Pending | 저장소 스택과 입력 manifest 탐지 |
-| 07 | Source Registry and Content Addressing | Pending | 모든 입력 snapshot과 digest 생성 |
-| 08 | Brief Intake Adapter and Text Normalization | Pending | PDF/MD/ticket/inline 기획서 정규화 및 evidence/gap 생성 |
-| 09 | Figma MCP Capability Discovery | Pending | local/remote/plugin Figma MCP capability와 provider policy 기록 |
-| 10 | Figma Source Intake and Raw Artifact Recording | Pending | Figma source 등록 및 metadata/context/screenshot/variables 기록 |
-| 11 | Figma Design-System Inventory and Cross-check | Pending | Figma 디자인시스템, component, token, asset, provider mismatch 파싱 |
-| 12 | OpenAPI Intake Adapter | Pending | OpenAPI 문서 parse, bundle, validate |
-| 13 | Evidence Graph and Requirement Traceability | Pending | brief → spec → API → Figma → code → tests 연결 |
-| 14 | OpenSpec Change Generator | Pending | proposal/design/tasks/spec 산출물 생성 |
-| 15 | Gherkin and Test Matrix Generator | Pending | scenario와 test matrix 생성 |
-| 16 | API Generator, Drift and Wrapper Pipeline | Pending | API type/schema/wrapper/test 생성 또는 최신성 검증 |
-| 17 | Figma Design Contract and Design-System Mapper | Pending | Figma inventory를 기존 디자인시스템에 매핑 |
-| 18 | Worktree-Isolated Agent Runtime | Pending | Agent를 격리된 Git worktree에서 실행 |
-| 19 | Spec/BDD Agent Lane | Pending | spec agent workflow 구현 |
-| 20 | API Contract Agent Lane | Pending | API agent workflow 구현 |
-| 21 | Design/UI Agent Lane | Pending | UI agent workflow 구현 |
-| 22 | Review Council and Gap Ledger | Pending | Agent 결과 교차 검토와 gap 관리 |
-| 23 | Integration and Bounded Repair Loop | Pending | Agent 결과 통합과 실패 복구 |
-| 24 | FSD Architecture and Source Guards | Pending | FSD와 API boundary rule 강제 |
-| 25 | Quality Gate Runner | Pending | lint/typecheck/test/build/contract gate 실행 |
-| 26 | Visual Regression and Screenshot Compare | Pending | Figma와 browser screenshot 비교 |
-| 27 | Accessibility Gate | Pending | 자동 접근성 검사와 구조화된 접근성 체크 |
-| 28 | Performance and Web Vitals | Pending | Lighthouse와 Web Vitals instrumentation |
-| 29 | OpenTelemetry and Log Correlation | Pending | trace/metric/log correlation 추가 |
-| 30 | Evidence-Driven PR Report | Pending | 최종 PR/MR body 생성 |
-| 31 | GitHub and GitLab Publishers | Pending | draft PR/MR 및 artifact 발행 |
-| 32 | OpenSpec Archive and Post-Merge Lifecycle | Pending | merge 후 OpenSpec change archive |
-| 33 | Evals, Hardening and Release | Pending | 평가, 보안 강화, 패키징, 릴리즈 |
+| Task | 이름                                           | 상태        | 비고                                                                |
+| ---: | ---------------------------------------------- | ----------- | ------------------------------------------------------------------- |
+|   01 | Executable Plugin Shell                        | In Progress | Claude Code → plugin → MCP stdio 경로 증명                          |
+|   02 | Shared Runtime Contracts                       | Pending     | Source, Evidence, Artifact, Gap, Check, Decision, AgentResult 정의  |
+|   03 | Run Aggregate and SQLite Persistence           | Pending     | 영속 실행 장부 생성                                                 |
+|   04 | State Machine and Resumability                 | Pending     | stage 전이, retry, resume 추가                                      |
+|   05 | Security and Policy Baseline                   | Pending     | path, command, secret, prompt-injection 보호                        |
+|   06 | Intake Manifest and Project Profiler           | Pending     | 저장소 스택과 입력 manifest 탐지                                    |
+|   07 | Source Registry and Content Addressing         | Pending     | 모든 입력 snapshot과 digest 생성                                    |
+|   08 | Brief Intake Adapter and Text Normalization    | Pending     | PDF/MD/ticket/inline 기획서 정규화 및 evidence/gap 생성             |
+|   09 | Figma MCP Capability Discovery                 | Pending     | local/remote/plugin Figma MCP capability와 provider policy 기록     |
+|   10 | Figma Source Intake and Raw Artifact Recording | Pending     | Figma source 등록 및 metadata/context/screenshot/variables 기록     |
+|   11 | Figma Design-System Inventory and Cross-check  | Pending     | Figma 디자인시스템, component, token, asset, provider mismatch 파싱 |
+|   12 | OpenAPI Intake Adapter                         | Pending     | OpenAPI 문서 parse, bundle, validate                                |
+|   13 | Evidence Graph and Requirement Traceability    | Pending     | brief → spec → API → Figma → code → tests 연결                      |
+|   14 | OpenSpec Change Generator                      | Pending     | proposal/design/tasks/spec 산출물 생성                              |
+|   15 | Gherkin and Test Matrix Generator              | Pending     | scenario와 test matrix 생성                                         |
+|   16 | API Generator, Drift and Wrapper Pipeline      | Pending     | API type/schema/wrapper/test 생성 또는 최신성 검증                  |
+|   17 | Figma Design Contract and Design-System Mapper | Pending     | Figma inventory를 기존 디자인시스템에 매핑                          |
+|   18 | Worktree-Isolated Agent Runtime                | Pending     | Agent를 격리된 Git worktree에서 실행                                |
+|   19 | Spec/BDD Agent Lane                            | Pending     | spec agent workflow 구현                                            |
+|   20 | API Contract Agent Lane                        | Pending     | API agent workflow 구현                                             |
+|   21 | Design/UI Agent Lane                           | Pending     | UI agent workflow 구현                                              |
+|   22 | Review Council and Gap Ledger                  | Pending     | Agent 결과 교차 검토와 gap 관리                                     |
+|   23 | Integration and Bounded Repair Loop            | Pending     | Agent 결과 통합과 실패 복구                                         |
+|   24 | FSD Architecture and Source Guards             | Pending     | FSD와 API boundary rule 강제                                        |
+|   25 | Quality Gate Runner                            | Pending     | lint/typecheck/test/build/contract gate 실행                        |
+|   26 | Visual Regression and Screenshot Compare       | Pending     | Figma와 browser screenshot 비교                                     |
+|   27 | Accessibility Gate                             | Pending     | 자동 접근성 검사와 구조화된 접근성 체크                             |
+|   28 | Performance and Web Vitals                     | Pending     | Lighthouse와 Web Vitals instrumentation                             |
+|   29 | OpenTelemetry and Log Correlation              | Pending     | trace/metric/log correlation 추가                                   |
+|   30 | Evidence-Driven PR Report                      | Pending     | 최종 PR/MR body 생성                                                |
+|   31 | GitHub and GitLab Publishers                   | Pending     | draft PR/MR 및 artifact 발행                                        |
+|   32 | OpenSpec Archive and Post-Merge Lifecycle      | Pending     | merge 후 OpenSpec change archive                                    |
+|   33 | Evals, Hardening and Release                   | Pending     | 평가, 보안 강화, 패키징, 릴리즈                                     |
 
 ## Phase A — 실행 기반
 

@@ -157,15 +157,15 @@ Selection is capability-based, not provider-name-based.
 
 Examples:
 
-| Purpose | Preferred policy |
-|---|---|
-| Current desktop selection | Prefer local desktop MCP when available |
-| URL-based metadata | Cross-check local and remote when both are available |
-| Design context | Use provider with richest returned context; cross-check key nodes |
-| Screenshot baseline | Use provider that succeeds for the target node and record provider identity |
-| Variables/styles | Prefer provider with `get_variable_defs`-like capability |
-| Code Connect | Prefer provider with non-empty Code Connect map |
-| Write/generate in Figma | Use provider that explicitly supports write/generate tools |
+| Purpose                   | Preferred policy                                                            |
+| ------------------------- | --------------------------------------------------------------------------- |
+| Current desktop selection | Prefer local desktop MCP when available                                     |
+| URL-based metadata        | Cross-check local and remote when both are available                        |
+| Design context            | Use provider with richest returned context; cross-check key nodes           |
+| Screenshot baseline       | Use provider that succeeds for the target node and record provider identity |
+| Variables/styles          | Prefer provider with `get_variable_defs`-like capability                    |
+| Code Connect              | Prefer provider with non-empty Code Connect map                             |
+| Write/generate in Figma   | Use provider that explicitly supports write/generate tools                  |
 
 ### Figma Cross-check Points
 
@@ -180,41 +180,41 @@ Figma is rechecked at multiple stages:
 
 ## Task Status
 
-| Task | Name | Status | Notes |
-|---:|---|---|---|
-| 01 | Executable Plugin Shell | In Progress | Prove Claude Code → plugin → MCP stdio path |
-| 02 | Shared Runtime Contracts | Pending | Define Source, Evidence, Artifact, Gap, Check, Decision, AgentResult |
-| 03 | Run Aggregate and SQLite Persistence | Pending | Create durable Run ledger |
-| 04 | State Machine and Resumability | Pending | Add stage transitions, retry, resume |
-| 05 | Security and Policy Baseline | Pending | Path, command, secret, prompt-injection protection |
-| 06 | Intake Manifest and Project Profiler | Pending | Detect repository stack and input manifest |
-| 07 | Source Registry and Content Addressing | Pending | Snapshot and digest all inputs |
-| 08 | Brief Intake Adapter and Text Normalization | Pending | Normalize PDF/MD/ticket/inline brief inputs and create evidence/gaps |
-| 09 | Figma MCP Capability Discovery | Pending | Discover local/remote/plugin Figma MCP capabilities and provider policy |
-| 10 | Figma Source Intake and Raw Artifact Recording | Pending | Register Figma source and record metadata/context/screenshots/variables |
-| 11 | Figma Design-System Inventory and Cross-check | Pending | Parse Figma design system, components, tokens, assets, provider mismatch |
-| 12 | OpenAPI Intake Adapter | Pending | Parse, bundle, and validate OpenAPI documents |
-| 13 | Evidence Graph and Requirement Traceability | Pending | Connect brief → spec → API → Figma → code → tests |
-| 14 | OpenSpec Change Generator | Pending | Generate proposal/design/tasks/spec artifacts |
-| 15 | Gherkin and Test Matrix Generator | Pending | Generate scenarios and test matrix |
-| 16 | API Generator, Drift and Wrapper Pipeline | Pending | Generate/update API types, schemas, wrappers, tests |
-| 17 | Figma Design Contract and Design-System Mapper | Pending | Map Figma inventory to existing design system |
-| 18 | Worktree-Isolated Agent Runtime | Pending | Run agents in isolated Git worktrees |
-| 19 | Spec/BDD Agent Lane | Pending | Implement spec agent workflow |
-| 20 | API Contract Agent Lane | Pending | Implement API agent workflow |
-| 21 | Design/UI Agent Lane | Pending | Implement UI agent workflow |
-| 22 | Review Council and Gap Ledger | Pending | Cross-review outputs and manage gaps |
-| 23 | Integration and Bounded Repair Loop | Pending | Merge agent outputs and repair failures |
-| 24 | FSD Architecture and Source Guards | Pending | Enforce FSD and API boundary rules |
-| 25 | Quality Gate Runner | Pending | Run lint/typecheck/test/build/contract gates |
-| 26 | Visual Regression and Screenshot Compare | Pending | Compare Figma and browser screenshots |
-| 27 | Accessibility Gate | Pending | Run automated and structured accessibility checks |
-| 28 | Performance and Web Vitals | Pending | Run Lighthouse and Web Vitals instrumentation |
-| 29 | OpenTelemetry and Log Correlation | Pending | Add trace/metric/log correlation |
-| 30 | Evidence-Driven PR Report | Pending | Generate final PR/MR body |
-| 31 | GitHub and GitLab Publishers | Pending | Publish draft PR/MR and artifacts |
-| 32 | OpenSpec Archive and Post-Merge Lifecycle | Pending | Archive OpenSpec changes after merge |
-| 33 | Evals, Hardening and Release | Pending | Evaluate, harden, package, and release |
+| Task | Name                                           | Status      | Notes                                                                    |
+| ---: | ---------------------------------------------- | ----------- | ------------------------------------------------------------------------ |
+|   01 | Executable Plugin Shell                        | In Progress | Prove Claude Code → plugin → MCP stdio path                              |
+|   02 | Shared Runtime Contracts                       | Pending     | Define Source, Evidence, Artifact, Gap, Check, Decision, AgentResult     |
+|   03 | Run Aggregate and SQLite Persistence           | Pending     | Create durable Run ledger                                                |
+|   04 | State Machine and Resumability                 | Pending     | Add stage transitions, retry, resume                                     |
+|   05 | Security and Policy Baseline                   | Pending     | Path, command, secret, prompt-injection protection                       |
+|   06 | Intake Manifest and Project Profiler           | Pending     | Detect repository stack and input manifest                               |
+|   07 | Source Registry and Content Addressing         | Pending     | Snapshot and digest all inputs                                           |
+|   08 | Brief Intake Adapter and Text Normalization    | Pending     | Normalize PDF/MD/ticket/inline brief inputs and create evidence/gaps     |
+|   09 | Figma MCP Capability Discovery                 | Pending     | Discover local/remote/plugin Figma MCP capabilities and provider policy  |
+|   10 | Figma Source Intake and Raw Artifact Recording | Pending     | Register Figma source and record metadata/context/screenshots/variables  |
+|   11 | Figma Design-System Inventory and Cross-check  | Pending     | Parse Figma design system, components, tokens, assets, provider mismatch |
+|   12 | OpenAPI Intake Adapter                         | Pending     | Parse, bundle, and validate OpenAPI documents                            |
+|   13 | Evidence Graph and Requirement Traceability    | Pending     | Connect brief → spec → API → Figma → code → tests                        |
+|   14 | OpenSpec Change Generator                      | Pending     | Generate proposal/design/tasks/spec artifacts                            |
+|   15 | Gherkin and Test Matrix Generator              | Pending     | Generate scenarios and test matrix                                       |
+|   16 | API Generator, Drift and Wrapper Pipeline      | Pending     | Generate/update API types, schemas, wrappers, tests                      |
+|   17 | Figma Design Contract and Design-System Mapper | Pending     | Map Figma inventory to existing design system                            |
+|   18 | Worktree-Isolated Agent Runtime                | Pending     | Run agents in isolated Git worktrees                                     |
+|   19 | Spec/BDD Agent Lane                            | Pending     | Implement spec agent workflow                                            |
+|   20 | API Contract Agent Lane                        | Pending     | Implement API agent workflow                                             |
+|   21 | Design/UI Agent Lane                           | Pending     | Implement UI agent workflow                                              |
+|   22 | Review Council and Gap Ledger                  | Pending     | Cross-review outputs and manage gaps                                     |
+|   23 | Integration and Bounded Repair Loop            | Pending     | Merge agent outputs and repair failures                                  |
+|   24 | FSD Architecture and Source Guards             | Pending     | Enforce FSD and API boundary rules                                       |
+|   25 | Quality Gate Runner                            | Pending     | Run lint/typecheck/test/build/contract gates                             |
+|   26 | Visual Regression and Screenshot Compare       | Pending     | Compare Figma and browser screenshots                                    |
+|   27 | Accessibility Gate                             | Pending     | Run automated and structured accessibility checks                        |
+|   28 | Performance and Web Vitals                     | Pending     | Run Lighthouse and Web Vitals instrumentation                            |
+|   29 | OpenTelemetry and Log Correlation              | Pending     | Add trace/metric/log correlation                                         |
+|   30 | Evidence-Driven PR Report                      | Pending     | Generate final PR/MR body                                                |
+|   31 | GitHub and GitLab Publishers                   | Pending     | Publish draft PR/MR and artifacts                                        |
+|   32 | OpenSpec Archive and Post-Merge Lifecycle      | Pending     | Archive OpenSpec changes after merge                                     |
+|   33 | Evals, Hardening and Release                   | Pending     | Evaluate, harden, package, and release                                   |
 
 ## Phase A — Execution Foundation
 
