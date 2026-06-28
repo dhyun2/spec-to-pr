@@ -98,5 +98,8 @@ function escapeTableCell(value: string): string {
 }
 
 function markdown(lines: string[]): string {
-  return `${lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd()}\n`;
+  return `${lines
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trimEnd()}\n`;
 }

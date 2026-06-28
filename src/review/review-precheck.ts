@@ -32,7 +32,8 @@ function findOpenBlockerGaps(input: { run: RunManifest; generatedAt: string }): 
         title: `Open blocker gap: ${gap.title}`,
         expected: "No open blocker gaps should remain before implementation is accepted.",
         observed: gap.observed,
-        recommendation: "Resolve the blocker with resolution artifacts or keep the requirement blocked.",
+        recommendation:
+          "Resolve the blocker with resolution artifacts or keep the requirement blocked.",
         gapIds: [gap.id],
         evidenceIds: gap.sourceEvidenceIds,
         createdAt: input.generatedAt,
@@ -130,7 +131,8 @@ function findApiClaimsWithoutOpenApiEvidence(input: {
         severity: "major",
         status: "open",
         title: "API Contract result lacks OpenAPI evidence",
-        expected: "API Contract Agent results should cite OpenAPI operation/schema/security evidence.",
+        expected:
+          "API Contract Agent results should cite OpenAPI operation/schema/security evidence.",
         observed: "No OpenAPI evidence IDs were attached to the passed API Contract result.",
         recommendation: "Attach OpenAPI intake evidence or keep undocumented work as API gap.",
         agentResultIds: [result.id],
@@ -167,7 +169,8 @@ function findDesignClaimsWithoutFigmaEvidence(input: {
         severity: "major",
         status: "open",
         title: "Design/UI result lacks Figma evidence",
-        expected: "Design/UI Agent results should cite Figma node evidence or design contract artifacts.",
+        expected:
+          "Design/UI Agent results should cite Figma node evidence or design contract artifacts.",
         observed: "No Figma evidence IDs were attached to the passed Design/UI result.",
         recommendation: "Attach Figma evidence or keep unsupported UI states as design gaps.",
         agentResultIds: [result.id],
