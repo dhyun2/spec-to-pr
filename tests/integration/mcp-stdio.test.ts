@@ -53,6 +53,7 @@ describe("spec-to-pr MCP stdio server", () => {
     const tools = await client.listTools();
 
     expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
+      "analyze_architecture_boundaries",
       "analyze_brief_source",
       "analyze_figma_design_inventory",
       "analyze_openapi_source",
@@ -71,6 +72,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "generate_figma_design_contract",
       "generate_gherkin_test_matrix",
       "generate_openspec_change",
+      "generate_source_guard_tests",
       "get_agent_context_pack",
       "get_api_contract_agent_context",
       "get_design_ui_agent_context",
