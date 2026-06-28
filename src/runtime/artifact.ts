@@ -21,6 +21,8 @@ export const ArtifactKindSchema = z.enum([
   "openapi-security-inventory",
   "openapi-ref-inventory",
   "openapi-intake-report",
+  "traceability-graph",
+  "traceability-matrix",
   "requirement-graph",
   "openspec",
   "gherkin",
