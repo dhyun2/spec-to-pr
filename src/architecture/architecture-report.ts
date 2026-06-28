@@ -1,11 +1,6 @@
 import { z } from "zod";
 
-export const ArchitectureViolationSeveritySchema = z.enum([
-  "blocker",
-  "major",
-  "minor",
-  "info",
-]);
+export const ArchitectureViolationSeveritySchema = z.enum(["blocker", "major", "minor", "info"]);
 
 export const ArchitectureViolationKindSchema = z.enum([
   "fsd-upward-import",
@@ -48,9 +43,7 @@ export const ArchitectureReportSchema = z
   })
   .strict();
 
-export type ArchitectureViolationSeverity = z.infer<
-  typeof ArchitectureViolationSeveritySchema
->;
+export type ArchitectureViolationSeverity = z.infer<typeof ArchitectureViolationSeveritySchema>;
 export type ArchitectureViolationKind = z.infer<typeof ArchitectureViolationKindSchema>;
 export type ArchitectureViolation = z.infer<typeof ArchitectureViolationSchema>;
 export type ArchitectureReport = z.infer<typeof ArchitectureReportSchema>;

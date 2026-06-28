@@ -1,13 +1,6 @@
 import { z } from "zod";
 
-export const FsdLayerSchema = z.enum([
-  "app",
-  "pages",
-  "widgets",
-  "features",
-  "entities",
-  "shared",
-]);
+export const FsdLayerSchema = z.enum(["app", "pages", "widgets", "features", "entities", "shared"]);
 
 export const FsdSegmentSchema = z.enum([
   "ui",

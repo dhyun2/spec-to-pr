@@ -136,7 +136,9 @@ async function writeWithConflictPolicy(input: {
     }
 
     if (!input.force) {
-      throw new Error(`Source guard test already exists with different content: ${input.absolutePath}`);
+      throw new Error(
+        `Source guard test already exists with different content: ${input.absolutePath}`,
+      );
     }
   }
 
