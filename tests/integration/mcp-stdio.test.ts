@@ -77,6 +77,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "get_resume_plan",
       "get_run",
       "get_source_snapshot",
+      "get_spec_bdd_agent_context",
       "get_traceability_matrix",
       "heartbeat_stage",
       "inspect_project",
@@ -88,12 +89,14 @@ describe("spec-to-pr MCP stdio server", () => {
       "list_runs",
       "policy_info",
       "prepare_agent_runtime",
+      "prepare_spec_bdd_agent",
       "record_figma_code_connect_map",
       "record_figma_design_context",
       "record_figma_mcp_capabilities",
       "record_figma_metadata",
       "record_figma_screenshot",
       "record_figma_variable_defs",
+      "record_spec_bdd_agent_result",
       "redact_text",
       "register_figma_source",
       "register_file_source",
@@ -558,6 +561,54 @@ components:
     expect(generatedGherkin.structuredContent).toMatchObject({
       duplicate: false,
       changeName: "deliver-reservation-management",
+    });
+
+    const preparedSpecBdd = await client.callTool({
+      name: "prepare_spec_bdd_agent",
+      arguments: {
+        runId,
+        changeName: "deliver-reservation-management",
+      },
+    });
+
+    expect(preparedSpecBdd.structuredContent).toMatchObject({
+      runId,
+      changeName: "deliver-reservation-management",
+    });
+
+    const specBddContext = await client.callTool({
+      name: "get_spec_bdd_agent_context",
+      arguments: {
+        runId,
+        changeName: "deliver-reservation-management",
+      },
+    });
+
+    expect(specBddContext.structuredContent).toMatchObject({
+      runId,
+      changeName: "deliver-reservation-management",
+      contextPack: {
+        changeName: "deliver-reservation-management",
+      },
+    });
+
+    const recordedSpecBdd = await client.callTool({
+      name: "record_spec_bdd_agent_result",
+      arguments: {
+        runId,
+        changeName: "deliver-reservation-management",
+        status: "passed",
+        reviewedRequirements: 1,
+        reviewedScenarios: 1,
+        acceptanceSkeletonCount: 1,
+        findings: [],
+        force: true,
+      },
+    });
+
+    expect(recordedSpecBdd.structuredContent).toMatchObject({
+      artifactIds: expect.any(Array),
+      acceptanceSkeletonFiles: expect.any(Array),
     });
 
     const descriptors = await client.callTool({
