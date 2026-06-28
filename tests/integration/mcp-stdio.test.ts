@@ -73,6 +73,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "create_intake_manifest",
       "create_run",
       "detect_publish_target",
+      "execute_openspec_archive",
       "fail_stage",
       "finalize_integration",
       "generate_api_pipeline",
@@ -91,6 +92,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "get_figma_provider_policy",
       "get_integration_plan",
       "get_observability_report",
+      "get_openspec_archive_result",
       "get_performance_report",
       "get_pr_report",
       "get_project_profile",
@@ -112,6 +114,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "list_runs",
       "plan_accessibility_gate",
       "plan_observability",
+      "plan_openspec_archive",
       "plan_performance_gate",
       "plan_review_request_publish",
       "plan_visual_regression",
@@ -134,6 +137,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "record_figma_variable_defs",
       "record_integration_repair",
       "record_observability_review",
+      "record_openspec_archive_review",
       "record_performance_review",
       "record_pr_report_review",
       "record_publish_review",
@@ -150,6 +154,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "start_stage",
       "update_review_request_body",
       "validate_path",
+      "verify_review_request_merged",
     ]);
 
     const info = await client.callTool({
@@ -1034,6 +1039,107 @@ components:
     expect(generatedOpenSpec.structuredContent).toMatchObject({
       duplicate: false,
       changeName: "deliver-reservation-management",
+    });
+
+    const archiveMergeStatus = await client.callTool({
+      name: "verify_review_request_merged",
+      arguments: {
+        runId,
+        review: {
+          provider: "github",
+          reviewRequestUrl: "https://github.com/acme/spec-to-pr/pull/123",
+          number: "123",
+          merged: false,
+          raw: {},
+        },
+      },
+    });
+
+    expect(archiveMergeStatus.structuredContent).toMatchObject({
+      verification: {
+        verified: false,
+        review: {
+          merged: false,
+        },
+      },
+      artifactId: expect.any(String),
+    });
+
+    const mergeStatusArtifactId = (
+      archiveMergeStatus.structuredContent as {
+        artifactId: string;
+      }
+    ).artifactId;
+
+    const archivePlan = await client.callTool({
+      name: "plan_openspec_archive",
+      arguments: {
+        runId,
+        changeName: "deliver-reservation-management",
+        mergeStatusArtifactId,
+      },
+    });
+
+    expect(archivePlan.structuredContent).toMatchObject({
+      plan: {
+        canExecute: false,
+        changeName: "deliver-reservation-management",
+      },
+      artifactId: expect.any(String),
+    });
+
+    const archiveExecution = await client.callTool({
+      name: "execute_openspec_archive",
+      arguments: {
+        runId,
+        changeName: "deliver-reservation-management",
+        mergeStatusArtifactId,
+      },
+    });
+
+    expect(archiveExecution.structuredContent).toMatchObject({
+      result: {
+        status: "blocked",
+      },
+      resultArtifactId: expect.any(String),
+      reportArtifactId: expect.any(String),
+    });
+
+    const archiveResultArtifactId = (
+      archiveExecution.structuredContent as {
+        resultArtifactId: string;
+      }
+    ).resultArtifactId;
+
+    const loadedArchiveResult = await client.callTool({
+      name: "get_openspec_archive_result",
+      arguments: {
+        runId,
+        artifactId: archiveResultArtifactId,
+      },
+    });
+
+    expect(loadedArchiveResult.structuredContent).toMatchObject({
+      result: {
+        status: "blocked",
+      },
+    });
+
+    const archiveReview = await client.callTool({
+      name: "record_openspec_archive_review",
+      arguments: {
+        runId,
+        archiveResultArtifactId,
+        review: {
+          status: "passed",
+          findings: [],
+        },
+      },
+    });
+
+    expect(archiveReview.structuredContent).toMatchObject({
+      reviewArtifactId: expect.any(String),
+      findingCount: 0,
     });
 
     const generatedGherkin = await client.callTool({
