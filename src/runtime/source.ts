@@ -9,6 +9,7 @@ import {
 } from "./scalars.js";
 
 export const SourceKindSchema = z.enum([
+  "instruction",
   "brief",
   "figma",
   "openapi",
@@ -63,7 +64,16 @@ export const TicketSourceLocatorSchema = z
   })
   .strict();
 
+export const InlineSourceLocatorSchema = z
+  .object({
+    type: z.literal("inline"),
+    label: z.string().trim().min(1).max(200).optional(),
+    mediaType: z.string().trim().min(1).optional(),
+  })
+  .strict();
+
 export const SourceLocatorSchema = z.discriminatedUnion("type", [
+  InlineSourceLocatorSchema,
   FileSourceLocatorSchema,
   UrlSourceLocatorSchema,
   FigmaSourceLocatorSchema,
@@ -186,7 +196,41 @@ export const GitFileEvidenceLocationSchema = z
     }
   });
 
+export const InlineTextEvidenceLocationSchema = z
+  .object({
+    type: z.literal("inline-text"),
+    label: z.string().trim().min(1).max(200).optional(),
+    startLine: z.number().int().positive().optional(),
+    endLine: z.number().int().positive().optional(),
+  })
+  .strict()
+  .superRefine((location, context) => {
+    const hasStartLine = location.startLine !== undefined;
+    const hasEndLine = location.endLine !== undefined;
+
+    if (hasStartLine !== hasEndLine) {
+      context.addIssue({
+        code: "custom",
+        message: "startLine and endLine must be provided together",
+        path: ["startLine"],
+      });
+    }
+
+    if (
+      location.startLine !== undefined &&
+      location.endLine !== undefined &&
+      location.endLine < location.startLine
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "endLine must be greater than or equal to startLine",
+        path: ["endLine"],
+      });
+    }
+  });
+
 export const EvidenceLocationSchema = z.discriminatedUnion("type", [
+  InlineTextEvidenceLocationSchema,
   FileLinesEvidenceLocationSchema,
   JsonPointerEvidenceLocationSchema,
   FigmaNodeEvidenceLocationSchema,

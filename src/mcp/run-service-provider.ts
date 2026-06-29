@@ -16,6 +16,7 @@ import { FigmaCapabilityService } from "../application/figma-capability-service.
 import { FigmaDesignInventoryService } from "../application/figma-design-inventory-service.js";
 import { FigmaIntakeService } from "../application/figma-intake-service.js";
 import { GherkinTestMatrixService } from "../application/gherkin-test-matrix-service.js";
+import { IntakeRequestService } from "../application/intake-request-service.js";
 import { IntegrationService } from "../application/integration-service.js";
 import { OpenApiIntakeService } from "../application/openapi-intake-service.js";
 import { ObservabilityService } from "../application/observability-service.js";
@@ -50,6 +51,7 @@ export type Services = {
   architectureGuardService: ArchitectureGuardService;
   qualityGateService: QualityGateService;
   profileService: ProjectProfileService;
+  intakeRequestService: IntakeRequestService;
   sourceRegistryService: SourceRegistryService;
   briefAdapterService: BriefAdapterService;
   evidenceGraphService: EvidenceGraphService;
@@ -105,6 +107,7 @@ export function createLazyServicesProvider(): ServicesProvider {
       profileService: new ProjectProfileService(
         new JsonProfileStore(path.join(dataDirectory, "profiles")),
       ),
+      intakeRequestService: new IntakeRequestService(store, snapshotStore, artifactStore),
       sourceRegistryService: new SourceRegistryService(store, snapshotStore),
       briefAdapterService: new BriefAdapterService(store, snapshotStore),
       evidenceGraphService: new EvidenceGraphService(store, artifactStore),

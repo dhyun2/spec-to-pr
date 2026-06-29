@@ -82,6 +82,10 @@ import {
 } from "../application/figma-intake-service.js";
 import { GenerateGherkinTestMatrixInputSchema } from "../application/gherkin-test-matrix-service.js";
 import {
+  ParseIntakeRequestInputSchema,
+  ParseIntakeRequestResultSchema,
+} from "../application/intake-request-service.js";
+import {
   ApplyIntegrationInputSchema,
   ApplyIntegrationResultSchema,
   FinalizeIntegrationInputSchema,
@@ -337,6 +341,7 @@ const TOOL_NAMES = [
   "list_agent_worktrees",
   "cleanup_agent_worktree",
   "create_intake_manifest",
+  "parse_intake_request",
   "inspect_project",
   "get_project_profile",
   "list_project_profiles",
@@ -1769,6 +1774,32 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
 
         return {
           text: `Created intake manifest for run ${structuredContent.runId}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "parse_intake_request",
+    {
+      title: "Parse intake request",
+      description:
+        "Capture the original user request as instruction evidence and deterministically extract Figma, docs, branch, validation, and publishing hints.",
+      inputSchema: ParseIntakeRequestInputSchema.shape,
+      outputSchema: ParseIntakeRequestResultSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { intakeRequestService } = await servicesProvider();
+        const structuredContent = await intakeRequestService.parseIntakeRequest(input);
+
+        return {
+          text: `Parsed intake request into ${structuredContent.parsed.filePaths.length} file hint(s), ${structuredContent.parsed.figmaUrls.length} Figma URL(s), and ${structuredContent.parsed.validationCommands.length} validation command(s).`,
           structuredContent,
         };
       }),

@@ -9,6 +9,7 @@
     "kind": {
       "type": "string",
       "enum": [
+        "instruction",
         "brief",
         "figma",
         "openapi",
@@ -20,6 +21,28 @@
     },
     "locator": {
       "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "inline"
+            },
+            "label": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "mediaType": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        },
         {
           "type": "object",
           "properties": {
