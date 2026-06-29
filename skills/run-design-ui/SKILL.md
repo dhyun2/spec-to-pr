@@ -3,10 +3,17 @@ name: Run Design UI Agent
 description: Prepare and run the Design/UI agent lane for a spec-to-pr Run.
 disable-model-invocation: false
 argument-hint: "<run-id> <change-name>"
-allowed-tools: mcp__spec-to-pr__prepare_design_ui_agent mcp__spec-to-pr__get_design_ui_agent_context mcp__spec-to-pr__record_design_ui_agent_result mcp__spec-to-pr__get_run
+allowed-tools: mcp__spec-to-pr__prepare_design_ui_agent mcp__spec_to_pr__prepare_design_ui_agent mcp__spec-to-pr__get_design_ui_agent_context mcp__spec_to_pr__get_design_ui_agent_context mcp__spec-to-pr__record_design_ui_agent_result mcp__spec_to_pr__record_design_ui_agent_result mcp__spec-to-pr__get_run mcp__spec_to_pr__get_run
 ---
 
 # Run Design/UI Agent
+
+## MCP Tool Namespace
+
+Tool names in this skill are written without the host prefix. Use the namespace exposed in the current host:
+
+- Codex: `mcp__spec_to_pr__<tool>`
+- Claude Code: `mcp__spec-to-pr__<tool>`
 
 You prepare the Design/UI Agent lane and instruct the `design-ui` subagent to implement UI changes.
 
@@ -31,7 +38,7 @@ Therefore it must be user-invoked and must not run automatically.
 
 ## Procedure
 
-1. Call `mcp__spec-to-pr__prepare_design_ui_agent` with:
+1. Call `prepare_design_ui_agent` with:
    - `runId`
    - `changeName`
 
@@ -42,7 +49,7 @@ Therefore it must be user-invoked and must not run automatically.
    - forbidden imports
    - expected output schema
 
-3. Call `mcp__spec-to-pr__get_design_ui_agent_context` if the context summary is not enough.
+3. Call `get_design_ui_agent_context` if the context summary is not enough.
 
 4. Invoke the `design-ui` subagent.
 
@@ -56,9 +63,9 @@ Therefore it must be user-invoked and must not run automatically.
    - add tests/fixtures/stories as requested
    - return a structured AgentResult
 
-6. After the subagent finishes, call `mcp__spec-to-pr__record_design_ui_agent_result`.
+6. After the subagent finishes, call `record_design_ui_agent_result`.
 
-7. Call `mcp__spec-to-pr__get_run` to confirm the result was recorded.
+7. Call `get_run` to confirm the result was recorded.
 
 ## Report
 

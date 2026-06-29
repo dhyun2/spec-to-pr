@@ -3,10 +3,17 @@ name: Figma Intake
 description: Register a Figma URL and record available Figma MCP outputs into a spec-to-pr Run.
 disable-model-invocation: false
 argument-hint: "[run-id] [figma-url]"
-allowed-tools: mcp__spec-to-pr__register_figma_source mcp__spec-to-pr__record_figma_metadata mcp__spec-to-pr__record_figma_design_context mcp__spec-to-pr__record_figma_screenshot mcp__spec-to-pr__record_figma_variable_defs mcp__spec-to-pr__record_figma_code_connect_map
+allowed-tools: mcp__spec-to-pr__register_figma_source mcp__spec_to_pr__register_figma_source mcp__spec-to-pr__record_figma_metadata mcp__spec_to_pr__record_figma_metadata mcp__spec-to-pr__record_figma_design_context mcp__spec_to_pr__record_figma_design_context mcp__spec-to-pr__record_figma_screenshot mcp__spec_to_pr__record_figma_screenshot mcp__spec-to-pr__record_figma_variable_defs mcp__spec_to_pr__record_figma_variable_defs mcp__spec-to-pr__record_figma_code_connect_map mcp__spec_to_pr__record_figma_code_connect_map
 ---
 
 # Figma Intake
+
+## MCP Tool Namespace
+
+Tool names in this skill are written without the host prefix. Use the namespace exposed in the current host:
+
+- Codex: `mcp__spec_to_pr__<tool>`
+- Claude Code: `mcp__spec-to-pr__<tool>`
 
 This skill records Figma evidence only. It does not implement UI and does not run visual regression.
 

@@ -29,6 +29,11 @@ codex plugin marketplace add .
 Then restart Codex, open `/plugins`, select the `Spec to PR Local` marketplace,
 and install `spec-to-pr`.
 
+In Codex, the plugin MCP tools are exposed under the normalized
+`mcp__spec_to_pr__*` namespace. If a thread loads the skills but says the MCP
+tools are not visible, start a new thread or ask Codex to search for
+`spec-to-pr kernel_info create_run` tools before running `Doctor`.
+
 ## SDK Runner
 
 The SDK runner scaffold lives in `packages/codex-sdk`. It intentionally stays

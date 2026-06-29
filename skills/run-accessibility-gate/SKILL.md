@@ -3,10 +3,17 @@ name: Run Accessibility Gate
 description: Plan and run accessibility checks, then record accessibility review notes.
 disable-model-invocation: false
 argument-hint: "<run-id> [targets-json]"
-allowed-tools: mcp__spec-to-pr__plan_accessibility_gate mcp__spec-to-pr__run_accessibility_gate mcp__spec-to-pr__get_accessibility_report mcp__spec-to-pr__record_accessibility_review Task
+allowed-tools: mcp__spec-to-pr__plan_accessibility_gate mcp__spec_to_pr__plan_accessibility_gate mcp__spec-to-pr__run_accessibility_gate mcp__spec_to_pr__run_accessibility_gate mcp__spec-to-pr__get_accessibility_report mcp__spec_to_pr__get_accessibility_report mcp__spec-to-pr__record_accessibility_review mcp__spec_to_pr__record_accessibility_review
 ---
 
 # Run Accessibility Gate
+
+## MCP Tool Namespace
+
+Tool names in this skill are written without the host prefix. Use the namespace exposed in the current host:
+
+- Codex: `mcp__spec_to_pr__<tool>`
+- Claude Code: `mcp__spec-to-pr__<tool>`
 
 You run the accessibility gate for an existing spec-to-pr Run.
 
@@ -34,15 +41,15 @@ If `targets-json` is omitted, call `plan_accessibility_gate` with an empty targe
 
 ## Procedure
 
-1. Call `mcp__spec-to-pr__plan_accessibility_gate`.
-2. If targets are provided, call `mcp__spec-to-pr__run_accessibility_gate`.
-3. Call `mcp__spec-to-pr__get_accessibility_report` with the returned report artifact ID.
+1. Call `plan_accessibility_gate`.
+2. If targets are provided, call `run_accessibility_gate`.
+3. Call `get_accessibility_report` with the returned report artifact ID.
 4. Invoke the `accessibility-reviewer` subagent through Task with:
    - accessibility report
    - gap IDs
    - manual review items
    - screenshot artifact references if available
-5. Call `mcp__spec-to-pr__record_accessibility_review` with the reviewer's triage notes.
+5. Call `record_accessibility_review` with the reviewer's triage notes.
 
 ## Important Boundaries
 

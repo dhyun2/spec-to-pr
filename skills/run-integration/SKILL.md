@@ -3,10 +3,17 @@ name: Run Integration
 description: Integrate Review Council-approved agent results into a dedicated integration worktree.
 disable-model-invocation: false
 argument-hint: "<run-id> <approved-agent-result-id...>"
-allowed-tools: mcp__spec-to-pr__get_run mcp__spec-to-pr__prepare_integration mcp__spec-to-pr__get_integration_plan mcp__spec-to-pr__apply_integration mcp__spec-to-pr__record_integration_repair mcp__spec-to-pr__finalize_integration
+allowed-tools: mcp__spec-to-pr__get_run mcp__spec_to_pr__get_run mcp__spec-to-pr__prepare_integration mcp__spec_to_pr__prepare_integration mcp__spec-to-pr__get_integration_plan mcp__spec_to_pr__get_integration_plan mcp__spec-to-pr__apply_integration mcp__spec_to_pr__apply_integration mcp__spec-to-pr__record_integration_repair mcp__spec_to_pr__record_integration_repair mcp__spec-to-pr__finalize_integration mcp__spec_to_pr__finalize_integration
 ---
 
 # Run Integration
+
+## MCP Tool Namespace
+
+Tool names in this skill are written without the host prefix. Use the namespace exposed in the current host:
+
+- Codex: `mcp__spec_to_pr__<tool>`
+- Claude Code: `mcp__spec-to-pr__<tool>`
 
 You run the Task 23 integration workflow.
 
@@ -26,21 +33,21 @@ Integration creates a Git worktree, applies commits, and may produce conflict re
 
 ## Procedure
 
-1. Call `mcp__spec-to-pr__get_run`.
+1. Call `get_run`.
 2. Confirm Review Council artifacts exist.
-3. Call `mcp__spec-to-pr__prepare_integration` with:
+3. Call `prepare_integration` with:
    - runId
    - approvedAgentResultIds
    - maxRepairAttempts default 2
-4. Optionally call `mcp__spec-to-pr__get_integration_plan` to reload the plan.
+4. Optionally call `get_integration_plan` to reload the plan.
 5. Report the integration plan:
    - integration branch
    - worktree path
    - candidate commit order
-6. Call `mcp__spec-to-pr__apply_integration`.
-7. If result is `passed`, call `mcp__spec-to-pr__finalize_integration`.
+6. Call `apply_integration`.
+7. If result is `passed`, call `finalize_integration`.
 8. If result is `conflicted`, summarize the conflict report and ask the user whether to run the integrator repair agent.
-9. Record each repair attempt with `mcp__spec-to-pr__record_integration_repair`.
+9. Record each repair attempt with `record_integration_repair`.
 10. Do not claim quality gates passed. They run in later tasks.
 
 ## Agent Usage

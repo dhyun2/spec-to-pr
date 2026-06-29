@@ -5,10 +5,17 @@ disable-model-invocation: false
 context: fork
 agent: spec-bdd
 argument-hint: "<run-id> <change-name>"
-allowed-tools: mcp__spec-to-pr__prepare_spec_bdd_agent mcp__spec-to-pr__record_spec_bdd_agent_result mcp__spec-to-pr__get_run
+allowed-tools: mcp__spec-to-pr__prepare_spec_bdd_agent mcp__spec_to_pr__prepare_spec_bdd_agent mcp__spec-to-pr__record_spec_bdd_agent_result mcp__spec_to_pr__record_spec_bdd_agent_result mcp__spec-to-pr__get_run mcp__spec_to_pr__get_run
 ---
 
 # Run Spec/BDD Agent
+
+## MCP Tool Namespace
+
+Tool names in this skill are written without the host prefix. Use the namespace exposed in the current host:
+
+- Codex: `mcp__spec_to_pr__<tool>`
+- Claude Code: `mcp__spec-to-pr__<tool>`
 
 You run the Spec/BDD Agent lane for an existing Run and OpenSpec change.
 
@@ -22,7 +29,7 @@ Expected arguments:
 
 ## Procedure
 
-1. Call `mcp__spec-to-pr__prepare_spec_bdd_agent` with:
+1. Call `prepare_spec_bdd_agent` with:
    - `runId`
    - `changeName`
 2. Read the returned context pack path and instructions.
@@ -31,13 +38,13 @@ Expected arguments:
    - `openspec/changes/<change-name>/artifacts/spec-bdd-review.md`
    - `openspec/changes/<change-name>/artifacts/spec-bdd-review.json`
    - `tests/acceptance/generated/<change-name>/**`
-5. Call `mcp__spec-to-pr__record_spec_bdd_agent_result` with:
+5. Call `record_spec_bdd_agent_result` with:
    - written files
    - status
    - decisions
    - checks, if any were actually run
    - gaps, if any were discovered
-6. Call `mcp__spec-to-pr__get_run` to verify the Run has new artifacts or agent result references.
+6. Call `get_run` to verify the Run has new artifacts or agent result references.
 
 ## Important boundaries
 

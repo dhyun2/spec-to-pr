@@ -3,10 +3,17 @@ name: Setup Observability
 description: Generate OpenTelemetry and log correlation artifacts for a spec-to-pr Run.
 disable-model-invocation: false
 argument-hint: "<run-id> [target=plugin|target-app|both] [collector-url]"
-allowed-tools: mcp__spec-to-pr__plan_observability mcp__spec-to-pr__generate_observability_config mcp__spec-to-pr__get_observability_report mcp__spec-to-pr__record_observability_review mcp__spec-to-pr__get_run
+allowed-tools: mcp__spec-to-pr__plan_observability mcp__spec_to_pr__plan_observability mcp__spec-to-pr__generate_observability_config mcp__spec_to_pr__generate_observability_config mcp__spec-to-pr__get_observability_report mcp__spec_to_pr__get_observability_report mcp__spec-to-pr__record_observability_review mcp__spec_to_pr__record_observability_review mcp__spec-to-pr__get_run mcp__spec_to_pr__get_run
 ---
 
 # Setup Observability
+
+## MCP Tool Namespace
+
+Tool names in this skill are written without the host prefix. Use the namespace exposed in the current host:
+
+- Codex: `mcp__spec_to_pr__<tool>`
+- Claude Code: `mcp__spec-to-pr__<tool>`
 
 This skill generates observability planning artifacts for a spec-to-pr Run.
 
@@ -38,11 +45,11 @@ Examples:
    - default: `both`
    - allowed: `plugin`, `target-app`, `both`
 3. If a collector URL is provided, use it as `collectorUrl`.
-4. Call `mcp__spec-to-pr__plan_observability`.
-5. Call `mcp__spec-to-pr__generate_observability_config`.
-6. Call `mcp__spec-to-pr__get_observability_report` with the returned report artifact ID.
-7. Call `mcp__spec-to-pr__get_run` to confirm artifacts and gaps were recorded.
-8. If reviewer output is available, call `mcp__spec-to-pr__record_observability_review`.
+4. Call `plan_observability`.
+5. Call `generate_observability_config`.
+6. Call `get_observability_report` with the returned report artifact ID.
+7. Call `get_run` to confirm artifacts and gaps were recorded.
+8. If reviewer output is available, call `record_observability_review`.
 9. Report:
    - report artifact ID
    - generated artifact IDs
@@ -54,11 +61,11 @@ Examples:
 
 Use only:
 
-- `mcp__spec-to-pr__plan_observability`
-- `mcp__spec-to-pr__generate_observability_config`
-- `mcp__spec-to-pr__get_observability_report`
-- `mcp__spec-to-pr__record_observability_review`
-- `mcp__spec-to-pr__get_run`
+- `plan_observability`
+- `generate_observability_config`
+- `get_observability_report`
+- `record_observability_review`
+- `get_run`
 
 Do not run shell commands.
 Do not edit application files.

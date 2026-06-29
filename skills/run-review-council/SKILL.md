@@ -3,10 +3,17 @@ name: Run Review Council
 description: Prepare context for the review-council agent and record its structured review result.
 disable-model-invocation: false
 argument-hint: "<run-id>"
-allowed-tools: mcp__spec-to-pr__prepare_review_council mcp__spec-to-pr__get_review_council_context mcp__spec-to-pr__record_review_council_result mcp__spec-to-pr__get_run
+allowed-tools: mcp__spec-to-pr__prepare_review_council mcp__spec_to_pr__prepare_review_council mcp__spec-to-pr__get_review_council_context mcp__spec_to_pr__get_review_council_context mcp__spec-to-pr__record_review_council_result mcp__spec_to_pr__record_review_council_result mcp__spec-to-pr__get_run mcp__spec_to_pr__get_run
 ---
 
 # Run Review Council
+
+## MCP Tool Namespace
+
+Tool names in this skill are written without the host prefix. Use the namespace exposed in the current host:
+
+- Codex: `mcp__spec_to_pr__<tool>`
+- Claude Code: `mcp__spec-to-pr__<tool>`
 
 You run the Review Council workflow for a spec-to-pr Run.
 
@@ -20,19 +27,19 @@ Expected argument:
 
 ## Procedure
 
-1. Call `mcp__spec-to-pr__prepare_review_council` with the Run ID.
+1. Call `prepare_review_council` with the Run ID.
 2. Read the returned:
    - context path
    - instructions path
    - context artifact ID
-3. Optionally call `mcp__spec-to-pr__get_review_council_context` to reload the context pack.
+3. Optionally call `get_review_council_context` to reload the context pack.
 4. Invoke or use the `review-council` subagent with that context.
 5. The subagent must return a JSON object matching ReviewCouncilResultSchema.
-6. Call `mcp__spec-to-pr__record_review_council_result` with:
+6. Call `record_review_council_result` with:
    - runId
    - contextArtifactId
    - result
-7. Call `mcp__spec-to-pr__get_run` to confirm:
+7. Call `get_run` to confirm:
    - review report artifact was added
    - review-council AgentResult was added
    - new gaps were added if needed

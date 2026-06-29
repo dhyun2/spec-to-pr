@@ -3,10 +3,17 @@ name: Generate PR Report
 description: Generate an evidence-driven PR/MR report body from a completed spec-to-pr Run.
 disable-model-invocation: false
 argument-hint: "<run-id> [--format markdown] [--review]"
-allowed-tools: mcp__spec-to-pr__get_run mcp__spec-to-pr__generate_pr_report mcp__spec-to-pr__get_pr_report mcp__spec-to-pr__record_pr_report_review
+allowed-tools: mcp__spec-to-pr__get_run mcp__spec_to_pr__get_run mcp__spec-to-pr__generate_pr_report mcp__spec_to_pr__generate_pr_report mcp__spec-to-pr__get_pr_report mcp__spec_to_pr__get_pr_report mcp__spec-to-pr__record_pr_report_review mcp__spec_to_pr__record_pr_report_review
 ---
 
 # Generate PR Report
+
+## MCP Tool Namespace
+
+Tool names in this skill are written without the host prefix. Use the namespace exposed in the current host:
+
+- Codex: `mcp__spec_to_pr__<tool>`
+- Claude Code: `mcp__spec-to-pr__<tool>`
 
 You generate an evidence-driven PR/MR report body for an existing spec-to-pr Run.
 
@@ -38,17 +45,17 @@ Expected arguments:
 
 ## Procedure
 
-1. Call `mcp__spec-to-pr__get_run`.
+1. Call `get_run`.
 2. Confirm the Run exists.
-3. Call `mcp__spec-to-pr__generate_pr_report`.
-4. Call `mcp__spec-to-pr__get_pr_report`.
+3. Call `generate_pr_report`.
+4. Call `get_pr_report`.
 5. If `--review` is present:
    - invoke the `pr-report-reviewer` subagent with:
      - report artifact ID
      - report markdown path or URI
      - view model artifact ID
      - Run ID
-   - record review using `mcp__spec-to-pr__record_pr_report_review`.
+   - record review using `record_pr_report_review`.
 6. Report:
    - PR report artifact ID
    - view model artifact ID

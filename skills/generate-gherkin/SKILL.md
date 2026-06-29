@@ -3,10 +3,17 @@ name: Generate Gherkin
 description: Generate Gherkin feature files and a test matrix for an OpenSpec change.
 disable-model-invocation: false
 argument-hint: "<run-id> <change-name>"
-allowed-tools: mcp__spec-to-pr__generate_gherkin_test_matrix mcp__spec-to-pr__get_run
+allowed-tools: mcp__spec-to-pr__generate_gherkin_test_matrix mcp__spec_to_pr__generate_gherkin_test_matrix mcp__spec-to-pr__get_run mcp__spec_to_pr__get_run
 ---
 
 # Generate Gherkin and Test Matrix
+
+## MCP Tool Namespace
+
+Tool names in this skill are written without the host prefix. Use the namespace exposed in the current host:
+
+- Codex: `mcp__spec_to_pr__<tool>`
+- Claude Code: `mcp__spec-to-pr__<tool>`
 
 You generate Gherkin feature files and a test matrix from an existing OpenSpec change.
 
@@ -20,10 +27,10 @@ Expected arguments:
 
 ## Procedure
 
-1. Call `mcp__spec-to-pr__generate_gherkin_test_matrix` with:
+1. Call `generate_gherkin_test_matrix` with:
    - `runId`
    - `changeName`
-2. Call `mcp__spec-to-pr__get_run` to confirm artifact count increased.
+2. Call `get_run` to confirm artifact count increased.
 3. Report generated files and scenario counts.
 
 ## Report

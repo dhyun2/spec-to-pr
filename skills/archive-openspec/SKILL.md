@@ -3,10 +3,17 @@ name: Archive OpenSpec
 description: Manually archive an OpenSpec change after the PR/MR has been merged.
 disable-model-invocation: false
 argument-hint: "[--merge-confirmed | --check-remote-once] [--execute] [--run <run-id>] [--change <change-name>]"
-allowed-tools: mcp__spec-to-pr__get_run mcp__spec-to-pr__resolve_archive_target mcp__spec-to-pr__record_user_merge_attestation mcp__spec-to-pr__plan_openspec_archive mcp__spec-to-pr__check_review_request_status_once mcp__spec-to-pr__run_openspec_archive mcp__spec-to-pr__get_openspec_archive_report
+allowed-tools: mcp__spec-to-pr__get_run mcp__spec_to_pr__get_run mcp__spec-to-pr__resolve_archive_target mcp__spec_to_pr__resolve_archive_target mcp__spec-to-pr__record_user_merge_attestation mcp__spec_to_pr__record_user_merge_attestation mcp__spec-to-pr__plan_openspec_archive mcp__spec_to_pr__plan_openspec_archive mcp__spec-to-pr__check_review_request_status_once mcp__spec_to_pr__check_review_request_status_once mcp__spec-to-pr__run_openspec_archive mcp__spec_to_pr__run_openspec_archive mcp__spec-to-pr__get_openspec_archive_report mcp__spec_to_pr__get_openspec_archive_report
 ---
 
 # Archive OpenSpec
+
+## MCP Tool Namespace
+
+Tool names in this skill are written without the host prefix. Use the namespace exposed in the current host:
+
+- Codex: `mcp__spec_to_pr__<tool>`
+- Claude Code: `mcp__spec-to-pr__<tool>`
 
 You archive an OpenSpec change only after a PR/MR has been merged.
 
@@ -42,7 +49,7 @@ If `--run` and `--change` are provided, use them.
 
 If not provided:
 
-1. Call `mcp__spec-to-pr__resolve_archive_target`.
+1. Call `resolve_archive_target`.
 2. Prefer the current workflow Run if the caller can infer it from conversation context by passing `--run`.
 3. Otherwise let the resolver find the latest Run with a published PR/MR and an unarchived OpenSpec change.
 4. If exactly one target is returned, use it.
@@ -52,15 +59,15 @@ If not provided:
 ## Procedure
 
 1. Resolve the archive target.
-2. Call `mcp__spec-to-pr__get_run` with the resolved Run ID.
+2. Call `get_run` with the resolved Run ID.
 3. Confirm the Run contains a publishing result from Task 31.
 4. Confirm the Run has a PR/MR URL.
 5. If `--merge-confirmed` is present or the user said the PR/MR was merged:
-   - call `mcp__spec-to-pr__record_user_merge_attestation`.
+   - call `record_user_merge_attestation`.
 6. If `--check-remote-once` is present:
-   - call `mcp__spec-to-pr__check_review_request_status_once`.
+   - call `check_review_request_status_once`.
    - continue only if status is `merged`.
-7. Call `mcp__spec-to-pr__plan_openspec_archive`.
+7. Call `plan_openspec_archive`.
 8. Report:
    - merge evidence
    - open blocker gaps
@@ -68,8 +75,8 @@ If not provided:
    - files expected to move or change
    - whether execution is allowed
 9. If `--execute` is present or the user clearly asked to archive now, and the plan is executable:
-   - call `mcp__spec-to-pr__run_openspec_archive` with `yes: true`.
-   - call `mcp__spec-to-pr__get_openspec_archive_report`.
+   - call `run_openspec_archive` with `yes: true`.
+   - call `get_openspec_archive_report`.
 10. If execution was not requested:
 
 - stop after the plan.

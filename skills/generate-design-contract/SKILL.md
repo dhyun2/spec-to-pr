@@ -3,10 +3,17 @@ name: Generate Design Contract
 description: Generate a Figma design contract and design-system mapping for a spec-to-pr Run.
 disable-model-invocation: false
 argument-hint: "<run-id> <change-name> <figma-inventory-artifact-id>"
-allowed-tools: mcp__spec-to-pr__generate_figma_design_contract mcp__spec-to-pr__get_run
+allowed-tools: mcp__spec-to-pr__generate_figma_design_contract mcp__spec_to_pr__generate_figma_design_contract mcp__spec-to-pr__get_run mcp__spec_to_pr__get_run
 ---
 
 # Generate Figma Design Contract
+
+## MCP Tool Namespace
+
+Tool names in this skill are written without the host prefix. Use the namespace exposed in the current host:
+
+- Codex: `mcp__spec_to_pr__<tool>`
+- Claude Code: `mcp__spec-to-pr__<tool>`
 
 You generate a design implementation contract from an existing Figma design inventory artifact.
 
@@ -32,11 +39,11 @@ Expected arguments:
 
 ## Procedure
 
-1. Call `mcp__spec-to-pr__generate_figma_design_contract` with:
+1. Call `generate_figma_design_contract` with:
    - `runId`
    - `changeName`
    - `figmaInventoryArtifactId`
-2. Call `mcp__spec-to-pr__get_run` to confirm:
+2. Call `get_run` to confirm:
    - design contract artifacts were added
    - design gaps were recorded when mappings are missing
 3. Report:

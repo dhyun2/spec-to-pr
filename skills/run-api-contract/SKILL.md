@@ -3,10 +3,17 @@ name: Run API Contract Agent
 description: Prepare and run the API Contract Agent lane for a spec-to-pr Run.
 disable-model-invocation: false
 argument-hint: "<run-id> <worktree-path> <base-sha>"
-allowed-tools: mcp__spec-to-pr__prepare_api_contract_agent mcp__spec-to-pr__get_api_contract_agent_context mcp__spec-to-pr__record_api_contract_agent_result mcp__spec-to-pr__get_run
+allowed-tools: mcp__spec-to-pr__prepare_api_contract_agent mcp__spec_to_pr__prepare_api_contract_agent mcp__spec-to-pr__get_api_contract_agent_context mcp__spec_to_pr__get_api_contract_agent_context mcp__spec-to-pr__record_api_contract_agent_result mcp__spec_to_pr__record_api_contract_agent_result mcp__spec-to-pr__get_run mcp__spec_to_pr__get_run
 ---
 
 # Run API Contract Agent
+
+## MCP Tool Namespace
+
+Tool names in this skill are written without the host prefix. Use the namespace exposed in the current host:
+
+- Codex: `mcp__spec_to_pr__<tool>`
+- Claude Code: `mcp__spec-to-pr__<tool>`
 
 You run the API Contract Agent lane.
 
@@ -24,7 +31,7 @@ Expected arguments:
 
 ## Procedure
 
-1. Call `mcp__spec-to-pr__prepare_api_contract_agent` with:
+1. Call `prepare_api_contract_agent` with:
    - `runId`
    - `worktreePath`
    - `baseSha`
@@ -39,11 +46,11 @@ Expected arguments:
    - `api-artifacts.json`
 5. The subagent must work only inside the API agent worktree.
 6. The subagent must return an implementation AgentResult.
-7. Call `mcp__spec-to-pr__record_api_contract_agent_result` with:
+7. Call `record_api_contract_agent_result` with:
    - `runId`
    - `contextArtifactId`
    - `result`
-8. Call `mcp__spec-to-pr__get_run` to confirm the result was recorded.
+8. Call `get_run` to confirm the result was recorded.
 
 ## What the Agent should do
 

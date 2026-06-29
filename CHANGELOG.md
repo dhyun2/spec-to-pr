@@ -5,6 +5,22 @@ All notable changes to spec-to-pr are documented in this file.
 The project follows semantic versioning for Claude Code plugin releases. Release tags should use
 the Claude plugin tag format, for example `spec-to-pr--v0.1.0`.
 
+## 0.1.4 - 2026-06-29
+
+### Fixed
+
+- Added Codex MCP namespace aliases to shared skills so Codex can call
+  `mcp__spec_to_pr__*` tools while Claude Code can continue using
+  `mcp__spec-to-pr__*` tools.
+- Reworded skill procedures to use host-neutral MCP tool names and avoid steering Codex toward
+  Claude-only tool prefixes.
+- Removed a stray `Task` token from the accessibility gate skill allowed-tools list.
+
+### Changed
+
+- Extended Codex plugin validation and layout tests to catch missing Codex MCP aliases before
+  release.
+
 ## 0.1.3 - 2026-06-29
 
 ### Added

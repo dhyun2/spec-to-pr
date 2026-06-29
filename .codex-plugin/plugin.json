@@ -1,6 +1,6 @@
 {
   "name": "spec-to-pr",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Evidence-driven Codex plugin for turning briefs, Figma designs, and OpenAPI contracts into verified pull requests.",
   "author": {
     "name": "Spec to PR Team",

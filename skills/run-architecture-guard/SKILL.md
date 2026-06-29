@@ -3,10 +3,17 @@ name: Run Architecture Guard
 description: Analyze FSD boundaries and generate source guard tests for a spec-to-pr Run.
 disable-model-invocation: false
 argument-hint: "<run-id>"
-allowed-tools: mcp__spec-to-pr__analyze_architecture_boundaries mcp__spec-to-pr__generate_source_guard_tests mcp__spec-to-pr__get_run
+allowed-tools: mcp__spec-to-pr__analyze_architecture_boundaries mcp__spec_to_pr__analyze_architecture_boundaries mcp__spec-to-pr__generate_source_guard_tests mcp__spec_to_pr__generate_source_guard_tests mcp__spec-to-pr__get_run mcp__spec_to_pr__get_run
 ---
 
 # Run Architecture Guard
+
+## MCP Tool Namespace
+
+Tool names in this skill are written without the host prefix. Use the namespace exposed in the current host:
+
+- Codex: `mcp__spec_to_pr__<tool>`
+- Claude Code: `mcp__spec-to-pr__<tool>`
 
 You run the deterministic architecture guard for an existing spec-to-pr Run.
 
@@ -20,7 +27,7 @@ Expected arguments:
 
 ## Procedure
 
-1. Call `mcp__spec-to-pr__analyze_architecture_boundaries` with:
+1. Call `analyze_architecture_boundaries` with:
    - `runId`
 2. Report:
    - violation count
@@ -28,10 +35,10 @@ Expected arguments:
    - major count
    - generated architecture gap IDs
    - architecture report artifact ID
-3. Call `mcp__spec-to-pr__generate_source_guard_tests` with:
+3. Call `generate_source_guard_tests` with:
    - `runId`
    - `force: false`
-4. Call `mcp__spec-to-pr__get_run` to confirm:
+4. Call `get_run` to confirm:
    - artifact count increased
    - architecture gaps are visible when violations exist
 

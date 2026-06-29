@@ -3,10 +3,17 @@ name: Figma Doctor
 description: Discover available Figma MCP providers and record their capabilities in a spec-to-pr Run.
 disable-model-invocation: false
 argument-hint: "[run-id]"
-allowed-tools: mcp__spec-to-pr__record_figma_mcp_capabilities mcp__spec-to-pr__get_figma_provider_policy
+allowed-tools: mcp__spec-to-pr__record_figma_mcp_capabilities mcp__spec_to_pr__record_figma_mcp_capabilities mcp__spec-to-pr__get_figma_provider_policy mcp__spec_to_pr__get_figma_provider_policy
 ---
 
 # Figma Doctor
+
+## MCP Tool Namespace
+
+Tool names in this skill are written without the host prefix. Use the namespace exposed in the current host:
+
+- Codex: `mcp__spec_to_pr__<tool>`
+- Claude Code: `mcp__spec-to-pr__<tool>`
 
 You verify Figma MCP capability only. Do not claim that Figma design intake or UI implementation is complete.
 
@@ -20,8 +27,8 @@ You verify Figma MCP capability only. Do not claim that Figma design intake or U
    - remote
    - plugin
    - unknown
-5. Call `mcp__spec-to-pr__record_figma_mcp_capabilities` with the observed providers and raw tool names.
-6. Call `mcp__spec-to-pr__get_figma_provider_policy`.
+5. Call `record_figma_mcp_capabilities` with the observed providers and raw tool names.
+6. Call `get_figma_provider_policy`.
 7. Report:
    - available providers
    - important tools found

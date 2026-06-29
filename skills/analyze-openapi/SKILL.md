@@ -4,10 +4,17 @@ summary: Register and analyze an OpenAPI source for a spec-to-pr Run.
 description: Snapshot an OpenAPI file source and analyze operations, schemas, security schemes, refs, and API gaps.
 disable-model-invocation: false
 argument-hint: "<run-id> <openapi-file-path>"
-allowed-tools: mcp__spec-to-pr__register_file_source mcp__spec-to-pr__analyze_openapi_source mcp__spec-to-pr__get_run
+allowed-tools: mcp__spec-to-pr__register_file_source mcp__spec_to_pr__register_file_source mcp__spec-to-pr__analyze_openapi_source mcp__spec_to_pr__analyze_openapi_source mcp__spec-to-pr__get_run mcp__spec_to_pr__get_run
 ---
 
 # Analyze OpenAPI
+
+## MCP Tool Namespace
+
+Tool names in this skill are written without the host prefix. Use the namespace exposed in the current host:
+
+- Codex: `mcp__spec_to_pr__<tool>`
+- Claude Code: `mcp__spec-to-pr__<tool>`
 
 You analyze only OpenAPI intake evidence.
 

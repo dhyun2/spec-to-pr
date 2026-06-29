@@ -5,7 +5,7 @@ import { z } from "zod";
 
 const ClaudePluginManifestSchema = z.object({
   name: z.literal("spec-to-pr"),
-  version: z.literal("0.1.3"),
+  version: z.literal("0.1.4"),
   license: z.literal("MIT"),
   skills: z.string().min(1),
   mcpServers: z.string().min(1),
@@ -13,17 +13,17 @@ const ClaudePluginManifestSchema = z.object({
 
 const MarketplaceSchema = z.object({
   name: z.literal("spec-to-pr"),
-  version: z.literal("0.1.3"),
+  version: z.literal("0.1.4"),
   plugins: z
     .array(
       z.object({
         name: z.literal("spec-to-pr"),
-        version: z.literal("0.1.3"),
+        version: z.literal("0.1.4"),
         license: z.literal("MIT"),
         source: z.object({
           source: z.literal("url"),
           url: z.literal("https://github.com/dhyun2/spec-to-pr.git"),
-          ref: z.literal("spec-to-pr--v0.1.3"),
+          ref: z.literal("spec-to-pr--v0.1.4"),
         }),
       }),
     )
@@ -32,7 +32,7 @@ const MarketplaceSchema = z.object({
 
 const CodexPluginManifestSchema = z.object({
   name: z.literal("spec-to-pr"),
-  version: z.literal("0.1.3"),
+  version: z.literal("0.1.4"),
   license: z.literal("MIT"),
   skills: z.literal("./skills/"),
   mcpServers: z.object({
@@ -177,6 +177,7 @@ describe("plugin layout", () => {
       expect(contents).not.toContain("disable-model-invocation: true");
       expect(contents).toMatch(/^---\n/);
       expect(contents).toContain("description:");
+      expect(contents).toContain("Codex: `mcp__spec_to_pr__<tool>`");
     }
   });
 
@@ -185,6 +186,7 @@ describe("plugin layout", () => {
     const contents = readFileSync(skillPath, "utf8");
 
     expect(contents).toContain("mcp__spec-to-pr__publish_review_request");
+    expect(contents).toContain("mcp__spec_to_pr__publish_review_request");
     expect(contents).toContain("confirm: true");
     expect(contents).toContain("draft PR/MR");
     expect(contents).toContain("Do not merge");

@@ -90,6 +90,21 @@ for (const skillName of readdirSync(path.join(root, "skills"))) {
   if (typeof frontmatter.description !== "string") {
     throw new Error(`Codex skill ${skillName} is missing description`);
   }
+  const allowedTools = frontmatter["allowed-tools"];
+  if (typeof allowedTools === "string" && allowedTools.includes("mcp__spec-to-pr__")) {
+    for (const tool of allowedTools
+      .split(/\s+/)
+      .filter((token) => token.startsWith("mcp__spec-to-pr__"))) {
+      const codexTool = tool.replace("mcp__spec-to-pr__", "mcp__spec_to_pr__");
+      if (!allowedTools.includes(codexTool)) {
+        throw new Error(`Codex skill ${skillName} is missing Codex MCP alias ${codexTool}`);
+      }
+    }
+  }
+  const contents = readFileSync(skillPath, "utf8");
+  if (contents.includes("mcp__spec-to-pr__") && !contents.includes("mcp__spec_to_pr__")) {
+    throw new Error(`Codex skill ${skillName} references Claude MCP tools without Codex aliases`);
+  }
 }
 
 console.log("Codex plugin validation passed");
