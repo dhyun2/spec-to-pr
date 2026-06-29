@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { decideReportStatus } from "../../src/pr-report/pr-report-decision-policy.js";
-import type { ArtifactRef, CheckResult, Gap } from "../../src/runtime/index.js";
+import type { ArtifactRef, CheckResult, Gap, SourceRef } from "../../src/runtime/index.js";
 
 describe("PR report decision policy", () => {
   it("blocks when no verification checks have run", () => {
@@ -108,6 +108,22 @@ describe("PR report decision policy", () => {
       checks: requiredChecks(),
       gaps: [],
       artifacts: [observabilityArtifact()],
+    });
+
+    expect(decision).toBe("ready");
+  });
+
+  it("does not require UI security observability or OpenSpec gates for instruction-only docs scope", () => {
+    const decision = decideReportStatus({
+      checks: [
+        passedCheck("chk_11111111111111111111111111111111", "lint"),
+        passedCheck("chk_22222222222222222222222222222222", "typecheck"),
+        passedCheck("chk_33333333333333333333333333333333", "build"),
+        passedCheck("chk_44444444444444444444444444444444", "unit"),
+      ],
+      gaps: [],
+      artifacts: [],
+      sources: [instructionSource()],
     });
 
     expect(decision).toBe("ready");
@@ -221,6 +237,21 @@ function visualReportArtifact(): ArtifactRef {
     metadata: {
       reportKind: "visual-report-json",
     },
+  };
+}
+
+function instructionSource(): SourceRef {
+  return {
+    id: "src_11111111111111111111111111111111",
+    kind: "instruction",
+    locator: {
+      type: "inline",
+      label: "user-request",
+      mediaType: "text/plain; charset=utf-8",
+    },
+    digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    capturedAt: "2026-06-23T00:00:00.000Z",
+    metadata: {},
   };
 }
 

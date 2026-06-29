@@ -48,10 +48,13 @@ export function buildTraceNodes(run: RunManifest): BuiltTraceNodes {
 
 function isBriefRequirementEvidence(evidence: EvidenceRef): boolean {
   return (
-    evidence.metadata["adapter"] === "brief-adapter-v1" &&
-    ["requirement", "policy", "api", "design", "test"].includes(
-      String(evidence.metadata["itemType"] ?? ""),
-    )
+    (evidence.metadata["adapter"] === "brief-adapter-v1" &&
+      ["requirement", "policy", "api", "design", "test"].includes(
+        String(evidence.metadata["itemType"] ?? ""),
+      )) ||
+    (evidence.location.type === "inline-text" &&
+      evidence.metadata["parserVersion"] === "intake-request-parser-v1" &&
+      evidence.metadata["itemType"] === "instruction")
   );
 }
 
@@ -82,7 +85,11 @@ function isTraceableArtifact(artifact: ArtifactRef): boolean {
 }
 
 function createRequirementNode(evidence: EvidenceRef): TraceNode {
-  const label = evidence.summary;
+  const isInstruction = evidence.metadata["itemType"] === "instruction";
+  const label = isInstruction ? summarizeInstructionLabel(evidence) : evidence.summary;
+  const summary = isInstruction
+    ? compactText(evidence.excerpt ?? evidence.summary, 2_000)
+    : (evidence.excerpt ?? evidence.summary);
   const { keywords } = extractKeywords(
     [
       evidence.summary,
@@ -95,15 +102,37 @@ function createRequirementNode(evidence: EvidenceRef): TraceNode {
     id: createTraceNodeId(),
     kind: "requirement",
     label,
-    summary: evidence.excerpt ?? evidence.summary,
+    summary,
     evidenceIds: [evidence.id],
     sourceIds: [evidence.sourceId],
     keywords,
     metadata: compactMetadata({
       itemType: evidence.metadata["itemType"],
       headingPath: evidence.metadata["headingPath"],
+      parserVersion: evidence.metadata["parserVersion"],
+      sourceKind: isInstruction ? "instruction" : undefined,
     }),
   });
+}
+
+function summarizeInstructionLabel(evidence: EvidenceRef): string {
+  const text = compactText(evidence.excerpt ?? evidence.summary, 300);
+  const firstLine = text
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+
+  return compactText(firstLine ?? evidence.summary, 300);
+}
+
+function compactText(text: string, maxLength: number): string {
+  const normalized = text.trim().replace(/\s+/g, " ");
+
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
 }
 
 function createApiOperationNode(evidence: EvidenceRef): TraceNode {

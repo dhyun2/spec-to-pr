@@ -1,6 +1,7 @@
 import type { CheckResult } from "../runtime/check.js";
 import type { Gap } from "../runtime/gap.js";
 import type { ArtifactRef } from "../runtime/artifact.js";
+import type { SourceRef } from "../runtime/source.js";
 import type { ReportDecision } from "./pr-report-model.js";
 
 const MANDATORY_CHECK_KINDS = ["lint", "typecheck", "build", "openspec", "security"] as const;
@@ -11,10 +12,13 @@ export function decideReportStatus(input: {
   checks: CheckResult[];
   gaps: Gap[];
   artifacts?: ArtifactRef[];
+  sources?: SourceRef[];
 }): ReportDecision {
+  const requirements = buildReportGateRequirements(input);
   const mandatoryFailures = input.checks.some(
     (check) =>
-      MANDATORY_CHECK_KINDS.some((kind) => kind === check.kind) && check.status === "failed",
+      requiredCheckKinds(requirements).some((kind) => kind === check.kind) &&
+      check.status === "failed",
   );
 
   if (mandatoryFailures) {
@@ -33,7 +37,7 @@ export function decideReportStatus(input: {
     return "blocked";
   }
 
-  if (hasFigmaVisualEvidence(input.artifacts ?? []) && !hasVisualComparisonEvidence(input)) {
+  if (requirements.figma && !hasVisualComparisonEvidence(input)) {
     return "blocked";
   }
 
@@ -61,10 +65,12 @@ export function decideReportStatus(input: {
 function hasMissingRequiredGate(input: {
   checks: CheckResult[];
   artifacts?: ArtifactRef[];
+  sources?: SourceRef[];
 }): boolean {
   const artifacts = input.artifacts ?? [];
+  const requirements = buildReportGateRequirements(input);
 
-  if (!MANDATORY_CHECK_KINDS.every((kind) => hasPassedCheck(input.checks, kind))) {
+  if (!requiredCheckKinds(requirements).every((kind) => hasPassedCheck(input.checks, kind))) {
     return true;
   }
 
@@ -72,23 +78,73 @@ function hasMissingRequiredGate(input: {
     return true;
   }
 
-  if (!hasAccessibilityEvidence(input)) {
+  if (requirements.accessibility && !hasAccessibilityEvidence(input)) {
     return true;
   }
 
-  if (!hasPerformanceEvidence(input)) {
+  if (requirements.performance && !hasPerformanceEvidence(input)) {
     return true;
   }
 
-  if (!hasObservabilityEvidence(artifacts)) {
+  if (requirements.observability && !hasObservabilityEvidence(artifacts)) {
     return true;
   }
 
-  if (hasFigmaVisualEvidence(artifacts)) {
+  if (requirements.figma) {
     return !hasRequiredFigmaEvidence(artifacts) || !hasVisualComparisonEvidence(input);
   }
 
   return false;
+}
+
+export type ReportGateRequirements = {
+  runtime: true;
+  functional: true;
+  openspec: boolean;
+  security: boolean;
+  accessibility: boolean;
+  performance: boolean;
+  observability: boolean;
+  figma: boolean;
+};
+
+export function buildReportGateRequirements(input: {
+  artifacts?: ArtifactRef[];
+  sources?: SourceRef[];
+}): ReportGateRequirements {
+  const artifacts = input.artifacts ?? [];
+  const sources = input.sources ?? [];
+  const hasSourceProfile = input.sources !== undefined;
+  const hasFigma =
+    hasFigmaVisualEvidence(artifacts) || sources.some((source) => source.kind === "figma");
+  const hasOpenSpecScope =
+    !hasSourceProfile ||
+    sources.some((source) => ["brief", "figma", "openapi"].includes(source.kind)) ||
+    artifacts.some((artifact) =>
+      ["openspec", "traceability-graph", "traceability-matrix", "gherkin-feature"].includes(
+        artifact.kind,
+      ),
+    );
+  const strictWhenUnprofiled = !hasSourceProfile;
+
+  return {
+    runtime: true,
+    functional: true,
+    openspec: hasOpenSpecScope,
+    security: strictWhenUnprofiled || hasSecurityEvidence(artifacts),
+    accessibility: strictWhenUnprofiled || hasFigma,
+    performance: strictWhenUnprofiled || hasFigma,
+    observability: strictWhenUnprofiled || hasObservabilityEvidence(artifacts),
+    figma: hasFigma,
+  };
+}
+
+function requiredCheckKinds(requirements: ReportGateRequirements): Array<CheckResult["kind"]> {
+  return MANDATORY_CHECK_KINDS.filter((kind) => {
+    if (kind === "openspec") return requirements.openspec;
+    if (kind === "security") return requirements.security;
+    return true;
+  });
 }
 
 function hasPassedCheck(checks: CheckResult[], kind: CheckResult["kind"]): boolean {
@@ -124,6 +180,14 @@ function hasObservabilityEvidence(artifacts: ArtifactRef[]): boolean {
     (artifact) =>
       artifact.kind === "telemetry-config" &&
       artifact.metadata["reportKind"] === "observability-report-json",
+  );
+}
+
+function hasSecurityEvidence(artifacts: ArtifactRef[]): boolean {
+  return artifacts.some(
+    (artifact) =>
+      artifact.kind === "agent-result-report" &&
+      ["security-hardening", "security-report"].includes(String(artifact.metadata["reportKind"])),
   );
 }
 

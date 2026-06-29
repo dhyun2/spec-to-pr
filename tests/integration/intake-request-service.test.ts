@@ -105,4 +105,31 @@ describe("IntakeRequestService", () => {
     expect(loaded.artifacts[0]?.kind).toBe("parsed-intake-request");
     expect(loaded.artifacts[0]?.evidenceIds).toEqual([result.evidence.id]);
   });
+
+  it("parses app targets inline endpoint notes and Korean branch hints from natural language", async () => {
+    const run = await runService.createRun({
+      projectRoot,
+    });
+
+    const requestText = [
+      "apps/rangepro 레슨권 등록 화면 작업해줘. docs 폴더의 plan.md도 참고.",
+      "API는 GET /members, POST /members/{userNo}, DELETE /members/{userNo}/lesson-vouchers 사용.",
+      "qa인 지금 브렌치로 MR 올려도 되는데 diff 이미지는 MR 본문에 넣지 말고 artifact로만 남겨.",
+    ].join("\n");
+
+    const result = await intakeRequestService.parseIntakeRequest({
+      runId: run.id,
+      requestText,
+    });
+
+    expect(result.parsed.filePaths).toEqual(expect.arrayContaining(["apps/rangepro", "plan.md"]));
+    expect(result.parsed.inlineOpenApiBlocks[0]).toContain("GET /members");
+    expect(result.parsed.inlineOpenApiBlocks[0]).toContain("POST /members/{userNo}");
+    expect(result.parsed.branchPolicy).toMatchObject({
+      targetBranch: "qa",
+    });
+    expect(result.parsed.visualPreviewPolicy).toMatchObject({
+      includeDiff: false,
+    });
+  });
 });

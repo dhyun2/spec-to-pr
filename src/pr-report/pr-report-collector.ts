@@ -2,7 +2,7 @@ import type { RunManifest } from "../run/index.js";
 import type { ArtifactRef } from "../runtime/artifact.js";
 import type { CheckResult } from "../runtime/check.js";
 import type { Gap } from "../runtime/gap.js";
-import { decideReportStatus } from "./pr-report-decision-policy.js";
+import { buildReportGateRequirements, decideReportStatus } from "./pr-report-decision-policy.js";
 import {
   PrReportViewModelSchema,
   type ReportLocale,
@@ -25,6 +25,11 @@ export function collectPrReportViewModel(input: {
     checks: allChecks,
     gaps: input.run.gaps,
     artifacts: input.run.artifacts,
+    sources: input.run.sources,
+  });
+  const gateRequirements = buildReportGateRequirements({
+    artifacts: input.run.artifacts,
+    sources: input.run.sources,
   });
 
   return PrReportViewModelSchema.parse({
@@ -37,7 +42,7 @@ export function collectPrReportViewModel(input: {
     summaryBullets: summaryBulletsForRun(input.run, input.locale ?? "ko"),
     runMetadata: runMetadata(input.run),
     reviewGuide: reviewGuide(input.locale ?? "ko"),
-    gateRows: gateRows(input.run.artifacts, allChecks),
+    gateRows: gateRows(input.run.artifacts, allChecks, gateRequirements),
     specificationLinks: specificationLinks(input.run.artifacts),
     traceabilityRows: [],
     changeScopeRows: changeScopeRows(input.run.artifacts),
@@ -144,9 +149,11 @@ function archivePlan(locale: ReportLocale): string[] {
   ];
 }
 
-function gateRows(artifacts: ArtifactRef[], checks: CheckResult[]): ReportGateRow[] {
-  const hasFigma = hasFigmaEvidence(artifacts);
-
+function gateRows(
+  artifacts: ArtifactRef[],
+  checks: CheckResult[],
+  requirements: ReturnType<typeof buildReportGateRequirements>,
+): ReportGateRow[] {
   return [
     {
       gate: "Runtime verification",
@@ -164,70 +171,80 @@ function gateRows(artifacts: ArtifactRef[], checks: CheckResult[]): ReportGateRo
     },
     {
       gate: "OpenSpec / specification",
-      required: true,
-      ...statusForCheckKinds(checks, ["openspec"], "openspec"),
+      required: requirements.openspec,
+      ...(requirements.openspec
+        ? statusForCheckKinds(checks, ["openspec"], "openspec")
+        : notApplicableGateStatus("No OpenSpec source profile was recorded for this run.")),
     },
     {
       gate: "Figma provider capability",
-      required: hasFigma,
+      required: requirements.figma,
       ...artifactGateStatus({
         artifacts,
         kinds: ["figma-mcp-capability-report", "figma-provider-policy"],
-        notApplicableWhen: !hasFigma,
+        notApplicableWhen: !requirements.figma,
         notRunNote: "Figma evidence exists, but provider capability was not recorded.",
         passNote: "Figma provider capability artifact is recorded.",
       }),
     },
     {
       gate: "Figma design inventory",
-      required: hasFigma,
+      required: requirements.figma,
       ...artifactGateStatus({
         artifacts,
         kinds: ["figma-design-inventory", "figma-provider-comparison"],
-        notApplicableWhen: !hasFigma,
+        notApplicableWhen: !requirements.figma,
         notRunNote: "Figma evidence exists, but design-system inventory was not recorded.",
         passNote: "Figma design-system inventory artifact is recorded.",
       }),
     },
     {
       gate: "Visual regression",
-      required: hasFigma,
-      ...visualGateStatus({ artifacts, checks, hasFigma }),
+      required: requirements.figma,
+      ...visualGateStatus({ artifacts, checks, hasFigma: requirements.figma }),
     },
     {
       gate: "Accessibility",
-      required: true,
-      ...statusForCheckKinds(checks, ["accessibility"], "accessibility"),
+      required: requirements.accessibility,
+      ...(requirements.accessibility
+        ? statusForCheckKinds(checks, ["accessibility"], "accessibility")
+        : notApplicableGateStatus("No UI or Figma source profile was recorded for this run.")),
     },
     {
       gate: "Performance / Web Vitals",
-      required: true,
-      ...combinedGateStatus({
-        checkStatus: statusForCheckKinds(checks, ["performance"], "performance"),
-        artifactStatus: artifactGateStatus({
-          artifacts,
-          kinds: ["performance-report"],
-          notApplicableWhen: false,
-          notRunNote: "No performance report artifact was recorded.",
-          passNote: "Performance report artifact is recorded.",
-        }),
-      }),
+      required: requirements.performance,
+      ...(requirements.performance
+        ? combinedGateStatus({
+            checkStatus: statusForCheckKinds(checks, ["performance"], "performance"),
+            artifactStatus: artifactGateStatus({
+              artifacts,
+              kinds: ["performance-report"],
+              notApplicableWhen: false,
+              notRunNote: "No performance report artifact was recorded.",
+              passNote: "Performance report artifact is recorded.",
+            }),
+          })
+        : notApplicableGateStatus("No UI or Figma source profile was recorded for this run.")),
     },
     {
       gate: "Security hardening",
-      required: true,
-      ...statusForCheckKinds(checks, ["security"], "security"),
+      required: requirements.security,
+      ...(requirements.security
+        ? statusForCheckKinds(checks, ["security"], "security")
+        : notApplicableGateStatus("No security source profile was recorded for this run.")),
     },
     {
       gate: "Observability",
-      required: true,
-      ...artifactGateStatus({
-        artifacts,
-        kinds: ["telemetry-config"],
-        notApplicableWhen: false,
-        notRunNote: "No observability report artifact was recorded.",
-        passNote: "Observability report artifact is recorded.",
-      }),
+      required: requirements.observability,
+      ...(requirements.observability
+        ? artifactGateStatus({
+            artifacts,
+            kinds: ["telemetry-config"],
+            notApplicableWhen: false,
+            notRunNote: "No observability report artifact was recorded.",
+            passNote: "Observability report artifact is recorded.",
+          })
+        : notApplicableGateStatus("No observability source profile was recorded for this run.")),
     },
   ];
 }
@@ -365,6 +382,16 @@ function statusForCheckKinds(
     status: "pass",
     evidence: matchingChecks.map((check) => check.name),
     notes: "Recorded checks passed.",
+  };
+}
+
+function notApplicableGateStatus(
+  notes: string,
+): Pick<ReportGateRow, "status" | "evidence" | "notes"> {
+  return {
+    status: "not-applicable",
+    evidence: [],
+    notes,
   };
 }
 

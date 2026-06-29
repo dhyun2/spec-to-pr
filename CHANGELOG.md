@@ -12,6 +12,17 @@ the Claude plugin tag format, for example `spec-to-pr--v0.1.0`.
 - Added release publishing scripts that bundle verification, package dry-run, git push, Claude
   plugin tagging, and local Claude/Codex marketplace updates.
 
+### Changed
+
+- Promoted captured instruction evidence into traceability requirement nodes so OpenSpec and Gherkin
+  generation can use the original user request instead of only brief adapter output.
+- Expanded intake parsing for workspace targets, inline endpoint notes, Korean branch hints, and
+  visual preview constraints.
+- Made PR report gate requiredness source-aware so instruction-only/docs scopes do not require
+  UI-only, observability, security, or OpenSpec gates by default.
+- Applied parsed visual preview constraints during publishing so diff images can remain local
+  artifacts without being uploaded into the PR/MR body.
+
 ## 0.1.6 - 2026-06-29
 
 ### Added

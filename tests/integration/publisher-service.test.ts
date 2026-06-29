@@ -198,6 +198,46 @@ describe("PublisherService", () => {
 
     expect(loadedRun.agentResults.some((result) => result.kind === "publishing")).toBe(false);
   });
+
+  it("honors intake constraints that keep visual diff images out of the PR body", async () => {
+    const run = await runService.createRun({
+      projectRoot,
+    });
+    await markRunReadyForPublish(run.id);
+    await addVisualEvidence(run.id);
+    await addParsedIntakePolicy(run.id, {
+      includeDiff: false,
+    });
+
+    const report = await prReportService.generatePrReport({
+      runId: run.id,
+    });
+
+    expect(report.decision).toBe("ready");
+
+    await publisherService.publish({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      pushBranch: false,
+      confirm: true,
+    });
+
+    expect(githubPublisher.uploadedAssets[0]?.map((asset) => asset.role)).toEqual([
+      "figma",
+      "browser",
+    ]);
+    expect(githubPublisher.createdPayloads[0]?.body).toContain(
+      "https://github.example/assets/figma.png",
+    );
+    expect(githubPublisher.createdPayloads[0]?.body).toContain(
+      "https://github.example/assets/browser.png",
+    );
+    expect(githubPublisher.createdPayloads[0]?.body).not.toContain(
+      "https://github.example/assets/diff.png",
+    );
+  });
 });
 
 async function markRunReadyForPublish(runId: string): Promise<void> {
@@ -458,6 +498,57 @@ async function addVisualEvidence(runId: string): Promise<void> {
   );
 }
 
+async function addParsedIntakePolicy(
+  runId: string,
+  visualPreviewPolicy: { includeDiff?: boolean },
+): Promise<void> {
+  const run = await store.get(runId);
+  const timestamp = "2026-06-23T00:00:00.900Z";
+  const artifact = await writeArtifact({
+    id: "art_66666666666666666666666666666666",
+    kind: "parsed-intake-request",
+    label: "parsed-intake-request.json",
+    reportKind: "parsed-intake-request",
+    content: Buffer.from(
+      `${JSON.stringify(
+        {
+          runId,
+          generatedAt: timestamp,
+          parsed: {
+            parserVersion: "intake-request-parser-v1",
+            figmaUrls: [],
+            urls: [],
+            filePaths: [],
+            ticketUrls: [],
+            inlineOpenApiBlocks: [],
+            branchPolicy: {},
+            validationCommands: [],
+            constraints: ["diff 이미지는 MR 본문에 넣지 말고 artifact로만 남겨."],
+            publishPolicy: {},
+            archivePolicy: {},
+            targetHints: [],
+            visualPreviewPolicy,
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    ),
+    mediaType: "application/json",
+    timestamp,
+  });
+
+  await store.save(
+    {
+      ...run,
+      revision: run.revision + 1,
+      updatedAt: timestamp,
+      artifacts: [...run.artifacts, artifact],
+    },
+    run.revision,
+  );
+}
+
 async function writeArtifact(input: {
   id: string;
   kind:
@@ -468,7 +559,8 @@ async function writeArtifact(input: {
     | "screenshot"
     | "visual-diff"
     | "visual-report"
-    | "telemetry-config";
+    | "telemetry-config"
+    | "parsed-intake-request";
   label: string;
   reportKind: string;
   content: Buffer;
@@ -503,6 +595,7 @@ async function writeArtifact(input: {
 class FakePublisher implements ReviewRequestPublisher {
   public readonly createdPayloads: ReviewRequestPayload[] = [];
   public readonly updatedBodies: string[] = [];
+  public readonly uploadedAssets: Array<Array<{ role: string }>> = [];
 
   public constructor(private readonly host: "github" | "gitlab") {}
 
@@ -510,30 +603,16 @@ class FakePublisher implements ReviewRequestPublisher {
     return undefined;
   }
 
-  public async publishAssets() {
-    return [
-      {
-        artifactId: "art_22222222222222222222222222222222",
-        role: "figma" as const,
-        targetId: "home-desktop",
-        label: "Figma",
-        url: "https://github.example/assets/figma.png",
-      },
-      {
-        artifactId: "art_33333333333333333333333333333333",
-        role: "browser" as const,
-        targetId: "home-desktop",
-        label: "Browser",
-        url: "https://github.example/assets/browser.png",
-      },
-      {
-        artifactId: "art_44444444444444444444444444444444",
-        role: "diff" as const,
-        targetId: "home-desktop",
-        label: "Diff",
-        url: "https://github.example/assets/diff.png",
-      },
-    ];
+  public async publishAssets(input: { assets: Array<{ role: string; artifactId: string }> }) {
+    this.uploadedAssets.push(input.assets.map((asset) => ({ role: asset.role })));
+
+    return input.assets.map((asset) => ({
+      artifactId: asset.artifactId,
+      role: asset.role as "figma" | "browser" | "diff" | "overlay",
+      targetId: "home-desktop",
+      label: asset.role === "figma" ? "Figma" : asset.role === "browser" ? "Browser" : "Diff",
+      url: `https://github.example/assets/${asset.role}.png`,
+    }));
   }
 
   public async create(input: {

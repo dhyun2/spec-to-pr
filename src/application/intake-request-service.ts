@@ -54,6 +54,14 @@ export const ArchivePolicySchema = z
   })
   .strict();
 
+export const VisualPreviewPolicySchema = z
+  .object({
+    includeFigma: z.boolean().optional(),
+    includeBrowser: z.boolean().optional(),
+    includeDiff: z.boolean().optional(),
+  })
+  .strict();
+
 export const ParsedIntakeRequestSchema = z
   .object({
     parserVersion: z.literal(PARSER_VERSION),
@@ -67,6 +75,7 @@ export const ParsedIntakeRequestSchema = z
     constraints: z.array(z.string().trim().min(1)),
     publishPolicy: PublishPolicySchema,
     archivePolicy: ArchivePolicySchema,
+    visualPreviewPolicy: VisualPreviewPolicySchema,
     targetHints: z.array(z.string().trim().min(1)),
   })
   .strict();
@@ -269,6 +278,7 @@ function parseRequestText(requestText: string): ParsedIntakeRequest {
     constraints,
     publishPolicy: extractPublishPolicy(text),
     archivePolicy: extractArchivePolicy(text),
+    visualPreviewPolicy: extractVisualPreviewPolicy(text),
     targetHints: extractTargetHints(text, filePaths, figmaUrls),
   });
 }
@@ -320,25 +330,58 @@ function safeHostname(url: string): string {
 
 function extractFilePaths(text: string): string[] {
   const paths = new Set<string>();
-  const matches = text.matchAll(
+  const fileMatches = text.matchAll(
     /(?<![A-Za-z0-9_@./-])((?:\.{1,2}\/)?[A-Za-z0-9_@./-]+\.(?:md|mdx|txt|yaml|yml|json|jsonc|feature|pdf|html|htm))(?![A-Za-z0-9_@./-])/g,
   );
 
-  for (const match of matches) {
-    const rawPath = match[1];
+  for (const match of fileMatches) {
+    addPath(paths, match[1]);
+  }
 
-    if (rawPath === undefined) {
-      continue;
-    }
+  const directoryMatches = text.matchAll(
+    /(?<![A-Za-z0-9_@./-])((?:\.{1,2}\/)?[A-Za-z0-9_@.-]+(?:\/[A-Za-z0-9_@.-]+)+)(?![A-Za-z0-9_@./-])/g,
+  );
 
-    const normalized = rawPath.replace(/^\.\//, "");
-
-    if (!normalized.includes("://")) {
-      paths.add(trimTrailingPunctuation(normalized));
-    }
+  for (const match of directoryMatches) {
+    addPath(paths, match[1]);
   }
 
   return [...paths];
+}
+
+function addPath(paths: Set<string>, rawPath: string | undefined): void {
+  if (rawPath === undefined) {
+    return;
+  }
+
+  const normalized = rawPath.replace(/^\.\//, "");
+
+  if (!normalized.includes("://") && isLikelyFileOrWorkspacePath(normalized)) {
+    paths.add(trimTrailingPunctuation(normalized));
+  }
+}
+
+function isLikelyFileOrWorkspacePath(pathLike: string): boolean {
+  if (/\.(?:md|mdx|txt|yaml|yml|json|jsonc|feature|pdf|html|htm)$/i.test(pathLike)) {
+    return true;
+  }
+
+  const firstSegment = pathLike.split("/")[0]?.toLowerCase();
+
+  return [
+    "app",
+    "apps",
+    "package",
+    "packages",
+    "src",
+    "lib",
+    "libs",
+    "services",
+    "features",
+    "widgets",
+    "entities",
+    "shared",
+  ].includes(firstSegment ?? "");
 }
 
 function extractInlineOpenApiBlocks(text: string): string[] {
@@ -370,7 +413,31 @@ function extractInlineOpenApiBlocks(text: string): string[] {
     blocks.push(text.slice(0, 20_000).trim());
   }
 
+  const endpointLines = extractEndpointNotes(text);
+
+  if (endpointLines.length > 0) {
+    blocks.push(endpointLines.join("\n"));
+  }
+
   return unique(blocks);
+}
+
+function extractEndpointNotes(text: string): string[] {
+  const endpoints = new Set<string>();
+  const endpointMatches = text.matchAll(
+    /\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\/[A-Za-z0-9._~:/?#[\]@!$&'()*+,;=%{}-]+)/gi,
+  );
+
+  for (const match of endpointMatches) {
+    const method = match[1]?.toUpperCase();
+    const endpoint = match[2];
+
+    if (method !== undefined && endpoint !== undefined) {
+      endpoints.add(`${method} ${trimTrailingPunctuation(endpoint)}`);
+    }
+  }
+
+  return [...endpoints];
 }
 
 function extractBranchPolicy(text: string): z.infer<typeof BranchPolicySchema> {
@@ -384,6 +451,7 @@ function extractBranchPolicy(text: string): z.infer<typeof BranchPolicySchema> {
       /target(?:\s|-)?branch\s*[:=]?\s*([A-Za-z0-9._/-]+)/i,
       /타겟\s*브랜치\s*[:=]?\s*([A-Za-z0-9._/-]+)/i,
       /대상\s*브랜치\s*[:=]?\s*([A-Za-z0-9._/-]+)/i,
+      /([A-Za-z0-9._/-]+)\s*인\s*지금\s*(?:브랜치|브렌치)\s*로\s*(?:PR|MR|pr|mr)/i,
       /(?:PR|MR|pr|mr)[^\n]*(?:into|to|->|대상|타겟)\s*([A-Za-z0-9._/-]+)/,
     ]),
   });
@@ -465,6 +533,19 @@ function extractArchivePolicy(text: string): z.infer<typeof ArchivePolicySchema>
 
   return ArchivePolicySchema.parse({
     ...(archiveMentioned ? { archiveAllowed: !archiveDenied } : {}),
+  });
+}
+
+function extractVisualPreviewPolicy(text: string): z.infer<typeof VisualPreviewPolicySchema> {
+  const includeDiff =
+    /(diff|visual\s*diff|차이\s*이미지|디프\s*이미지)[^\n]*(do not|don't|never|본문에\s*넣지|본문\s*제외|넣지\s*말|올리지\s*말|artifact로만|아티팩트로만)/i.test(
+      text,
+    )
+      ? false
+      : undefined;
+
+  return VisualPreviewPolicySchema.parse({
+    ...(includeDiff === undefined ? {} : { includeDiff }),
   });
 }
 

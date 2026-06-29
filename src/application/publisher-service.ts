@@ -40,6 +40,12 @@ import { VisualReportSchema, type VisualReport } from "../visual/index.js";
 const execFileAsync = promisify(execFile);
 const PUBLISHER_ADAPTER = "publisher-v1" as const;
 
+type VisualPreviewPolicy = {
+  includeFigma?: boolean;
+  includeBrowser?: boolean;
+  includeDiff?: boolean;
+};
+
 export type GitCommandRunner = (
   cwd: string,
   args: string[],
@@ -527,29 +533,37 @@ export class PublisherService {
     const report = VisualReportSchema.parse(
       JSON.parse((await this.artifactStore.readContent(reportArtifact.digest)).toString("utf8")),
     );
+    const policy = await this.readVisualPreviewPolicy(run.artifacts);
     const assets: ReviewRequestAsset[] = [];
 
     for (const result of report.results) {
-      assets.push(
-        await this.visualAssetFromArtifact({
-          artifacts: run.artifacts,
-          artifactId: result.figmaScreenshotArtifactId,
-          targetId: result.targetId,
-          role: "figma",
-          label: "Figma",
-          payload,
-        }),
-        await this.visualAssetFromArtifact({
-          artifacts: run.artifacts,
-          artifactId: result.browserScreenshotArtifactId,
-          targetId: result.targetId,
-          role: "browser",
-          label: "Browser",
-          payload,
-        }),
-      );
+      if (includeVisualRole(policy, "figma")) {
+        assets.push(
+          await this.visualAssetFromArtifact({
+            artifacts: run.artifacts,
+            artifactId: result.figmaScreenshotArtifactId,
+            targetId: result.targetId,
+            role: "figma",
+            label: "Figma",
+            payload,
+          }),
+        );
+      }
 
-      if (result.diffArtifactId !== undefined) {
+      if (includeVisualRole(policy, "browser")) {
+        assets.push(
+          await this.visualAssetFromArtifact({
+            artifacts: run.artifacts,
+            artifactId: result.browserScreenshotArtifactId,
+            targetId: result.targetId,
+            role: "browser",
+            label: "Browser",
+            payload,
+          }),
+        );
+      }
+
+      if (result.diffArtifactId !== undefined && includeVisualRole(policy, "diff")) {
         assets.push(
           await this.visualAssetFromArtifact({
             artifacts: run.artifacts,
@@ -567,6 +581,28 @@ export class PublisherService {
       report,
       assets,
     };
+  }
+
+  private async readVisualPreviewPolicy(artifacts: ArtifactRef[]): Promise<VisualPreviewPolicy> {
+    const artifact = [...artifacts].reverse().find((item) => item.kind === "parsed-intake-request");
+
+    if (artifact === undefined) {
+      return {};
+    }
+
+    try {
+      const parsed = JSON.parse(
+        (await this.artifactStore.readContent(artifact.digest)).toString("utf8"),
+      ) as {
+        parsed?: {
+          visualPreviewPolicy?: VisualPreviewPolicy;
+        };
+      };
+
+      return parsed.parsed?.visualPreviewPolicy ?? {};
+    } catch {
+      return {};
+    }
   }
 
   private async visualAssetFromArtifact(input: {
@@ -697,6 +733,16 @@ export class PublisherService {
       },
     });
   }
+}
+
+function includeVisualRole(
+  policy: VisualPreviewPolicy,
+  role: "figma" | "browser" | "diff",
+): boolean {
+  if (role === "figma") return policy.includeFigma !== false;
+  if (role === "browser") return policy.includeBrowser !== false;
+
+  return policy.includeDiff !== false;
 }
 
 async function defaultGitCommandRunner(

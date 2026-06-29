@@ -12,6 +12,7 @@ const runId = "run_11111111111111111111111111111111";
 const briefSourceId = "src_11111111111111111111111111111111";
 const apiSourceId = "src_22222222222222222222222222222222";
 const figmaSourceId = "src_33333333333333333333333333333333";
+const instructionSourceId = "src_44444444444444444444444444444444";
 const digest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 function createRunWithEvidence() {
@@ -129,6 +130,55 @@ describe("traceability", () => {
     expect(nodes.requirementNodes).toHaveLength(1);
     expect(nodes.apiNodes).toHaveLength(1);
     expect(nodes.figmaNodes).toHaveLength(1);
+  });
+
+  it("treats captured user instructions as requirement evidence", () => {
+    const run = createRunWithEvidence();
+    run.sources.push({
+      id: instructionSourceId,
+      kind: "instruction",
+      locator: {
+        type: "inline",
+        label: "user-request",
+        mediaType: "text/plain; charset=utf-8",
+      },
+      digest,
+      capturedAt: now,
+      metadata: {},
+    });
+    run.evidence.push({
+      id: "ev_44444444444444444444444444444444",
+      sourceId: instructionSourceId,
+      location: {
+        type: "inline-text",
+        label: "user-request",
+        startLine: 1,
+        endLine: 2,
+      },
+      summary: "Original user request captured for deterministic intake.",
+      excerpt:
+        "레슨권 등록 화면에서 GET /members로 회원 검색 후 POST /members/{userNo}로 등록한다.",
+      digest,
+      capturedAt: now,
+      metadata: {
+        parserVersion: "intake-request-parser-v1",
+        itemType: "instruction",
+      },
+    });
+
+    const nodes = buildTraceNodes(run);
+    const instructionRequirement = nodes.requirementNodes.find((node) =>
+      node.evidenceIds.includes("ev_44444444444444444444444444444444"),
+    );
+
+    expect(instructionRequirement).toMatchObject({
+      kind: "requirement",
+      summary: expect.stringContaining("레슨권 등록 화면"),
+      metadata: expect.objectContaining({
+        itemType: "instruction",
+        sourceKind: "instruction",
+      }),
+    });
   });
 
   it("links requirement to API and Figma candidates", () => {
