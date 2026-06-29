@@ -5,8 +5,13 @@ import { verifyReleasePackageFiles } from "../../src/release/index.js";
 describe("release verifier", () => {
   it("passes required plugin files", () => {
     const result = verifyReleasePackageFiles([
+      ".agents/plugins/marketplace.json",
       ".claude-plugin/marketplace.json",
       ".claude-plugin/plugin.json",
+      ".codex/agents/spec-to-pr-design-ui-repair.toml",
+      ".codex/agents/spec-to-pr-review-council.toml",
+      ".codex/agents/spec-to-pr-visual-regression-reviewer.toml",
+      ".codex-plugin/plugin.json",
       ".mcp.json",
       "CHANGELOG.md",
       "dist/mcp/server.js",
@@ -19,8 +24,13 @@ describe("release verifier", () => {
 
   it("rejects forbidden files", () => {
     const result = verifyReleasePackageFiles([
+      ".agents/plugins/marketplace.json",
       ".claude-plugin/marketplace.json",
       ".claude-plugin/plugin.json",
+      ".codex/agents/spec-to-pr-design-ui-repair.toml",
+      ".codex/agents/spec-to-pr-review-council.toml",
+      ".codex/agents/spec-to-pr-visual-regression-reviewer.toml",
+      ".codex-plugin/plugin.json",
       ".mcp.json",
       "CHANGELOG.md",
       "dist/mcp/server.js",

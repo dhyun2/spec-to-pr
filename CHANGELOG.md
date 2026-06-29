@@ -5,6 +5,26 @@ All notable changes to spec-to-pr are documented in this file.
 The project follows semantic versioning for Claude Code plugin releases. Release tags should use
 the Claude plugin tag format, for example `spec-to-pr--v0.1.0`.
 
+## Unreleased
+
+### Added
+
+- Added a Codex plugin manifest and repo-local Codex marketplace catalog.
+- Added a Codex SDK runner scaffold for programmatic spec-to-pr automation.
+- Added Codex review-agent profiles and a bounded visual repair loop policy.
+- Added a shared visual repair loop skill for repeated Design/UI repair until visual evidence passes.
+- Added an end-to-end `Spec To PR` skill that publishes a draft PR/MR when the PR report is not blocked.
+- Added PR/MR visual evidence previews that upload Figma, browser, and diff PNGs during publishing.
+- Added Codex plugin validation to the root plugin validation script.
+- Added Codex integration documentation.
+
+### Changed
+
+- Relaxed shared skill frontmatter so the same skills can be ingested by Codex.
+- Expanded release packaging and verification to include the Codex plugin and SDK runner files.
+- Clarified that publishing creates or updates a draft PR/MR from the generated PR report body, but never merges.
+- Preserved local visual artifact IDs in PR/MR bodies while linking uploaded images for reviewer-friendly comparison.
+
 ## 0.1.2 - 2026-06-29
 
 ### Fixed

@@ -13,8 +13,13 @@ export const ReleaseVerificationResultSchema = z
 export type ReleaseVerificationResult = z.infer<typeof ReleaseVerificationResultSchema>;
 
 export const REQUIRED_RELEASE_FILES = [
+  ".agents/plugins/marketplace.json",
   ".claude-plugin/marketplace.json",
   ".claude-plugin/plugin.json",
+  ".codex/agents/spec-to-pr-design-ui-repair.toml",
+  ".codex/agents/spec-to-pr-review-council.toml",
+  ".codex/agents/spec-to-pr-visual-regression-reviewer.toml",
+  ".codex-plugin/plugin.json",
   ".mcp.json",
   "CHANGELOG.md",
   "dist/mcp/server.js",

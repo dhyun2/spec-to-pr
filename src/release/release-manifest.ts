@@ -38,8 +38,10 @@ export type ReleaseManifest = z.infer<typeof ReleaseManifestSchema>;
 export type ReleaseFeature = z.infer<typeof ReleaseFeatureSchema>;
 
 export const RELEASE_FILE_ALLOWLIST = [
+  ".agents/plugins/marketplace.json",
   ".claude-plugin/marketplace.json",
   ".claude-plugin/plugin.json",
+  ".codex-plugin/plugin.json",
   ".mcp.json",
   "CHANGELOG.md",
   "dist/mcp/server.js",
@@ -47,9 +49,17 @@ export const RELEASE_FILE_ALLOWLIST = [
   "package.json",
   "README.md",
   "LICENSE",
+  "scripts/validate-codex-plugin.ts",
 ] as const;
 
-export const RELEASE_DIRECTORY_ALLOWLIST = ["skills/", "agents/", "schemas/runtime/"] as const;
+export const RELEASE_DIRECTORY_ALLOWLIST = [
+  ".codex/agents/",
+  "skills/",
+  "agents/",
+  "schemas/runtime/",
+  "docs/codex/",
+  "packages/codex-sdk/",
+] as const;
 
 export const RELEASE_FORBIDDEN_PATTERNS = [
   "node_modules/",
