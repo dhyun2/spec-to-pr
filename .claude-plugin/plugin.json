@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "spec-to-pr",
   "displayName": "Spec to PR",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Evidence-driven Claude Code plugin for turning briefs, Figma designs, and OpenAPI contracts into verified pull requests.",
   "author": {
     "name": "Spec to PR Team"

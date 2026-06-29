@@ -9,6 +9,12 @@ the Claude plugin tag format, for example `spec-to-pr--v0.1.0`.
 
 No unreleased changes yet.
 
+## 0.1.8 - 2026-06-29
+
+### Fixed
+
+- Aligned the bundled Codex SDK runner package version with the published plugin version.
+
 ## 0.1.7 - 2026-06-29
 
 ### Added
