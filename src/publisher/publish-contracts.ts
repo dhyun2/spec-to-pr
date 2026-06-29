@@ -57,6 +57,18 @@ export const ReviewRequestPayloadSchema = z
   })
   .strict();
 
+export const ReviewRequestAssetRoleSchema = z.enum(["figma", "browser", "diff", "overlay"]);
+
+export const PublishedReviewAssetSchema = z
+  .object({
+    artifactId: ArtifactIdSchema,
+    targetId: z.string().trim().min(1),
+    role: ReviewRequestAssetRoleSchema,
+    label: z.string().trim().min(1),
+    url: z.string().trim().min(1),
+  })
+  .strict();
+
 export const PublishPlanSchema = z
   .object({
     runId: RunIdSchema,
@@ -93,6 +105,7 @@ export const PublishResultSchema = z
     target: PublishTargetSchema.optional(),
     request: PublishedReviewRequestSchema.optional(),
     reportArtifactId: ArtifactIdSchema.optional(),
+    publishedAssets: z.array(PublishedReviewAssetSchema).default([]),
     errorCode: z.string().trim().min(1).optional(),
     errorMessage: z.string().trim().min(1).optional(),
     retryable: z.boolean().default(false),
@@ -104,6 +117,8 @@ export type ReviewHost = z.infer<typeof ReviewHostSchema>;
 export type PublishMode = z.infer<typeof PublishModeSchema>;
 export type PublishTarget = z.infer<typeof PublishTargetSchema>;
 export type ReviewRequestPayload = z.infer<typeof ReviewRequestPayloadSchema>;
+export type ReviewRequestAssetRole = z.infer<typeof ReviewRequestAssetRoleSchema>;
+export type PublishedReviewAsset = z.infer<typeof PublishedReviewAssetSchema>;
 export type PublishPlan = z.infer<typeof PublishPlanSchema>;
 export type PublishedReviewRequest = z.infer<typeof PublishedReviewRequestSchema>;
 export type PublishResult = z.infer<typeof PublishResultSchema>;

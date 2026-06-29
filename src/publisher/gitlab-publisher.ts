@@ -1,10 +1,12 @@
 import {
+  PublishedReviewAssetSchema,
   PublishedReviewRequestSchema,
+  type PublishedReviewAsset,
   type PublishedReviewRequest,
   type PublishTarget,
   type ReviewRequestPayload,
 } from "./publish-contracts.js";
-import type { ReviewRequestPublisher } from "./publisher-port.js";
+import type { ReviewRequestAsset, ReviewRequestPublisher } from "./publisher-port.js";
 import { encodeGitLabProjectId } from "./review-host.js";
 
 type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
@@ -113,14 +115,64 @@ export class GitLabPublisherAdapter implements ReviewRequestPublisher {
     });
   }
 
+  public async publishAssets(input: {
+    target: PublishTarget;
+    payload: ReviewRequestPayload;
+    token: string;
+    assets: ReviewRequestAsset[];
+  }): Promise<PublishedReviewAsset[]> {
+    assertGitLab(input.target);
+
+    const project = encodeGitLabProjectId(input.target.projectId ?? input.target.projectPath);
+    const published: PublishedReviewAsset[] = [];
+
+    for (const asset of input.assets) {
+      const form = new FormData();
+
+      form.append("file", new Blob([asset.content], { type: asset.mediaType }), asset.filename);
+
+      const response = await this.gitlabFetch(
+        `${input.target.apiBaseUrl}/projects/${project}/uploads`,
+        input.token,
+        {
+          method: "POST",
+          body: form,
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `GitLab upload visual asset failed: ${response.status} ${await response.text()}`,
+        );
+      }
+
+      const uploaded = (await response.json()) as Record<string, unknown>;
+      const rawUrl = String(uploaded["full_path"] ?? uploaded["url"] ?? "");
+
+      published.push(
+        PublishedReviewAssetSchema.parse({
+          artifactId: asset.artifactId,
+          targetId: asset.targetId,
+          role: asset.role,
+          label: asset.label,
+          url: absoluteGitLabAssetUrl(input.target, rawUrl),
+        }),
+      );
+    }
+
+    return published;
+  }
+
   private async gitlabFetch(url: string, token: string, init: RequestInit): Promise<Response> {
+    const headers: Record<string, string> = {
+      "PRIVATE-TOKEN": token,
+      ...(init.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
+      ...(init.headers as Record<string, string> | undefined),
+    };
+
     return this.fetchImpl(url, {
       ...init,
-      headers: {
-        "PRIVATE-TOKEN": token,
-        "Content-Type": "application/json",
-        ...init.headers,
-      },
+      headers,
     });
   }
 }
@@ -156,4 +208,12 @@ function normalizeGitLabMr(
     created,
     updated,
   });
+}
+
+function absoluteGitLabAssetUrl(target: PublishTarget, rawUrl: string): string {
+  if (/^https?:\/\//i.test(rawUrl)) {
+    return rawUrl;
+  }
+
+  return new URL(rawUrl, target.webBaseUrl).toString();
 }

@@ -1,10 +1,12 @@
 import {
+  PublishedReviewAssetSchema,
   PublishedReviewRequestSchema,
+  type PublishedReviewAsset,
   type PublishedReviewRequest,
   type PublishTarget,
   type ReviewRequestPayload,
 } from "./publish-contracts.js";
-import type { ReviewRequestPublisher } from "./publisher-port.js";
+import type { ReviewRequestAsset, ReviewRequestPublisher } from "./publisher-port.js";
 
 type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 
@@ -114,6 +116,68 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
     });
   }
 
+  public async publishAssets(input: {
+    target: PublishTarget;
+    payload: ReviewRequestPayload;
+    token: string;
+    assets: ReviewRequestAsset[];
+  }): Promise<PublishedReviewAsset[]> {
+    assertGitHub(input.target);
+
+    const published: PublishedReviewAsset[] = [];
+
+    for (const asset of input.assets) {
+      const assetPath = [
+        ".spec-to-pr",
+        "visual-assets",
+        input.payload.runId,
+        safePathSegment(asset.targetId),
+        asset.filename,
+      ].join("/");
+      const existingSha = await this.findContentSha({
+        target: input.target,
+        path: assetPath,
+        branch: input.payload.sourceBranch,
+        token: input.token,
+      });
+      const response = await this.githubFetch(
+        `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}/contents/${encodePath(assetPath)}`,
+        input.token,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            message: `chore(spec-to-pr): publish visual evidence ${asset.artifactId}`,
+            content: asset.content.toString("base64"),
+            branch: input.payload.sourceBranch,
+            ...(existingSha === undefined ? {} : { sha: existingSha }),
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `GitHub upload visual asset failed: ${response.status} ${await response.text()}`,
+        );
+      }
+
+      const uploaded = (await response.json()) as Record<string, unknown>;
+      const content = uploaded["content"] as Record<string, unknown> | undefined;
+      const url = String(content?.["download_url"] ?? content?.["html_url"] ?? "");
+
+      published.push(
+        PublishedReviewAssetSchema.parse({
+          artifactId: asset.artifactId,
+          targetId: asset.targetId,
+          role: asset.role,
+          label: asset.label,
+          url,
+        }),
+      );
+    }
+
+    return published;
+  }
+
   private async applyIssueMetadata(input: {
     target: PublishTarget & { owner: string; repo: string };
     issueNumber: string;
@@ -159,6 +223,38 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
       },
     });
   }
+
+  private async findContentSha(input: {
+    target: PublishTarget & { owner: string; repo: string };
+    path: string;
+    branch: string;
+    token: string;
+  }): Promise<string | undefined> {
+    const url = new URL(
+      `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}/contents/${encodePath(input.path)}`,
+    );
+
+    url.searchParams.set("ref", input.branch);
+
+    const response = await this.githubFetch(url.toString(), input.token, {
+      method: "GET",
+    });
+
+    if (response.status === 404) {
+      return undefined;
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        `GitHub inspect visual asset failed: ${response.status} ${await response.text()}`,
+      );
+    }
+
+    const body = (await response.json()) as Record<string, unknown>;
+    const sha = body["sha"];
+
+    return typeof sha === "string" && sha.length > 0 ? sha : undefined;
+  }
 }
 
 function assertGitHub(target: PublishTarget): asserts target is PublishTarget & {
@@ -187,4 +283,14 @@ function normalizeGitHubPr(
     created,
     updated,
   });
+}
+
+function encodePath(path: string): string {
+  return path.split("/").map(encodeURIComponent).join("/");
+}
+
+function safePathSegment(value: string): string {
+  const safe = value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+
+  return safe === "" ? "target" : safe;
 }

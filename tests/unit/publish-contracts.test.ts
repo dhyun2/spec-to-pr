@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  PublishedReviewAssetSchema,
+  PublishResultSchema,
   PublishTargetSchema,
   ReviewRequestPayloadSchema,
 } from "../../src/publisher/publish-contracts.js";
@@ -28,5 +30,25 @@ describe("publish contracts", () => {
     });
 
     expect(payload.mode).toBe("draft");
+  });
+
+  it("records uploaded visual evidence assets on publish results", () => {
+    const asset = PublishedReviewAssetSchema.parse({
+      artifactId: "art_22222222222222222222222222222222",
+      targetId: "home",
+      role: "figma",
+      label: "Figma",
+      url: "https://gitlab.example/uploads/figma.png",
+    });
+    const result = PublishResultSchema.parse({
+      runId: "run_11111111111111111111111111111111",
+      status: "passed",
+      reportArtifactId: "art_11111111111111111111111111111111",
+      publishedAssets: [asset],
+      publishedAt: "2026-06-23T00:00:00.000Z",
+    });
+
+    expect(result.publishedAssets).toHaveLength(1);
+    expect(result.publishedAssets[0]?.url).toContain("figma.png");
   });
 });

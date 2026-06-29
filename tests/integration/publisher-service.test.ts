@@ -19,10 +19,13 @@ import { SqliteRunStore } from "../../src/store/sqlite-run-store.js";
 let directory: string;
 let projectRoot: string;
 let store: SqliteRunStore;
+let artifactStore: ArtifactBlobStore;
 let runService: RunService;
 let prReportService: PrReportService;
 let publisherService: PublisherService;
 let originalGithubToken: string | undefined;
+let githubPublisher: FakePublisher;
+let gitlabPublisher: FakePublisher;
 
 beforeEach(async () => {
   directory = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-publisher-"));
@@ -36,20 +39,22 @@ beforeEach(async () => {
   process.env["GITHUB_TOKEN"] = "ghp_test_token";
 
   store = new SqliteRunStore(path.join(directory, "runs.sqlite3"));
-  const artifactStore = new ArtifactBlobStore(path.join(directory, "artifacts"));
+  artifactStore = new ArtifactBlobStore(path.join(directory, "artifacts"));
 
   runService = new RunService(store, {
     pluginVersion: "0.1.0",
     now: () => "2026-06-23T00:00:00.000Z",
   });
   prReportService = new PrReportService(store, artifactStore, () => "2026-06-23T00:00:01.000Z");
+  githubPublisher = new FakePublisher("github");
+  gitlabPublisher = new FakePublisher("gitlab");
   publisherService = new PublisherService(
     store,
     artifactStore,
     () => "2026-06-23T00:00:02.000Z",
     {
-      github: new FakePublisher("github"),
-      gitlab: new FakePublisher("gitlab"),
+      github: githubPublisher,
+      gitlab: gitlabPublisher,
     },
     async () => ({
       stdout: "https://github.com/acme/spec-to-pr.git\n",
@@ -78,12 +83,18 @@ describe("PublisherService", () => {
       projectRoot,
     });
     await markRunReadyForPublish(run.id);
+    await addVisualEvidence(run.id);
 
     const report = await prReportService.generatePrReport({
       runId: run.id,
     });
 
     expect(report.decision).toBe("ready");
+
+    const reportBody = await prReportService.getPrReport({
+      runId: run.id,
+      artifactId: report.markdownArtifactId,
+    });
 
     const plan = await publisherService.plan({
       runId: run.id,
@@ -99,6 +110,7 @@ describe("PublisherService", () => {
       repo: "spec-to-pr",
     });
     expect(plan.payload.mode).toBe("draft");
+    expect(plan.payload.body).toBe(reportBody.markdown);
 
     const published = await publisherService.publish({
       runId: run.id,
@@ -117,6 +129,22 @@ describe("PublisherService", () => {
       },
     });
     expect(published.agentResultId).toMatch(/^ar_/);
+    expect(githubPublisher.createdPayloads[0]?.body).toContain("## Visual Evidence Preview");
+    expect(githubPublisher.createdPayloads[0]?.body).toContain(
+      "https://github.example/assets/figma.png",
+    );
+    expect(githubPublisher.createdPayloads[0]?.body).toContain(
+      "https://github.example/assets/browser.png",
+    );
+    expect(githubPublisher.createdPayloads[0]?.body).toContain(
+      "https://github.example/assets/diff.png",
+    );
+    expect(githubPublisher.createdPayloads[0]?.body).toContain(
+      "art_22222222222222222222222222222222",
+    );
+    expect(githubPublisher.createdPayloads[0]?.body).toContain("# Summary");
+    expect(githubPublisher.createdPayloads[0]?.body).toContain("## Run Metadata");
+    expect(githubPublisher.createdPayloads[0]?.body).toContain("## Decision");
 
     const loadedResult = await publisherService.getResult({
       runId: run.id,
@@ -282,11 +310,161 @@ async function markRunReadyForPublish(runId: string): Promise<void> {
   );
 }
 
+async function addVisualEvidence(runId: string): Promise<void> {
+  const run = await store.get(runId);
+  const timestamp = "2026-06-23T00:00:00.750Z";
+  const artifacts = [
+    await writeArtifact({
+      id: "art_22222222222222222222222222222222",
+      kind: "figma-screenshot",
+      label: "figma-home.png",
+      reportKind: "figma-screenshot",
+      content: Buffer.from("figma-png"),
+      mediaType: "image/png",
+      timestamp,
+    }),
+    await writeArtifact({
+      id: "art_33333333333333333333333333333333",
+      kind: "screenshot",
+      label: "browser-home.png",
+      reportKind: "browser-screenshot",
+      content: Buffer.from("browser-png"),
+      mediaType: "image/png",
+      timestamp,
+    }),
+    await writeArtifact({
+      id: "art_44444444444444444444444444444444",
+      kind: "visual-diff",
+      label: "diff-home.png",
+      reportKind: "visual-diff",
+      content: Buffer.from("diff-png"),
+      mediaType: "image/png",
+      timestamp,
+    }),
+  ];
+  const visualReport = {
+    runId,
+    changeName: "home",
+    generatedAt: timestamp,
+    targetCount: 1,
+    passedCount: 1,
+    failedCount: 0,
+    reviewNeededCount: 0,
+    results: [
+      {
+        targetId: "home-desktop",
+        status: "passed",
+        figmaScreenshotArtifactId: "art_22222222222222222222222222222222",
+        browserScreenshotArtifactId: "art_33333333333333333333333333333333",
+        diffArtifactId: "art_44444444444444444444444444444444",
+        metrics: {
+          width: 100,
+          height: 100,
+          comparedPixelCount: 10_000,
+          maskedPixelCount: 0,
+          exactMatchRatio: 0.95,
+          reviewMatchRatio: 0.98,
+          meanDistance: 0.1,
+          maxDistance: 1,
+        },
+        gapIds: [],
+        notes: [],
+      },
+    ],
+  };
+  const visualReportArtifact = await writeArtifact({
+    id: "art_55555555555555555555555555555555",
+    kind: "visual-report",
+    label: "visual-report.json",
+    reportKind: "visual-report-json",
+    content: Buffer.from(`${JSON.stringify(visualReport, null, 2)}\n`),
+    mediaType: "application/json",
+    timestamp,
+    metadata: {
+      changeName: "home",
+      decision: "passed",
+    },
+  });
+
+  await store.save(
+    {
+      ...run,
+      revision: run.revision + 1,
+      updatedAt: timestamp,
+      artifacts: [...run.artifacts, ...artifacts, visualReportArtifact],
+    },
+    run.revision,
+  );
+}
+
+async function writeArtifact(input: {
+  id: string;
+  kind: "figma-screenshot" | "screenshot" | "visual-diff" | "visual-report";
+  label: string;
+  reportKind: string;
+  content: Buffer;
+  mediaType: string;
+  timestamp: string;
+  metadata?: Record<string, unknown>;
+}) {
+  const blob = await artifactStore.writeBlob({
+    content: input.content,
+    mediaType: input.mediaType,
+    storedAt: input.timestamp,
+    label: input.label,
+  });
+
+  return {
+    id: input.id,
+    kind: input.kind,
+    uri: blob.uri,
+    mediaType: input.mediaType,
+    digest: blob.digest,
+    producedBy: "orchestrator" as const,
+    evidenceIds: [],
+    createdAt: input.timestamp,
+    metadata: {
+      reportKind: input.reportKind,
+      label: input.label,
+      ...(input.metadata ?? {}),
+    },
+  };
+}
+
 class FakePublisher implements ReviewRequestPublisher {
+  public readonly createdPayloads: ReviewRequestPayload[] = [];
+  public readonly updatedBodies: string[] = [];
+
   public constructor(private readonly host: "github" | "gitlab") {}
 
   public async findExisting(): Promise<PublishedReviewRequest | undefined> {
     return undefined;
+  }
+
+  public async publishAssets() {
+    return [
+      {
+        artifactId: "art_22222222222222222222222222222222",
+        role: "figma" as const,
+        targetId: "home-desktop",
+        label: "Figma",
+        url: "https://github.example/assets/figma.png",
+      },
+      {
+        artifactId: "art_33333333333333333333333333333333",
+        role: "browser" as const,
+        targetId: "home-desktop",
+        label: "Browser",
+        url: "https://github.example/assets/browser.png",
+      },
+      {
+        artifactId: "art_44444444444444444444444444444444",
+        role: "diff" as const,
+        targetId: "home-desktop",
+        label: "Diff",
+        url: "https://github.example/assets/diff.png",
+      },
+    ];
   }
 
   public async create(input: {
@@ -294,6 +472,8 @@ class FakePublisher implements ReviewRequestPublisher {
     payload: ReviewRequestPayload;
     token: string;
   }): Promise<PublishedReviewRequest> {
+    this.createdPayloads.push(input.payload);
+
     return {
       host: this.host,
       url:
@@ -316,6 +496,8 @@ class FakePublisher implements ReviewRequestPublisher {
     body: string;
     token: string;
   }): Promise<PublishedReviewRequest> {
+    this.updatedBodies.push(input.body);
+
     return {
       host: this.host,
       url:

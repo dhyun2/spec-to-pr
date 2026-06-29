@@ -42,6 +42,52 @@ describe("GitLabPublisherAdapter", () => {
       created: true,
     });
   });
+
+  it("uploads visual evidence images as project markdown uploads", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse({
+        full_path: "/uploads/abc123/figma.png",
+      }),
+    );
+    const adapter = new GitLabPublisherAdapter(fetchMock);
+
+    const result = await adapter.publishAssets({
+      target: gitlabTarget(),
+      payload: payload(),
+      token: "glpat-example",
+      assets: [
+        {
+          artifactId: "art_22222222222222222222222222222222",
+          targetId: "home",
+          role: "figma",
+          label: "Figma",
+          filename: "figma.png",
+          mediaType: "image/png",
+          content: Buffer.from("png"),
+        },
+      ],
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://gitlab.com/api/v4/projects/acme%2Fplatform%2Fspec-to-pr/uploads",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.any(FormData),
+        headers: expect.not.objectContaining({
+          "Content-Type": "application/json",
+        }),
+      }),
+    );
+    expect(result).toEqual([
+      {
+        artifactId: "art_22222222222222222222222222222222",
+        targetId: "home",
+        role: "figma",
+        label: "Figma",
+        url: "https://gitlab.com/uploads/abc123/figma.png",
+      },
+    ]);
+  });
 });
 
 function gitlabTarget(): PublishTarget {

@@ -11,9 +11,11 @@ import {
   PublishedReviewRequestSchema,
   PublishPlanSchema,
   PublishResultSchema,
+  type PublishedReviewAsset,
   readPublisherToken,
   redactSecrets,
   ReviewHostSchema,
+  type ReviewRequestAsset,
   ReviewRequestPayloadSchema,
 } from "../publisher/index.js";
 import type {
@@ -33,6 +35,7 @@ import { ArtifactIdSchema, RunIdSchema } from "../runtime/ids.js";
 import { GitObjectIdSchema, IsoDateTimeSchema } from "../runtime/scalars.js";
 import type { ArtifactRef } from "../runtime/index.js";
 import type { RunStore } from "../store/run-store.js";
+import { VisualReportSchema, type VisualReport } from "../visual/index.js";
 
 const execFileAsync = promisify(execFile);
 const PUBLISHER_ADAPTER = "publisher-v1" as const;
@@ -379,22 +382,28 @@ export class PublisherService {
       }
 
       const publisher = this.publishers[input.plan.target.host];
+      const prepared = await this.preparePayloadForPublish({
+        run: input.run,
+        plan: input.plan,
+        publisher,
+        token: token.token,
+      });
       const existing = await publisher.findExisting({
         target: input.plan.target,
-        payload: input.plan.payload,
+        payload: prepared.payload,
         token: token.token,
       });
       const request =
         existing === undefined
           ? await publisher.create({
               target: input.plan.target,
-              payload: input.plan.payload,
+              payload: prepared.payload,
               token: token.token,
             })
           : await publisher.updateBody({
               target: input.plan.target,
               requestNumber: existing.number,
-              body: input.plan.payload.body,
+              body: prepared.payload.body,
               token: token.token,
             });
 
@@ -404,6 +413,7 @@ export class PublisherService {
         target: input.plan.target,
         request,
         reportArtifactId: input.plan.payload.reportArtifactId,
+        publishedAssets: prepared.publishedAssets,
         retryable: false,
         publishedAt: input.timestamp,
       });
@@ -426,10 +436,17 @@ export class PublisherService {
     try {
       const token = readPublisherToken(input.plan.target.host);
       const publisher = this.publishers[input.plan.target.host];
+      const run = await this.runStore.get(input.plan.runId);
+      const prepared = await this.preparePayloadForPublish({
+        run,
+        plan: input.plan,
+        publisher,
+        token: token.token,
+      });
       const request = await publisher.updateBody({
         target: input.plan.target,
         requestNumber: input.requestNumber,
-        body: input.plan.payload.body,
+        body: prepared.payload.body,
         token: token.token,
       });
 
@@ -439,6 +456,7 @@ export class PublisherService {
         target: input.plan.target,
         request,
         reportArtifactId: input.plan.payload.reportArtifactId,
+        publishedAssets: prepared.publishedAssets,
         retryable: false,
         publishedAt: input.timestamp,
       });
@@ -451,6 +469,137 @@ export class PublisherService {
         publishedAt: input.timestamp,
       });
     }
+  }
+
+  private async preparePayloadForPublish(input: {
+    run: Awaited<ReturnType<RunStore["get"]>>;
+    plan: z.infer<typeof PublishPlanSchema>;
+    publisher: ReviewRequestPublisher;
+    token: string;
+  }): Promise<{
+    payload: ReviewRequestPayload;
+    publishedAssets: PublishedReviewAsset[];
+  }> {
+    const visualPreview = await this.collectVisualPreviewAssets(input.run, input.plan.payload);
+
+    if (visualPreview.assets.length === 0 || visualPreview.report === undefined) {
+      return {
+        payload: input.plan.payload,
+        publishedAssets: [],
+      };
+    }
+
+    const publishedAssets = await input.publisher.publishAssets({
+      target: input.plan.target,
+      payload: input.plan.payload,
+      token: input.token,
+      assets: visualPreview.assets,
+    });
+
+    return {
+      payload: ReviewRequestPayloadSchema.parse({
+        ...input.plan.payload,
+        body: injectVisualEvidencePreview({
+          body: input.plan.payload.body,
+          report: visualPreview.report,
+          assets: publishedAssets,
+        }),
+      }),
+      publishedAssets,
+    };
+  }
+
+  private async collectVisualPreviewAssets(
+    run: Awaited<ReturnType<RunStore["get"]>>,
+    payload: ReviewRequestPayload,
+  ): Promise<{
+    report?: VisualReport;
+    assets: ReviewRequestAsset[];
+  }> {
+    const reportArtifact = latestVisualReportArtifact(run.artifacts);
+
+    if (reportArtifact === undefined) {
+      return {
+        assets: [],
+      };
+    }
+
+    const report = VisualReportSchema.parse(
+      JSON.parse((await this.artifactStore.readContent(reportArtifact.digest)).toString("utf8")),
+    );
+    const assets: ReviewRequestAsset[] = [];
+
+    for (const result of report.results) {
+      assets.push(
+        await this.visualAssetFromArtifact({
+          artifacts: run.artifacts,
+          artifactId: result.figmaScreenshotArtifactId,
+          targetId: result.targetId,
+          role: "figma",
+          label: "Figma",
+          payload,
+        }),
+        await this.visualAssetFromArtifact({
+          artifacts: run.artifacts,
+          artifactId: result.browserScreenshotArtifactId,
+          targetId: result.targetId,
+          role: "browser",
+          label: "Browser",
+          payload,
+        }),
+      );
+
+      if (result.diffArtifactId !== undefined) {
+        assets.push(
+          await this.visualAssetFromArtifact({
+            artifacts: run.artifacts,
+            artifactId: result.diffArtifactId,
+            targetId: result.targetId,
+            role: "diff",
+            label: "Diff",
+            payload,
+          }),
+        );
+      }
+    }
+
+    return {
+      report,
+      assets,
+    };
+  }
+
+  private async visualAssetFromArtifact(input: {
+    artifacts: ArtifactRef[];
+    artifactId: string;
+    targetId: string;
+    role: ReviewRequestAsset["role"];
+    label: string;
+    payload: ReviewRequestPayload;
+  }): Promise<ReviewRequestAsset> {
+    const artifact = requireArtifact(input.artifacts, input.artifactId);
+
+    if (!artifact.mediaType.startsWith("image/")) {
+      throw new Error(`Visual artifact is not an image: ${artifact.id}`);
+    }
+
+    const extension = extensionForMediaType(artifact.mediaType);
+
+    return {
+      artifactId: artifact.id,
+      targetId: input.targetId,
+      role: input.role,
+      label: input.label,
+      filename:
+        [
+          safePathSegment(input.payload.runId),
+          safePathSegment(input.targetId),
+          input.role,
+          artifact.id.replace(/^art_/, "").slice(0, 12),
+        ].join("-") + extension,
+      mediaType: artifact.mediaType,
+      content: await this.artifactStore.readContent(artifact.digest),
+    };
   }
 
   private async recordPublishResult(input: {
@@ -610,6 +759,130 @@ function latestPublishResultArtifact(artifacts: ArtifactRef[]): ArtifactRef {
   }
 
   return artifact;
+}
+
+function latestVisualReportArtifact(artifacts: ArtifactRef[]): ArtifactRef | undefined {
+  return artifacts
+    .filter(
+      (item) =>
+        item.kind === "visual-report" && item.metadata["reportKind"] === "visual-report-json",
+    )
+    .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))[0];
+}
+
+function injectVisualEvidencePreview(input: {
+  body: string;
+  report: VisualReport;
+  assets: PublishedReviewAsset[];
+}): string {
+  const preview = renderVisualEvidencePreview(input.report, input.assets);
+
+  if (preview === undefined) {
+    return input.body;
+  }
+
+  const cleaned = removeVisualEvidencePreview(input.body).trimEnd();
+  const runMetadataIndex = cleaned.indexOf("\n## Run Metadata");
+
+  if (runMetadataIndex === -1) {
+    return `${cleaned}\n\n${preview}\n`;
+  }
+
+  return `${cleaned.slice(0, runMetadataIndex).trimEnd()}\n\n${preview}\n${cleaned.slice(runMetadataIndex)}\n`;
+}
+
+const VISUAL_PREVIEW_START = "<!-- spec-to-pr:visual-evidence:start -->";
+const VISUAL_PREVIEW_END = "<!-- spec-to-pr:visual-evidence:end -->";
+
+function removeVisualEvidencePreview(body: string): string {
+  const start = body.indexOf(VISUAL_PREVIEW_START);
+  const end = body.indexOf(VISUAL_PREVIEW_END);
+
+  if (start === -1 || end === -1 || end < start) {
+    return body;
+  }
+
+  return `${body.slice(0, start).trimEnd()}\n\n${body.slice(end + VISUAL_PREVIEW_END.length).trimStart()}`;
+}
+
+function renderVisualEvidencePreview(
+  report: VisualReport,
+  assets: PublishedReviewAsset[],
+): string | undefined {
+  if (assets.length === 0 || report.results.length === 0) {
+    return undefined;
+  }
+
+  const assetByTargetAndRole = new Map<string, PublishedReviewAsset>();
+
+  for (const asset of assets) {
+    assetByTargetAndRole.set(`${asset.targetId}:${asset.role}`, asset);
+  }
+
+  const rows = report.results.map((result) => {
+    const figma = assetByTargetAndRole.get(`${result.targetId}:figma`);
+    const browser = assetByTargetAndRole.get(`${result.targetId}:browser`);
+    const diff = assetByTargetAndRole.get(`${result.targetId}:diff`);
+    const reviewMatch = `${(result.metrics.reviewMatchRatio * 100).toFixed(2)}%`;
+    const exactMatch = `${(result.metrics.exactMatchRatio * 100).toFixed(2)}%`;
+
+    return [
+      escapeMarkdownTableCell(result.targetId),
+      imageCell(figma, "Figma"),
+      imageCell(browser, "Browser"),
+      imageCell(diff, "Diff"),
+      `${reviewMatch}<br>exact ${exactMatch}<br>${result.status}`,
+      [figma, browser, diff]
+        .filter((asset): asset is PublishedReviewAsset => asset !== undefined)
+        .map((asset) => `${asset.label}: \`${asset.artifactId}\``)
+        .join("<br>") || "-",
+    ];
+  });
+
+  return [
+    VISUAL_PREVIEW_START,
+    "## Visual Evidence Preview",
+    "",
+    "Figma baseline, browser capture, and visual diff are uploaded for review. Artifact IDs are kept for local evidence traceability.",
+    "",
+    "| Target | Figma | Browser | Diff | Score | Artifact IDs |",
+    "| --- | --- | --- | --- | --- | --- |",
+    ...rows.map((row) => `| ${row.join(" | ")} |`),
+    VISUAL_PREVIEW_END,
+  ].join("\n");
+}
+
+function imageCell(asset: PublishedReviewAsset | undefined, altPrefix: string): string {
+  if (asset === undefined) {
+    return "-";
+  }
+
+  return `<img src="${escapeHtmlAttribute(asset.url)}" alt="${escapeHtmlAttribute(`${altPrefix} ${asset.targetId}`)}" width="260" />`;
+}
+
+function extensionForMediaType(mediaType: string): string {
+  if (mediaType === "image/jpeg") return ".jpg";
+  if (mediaType === "image/webp") return ".webp";
+
+  return ".png";
+}
+
+function safePathSegment(value: string): string {
+  const safe = value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+
+  return safe === "" ? "item" : safe;
+}
+
+function escapeMarkdownTableCell(value: string): string {
+  return value.replaceAll("|", "\\|").replace(/\r?\n/g, "<br>");
+}
+
+function escapeHtmlAttribute(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
 }
 
 function failedPublishResult(input: {
