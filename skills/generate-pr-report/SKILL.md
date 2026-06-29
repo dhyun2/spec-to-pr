@@ -50,6 +50,7 @@ Expected arguments:
    - PR report artifact ID
    - view model artifact ID
    - decision
+   - required gate statuses, including not-run gates
    - mandatory gates summary
    - open blocker gap count
    - open major gap count
@@ -58,6 +59,8 @@ Expected arguments:
 
 Do not publish to GitHub or GitLab.
 Do not claim merge readiness if the report decision says blocked.
+Do not treat a missing gate as passed.
+If Figma evidence exists but no Figma/browser visual comparison report exists, report the decision as blocked.
 Do not change gap status.
 Do not mark skipped checks as passed.
 Do not claim OpenSpec archive has happened.

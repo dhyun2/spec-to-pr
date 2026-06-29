@@ -31,18 +31,21 @@ Default target branch is `main`.
    - source branch
    - target branch
    - draft mode
+   - report decision
    - labels
    - reviewer list
    - required token env
    - warnings
-6. If the user has invoked this Skill directly, call `mcp__spec-to-pr__publish_review_request` with `confirm: true`.
-7. Call `mcp__spec-to-pr__get_publish_result`.
-8. Optionally call `mcp__spec-to-pr__record_publish_review` with publisher-reviewer findings.
-9. Report the created or updated PR/MR URL.
+6. If the plan says the report decision is blocked or `willCreateOrUpdate` is false, stop and report the blocking gates. Do not publish.
+7. If the user has invoked this Skill directly, call `mcp__spec-to-pr__publish_review_request` with `confirm: true`.
+8. Call `mcp__spec-to-pr__get_publish_result`.
+9. Optionally call `mcp__spec-to-pr__record_publish_review` with publisher-reviewer findings.
+10. Report the created or updated PR/MR URL.
 
 ## Safety Rules
 
 - Do not create or update a PR/MR without using the generated report artifact.
+- Do not publish a blocked report.
 - Do not rewrite the PR body from memory.
 - Do not print tokens.
 - Do not mark ready for review unless explicitly requested.
