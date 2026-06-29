@@ -42,5 +42,7 @@ describe("Codex SDK workflow policy", () => {
     expect(prompt).toContain("publish_review_request");
     expect(prompt).toContain("draft PR/MR");
     expect(prompt).toContain("Do not merge");
+    expect(prompt).toContain("mandatory gate evidence");
+    expect(prompt).toContain('language: "ko"');
   });
 });

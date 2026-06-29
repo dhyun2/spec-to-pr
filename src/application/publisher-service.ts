@@ -775,14 +775,18 @@ function injectVisualEvidencePreview(input: {
   report: VisualReport;
   assets: PublishedReviewAsset[];
 }): string {
-  const preview = renderVisualEvidencePreview(input.report, input.assets);
+  const locale = isKoreanReportBody(input.body) ? "ko" : "en";
+  const preview = renderVisualEvidencePreview(input.report, input.assets, locale);
 
   if (preview === undefined) {
     return input.body;
   }
 
   const cleaned = removeVisualEvidencePreview(input.body).trimEnd();
-  const runMetadataIndex = cleaned.indexOf("\n## Run Metadata");
+  const runMetadataIndex =
+    locale === "ko"
+      ? cleaned.indexOf("\n## 실행 메타데이터")
+      : cleaned.indexOf("\n## Run Metadata");
 
   if (runMetadataIndex === -1) {
     return `${cleaned}\n\n${preview}\n`;
@@ -808,6 +812,7 @@ function removeVisualEvidencePreview(body: string): string {
 function renderVisualEvidencePreview(
   report: VisualReport,
   assets: PublishedReviewAsset[],
+  locale: "ko" | "en" = "en",
 ): string | undefined {
   if (assets.length === 0 || report.results.length === 0) {
     return undefined;
@@ -841,15 +846,23 @@ function renderVisualEvidencePreview(
 
   return [
     VISUAL_PREVIEW_START,
-    "## Visual Evidence Preview",
+    locale === "ko" ? "## 시각 증거 미리보기" : "## Visual Evidence Preview",
     "",
-    "Figma baseline, browser capture, and visual diff are uploaded for review. Artifact IDs are kept for local evidence traceability.",
+    locale === "ko"
+      ? "Figma baseline, 브라우저 캡처, visual diff 이미지를 리뷰용으로 업로드했습니다. 로컬 증거 추적을 위해 artifact ID도 함께 남깁니다."
+      : "Figma baseline, browser capture, and visual diff are uploaded for review. Artifact IDs are kept for local evidence traceability.",
     "",
-    "| Target | Figma | Browser | Diff | Score | Artifact IDs |",
+    locale === "ko"
+      ? "| 대상 | Figma | Browser | Diff | 점수 | Artifact IDs |"
+      : "| Target | Figma | Browser | Diff | Score | Artifact IDs |",
     "| --- | --- | --- | --- | --- | --- |",
     ...rows.map((row) => `| ${row.join(" | ")} |`),
     VISUAL_PREVIEW_END,
   ].join("\n");
+}
+
+function isKoreanReportBody(body: string): boolean {
+  return body.startsWith("# 요약") || body.includes("\n## 실행 메타데이터");
 }
 
 function imageCell(asset: PublishedReviewAsset | undefined, altPrefix: string): string {

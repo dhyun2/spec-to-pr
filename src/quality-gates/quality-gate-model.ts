@@ -12,6 +12,7 @@ export const QUALITY_GATE_ORDER = [
   "component",
   "contract",
   "acceptance",
+  "security",
 ] as const;
 
 export const QualityGateNameSchema = z.enum(QUALITY_GATE_ORDER);

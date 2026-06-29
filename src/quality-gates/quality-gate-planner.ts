@@ -27,6 +27,7 @@ const GATE_KIND_BY_NAME = {
   component: "component",
   contract: "contract",
   acceptance: "acceptance",
+  security: "security",
 } as const satisfies Record<QualityGateName, string>;
 
 const SCRIPT_CANDIDATES = {
@@ -37,6 +38,7 @@ const SCRIPT_CANDIDATES = {
   component: ["test:component", "component"],
   contract: ["test:contract", "contract"],
   acceptance: ["test:acceptance", "acceptance"],
+  security: ["test:security", "security", "audit"],
 } as const satisfies Record<QualityGateName, readonly string[]>;
 
 export const PlanQualityGatesInputSchema = z

@@ -2,7 +2,7 @@
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "spec-to-pr",
   "description": "Claude Code marketplace for the spec-to-pr agent plugin.",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "owner": {
     "name": "dhyun2-plugins",
     "email": "dhp94d@gmail.com",
@@ -13,7 +13,7 @@
       "name": "spec-to-pr",
       "displayName": "Spec to PR",
       "description": "Evidence-driven Claude Code plugin for turning briefs, Figma designs, and OpenAPI contracts into verified pull requests.",
-      "version": "0.1.5",
+      "version": "0.1.6",
       "author": {
         "name": "Spec to PR Team"
       },
@@ -31,7 +31,7 @@
       "source": {
         "source": "url",
         "url": "https://github.com/dhyun2/spec-to-pr.git",
-        "ref": "spec-to-pr--v0.1.5"
+        "ref": "spec-to-pr--v0.1.6"
       },
       "homepage": "https://github.com/dhyun2/spec-to-pr",
       "repository": "https://github.com/dhyun2/spec-to-pr",

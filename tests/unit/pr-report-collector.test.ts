@@ -81,7 +81,7 @@ describe("PR report collector", () => {
       generatedAt: "2026-06-23T00:00:02.000Z",
     });
 
-    expect(model.decision).toBe("draft");
+    expect(model.decision).toBe("blocked");
     expect(model.specificationLinks).toHaveLength(1);
     expect(model.runtimeChecks[0]).toMatchObject({
       name: "typecheck",

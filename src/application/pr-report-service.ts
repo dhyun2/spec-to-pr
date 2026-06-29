@@ -7,6 +7,7 @@ import {
   renderPrReportMarkdown,
   writePrReportArtifacts,
 } from "../pr-report/index.js";
+import { ReportLocaleSchema } from "../pr-report/pr-report-model.js";
 import { RunManifestSchema, RunSummarySchema, summarizeRun } from "../run/index.js";
 import { ArtifactRefSchema } from "../runtime/artifact.js";
 import { createArtifactId } from "../runtime/id-factory.js";
@@ -18,6 +19,7 @@ import type { RunStore } from "../store/run-store.js";
 export const GeneratePrReportInputSchema = z
   .object({
     runId: RunIdSchema,
+    language: ReportLocaleSchema.default("ko"),
   })
   .strict();
 
@@ -27,6 +29,7 @@ export const GeneratePrReportResultSchema = z
     markdownArtifactId: ArtifactIdSchema,
     viewModelArtifactId: ArtifactIdSchema,
     decision: z.string(),
+    language: ReportLocaleSchema,
     openBlockerGapCount: z.number().int().nonnegative(),
     openMajorGapCount: z.number().int().nonnegative(),
   })
@@ -79,6 +82,7 @@ export class PrReportService {
     const collectedViewModel = collectPrReportViewModel({
       run,
       generatedAt,
+      locale: input.language,
     });
     const markdownArtifactId = createArtifactId();
     const viewModelArtifactId = createArtifactId();
@@ -109,6 +113,7 @@ export class PrReportService {
       markdownArtifactId: finalWritten.markdownArtifact.id,
       viewModelArtifactId: finalWritten.viewModelArtifact.id,
       decision: viewModel.decision,
+      language: viewModel.locale,
       openBlockerGapCount: openGapCount(run.gaps, "blocker"),
       openMajorGapCount: openGapCount(run.gaps, "major"),
     });

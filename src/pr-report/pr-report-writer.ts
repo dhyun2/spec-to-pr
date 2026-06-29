@@ -29,6 +29,7 @@ export async function writePrReportArtifacts(input: {
     metadata: {
       reportKind: "pr-body-markdown",
       decision: input.viewModel.decision,
+      locale: input.viewModel.locale,
     },
   });
   const viewModelArtifact = await writeArtifact({
@@ -41,6 +42,7 @@ export async function writePrReportArtifacts(input: {
     metadata: {
       reportKind: "pr-report-view-model",
       decision: input.viewModel.decision,
+      locale: input.viewModel.locale,
       markdownArtifactId: markdownArtifact.id,
     },
   });

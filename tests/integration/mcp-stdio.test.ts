@@ -116,6 +116,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "list_eval_suites",
       "list_project_profiles",
       "list_runs",
+      "parse_intake_request",
       "plan_accessibility_gate",
       "plan_observability",
       "plan_openspec_archive",
@@ -255,6 +256,31 @@ describe("spec-to-pr MCP stdio server", () => {
       id: runId,
       status: "created",
       revision: 0,
+    });
+
+    const parsedIntake = await client.callTool({
+      name: "parse_intake_request",
+      arguments: {
+        runId,
+        requestText:
+          "Use docs/plan.md and https://www.figma.com/design/abc123/Test?node-id=1-2. source branch feat/demo, target branch main. pnpm test 검증하고 PR은 publish 해도 되지만 merge 하지마.",
+      },
+    });
+
+    expect(parsedIntake.structuredContent).toMatchObject({
+      parsed: {
+        figmaUrls: ["https://www.figma.com/design/abc123/Test?node-id=1-2"],
+        filePaths: ["docs/plan.md"],
+        branchPolicy: {
+          sourceBranch: "feat/demo",
+          targetBranch: "main",
+        },
+        validationCommands: ["pnpm test"],
+        publishPolicy: {
+          shouldPublish: true,
+          mergeAllowed: false,
+        },
+      },
     });
 
     const accessibilityTargets = [
@@ -562,7 +588,7 @@ describe("spec-to-pr MCP stdio server", () => {
 
     expect(prReport.structuredContent).toMatchObject({
       artifactId: prReportArtifactId,
-      markdown: expect.stringContaining("# Summary"),
+      markdown: expect.stringContaining("# 요약"),
     });
 
     const prReportReview = await client.callTool({

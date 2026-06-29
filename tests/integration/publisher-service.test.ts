@@ -129,7 +129,7 @@ describe("PublisherService", () => {
       },
     });
     expect(published.agentResultId).toMatch(/^ar_/);
-    expect(githubPublisher.createdPayloads[0]?.body).toContain("## Visual Evidence Preview");
+    expect(githubPublisher.createdPayloads[0]?.body).toContain("## 시각 증거 미리보기");
     expect(githubPublisher.createdPayloads[0]?.body).toContain(
       "https://github.example/assets/figma.png",
     );
@@ -142,9 +142,9 @@ describe("PublisherService", () => {
     expect(githubPublisher.createdPayloads[0]?.body).toContain(
       "art_22222222222222222222222222222222",
     );
-    expect(githubPublisher.createdPayloads[0]?.body).toContain("# Summary");
-    expect(githubPublisher.createdPayloads[0]?.body).toContain("## Run Metadata");
-    expect(githubPublisher.createdPayloads[0]?.body).toContain("## Decision");
+    expect(githubPublisher.createdPayloads[0]?.body).toContain("# 요약");
+    expect(githubPublisher.createdPayloads[0]?.body).toContain("## 실행 메타데이터");
+    expect(githubPublisher.createdPayloads[0]?.body).toContain("## 결정");
 
     const loadedResult = await publisherService.getResult({
       runId: run.id,
@@ -261,7 +261,40 @@ async function markRunReadyForPublish(runId: string): Promise<void> {
       exitCode: 0,
       summary: "openspec passed.",
     },
+    {
+      id: "chk_88888888888888888888888888888888",
+      name: "accessibility",
+      kind: "accessibility" as const,
+      status: "passed" as const,
+      exitCode: 0,
+      summary: "accessibility passed.",
+    },
+    {
+      id: "chk_99999999999999999999999999999999",
+      name: "performance",
+      kind: "performance" as const,
+      status: "passed" as const,
+      exitCode: 0,
+      summary: "performance passed.",
+    },
+    {
+      id: "chk_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      name: "security",
+      kind: "security" as const,
+      status: "passed" as const,
+      exitCode: 0,
+      summary: "security passed.",
+    },
   ];
+  const observabilityArtifact = await writeArtifact({
+    id: "art_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    kind: "telemetry-config",
+    label: "observability-report.json",
+    reportKind: "observability-report-json",
+    content: Buffer.from("{}\n"),
+    mediaType: "application/json",
+    timestamp,
+  });
 
   await store.save(
     {
@@ -284,6 +317,7 @@ async function markRunReadyForPublish(runId: string): Promise<void> {
             reportKind: "verification-report",
           },
         },
+        observabilityArtifact,
       ],
       agentResults: [
         ...run.agentResults,
@@ -314,6 +348,33 @@ async function addVisualEvidence(runId: string): Promise<void> {
   const run = await store.get(runId);
   const timestamp = "2026-06-23T00:00:00.750Z";
   const artifacts = [
+    await writeArtifact({
+      id: "art_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      kind: "figma-mcp-capability-report",
+      label: "figma-provider.json",
+      reportKind: "figma-mcp-capability-report",
+      content: Buffer.from("{}\n"),
+      mediaType: "application/json",
+      timestamp,
+    }),
+    await writeArtifact({
+      id: "art_cccccccccccccccccccccccccccccccc",
+      kind: "figma-design-inventory",
+      label: "figma-inventory.json",
+      reportKind: "figma-design-inventory",
+      content: Buffer.from("{}\n"),
+      mediaType: "application/json",
+      timestamp,
+    }),
+    await writeArtifact({
+      id: "art_dddddddddddddddddddddddddddddddd",
+      kind: "figma-design-contract",
+      label: "figma-design-contract.json",
+      reportKind: "figma-design-contract",
+      content: Buffer.from("{}\n"),
+      mediaType: "application/json",
+      timestamp,
+    }),
     await writeArtifact({
       id: "art_22222222222222222222222222222222",
       kind: "figma-screenshot",
@@ -399,7 +460,15 @@ async function addVisualEvidence(runId: string): Promise<void> {
 
 async function writeArtifact(input: {
   id: string;
-  kind: "figma-screenshot" | "screenshot" | "visual-diff" | "visual-report";
+  kind:
+    | "figma-mcp-capability-report"
+    | "figma-design-inventory"
+    | "figma-design-contract"
+    | "figma-screenshot"
+    | "screenshot"
+    | "visual-diff"
+    | "visual-report"
+    | "telemetry-config";
   label: string;
   reportKind: string;
   content: Buffer;

@@ -5,6 +5,7 @@ import type { Gap } from "../runtime/gap.js";
 import { decideReportStatus } from "./pr-report-decision-policy.js";
 import {
   PrReportViewModelSchema,
+  type ReportLocale,
   type ReportArtifactSummaryRow,
   type ReportCheckSummary,
   type ReportGateRow,
@@ -14,6 +15,7 @@ import type { PrReportViewModel, ReportSectionStatus } from "./pr-report-model.j
 export function collectPrReportViewModel(input: {
   run: RunManifest;
   generatedAt: string;
+  locale?: ReportLocale;
 }): PrReportViewModel {
   const allChecks = input.run.agentResults.flatMap((result) => result.checks);
   const openGaps = input.run.gaps.filter(
@@ -27,13 +29,14 @@ export function collectPrReportViewModel(input: {
 
   return PrReportViewModelSchema.parse({
     schemaVersion: "pr-report-v1",
+    locale: input.locale ?? "ko",
     runId: input.run.id,
     generatedAt: input.generatedAt,
     decision,
-    title: titleForRun(input.run),
-    summaryBullets: summaryBulletsForRun(input.run),
+    title: titleForRun(input.run, input.locale ?? "ko"),
+    summaryBullets: summaryBulletsForRun(input.run, input.locale ?? "ko"),
     runMetadata: runMetadata(input.run),
-    reviewGuide: reviewGuide(),
+    reviewGuide: reviewGuide(input.locale ?? "ko"),
     gateRows: gateRows(input.run.artifacts, allChecks),
     specificationLinks: specificationLinks(input.run.artifacts),
     traceabilityRows: [],
@@ -55,26 +58,32 @@ export function collectPrReportViewModel(input: {
     observabilityChecks: observabilityChecks(input.run.artifacts),
     runtimeChecks: checksByKinds(allChecks, ["lint", "typecheck", "build", "openspec"]),
     gapSummaries: openGaps.map(gapSummary),
-    archivePlan: [
-      "Do not archive the OpenSpec change before review and merge.",
-      "After merge, run the OpenSpec archive workflow in Task 32.",
-      "Archive should preserve proposal, design, tasks, specs, and artifacts under the archive folder.",
-    ],
+    archivePlan: archivePlan(input.locale ?? "ko"),
     reportArtifactIds: [],
   });
 }
 
-function titleForRun(run: RunManifest): string {
+function titleForRun(run: RunManifest, locale: ReportLocale): string {
   const openspec = run.artifacts.find((artifact) => artifact.kind === "openspec");
   const changeName =
     typeof openspec?.metadata["changeName"] === "string"
       ? openspec.metadata["changeName"]
       : "spec-to-pr-change";
 
-  return `Spec to PR Report - ${changeName}`;
+  return locale === "ko"
+    ? `Spec to PR 리포트 - ${changeName}`
+    : `Spec to PR Report - ${changeName}`;
 }
 
-function summaryBulletsForRun(run: RunManifest): string[] {
+function summaryBulletsForRun(run: RunManifest, locale: ReportLocale): string[] {
+  if (locale === "ko") {
+    return [
+      `Run ${run.id} 기준으로 증거 기반 구현 리포트를 생성했습니다.`,
+      `${run.artifacts.length}개 artifact, ${run.evidence.length}개 evidence item, ${run.gaps.length}개 gap이 기록되어 있습니다.`,
+      "이 리포트는 Run artifact에서 생성됩니다. 자연어 완료 주장은 증거로 취급하지 않습니다.",
+    ];
+  }
+
   return [
     `Run ${run.id} generated an evidence-backed implementation report.`,
     `${run.artifacts.length} artifact(s), ${run.evidence.length} evidence item(s), and ${run.gaps.length} gap(s) are recorded.`,
@@ -95,7 +104,19 @@ function runMetadata(run: RunManifest): Record<string, string> {
   };
 }
 
-function reviewGuide(): string[] {
+function reviewGuide(locale: ReportLocale): string[] {
+  if (locale === "ko") {
+    return [
+      "게이트 요약과 결정을 먼저 확인합니다. blocked 리포트는 publish 대상이 아닙니다.",
+      "명세에서 어떤 OpenSpec change가 구현되었는지 확인합니다.",
+      "API Generator / API Contract에서 generated client와 wrapper boundary를 확인합니다.",
+      "기능 검증에서 요구사항 커버리지와 테스트 상태를 확인합니다.",
+      "디자인 계약과 시각 회귀에서 Figma 대비 구현 일치도를 확인합니다.",
+      "갭 및 리뷰 메모에서 의도적으로 미구현/미지원 처리된 항목을 확인합니다.",
+      "publisher가 PR/MR URL을 기록하기 전까지 이 리포트를 publish 증거로 취급하지 않습니다.",
+    ];
+  }
+
   return [
     "Start with Gate Summary and Decision; blocked reports are not publishable.",
     "Review Specification to confirm which OpenSpec change is implemented.",
@@ -107,6 +128,22 @@ function reviewGuide(): string[] {
   ];
 }
 
+function archivePlan(locale: ReportLocale): string[] {
+  if (locale === "ko") {
+    return [
+      "리뷰와 머지가 끝나기 전에는 OpenSpec change를 archive하지 않습니다.",
+      "머지 후 OpenSpec archive workflow를 실행합니다.",
+      "Archive는 proposal, design, tasks, specs, artifacts를 archive 폴더 아래에 보존해야 합니다.",
+    ];
+  }
+
+  return [
+    "Do not archive the OpenSpec change before review and merge.",
+    "After merge, run the OpenSpec archive workflow in Task 32.",
+    "Archive should preserve proposal, design, tasks, specs, and artifacts under the archive folder.",
+  ];
+}
+
 function gateRows(artifacts: ArtifactRef[], checks: CheckResult[]): ReportGateRow[] {
   const hasFigma = hasFigmaEvidence(artifacts);
 
@@ -114,7 +151,7 @@ function gateRows(artifacts: ArtifactRef[], checks: CheckResult[]): ReportGateRo
     {
       gate: "Runtime verification",
       required: true,
-      ...statusForCheckKinds(checks, ["lint", "typecheck", "build"], "lint/typecheck/build"),
+      ...statusForAllCheckKinds(checks, ["lint", "typecheck", "build"], "lint/typecheck/build"),
     },
     {
       gate: "Functional verification",
@@ -249,6 +286,48 @@ function figmaInventoryRows(artifacts: ArtifactRef[]): ReportArtifactSummaryRow[
       },
     ],
   });
+}
+
+function statusForAllCheckKinds(
+  checks: CheckResult[],
+  kinds: Array<CheckResult["kind"]>,
+  label: string,
+): Pick<ReportGateRow, "status" | "evidence" | "notes"> {
+  const matchingChecks = checks.filter((check) => kinds.includes(check.kind));
+  const passedKinds = new Set(
+    matchingChecks.filter((check) => check.status === "passed").map((check) => check.kind),
+  );
+  const missingKinds = kinds.filter((kind) => !passedKinds.has(kind));
+
+  if (matchingChecks.some((check) => check.status === "failed")) {
+    return {
+      status: "fail",
+      evidence: matchingChecks.map((check) => check.name),
+      notes: "At least one required check failed.",
+    };
+  }
+
+  if (matchingChecks.some((check) => check.status === "skipped")) {
+    return {
+      status: "skipped",
+      evidence: matchingChecks.map((check) => check.name),
+      notes: "At least one required check was skipped.",
+    };
+  }
+
+  if (missingKinds.length > 0) {
+    return {
+      status: "not-run",
+      evidence: matchingChecks.map((check) => check.name),
+      notes: `Missing required ${label} CheckResult(s): ${missingKinds.join(", ")}.`,
+    };
+  }
+
+  return {
+    status: "pass",
+    evidence: matchingChecks.map((check) => check.name),
+    notes: "Recorded checks passed.",
+  };
 }
 
 function statusForCheckKinds(

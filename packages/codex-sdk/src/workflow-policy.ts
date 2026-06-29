@@ -95,6 +95,8 @@ export function buildCodexVisualRepairInstructions(
 export function buildCodexPublishInstructions(): string {
   return [
     "Publish policy:",
+    "- Before generate_pr_report, mandatory gate evidence must exist: lint, typecheck, build, at least one functional test, OpenSpec validation, accessibility, performance/Web Vitals, security, observability, and Figma visual comparison when Figma evidence exists.",
+    '- Generate Korean review bodies by calling generate_pr_report with language: "ko" unless the user explicitly asks for English.',
     "- If the PR report decision is not blocked and the user asked for an end-to-end run or review request, do not stop at plan_review_request_publish.",
     "- Call publish_review_request with confirm: true after the publish plan is valid.",
     "- Publishing means creating or updating a draft PR/MR with the generated PR report artifact as the body.",

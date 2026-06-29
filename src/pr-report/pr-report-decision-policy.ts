@@ -3,15 +3,9 @@ import type { Gap } from "../runtime/gap.js";
 import type { ArtifactRef } from "../runtime/artifact.js";
 import type { ReportDecision } from "./pr-report-model.js";
 
-const MANDATORY_CHECK_KINDS = [
-  "lint",
-  "typecheck",
-  "build",
-  "unit",
-  "component",
-  "contract",
-  "openspec",
-] as const;
+const MANDATORY_CHECK_KINDS = ["lint", "typecheck", "build", "openspec", "security"] as const;
+
+const FUNCTIONAL_CHECK_KINDS = ["unit", "component", "contract", "acceptance", "e2e"] as const;
 
 export function decideReportStatus(input: {
   checks: CheckResult[];
@@ -35,7 +29,7 @@ export function decideReportStatus(input: {
     return "blocked";
   }
 
-  if (input.checks.length === 0) {
+  if (hasMissingRequiredGate(input)) {
     return "blocked";
   }
 
@@ -62,6 +56,91 @@ export function decideReportStatus(input: {
   }
 
   return "ready";
+}
+
+function hasMissingRequiredGate(input: {
+  checks: CheckResult[];
+  artifacts?: ArtifactRef[];
+}): boolean {
+  const artifacts = input.artifacts ?? [];
+
+  if (!MANDATORY_CHECK_KINDS.every((kind) => hasPassedCheck(input.checks, kind))) {
+    return true;
+  }
+
+  if (!FUNCTIONAL_CHECK_KINDS.some((kind) => hasPassedCheck(input.checks, kind))) {
+    return true;
+  }
+
+  if (!hasAccessibilityEvidence(input)) {
+    return true;
+  }
+
+  if (!hasPerformanceEvidence(input)) {
+    return true;
+  }
+
+  if (!hasObservabilityEvidence(artifacts)) {
+    return true;
+  }
+
+  if (hasFigmaVisualEvidence(artifacts)) {
+    return !hasRequiredFigmaEvidence(artifacts) || !hasVisualComparisonEvidence(input);
+  }
+
+  return false;
+}
+
+function hasPassedCheck(checks: CheckResult[], kind: CheckResult["kind"]): boolean {
+  return checks.some((check) => check.kind === kind && check.status === "passed");
+}
+
+function hasAccessibilityEvidence(input: {
+  checks: CheckResult[];
+  artifacts?: ArtifactRef[];
+}): boolean {
+  return (
+    hasPassedCheck(input.checks, "accessibility") ||
+    (input.artifacts ?? []).some((artifact) => artifact.kind === "accessibility-report")
+  );
+}
+
+function hasPerformanceEvidence(input: {
+  checks: CheckResult[];
+  artifacts?: ArtifactRef[];
+}): boolean {
+  return (
+    hasPassedCheck(input.checks, "performance") ||
+    (input.artifacts ?? []).some(
+      (artifact) =>
+        artifact.kind === "performance-report" &&
+        artifact.metadata["reportKind"] === "performance-report-json",
+    )
+  );
+}
+
+function hasObservabilityEvidence(artifacts: ArtifactRef[]): boolean {
+  return artifacts.some(
+    (artifact) =>
+      artifact.kind === "telemetry-config" &&
+      artifact.metadata["reportKind"] === "observability-report-json",
+  );
+}
+
+function hasRequiredFigmaEvidence(artifacts: ArtifactRef[]): boolean {
+  const hasProviderCapability = artifacts.some(
+    (artifact) => artifact.kind === "figma-mcp-capability-report",
+  );
+  const hasInventory = artifacts.some((artifact) =>
+    ["figma-design-inventory", "figma-provider-comparison"].includes(artifact.kind),
+  );
+  const hasDesignContract = artifacts.some((artifact) =>
+    ["figma-design-contract", "design-system-map", "ui-implementation-rules"].includes(
+      artifact.kind,
+    ),
+  );
+
+  return hasProviderCapability && hasInventory && hasDesignContract;
 }
 
 function hasFigmaVisualEvidence(artifacts: ArtifactRef[]): boolean {

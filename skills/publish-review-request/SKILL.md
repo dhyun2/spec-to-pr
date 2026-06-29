@@ -48,7 +48,7 @@ Default target branch is `main`.
    - warnings
 6. If the plan says the report decision is blocked or `willCreateOrUpdate` is false, stop and report the blocking gates. Do not publish.
 7. If the user invoked this Skill directly, or an end-to-end workflow reached this Skill, call `publish_review_request` with `confirm: true`. Do not stop after planning.
-8. If visual comparison PNG artifacts exist, confirm the publish result includes uploaded visual assets and the PR/MR body includes `Visual Evidence Preview`.
+8. If visual comparison PNG artifacts exist, confirm the publish result includes uploaded visual assets and the PR/MR body includes `Visual Evidence Preview` or `시각 증거 미리보기`, matching the report language.
 9. Call `get_publish_result`.
 10. Optionally call `record_publish_review` with publisher-reviewer findings.
 11. Report the created or updated PR/MR URL.
@@ -57,6 +57,7 @@ Default target branch is `main`.
 
 - Do not create or update a PR/MR without using the generated report artifact.
 - Do not publish a blocked report.
+- Do not publish when mandatory gate evidence is missing; the PR report decision must already reflect that as blocked.
 - Do not rewrite the PR body from memory.
 - It is allowed for the publisher to inject uploaded visual evidence image links into the generated body.
 - Do not print tokens.

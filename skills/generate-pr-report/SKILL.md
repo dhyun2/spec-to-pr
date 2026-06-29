@@ -47,7 +47,7 @@ Expected arguments:
 
 1. Call `get_run`.
 2. Confirm the Run exists.
-3. Call `generate_pr_report`.
+3. Call `generate_pr_report` with `language: "ko"` unless the user explicitly asks for English.
 4. Call `get_pr_report`.
 5. If `--review` is present:
    - invoke the `pr-report-reviewer` subagent with:
@@ -72,6 +72,7 @@ When an end-to-end `Spec To PR` workflow asked for a review request, continue in
 `Publish Review Request` after this report is generated and reviewed.
 Do not claim merge readiness if the report decision says blocked.
 Do not treat a missing gate as passed.
+Do not generate a publishable report if any mandatory gate is missing: lint, typecheck, build, functional verification, OpenSpec, visual comparison when Figma evidence exists, accessibility, performance/Web Vitals, security, or observability.
 If Figma evidence exists but no Figma/browser visual comparison report exists, report the decision as blocked.
 Do not change gap status.
 Do not mark skipped checks as passed.

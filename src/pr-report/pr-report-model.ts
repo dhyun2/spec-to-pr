@@ -2,6 +2,8 @@ import { z } from "zod";
 
 import { ArtifactIdSchema, GapIdSchema, RunIdSchema } from "../runtime/ids.js";
 
+export const ReportLocaleSchema = z.enum(["ko", "en"]);
+
 export const ReportDecisionSchema = z.enum(["blocked", "draft", "ready-after-review", "ready"]);
 
 export const ReportSectionStatusSchema = z.enum([
@@ -102,6 +104,7 @@ export const PerformanceMetricRowSchema = z
 export const PrReportViewModelSchema = z
   .object({
     schemaVersion: z.literal("pr-report-v1"),
+    locale: ReportLocaleSchema.default("en"),
     runId: RunIdSchema,
     generatedAt: z.string().datetime({ offset: true }),
     decision: ReportDecisionSchema,
@@ -130,6 +133,7 @@ export const PrReportViewModelSchema = z
   .strict();
 
 export type ReportDecision = z.infer<typeof ReportDecisionSchema>;
+export type ReportLocale = z.infer<typeof ReportLocaleSchema>;
 export type ReportSectionStatus = z.infer<typeof ReportSectionStatusSchema>;
 export type ReportCheckSummary = z.infer<typeof ReportCheckSummarySchema>;
 export type ReportGateRow = z.infer<typeof ReportGateRowSchema>;

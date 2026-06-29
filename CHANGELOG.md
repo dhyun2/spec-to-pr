@@ -5,6 +5,39 @@ All notable changes to spec-to-pr are documented in this file.
 The project follows semantic versioning for Claude Code plugin releases. Release tags should use
 the Claude plugin tag format, for example `spec-to-pr--v0.1.0`.
 
+## 0.1.6 - 2026-06-29
+
+### Added
+
+- Added first-class `instruction` sources for capturing the original user request as durable Run
+  evidence.
+- Added `parse_intake_request` to snapshot user prompts and deterministically extract docs, Figma
+  URLs, branches, validation commands, publish intent, merge boundaries, and OpenSpec archive
+  policy.
+- Added parsed intake request artifacts so downstream PR/MR reports can trace decisions back to the
+  request that initiated the workflow.
+- Added Korean PR/MR report rendering and made `generate_pr_report` default to Korean unless the
+  caller explicitly requests English.
+- Added localized visual evidence previews in published PR/MR bodies so Figma, browser, and diff PNG
+  links render with the report language.
+
+### Changed
+
+- Updated the end-to-end Spec To PR skill to parse and record the original user request before
+  registering derived brief, Figma, and OpenAPI sources.
+- Updated Spec To PR, PR report, publish, and Codex SDK instructions to require lint, typecheck,
+  build, functional, OpenSpec, accessibility, performance/Web Vitals, security, observability, and
+  Figma visual comparison evidence before publishing.
+- Added `security` to quality-gate planning so projects with `test:security`, `security`, or `audit`
+  scripts are surfaced as required release evidence.
+
+### Fixed
+
+- Blocked reports with missing mandatory gate evidence instead of allowing them to appear as draft or
+  ready for publish.
+- Required runtime verification to include lint, typecheck, and build rather than treating any single
+  runtime check as enough evidence.
+
 ## 0.1.5 - 2026-06-29
 
 ### Fixed

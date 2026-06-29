@@ -16,15 +16,15 @@ are clear. Publishing creates or updates the review request body; it does not
 merge, approve, close, or mark ready for review.
 
 When visual comparison PNG artifacts exist, publishing uploads them to the
-review host and injects a `Visual Evidence Preview` section so reviewers can see
-Figma, browser, and diff images directly in the PR/MR body.
+review host and injects a localized visual evidence preview section so reviewers
+can see Figma, browser, and diff images directly in the PR/MR body.
 
 ## Release Preparation
 
 Task 33 adds a local release-readiness workflow:
 
 ```bash
-pnpm release:build 0.1.5 --dry-run
+pnpm release:build 0.1.6 --dry-run
 ```
 
 The workflow runs eval fixtures, security hardening checks, deterministic package generation, package verification, checksums, a release manifest, and release notes.

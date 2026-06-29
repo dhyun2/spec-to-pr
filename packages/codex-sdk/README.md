@@ -48,6 +48,11 @@ When Figma evidence exists, the runner requires a bounded visual repair loop:
 Design/UI repair, visual capture, comparison, and `evaluate_visual_repair_loop`.
 The default threshold is `0.9` and the default cap is `3` attempts.
 
+Before PR reporting, the runner requires lint, typecheck, build, functional,
+OpenSpec, accessibility, performance/Web Vitals, security, observability, and
+Figma visual comparison evidence when applicable. `generate_pr_report` is called
+with Korean output by default unless the user explicitly requests English.
+
 When the run reaches PR reporting and the report decision is not blocked, the
 runner instructs Codex to call `publish_review_request` with `confirm: true`.
 That creates or updates a draft PR/MR with the generated report artifact as the
@@ -55,5 +60,5 @@ base body. It never merges, approves, closes, or marks the request ready for
 review.
 
 If visual PNG evidence exists, publishing uploads Figma, browser, and diff
-images to the review host and injects a `Visual Evidence Preview` section so the
-PR/MR body renders the comparison directly.
+images to the review host and injects a localized visual evidence preview
+section so the PR/MR body renders the comparison directly.

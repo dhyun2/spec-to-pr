@@ -58,8 +58,8 @@ describe("PrReportService", () => {
       artifactId: generated.markdownArtifactId,
     });
 
-    expect(report.markdown).toContain("# Summary");
-    expect(report.markdown).toContain("## Decision");
+    expect(report.markdown).toContain("# 요약");
+    expect(report.markdown).toContain("## 결정");
 
     const review = await service.recordReview({
       runId: run.id,
@@ -75,5 +75,36 @@ describe("PrReportService", () => {
     const loaded = await store.get(run.id);
 
     expect(loaded.artifacts.some((artifact) => artifact.kind === "pr-report")).toBe(true);
+  });
+
+  it("generates Korean PR report bodies by default and English bodies on request", async () => {
+    const run = await runService.createRun({
+      projectRoot,
+    });
+
+    const korean = await service.generatePrReport({
+      runId: run.id,
+    });
+    const koreanReport = await service.getPrReport({
+      runId: run.id,
+      artifactId: korean.markdownArtifactId,
+    });
+
+    expect(korean.language).toBe("ko");
+    expect(koreanReport.markdown).toContain("# 요약");
+    expect(koreanReport.markdown).toContain("## 결정");
+
+    const english = await service.generatePrReport({
+      runId: run.id,
+      language: "en",
+    });
+    const englishReport = await service.getPrReport({
+      runId: run.id,
+      artifactId: english.markdownArtifactId,
+    });
+
+    expect(english.language).toBe("en");
+    expect(englishReport.markdown).toContain("# Summary");
+    expect(englishReport.markdown).toContain("## Decision");
   });
 });

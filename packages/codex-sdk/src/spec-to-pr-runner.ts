@@ -83,7 +83,8 @@ export function buildSpecToPrPrompt(input: SpecToPrCodexRunInput): string {
   return [
     "Use the installed spec-to-pr Codex plugin when it is available.",
     "Start with the spec-to-pr doctor check before relying on MCP tools.",
-    "Follow the evidence-first flow: intake sources, build traceability, generate OpenSpec/Gherkin/contracts, prepare agent runtime, run quality gates, run visual comparison when Figma evidence exists, and generate a PR report only after required evidence exists.",
+    "Follow the evidence-first flow: intake sources, build traceability, generate OpenSpec/Gherkin/contracts, prepare agent runtime, run mandatory quality gates, run accessibility, performance/Web Vitals, security, observability, and run visual comparison when Figma evidence exists. Generate a PR report only after required evidence exists.",
+    'Call generate_pr_report with language: "ko" unless the user explicitly asks for English.',
     "Do not publish a review request if the PR report decision is blocked.",
     "When Figma input is present, do not call the work review-ready unless there is Figma-vs-implementation visual comparison evidence.",
     "",

@@ -31,6 +31,7 @@ describe("planQualityGates", () => {
             typecheck: "tsc --noEmit",
             test: "vitest run",
             "test:contract": "vitest run contract",
+            "test:security": "vitest run security",
           },
         },
         null,
@@ -40,7 +41,7 @@ describe("planQualityGates", () => {
 
     const plan = await planQualityGates({
       projectRoot: directory,
-      gates: ["lint", "typecheck", "unit", "component", "contract"],
+      gates: ["lint", "typecheck", "unit", "component", "contract", "security"],
     });
 
     expect(plan.packageManager).toBe("pnpm");
@@ -50,6 +51,7 @@ describe("planQualityGates", () => {
       "unit",
       "component",
       "contract",
+      "security",
     ]);
     expect(plan.gates[0]).toMatchObject({
       status: "planned",
@@ -66,6 +68,10 @@ describe("planQualityGates", () => {
     expect(plan.gates[4]).toMatchObject({
       status: "planned",
       script: "test:contract",
+    });
+    expect(plan.gates[5]).toMatchObject({
+      status: "planned",
+      script: "test:security",
     });
   });
 
