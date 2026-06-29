@@ -24,9 +24,27 @@ can see Figma, browser, and diff images directly in the PR/MR body.
 Task 33 adds a local release-readiness workflow:
 
 ```bash
-pnpm release:build 0.1.6 --dry-run
+pnpm release:verify
 ```
 
 The workflow runs eval fixtures, security hardening checks, deterministic package generation, package verification, checksums, a release manifest, and release notes.
 
 It does not publish to npm, upload GitHub Releases, submit to a marketplace, or perform external deployment.
+
+## Release Publishing
+
+Use a dry-run first to inspect the exact command plan:
+
+```bash
+pnpm release:publish:dry-run
+```
+
+When the plan is right, publish the current package version:
+
+```bash
+pnpm release:publish
+```
+
+The publish script runs `pnpm check`, `pnpm plugin:validate`, `pnpm release:build <version>
+--dry-run`, pushes `main`, creates and pushes the Claude plugin tag, then refreshes local Claude and
+Codex marketplace installs. It does not merge any downstream PR/MR.
