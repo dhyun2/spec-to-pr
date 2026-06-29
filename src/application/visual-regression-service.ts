@@ -12,6 +12,9 @@ import {
   captureBrowserScreenshot,
   comparePngImages,
   DEFAULT_VISUAL_GATE_POLICY,
+  VisualRepairDecisionSchema,
+  VisualRepairPolicySchema,
+  decideVisualRepair,
   evaluateVisualComparison,
   renderVisualReportMarkdown,
   VisualGatePolicySchema,
@@ -25,6 +28,7 @@ import type {
   VisualComparisonResult,
   VisualGatePolicy,
   VisualMaskRegion,
+  VisualRepairPolicy,
   VisualReport,
   VisualReviewResult,
   VisualTarget,
@@ -99,6 +103,24 @@ export const GetVisualReportResultSchema = z
     reportArtifactId: ArtifactIdSchema,
     markdownReportArtifactId: ArtifactIdSchema.optional(),
     report: VisualReportSchema,
+  })
+  .strict();
+
+export const EvaluateVisualRepairLoopInputSchema = z
+  .object({
+    runId: RunIdSchema,
+    reportArtifactId: ArtifactIdSchema.optional(),
+    attempt: z.number().int().positive().default(1),
+    policy: VisualRepairPolicySchema.partial().optional(),
+  })
+  .strict();
+
+export const EvaluateVisualRepairLoopResultSchema = z
+  .object({
+    run: RunSummarySchema,
+    reportArtifactId: ArtifactIdSchema,
+    report: VisualReportSchema,
+    decision: VisualRepairDecisionSchema,
   })
   .strict();
 
@@ -393,6 +415,37 @@ export class VisualRegressionService {
         ? {}
         : { markdownReportArtifactId: markdownReportArtifact.id }),
       report,
+    });
+  }
+
+  public async evaluateRepairLoop(rawInput: unknown) {
+    const input = EvaluateVisualRepairLoopInputSchema.parse(rawInput);
+    const run = await this.runStore.get(input.runId);
+    const reportArtifact =
+      input.reportArtifactId === undefined
+        ? latestVisualReportArtifact(run.artifacts)
+        : requireArtifact(run.artifacts, input.reportArtifactId);
+
+    if (reportArtifact.metadata["reportKind"] !== "visual-report-json") {
+      throw new Error(`Artifact is not a visual report JSON artifact: ${reportArtifact.id}`);
+    }
+
+    const report = VisualReportSchema.parse(
+      JSON.parse((await this.artifactStore.readContent(reportArtifact.digest)).toString("utf8")),
+    );
+    const decision = decideVisualRepair({
+      report,
+      attempt: input.attempt,
+      ...(input.policy === undefined
+        ? {}
+        : { policy: input.policy as Partial<VisualRepairPolicy> }),
+    });
+
+    return EvaluateVisualRepairLoopResultSchema.parse({
+      run: summarizeRun(run),
+      reportArtifactId: reportArtifact.id,
+      report,
+      decision,
     });
   }
 

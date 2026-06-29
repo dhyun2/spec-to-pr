@@ -106,6 +106,24 @@ describe("VisualRegressionService", () => {
     expect(compared.overlayArtifactIds).toHaveLength(1);
     expect(compared.gapIds).toHaveLength(1);
 
+    const repairDecision = await service.evaluateRepairLoop({
+      runId: "run_11111111111111111111111111111111",
+      reportArtifactId: compared.reportArtifactId,
+      attempt: 1,
+      policy: {
+        minPassingScore: 0.9,
+        maxAttempts: 3,
+      },
+    });
+
+    expect(repairDecision.decision).toMatchObject({
+      status: "retry",
+      score: 0,
+      threshold: 0.9,
+      attemptsRemaining: 2,
+      nextOwner: "design-ui",
+    });
+
     const loadedReport = await service.getReport({
       runId: "run_11111111111111111111111111111111",
     });

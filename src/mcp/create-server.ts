@@ -168,6 +168,8 @@ import {
   CaptureBrowserScreenshotsResultSchema,
   CompareVisualSnapshotsInputSchema,
   CompareVisualSnapshotsResultSchema,
+  EvaluateVisualRepairLoopInputSchema,
+  EvaluateVisualRepairLoopResultSchema,
   GetVisualReportInputSchema,
   GetVisualReportResultSchema,
   PlanVisualRegressionInputSchema,
@@ -312,6 +314,7 @@ const TOOL_NAMES = [
   "capture_browser_screenshots",
   "compare_visual_snapshots",
   "get_visual_report",
+  "evaluate_visual_repair_loop",
   "record_visual_review_result",
   "create_run",
   "get_run",
@@ -1472,6 +1475,31 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
 
         return {
           text: `Loaded visual report ${structuredContent.reportArtifactId}.`,
+          structuredContent,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "evaluate_visual_repair_loop",
+    {
+      title: "Evaluate visual repair loop",
+      description:
+        "Evaluate whether visual comparison evidence meets the repair threshold or needs another Design/UI attempt.",
+      inputSchema: EvaluateVisualRepairLoopInputSchema.shape,
+      outputSchema: EvaluateVisualRepairLoopResultSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+      },
+    },
+    async (input: unknown) =>
+      handleTool(async () => {
+        const { visualRegressionService } = await servicesProvider();
+        const structuredContent = await visualRegressionService.evaluateRepairLoop(input);
+
+        return {
+          text: `Visual repair decision: ${structuredContent.decision.status} at ${(structuredContent.decision.score * 100).toFixed(2)}%.`,
           structuredContent,
         };
       }),

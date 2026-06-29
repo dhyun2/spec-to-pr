@@ -75,6 +75,7 @@ describe("spec-to-pr MCP stdio server", () => {
       "create_intake_manifest",
       "create_run",
       "detect_publish_target",
+      "evaluate_visual_repair_loop",
       "fail_stage",
       "finalize_integration",
       "generate_api_pipeline",
