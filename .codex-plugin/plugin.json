@@ -1,0 +1,50 @@
+{
+  "name": "spec-to-pr",
+  "version": "0.1.2",
+  "description": "Evidence-driven Codex plugin for turning briefs, Figma designs, and OpenAPI contracts into verified pull requests.",
+  "author": {
+    "name": "Spec to PR Team",
+    "email": "dhp94d@gmail.com",
+    "url": "https://github.com/dhyun2"
+  },
+  "homepage": "https://github.com/dhyun2/spec-to-pr",
+  "repository": "https://github.com/dhyun2/spec-to-pr",
+  "license": "MIT",
+  "keywords": [
+    "codex",
+    "mcp",
+    "openspec",
+    "figma",
+    "openapi",
+    "gherkin",
+    "quality-gates",
+    "pull-requests"
+  ],
+  "skills": "./skills/",
+  "mcpServers": {
+    "spec-to-pr": {
+      "command": "node",
+      "args": ["./dist/mcp/server.js"],
+      "env": {
+        "SPEC_TO_PR_HOST": "codex"
+      }
+    }
+  },
+  "interface": {
+    "displayName": "Spec to PR",
+    "shortDescription": "Turn specs, Figma, and APIs into verified PRs.",
+    "longDescription": "Spec to PR gives Codex an evidence-led workflow for intake, traceability, OpenSpec generation, implementation lanes, quality gates, visual comparison, PR reporting, and review-request publishing.",
+    "developerName": "Spec to PR Team",
+    "category": "Developer Tools",
+    "capabilities": ["Interactive", "Read", "Write"],
+    "websiteURL": "https://github.com/dhyun2/spec-to-pr",
+    "termsOfServiceURL": "https://github.com/dhyun2/spec-to-pr/blob/main/LICENSE",
+    "defaultPrompt": [
+      "Use spec-to-pr to turn docs, Figma, and API contracts into a verified draft PR/MR.",
+      "Run spec-to-pr doctor and check the local MCP kernel.",
+      "Generate and publish an evidence-driven PR report for my spec-to-pr run."
+    ],
+    "brandColor": "#2563EB",
+    "screenshots": []
+  }
+}

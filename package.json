@@ -3,7 +3,7 @@
   "version": "0.1.2",
   "private": true,
   "type": "module",
-  "description": "Claude Code plugin shell for evidence-driven spec-to-pr automation.",
+  "description": "Claude Code and Codex plugin shell for evidence-driven spec-to-pr automation.",
   "engines": {
     "node": ">=22.0.0"
   },
@@ -16,7 +16,9 @@
     "schemas:build": "tsx scripts/export-runtime-schemas.ts",
     "release:build": "tsx scripts/build-release.ts",
     "check": "pnpm format:check && pnpm typecheck && pnpm schemas:build && pnpm build && pnpm test",
-    "plugin:validate": "claude plugin validate . --strict"
+    "plugin:validate": "pnpm plugin:validate:claude && pnpm plugin:validate:codex",
+    "plugin:validate:claude": "claude plugin validate . --strict",
+    "plugin:validate:codex": "tsx scripts/validate-codex-plugin.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",

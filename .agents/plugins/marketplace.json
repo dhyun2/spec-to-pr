@@ -1,0 +1,20 @@
+{
+  "name": "spec-to-pr-local",
+  "interface": {
+    "displayName": "Spec to PR Local"
+  },
+  "plugins": [
+    {
+      "name": "spec-to-pr",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

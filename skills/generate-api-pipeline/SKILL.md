@@ -1,7 +1,7 @@
 ---
 name: Generate API Pipeline
 description: Generate API types, Zod schemas, wrappers, mocks, contract skeletons, and source guards from an OpenAPI intake artifact.
-disable-model-invocation: true
+disable-model-invocation: false
 argument-hint: "<run-id> <openapi-intake-artifact-id> <source-key>"
 allowed-tools: mcp__spec-to-pr__generate_api_pipeline mcp__spec-to-pr__get_run
 ---

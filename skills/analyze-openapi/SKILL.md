@@ -2,7 +2,7 @@
 name: Analyze OpenAPI
 summary: Register and analyze an OpenAPI source for a spec-to-pr Run.
 description: Snapshot an OpenAPI file source and analyze operations, schemas, security schemes, refs, and API gaps.
-disable-model-invocation: true
+disable-model-invocation: false
 argument-hint: "<run-id> <openapi-file-path>"
 allowed-tools: mcp__spec-to-pr__register_file_source mcp__spec-to-pr__analyze_openapi_source mcp__spec-to-pr__get_run
 ---

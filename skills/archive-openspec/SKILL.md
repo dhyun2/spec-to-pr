@@ -1,7 +1,7 @@
 ---
 name: Archive OpenSpec
 description: Manually archive an OpenSpec change after the PR/MR has been merged.
-disable-model-invocation: true
+disable-model-invocation: false
 argument-hint: "[--merge-confirmed | --check-remote-once] [--execute] [--run <run-id>] [--change <change-name>]"
 allowed-tools: mcp__spec-to-pr__get_run mcp__spec-to-pr__resolve_archive_target mcp__spec-to-pr__record_user_merge_attestation mcp__spec-to-pr__plan_openspec_archive mcp__spec-to-pr__check_review_request_status_once mcp__spec-to-pr__run_openspec_archive mcp__spec-to-pr__get_openspec_archive_report
 ---

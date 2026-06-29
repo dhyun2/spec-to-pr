@@ -1,7 +1,7 @@
 ---
 name: Run Quality Gates
 description: Run deterministic lint, typecheck, build, and test quality gates for a spec-to-pr Run.
-disable-model-invocation: true
+disable-model-invocation: false
 argument-hint: "<run-id>"
 allowed-tools: mcp__spec-to-pr__run_quality_gates mcp__spec-to-pr__get_run
 ---

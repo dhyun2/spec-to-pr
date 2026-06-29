@@ -1,7 +1,7 @@
 ---
 name: Run Performance Gate
 description: Run Lighthouse, bundle budgets, and Web Vitals readiness checks for a spec-to-pr Run.
-disable-model-invocation: true
+disable-model-invocation: false
 argument-hint: "<run-id> [route-glob-or-change-name]"
 allowed-tools: mcp__spec-to-pr__plan_performance_gate mcp__spec-to-pr__run_performance_gate mcp__spec-to-pr__get_performance_report mcp__spec-to-pr__record_performance_review
 ---

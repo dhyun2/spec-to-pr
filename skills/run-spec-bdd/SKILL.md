@@ -1,7 +1,7 @@
 ---
 name: Run Spec BDD Agent
 description: Prepare and run the Spec/BDD agent lane for an OpenSpec change.
-disable-model-invocation: true
+disable-model-invocation: false
 context: fork
 agent: spec-bdd
 argument-hint: "<run-id> <change-name>"

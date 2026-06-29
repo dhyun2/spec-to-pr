@@ -1,7 +1,7 @@
 ---
 name: Doctor
 description: Verify that the spec-to-pr plugin and local MCP kernel are installed and reachable.
-disable-model-invocation: true
+disable-model-invocation: false
 argument-hint: "[echo-message]"
 allowed-tools: mcp__spec-to-pr__kernel_info mcp__spec-to-pr__kernel_ping
 ---

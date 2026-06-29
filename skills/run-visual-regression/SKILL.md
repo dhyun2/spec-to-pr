@@ -1,7 +1,7 @@
 ---
 name: Run Visual Regression
 description: Capture browser screenshots and compare them against stored Figma screenshot artifacts.
-disable-model-invocation: true
+disable-model-invocation: false
 argument-hint: "<run-id> <change-name>"
 allowed-tools: mcp__spec-to-pr__plan_visual_regression mcp__spec-to-pr__capture_browser_screenshots mcp__spec-to-pr__compare_visual_snapshots mcp__spec-to-pr__get_visual_report mcp__spec-to-pr__record_visual_review_result mcp__spec-to-pr__get_run
 ---

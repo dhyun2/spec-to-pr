@@ -1,7 +1,7 @@
 ---
 name: Build Traceability
 description: Build requirement traceability graph and matrix from collected brief, Figma, and OpenAPI evidence.
-disable-model-invocation: true
+disable-model-invocation: false
 argument-hint: "<run-id>"
 allowed-tools: mcp__spec-to-pr__build_evidence_graph mcp__spec-to-pr__get_traceability_matrix mcp__spec-to-pr__get_run
 ---

@@ -1,0 +1,21 @@
+{
+  "name": "@spec-to-pr/codex-sdk-runner",
+  "version": "0.1.2",
+  "private": true,
+  "type": "module",
+  "description": "Codex SDK runner for automating spec-to-pr workflows.",
+  "bin": {
+    "spec-to-pr-codex": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@openai/codex-sdk": "0.142.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.8.0"
+  }
+}

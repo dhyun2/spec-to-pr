@@ -1,7 +1,7 @@
 ---
 name: Setup Observability
 description: Generate OpenTelemetry and log correlation artifacts for a spec-to-pr Run.
-disable-model-invocation: true
+disable-model-invocation: false
 argument-hint: "<run-id> [target=plugin|target-app|both] [collector-url]"
 allowed-tools: mcp__spec-to-pr__plan_observability mcp__spec-to-pr__generate_observability_config mcp__spec-to-pr__get_observability_report mcp__spec-to-pr__record_observability_review mcp__spec-to-pr__get_run
 ---

@@ -1,7 +1,7 @@
 ---
 name: Figma Intake
 description: Register a Figma URL and record available Figma MCP outputs into a spec-to-pr Run.
-disable-model-invocation: true
+disable-model-invocation: false
 argument-hint: "[run-id] [figma-url]"
 allowed-tools: mcp__spec-to-pr__register_figma_source mcp__spec-to-pr__record_figma_metadata mcp__spec-to-pr__record_figma_design_context mcp__spec-to-pr__record_figma_screenshot mcp__spec-to-pr__record_figma_variable_defs mcp__spec-to-pr__record_figma_code_connect_map
 ---

@@ -1,7 +1,7 @@
 ---
 name: Generate Gherkin
 description: Generate Gherkin feature files and a test matrix for an OpenSpec change.
-disable-model-invocation: true
+disable-model-invocation: false
 argument-hint: "<run-id> <change-name>"
 allowed-tools: mcp__spec-to-pr__generate_gherkin_test_matrix mcp__spec-to-pr__get_run
 ---

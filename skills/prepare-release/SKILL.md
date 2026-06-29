@@ -1,7 +1,7 @@
 ---
 name: Prepare Release
 description: Run evals, security hardening, package verification, and release-note generation for a spec-to-pr plugin release candidate.
-disable-model-invocation: true
+disable-model-invocation: false
 argument-hint: "<version> [--dry-run|--full]"
 allowed-tools: mcp__spec-to-pr__list_eval_suites mcp__spec-to-pr__run_eval_suite mcp__spec-to-pr__run_security_hardening_suite mcp__spec-to-pr__build_release_package mcp__spec-to-pr__verify_release_package mcp__spec-to-pr__generate_release_notes
 ---

@@ -1,7 +1,7 @@
 ---
 name: Run API Contract Agent
 description: Prepare and run the API Contract Agent lane for a spec-to-pr Run.
-disable-model-invocation: true
+disable-model-invocation: false
 argument-hint: "<run-id> <worktree-path> <base-sha>"
 allowed-tools: mcp__spec-to-pr__prepare_api_contract_agent mcp__spec-to-pr__get_api_contract_agent_context mcp__spec-to-pr__record_api_contract_agent_result mcp__spec-to-pr__get_run
 ---

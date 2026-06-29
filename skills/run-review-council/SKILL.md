@@ -1,7 +1,7 @@
 ---
 name: Run Review Council
 description: Prepare context for the review-council agent and record its structured review result.
-disable-model-invocation: true
+disable-model-invocation: false
 argument-hint: "<run-id>"
 allowed-tools: mcp__spec-to-pr__prepare_review_council mcp__spec-to-pr__get_review_council_context mcp__spec-to-pr__record_review_council_result mcp__spec-to-pr__get_run
 ---

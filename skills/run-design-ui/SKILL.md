@@ -1,7 +1,7 @@
 ---
 name: Run Design UI Agent
 description: Prepare and run the Design/UI agent lane for a spec-to-pr Run.
-disable-model-invocation: true
+disable-model-invocation: false
 argument-hint: "<run-id> <change-name>"
 allowed-tools: mcp__spec-to-pr__prepare_design_ui_agent mcp__spec-to-pr__get_design_ui_agent_context mcp__spec-to-pr__record_design_ui_agent_result mcp__spec-to-pr__get_run
 ---

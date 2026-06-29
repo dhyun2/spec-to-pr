@@ -1,7 +1,7 @@
 ---
 name: Run Architecture Guard
 description: Analyze FSD boundaries and generate source guard tests for a spec-to-pr Run.
-disable-model-invocation: true
+disable-model-invocation: false
 argument-hint: "<run-id>"
 allowed-tools: mcp__spec-to-pr__analyze_architecture_boundaries mcp__spec-to-pr__generate_source_guard_tests mcp__spec-to-pr__get_run
 ---

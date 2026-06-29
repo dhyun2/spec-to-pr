@@ -1,7 +1,7 @@
 ---
 name: Run Accessibility Gate
 description: Plan and run accessibility checks, then record accessibility review notes.
-disable-model-invocation: true
+disable-model-invocation: false
 argument-hint: "<run-id> [targets-json]"
 allowed-tools: mcp__spec-to-pr__plan_accessibility_gate mcp__spec-to-pr__run_accessibility_gate mcp__spec-to-pr__get_accessibility_report mcp__spec-to-pr__record_accessibility_review Task
 ---

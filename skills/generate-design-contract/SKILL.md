@@ -1,7 +1,7 @@
 ---
 name: Generate Design Contract
 description: Generate a Figma design contract and design-system mapping for a spec-to-pr Run.
-disable-model-invocation: true
+disable-model-invocation: false
 argument-hint: "<run-id> <change-name> <figma-inventory-artifact-id>"
 allowed-tools: mcp__spec-to-pr__generate_figma_design_contract mcp__spec-to-pr__get_run
 ---

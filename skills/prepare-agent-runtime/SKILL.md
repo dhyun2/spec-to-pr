@@ -1,7 +1,7 @@
 ---
 name: Prepare Agent Runtime
 description: Prepare isolated git worktrees and context packs for implementation agents in a spec-to-pr Run.
-disable-model-invocation: true
+disable-model-invocation: false
 argument-hint: "[run-id]"
 allowed-tools: mcp__spec-to-pr__get_run mcp__spec-to-pr__list_agent_descriptors mcp__spec-to-pr__prepare_agent_runtime
 ---

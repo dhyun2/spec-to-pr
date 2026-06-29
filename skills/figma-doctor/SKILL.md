@@ -1,7 +1,7 @@
 ---
 name: Figma Doctor
 description: Discover available Figma MCP providers and record their capabilities in a spec-to-pr Run.
-disable-model-invocation: true
+disable-model-invocation: false
 argument-hint: "[run-id]"
 allowed-tools: mcp__spec-to-pr__record_figma_mcp_capabilities mcp__spec-to-pr__get_figma_provider_policy
 ---

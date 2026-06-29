@@ -1,7 +1,7 @@
 ---
 name: Run Integration
 description: Integrate Review Council-approved agent results into a dedicated integration worktree.
-disable-model-invocation: true
+disable-model-invocation: false
 argument-hint: "<run-id> <approved-agent-result-id...>"
 allowed-tools: mcp__spec-to-pr__get_run mcp__spec-to-pr__prepare_integration mcp__spec-to-pr__get_integration_plan mcp__spec-to-pr__apply_integration mcp__spec-to-pr__record_integration_repair mcp__spec-to-pr__finalize_integration
 ---
