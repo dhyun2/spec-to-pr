@@ -29,8 +29,8 @@
         "pull-requests"
       ],
       "source": {
-        "source": "github",
-        "repo": "dhyun2/spec-to-pr",
+        "source": "url",
+        "url": "https://github.com/dhyun2/spec-to-pr.git",
         "ref": "spec-to-pr--v0.1.0"
       },
       "homepage": "https://github.com/dhyun2/spec-to-pr",

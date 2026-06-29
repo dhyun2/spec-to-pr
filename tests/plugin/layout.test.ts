@@ -19,8 +19,8 @@ const MarketplaceSchema = z.object({
         name: z.literal("spec-to-pr"),
         version: z.string().min(1),
         source: z.object({
-          source: z.literal("github"),
-          repo: z.literal("dhyun2/spec-to-pr"),
+          source: z.literal("url"),
+          url: z.literal("https://github.com/dhyun2/spec-to-pr.git"),
           ref: z.literal("spec-to-pr--v0.1.0"),
         }),
       }),
