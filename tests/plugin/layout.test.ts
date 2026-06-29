@@ -10,6 +10,24 @@ const PluginManifestSchema = z.object({
   mcpServers: z.string().min(1),
 });
 
+const MarketplaceSchema = z.object({
+  name: z.literal("spec-to-pr"),
+  version: z.string().min(1),
+  plugins: z
+    .array(
+      z.object({
+        name: z.literal("spec-to-pr"),
+        version: z.string().min(1),
+        source: z.object({
+          source: z.literal("github"),
+          repo: z.literal("dhyun2/spec-to-pr"),
+          ref: z.literal("spec-to-pr--v0.1.0"),
+        }),
+      }),
+    )
+    .length(1),
+});
+
 const McpConfigSchema = z.object({
   mcpServers: z.object({
     "spec-to-pr": z.object({
@@ -31,6 +49,17 @@ describe("plugin layout", () => {
 
     expect(existsSync(path.join(root, manifest.skills))).toBe(true);
     expect(existsSync(path.join(root, manifest.mcpServers))).toBe(true);
+  });
+
+  it("declares a marketplace entry for the release tag", () => {
+    const manifestPath = path.join(root, ".claude-plugin", "plugin.json");
+    const manifest = PluginManifestSchema.parse(JSON.parse(readFileSync(manifestPath, "utf8")));
+    const marketplacePath = path.join(root, ".claude-plugin", "marketplace.json");
+    const marketplace = MarketplaceSchema.parse(JSON.parse(readFileSync(marketplacePath, "utf8")));
+    const plugin = marketplace.plugins[0]!;
+
+    expect(plugin.version).toBe(manifest.version);
+    expect(plugin.source.ref).toBe(`${manifest.name}--v${manifest.version}`);
   });
 
   it("points the MCP server at the production bundle", () => {
