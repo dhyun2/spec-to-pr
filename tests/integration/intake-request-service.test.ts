@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { IntakeRequestService } from "../../src/application/intake-request-service.js";
+import { OpenApiIntakeService } from "../../src/application/openapi-intake-service.js";
 import { RunService } from "../../src/application/run-service.js";
 import { ArtifactBlobStore } from "../../src/artifact-registry/artifact-blob-store.js";
 import { SourceSnapshotStore } from "../../src/source-registry/snapshot-store.js";
@@ -16,6 +17,7 @@ let dataRoot: string;
 let store: SqliteRunStore;
 let runService: RunService;
 let intakeRequestService: IntakeRequestService;
+let openApiIntakeService: OpenApiIntakeService;
 
 beforeEach(async () => {
   directory = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-intake-request-"));
@@ -33,11 +35,20 @@ beforeEach(async () => {
     now: () => "2026-06-29T00:00:00.000Z",
   });
 
+  const snapshotStore = new SourceSnapshotStore(path.join(dataRoot, "source-snapshots"));
+  const artifactStore = new ArtifactBlobStore(path.join(dataRoot, "artifacts"));
+
   intakeRequestService = new IntakeRequestService(
     store,
-    new SourceSnapshotStore(path.join(dataRoot, "source-snapshots")),
-    new ArtifactBlobStore(path.join(dataRoot, "artifacts")),
+    snapshotStore,
+    artifactStore,
     () => "2026-06-29T00:00:00.000Z",
+  );
+  openApiIntakeService = new OpenApiIntakeService(
+    store,
+    snapshotStore,
+    artifactStore,
+    () => "2026-06-29T00:00:01.000Z",
   );
 });
 
@@ -99,11 +110,14 @@ describe("IntakeRequestService", () => {
     const loaded = await store.get(run.id);
 
     expect(loaded.sources).toHaveLength(1);
-    expect(loaded.evidence).toHaveLength(1);
+    expect(loaded.evidence.length).toBeGreaterThan(1);
     expect(loaded.artifacts).toHaveLength(1);
     expect(loaded.revision).toBe(1);
     expect(loaded.artifacts[0]?.kind).toBe("parsed-intake-request");
-    expect(loaded.artifacts[0]?.evidenceIds).toEqual([result.evidence.id]);
+    expect(loaded.artifacts[0]?.evidenceIds).toContain(result.evidence.id);
+    expect(loaded.evidence.some((evidence) => evidence.metadata["itemType"] === "policy")).toBe(
+      true,
+    );
   });
 
   it("parses app targets inline endpoint notes and Korean branch hints from natural language", async () => {
@@ -131,5 +145,23 @@ describe("IntakeRequestService", () => {
     expect(result.parsed.visualPreviewPolicy).toMatchObject({
       includeDiff: false,
     });
+
+    const loaded = await store.get(run.id);
+    const inlineOpenApiSource = result.derivedSources.find((source) => source.kind === "openapi");
+
+    expect(inlineOpenApiSource).toBeDefined();
+    expect(loaded.sources).toEqual(expect.arrayContaining([inlineOpenApiSource]));
+    expect(
+      loaded.evidence.filter(
+        (evidence) => evidence.metadata["openapiEvidenceKind"] === "operation",
+      ),
+    ).toHaveLength(3);
+
+    const analysis = await openApiIntakeService.analyzeOpenApiSource({
+      runId: run.id,
+      sourceId: inlineOpenApiSource!.id,
+    });
+
+    expect(analysis.operationCount).toBe(3);
   });
 });

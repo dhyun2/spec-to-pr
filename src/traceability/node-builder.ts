@@ -54,13 +54,16 @@ function isBriefRequirementEvidence(evidence: EvidenceRef): boolean {
       )) ||
     (evidence.location.type === "inline-text" &&
       evidence.metadata["parserVersion"] === "intake-request-parser-v1" &&
-      evidence.metadata["itemType"] === "instruction")
+      ["requirement", "policy", "design", "test"].includes(
+        String(evidence.metadata["itemType"] ?? ""),
+      ))
   );
 }
 
 function isOpenApiOperationEvidence(evidence: EvidenceRef): boolean {
   return (
-    evidence.metadata["adapter"] === "openapi-intake-v1" &&
+    (evidence.metadata["adapter"] === "openapi-intake-v1" ||
+      evidence.metadata["parserVersion"] === "intake-request-parser-v1") &&
     (evidence.metadata["openapiEvidenceKind"] === "operation" ||
       evidence.metadata["evidenceType"] === "openapi-operation")
   );
@@ -110,7 +113,7 @@ function createRequirementNode(evidence: EvidenceRef): TraceNode {
       itemType: evidence.metadata["itemType"],
       headingPath: evidence.metadata["headingPath"],
       parserVersion: evidence.metadata["parserVersion"],
-      sourceKind: isInstruction ? "instruction" : undefined,
+      sourceKind: evidence.metadata["sourceKind"] ?? (isInstruction ? "instruction" : undefined),
     }),
   });
 }

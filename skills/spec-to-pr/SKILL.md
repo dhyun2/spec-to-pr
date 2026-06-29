@@ -35,26 +35,27 @@ Default target branch is `main` when the user does not provide one.
 
 1. Run the Doctor checks before relying on the kernel.
 2. Create or reuse a Run for the project root.
-3. Call `parse_intake_request` with the original user request text before registering derived sources. Treat parsed file paths, Figma URLs, branch policy, validation commands, publish policy, merge boundary, and archive policy as intake evidence, not as memory.
-4. Register supplied brief, docs, Figma, and OpenAPI sources.
-5. Build traceability, OpenSpec, Gherkin, API artifacts, and Figma design contracts from recorded evidence.
-6. Prepare and run the relevant implementation lanes.
-7. Run mandatory evidence gates before PR reporting:
+3. Call `parse_intake_request` with the original user request text before registering derived sources. Treat parsed file paths, Figma URLs, inline OpenAPI/API endpoint notes, branch policy, validation commands, publish policy, merge boundary, archive policy, visual preview policy, and gate intent as intake evidence, not as memory.
+4. If `parse_intake_request` returns `derivedSources` with `kind: "openapi"`, call `analyze_openapi_source` for each returned source before building traceability or API artifacts. These derived sources represent pasted API notes normalized into OpenAPI snapshots.
+5. Register supplied brief, docs, Figma, and OpenAPI file sources.
+6. Build traceability, OpenSpec, Gherkin, API artifacts, and Figma design contracts from recorded evidence.
+7. Prepare and run the relevant implementation lanes.
+8. Run mandatory evidence gates before PR reporting:
    - `run_quality_gates` must record `lint`, `typecheck`, `build`, at least one functional gate (`unit`, `component`, `contract`, `acceptance`, or `e2e`), `openspec`, and `security` CheckResults. If a project has no matching script, provide an explicit command override or keep the report blocked.
    - If Figma evidence exists, run Figma provider policy/inventory/design contract steps and run visual comparison with `plan_visual_regression`, `capture_browser_screenshots`, and `compare_visual_snapshots`.
    - Run `run_accessibility_gate`.
    - Run `run_performance_gate` and record Web Vitals/Lighthouse readiness evidence.
    - Run `generate_observability_config` and record observability review evidence.
-8. If Figma evidence exists, run the visual repair loop until `evaluate_visual_repair_loop` returns `passed` or a human-review blocker is recorded.
-9. Do not generate a final PR report while mandatory gate evidence is missing unless the report is intentionally blocked and will not be published.
-10. Run Review Council before final reporting.
-11. Generate the PR report with `generate_pr_report`. Use `language: "ko"` unless the user explicitly asks for English.
-12. Read the markdown body with `get_pr_report`.
-13. If the report decision is `blocked`, stop and report the missing/failed gates. Do not publish.
-14. If the report decision is not `blocked`, detect the publish target and build the publish plan.
-15. Do not stop after planning. Call `publish_review_request` with `confirm: true` to create or update a draft PR/MR using the generated report artifact as the base body.
+9. If Figma evidence exists, run the visual repair loop until `evaluate_visual_repair_loop` returns `passed` or a human-review blocker is recorded.
+10. Do not generate a final PR report while mandatory gate evidence is missing unless the report is intentionally blocked and will not be published.
+11. Run Review Council before final reporting.
+12. Generate the PR report with `generate_pr_report`. Use `language: "ko"` unless the user explicitly asks for English.
+13. Read the markdown body with `get_pr_report`.
+14. If the report decision is `blocked`, stop and report the missing/failed gates. Do not publish.
+15. If the report decision is not `blocked`, detect the publish target and build the publish plan.
+16. Do not stop after planning. Call `publish_review_request` with `confirm: true` to create or update a draft PR/MR using the generated report artifact as the base body.
     - If visual PNG artifacts exist, the publisher uploads them to GitHub/GitLab and injects a `Visual Evidence Preview` section with image links.
-16. Call `get_publish_result` and report the PR/MR URL.
+17. Call `get_publish_result` and report the PR/MR URL.
 
 ## Publishing Boundary
 

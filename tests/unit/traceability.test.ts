@@ -132,7 +132,7 @@ describe("traceability", () => {
     expect(nodes.figmaNodes).toHaveLength(1);
   });
 
-  it("treats captured user instructions as requirement evidence", () => {
+  it("builds requirement and API nodes from structured instruction evidence", () => {
     const run = createRunWithEvidence();
     run.sources.push({
       id: instructionSourceId,
@@ -146,37 +146,95 @@ describe("traceability", () => {
       capturedAt: now,
       metadata: {},
     });
-    run.evidence.push({
-      id: "ev_44444444444444444444444444444444",
-      sourceId: instructionSourceId,
-      location: {
-        type: "inline-text",
-        label: "user-request",
-        startLine: 1,
-        endLine: 2,
+    run.evidence.push(
+      {
+        id: "ev_44444444444444444444444444444444",
+        sourceId: instructionSourceId,
+        location: {
+          type: "inline-text",
+          label: "user-request",
+          startLine: 1,
+          endLine: 2,
+        },
+        summary: "Original user request captured for deterministic intake.",
+        excerpt:
+          "레슨권 등록 화면에서 GET /members로 회원 검색 후 POST /members/{userNo}로 등록한다.",
+        digest,
+        capturedAt: now,
+        metadata: {
+          parserVersion: "intake-request-parser-v1",
+          itemType: "instruction",
+        },
       },
-      summary: "Original user request captured for deterministic intake.",
-      excerpt:
-        "레슨권 등록 화면에서 GET /members로 회원 검색 후 POST /members/{userNo}로 등록한다.",
-      digest,
-      capturedAt: now,
-      metadata: {
-        parserVersion: "intake-request-parser-v1",
-        itemType: "instruction",
+      {
+        id: "ev_55555555555555555555555555555555",
+        sourceId: instructionSourceId,
+        location: {
+          type: "inline-text",
+          label: "user-request",
+          startLine: 1,
+          endLine: 1,
+        },
+        summary: "레슨권 등록 화면에서 회원 검색 후 등록한다.",
+        excerpt: "레슨권 등록 화면에서 회원 검색 후 등록한다.",
+        digest,
+        capturedAt: now,
+        metadata: {
+          parserVersion: "intake-request-parser-v1",
+          itemType: "requirement",
+          sourceKind: "instruction",
+        },
       },
-    });
+      {
+        id: "ev_66666666666666666666666666666666",
+        sourceId: instructionSourceId,
+        location: {
+          type: "inline-text",
+          label: "user-request",
+          startLine: 1,
+          endLine: 1,
+        },
+        summary: "GET /members",
+        excerpt: "GET /members",
+        digest,
+        capturedAt: now,
+        metadata: {
+          parserVersion: "intake-request-parser-v1",
+          itemType: "api",
+          evidenceType: "openapi-operation",
+          openapiEvidenceKind: "operation",
+          method: "get",
+          path: "/members",
+        },
+      },
+    );
 
     const nodes = buildTraceNodes(run);
     const instructionRequirement = nodes.requirementNodes.find((node) =>
+      node.evidenceIds.includes("ev_55555555555555555555555555555555"),
+    );
+    const wholePromptRequirement = nodes.requirementNodes.find((node) =>
       node.evidenceIds.includes("ev_44444444444444444444444444444444"),
+    );
+    const inlineApiNode = nodes.apiNodes.find((node) =>
+      node.evidenceIds.includes("ev_66666666666666666666666666666666"),
     );
 
     expect(instructionRequirement).toMatchObject({
       kind: "requirement",
-      summary: expect.stringContaining("레슨권 등록 화면"),
+      summary: "레슨권 등록 화면에서 회원 검색 후 등록한다.",
       metadata: expect.objectContaining({
-        itemType: "instruction",
+        itemType: "requirement",
         sourceKind: "instruction",
+      }),
+    });
+    expect(wholePromptRequirement).toBeUndefined();
+    expect(inlineApiNode).toMatchObject({
+      kind: "api-operation",
+      label: "GET /members",
+      metadata: expect.objectContaining({
+        method: "get",
+        path: "/members",
       }),
     });
   });

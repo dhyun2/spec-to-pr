@@ -113,7 +113,7 @@ describe("PR report decision policy", () => {
     expect(decision).toBe("ready");
   });
 
-  it("does not require UI security observability or OpenSpec gates for instruction-only docs scope", () => {
+  it("requires OpenSpec for natural-language-only runs", () => {
     const decision = decideReportStatus({
       checks: [
         passedCheck("chk_11111111111111111111111111111111", "lint"),
@@ -126,7 +126,46 @@ describe("PR report decision policy", () => {
       sources: [instructionSource()],
     });
 
+    expect(decision).toBe("blocked");
+  });
+
+  it("marks instruction-only runs ready after OpenSpec when no UI security or observability intent exists", () => {
+    const decision = decideReportStatus({
+      checks: [
+        passedCheck("chk_11111111111111111111111111111111", "lint"),
+        passedCheck("chk_22222222222222222222222222222222", "typecheck"),
+        passedCheck("chk_33333333333333333333333333333333", "build"),
+        passedCheck("chk_44444444444444444444444444444444", "unit"),
+        passedCheck("chk_55555555555555555555555555555555", "openspec"),
+      ],
+      gaps: [],
+      artifacts: [],
+      sources: [instructionSource()],
+    });
+
     expect(decision).toBe("ready");
+  });
+
+  it("requires security and observability gates from parsed request intent before evidence exists", () => {
+    const decision = decideReportStatus({
+      checks: [
+        passedCheck("chk_11111111111111111111111111111111", "lint"),
+        passedCheck("chk_22222222222222222222222222222222", "typecheck"),
+        passedCheck("chk_33333333333333333333333333333333", "build"),
+        passedCheck("chk_44444444444444444444444444444444", "unit"),
+        passedCheck("chk_55555555555555555555555555555555", "openspec"),
+      ],
+      gaps: [],
+      artifacts: [
+        parsedIntakeArtifact({
+          security: true,
+          observability: true,
+        }),
+      ],
+      sources: [instructionSource()],
+    });
+
+    expect(decision).toBe("blocked");
   });
 
   it("blocks Figma-backed reports when visual comparison has not run", () => {
@@ -252,6 +291,26 @@ function instructionSource(): SourceRef {
     digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
     capturedAt: "2026-06-23T00:00:00.000Z",
     metadata: {},
+  };
+}
+
+function parsedIntakeArtifact(gatePolicy: {
+  security?: boolean;
+  observability?: boolean;
+}): ArtifactRef {
+  return {
+    id: "art_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    kind: "parsed-intake-request",
+    uri: "artifact://sha256/aaa",
+    mediaType: "application/json",
+    digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    producedBy: "orchestrator",
+    evidenceIds: [],
+    createdAt: "2026-06-23T00:00:00.000Z",
+    metadata: {
+      parserVersion: "intake-request-parser-v1",
+      gatePolicy,
+    },
   };
 }
 

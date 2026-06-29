@@ -11,17 +11,25 @@ the Claude plugin tag format, for example `spec-to-pr--v0.1.0`.
 
 - Added release publishing scripts that bundle verification, package dry-run, git push, Claude
   plugin tagging, and local Claude/Codex marketplace updates.
+- Added structured intake evidence for natural-language requirements, policies, validation
+  commands, and inline API endpoint notes.
+- Added inline OpenAPI source generation so pasted endpoint notes such as `GET /members` can be
+  analyzed by the OpenAPI intake pipeline.
 
 ### Changed
 
-- Promoted captured instruction evidence into traceability requirement nodes so OpenSpec and Gherkin
-  generation can use the original user request instead of only brief adapter output.
+- Promoted structured instruction evidence into traceability requirement and API operation nodes so
+  OpenSpec, Gherkin, and API contract steps can use the original user request without collapsing it
+  into one broad requirement.
 - Expanded intake parsing for workspace targets, inline endpoint notes, Korean branch hints, and
   visual preview constraints.
-- Made PR report gate requiredness source-aware so instruction-only/docs scopes do not require
-  UI-only, observability, security, or OpenSpec gates by default.
+- Made PR report gate requiredness intent-aware: natural-language runs still require OpenSpec, while
+  UI, security, performance, accessibility, and observability gates are required from parsed source
+  and request intent instead of from already-produced evidence.
 - Applied parsed visual preview constraints during publishing so diff images can remain local
   artifacts without being uploaded into the PR/MR body.
+- Updated Spec To PR and OpenAPI skills so agents analyze OpenAPI sources derived from pasted API
+  notes before traceability and API artifact generation.
 
 ## 0.1.6 - 2026-06-29
 

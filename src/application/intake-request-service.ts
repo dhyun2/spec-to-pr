@@ -14,6 +14,7 @@ import { createArtifactId, createEvidenceId, createSourceId } from "../runtime/i
 import { RunIdSchema } from "../runtime/ids.js";
 import { IsoDateTimeSchema } from "../runtime/scalars.js";
 import { canonicalizeFileContent, SourceSnapshotStore } from "../source-registry/index.js";
+import { sha256Digest } from "../source-registry/content-hash.js";
 import type { RunStore } from "../store/run-store.js";
 
 const DEFAULT_MEDIA_TYPE = "text/plain; charset=utf-8" as const;
@@ -62,6 +63,16 @@ export const VisualPreviewPolicySchema = z
   })
   .strict();
 
+export const GatePolicySchema = z
+  .object({
+    openspec: z.boolean().optional(),
+    security: z.boolean().optional(),
+    accessibility: z.boolean().optional(),
+    performance: z.boolean().optional(),
+    observability: z.boolean().optional(),
+  })
+  .strict();
+
 export const ParsedIntakeRequestSchema = z
   .object({
     parserVersion: z.literal(PARSER_VERSION),
@@ -76,6 +87,7 @@ export const ParsedIntakeRequestSchema = z
     publishPolicy: PublishPolicySchema,
     archivePolicy: ArchivePolicySchema,
     visualPreviewPolicy: VisualPreviewPolicySchema,
+    gatePolicy: GatePolicySchema,
     targetHints: z.array(z.string().trim().min(1)),
   })
   .strict();
@@ -85,6 +97,7 @@ export const ParseIntakeRequestResultSchema = z
     run: RunSummarySchema,
     source: SourceRefSchema,
     evidence: EvidenceRefSchema,
+    derivedSources: z.array(SourceRefSchema).default([]),
     artifact: ArtifactRefSchema,
     parsed: ParsedIntakeRequestSchema,
     duplicateSource: z.boolean(),
@@ -157,9 +170,29 @@ export class IntakeRequestService {
       digest: canonical.canonicalDigest,
       capturedAt,
     });
+    const derivedEvidence = createStructuredInstructionEvidence({
+      source,
+      label: input.label,
+      requestText: input.requestText,
+      parsed,
+      capturedAt,
+    });
+    const inlineOpenApiSource = await this.createInlineOpenApiSource({
+      run,
+      label: input.label,
+      parsed,
+      capturedAt,
+    });
+    const evidenceToAdd = [evidence, ...derivedEvidence];
+    const sourcesToAdd = [
+      ...(existingSource === undefined ? [source] : []),
+      ...(inlineOpenApiSource !== undefined && !inlineOpenApiSource.duplicate
+        ? [inlineOpenApiSource.source]
+        : []),
+    ];
     const artifact = await this.createParsedArtifact({
       runId: input.runId,
-      evidence,
+      evidence: evidenceToAdd,
       parsed,
       capturedAt,
     });
@@ -168,8 +201,8 @@ export class IntakeRequestService {
       ...run,
       revision: run.revision + 1,
       updatedAt: capturedAt,
-      sources: existingSource === undefined ? [...run.sources, source] : run.sources,
-      evidence: [...run.evidence, evidence],
+      sources: [...run.sources, ...sourcesToAdd],
+      evidence: [...run.evidence, ...evidenceToAdd],
       artifacts: [...run.artifacts, artifact],
     });
 
@@ -179,15 +212,78 @@ export class IntakeRequestService {
       run: summarizeRun(nextRun),
       source,
       evidence,
+      derivedSources: inlineOpenApiSource === undefined ? [] : [inlineOpenApiSource.source],
       artifact,
       parsed,
       duplicateSource: existingSource !== undefined,
     });
   }
 
+  private async createInlineOpenApiSource(input: {
+    run: { sources: SourceRef[] };
+    label: string;
+    parsed: ParsedIntakeRequest;
+    capturedAt: string;
+  }): Promise<{ source: SourceRef; duplicate: boolean } | undefined> {
+    const document = buildInlineOpenApiSourceDocument(input.parsed);
+
+    if (document === undefined) {
+      return undefined;
+    }
+
+    const sourceLabel = `${input.label}-inline-openapi`;
+    const canonical = canonicalizeFileContent({
+      path: document.path,
+      mediaType: document.mediaType,
+      rawContent: document.content,
+    });
+
+    const existingSource = input.run.sources.find(
+      (source) =>
+        source.kind === "openapi" &&
+        source.locator.type === "inline" &&
+        source.locator.label === sourceLabel &&
+        source.digest === canonical.canonicalDigest,
+    );
+    const source =
+      existingSource ??
+      SourceRefSchema.parse({
+        id: createSourceId(),
+        kind: "openapi",
+        locator: {
+          type: "inline",
+          label: sourceLabel,
+          mediaType: document.mediaType,
+        },
+        digest: canonical.canonicalDigest,
+        capturedAt: input.capturedAt,
+        metadata: {
+          parserVersion: PARSER_VERSION,
+          generatedFrom: "instruction-inline-api",
+          rawDigest: canonical.rawDigest,
+          mode: canonical.mode,
+          rawByteLength: canonical.rawByteLength,
+          canonicalByteLength: canonical.canonicalByteLength,
+          operationCount: document.operationCount,
+          ...(canonical.lineCount === undefined ? {} : { lineCount: canonical.lineCount }),
+        },
+      });
+
+    await this.snapshotStore.writeSnapshot({
+      source,
+      canonical,
+      storedAt: input.capturedAt,
+    });
+
+    return {
+      source,
+      duplicate: existingSource !== undefined,
+    };
+  }
+
   private async createParsedArtifact(input: {
     runId: string;
-    evidence: EvidenceRef;
+    evidence: EvidenceRef[];
     parsed: ParsedIntakeRequest;
     capturedAt: string;
   }): Promise<ArtifactRef> {
@@ -218,10 +314,12 @@ export class IntakeRequestService {
       mediaType: "application/json",
       digest: blob.digest,
       producedBy: "orchestrator",
-      evidenceIds: [input.evidence.id],
+      evidenceIds: input.evidence.map((evidence) => evidence.id),
       createdAt: input.capturedAt,
       metadata: {
         parserVersion: PARSER_VERSION,
+        gatePolicy: input.parsed.gatePolicy,
+        visualPreviewPolicy: input.parsed.visualPreviewPolicy,
       },
     });
   }
@@ -256,6 +354,122 @@ function createInstructionEvidence(input: {
   });
 }
 
+function createStructuredInstructionEvidence(input: {
+  source: SourceRef;
+  label: string;
+  requestText: string;
+  parsed: ParsedIntakeRequest;
+  capturedAt: string;
+}): EvidenceRef[] {
+  const evidence: EvidenceRef[] = [];
+  const seen = new Set<string>();
+
+  for (const constraint of input.parsed.constraints) {
+    evidence.push(
+      createInlineEvidence({
+        source: input.source,
+        label: input.label,
+        capturedAt: input.capturedAt,
+        summary: compactSummary(constraint),
+        excerpt: constraint,
+        metadata: {
+          parserVersion: PARSER_VERSION,
+          itemType: classifyConstraint(constraint),
+          sourceKind: "instruction",
+        },
+      }),
+    );
+    seen.add(constraint);
+  }
+
+  for (const line of extractRequirementLines(input.requestText)) {
+    if (seen.has(line)) {
+      continue;
+    }
+
+    evidence.push(
+      createInlineEvidence({
+        source: input.source,
+        label: input.label,
+        capturedAt: input.capturedAt,
+        summary: compactSummary(line),
+        excerpt: line,
+        metadata: {
+          parserVersion: PARSER_VERSION,
+          itemType: "requirement",
+          sourceKind: "instruction",
+        },
+      }),
+    );
+    seen.add(line);
+  }
+
+  for (const command of input.parsed.validationCommands) {
+    evidence.push(
+      createInlineEvidence({
+        source: input.source,
+        label: input.label,
+        capturedAt: input.capturedAt,
+        summary: `Validation command: ${command}`,
+        excerpt: command,
+        metadata: {
+          parserVersion: PARSER_VERSION,
+          itemType: "test",
+          sourceKind: "instruction",
+          command,
+        },
+      }),
+    );
+  }
+
+  for (const endpoint of parseEndpointNotes(input.parsed.inlineOpenApiBlocks.join("\n"))) {
+    evidence.push(
+      createInlineEvidence({
+        source: input.source,
+        label: input.label,
+        capturedAt: input.capturedAt,
+        summary: `${endpoint.method} ${endpoint.path}`,
+        excerpt: `${endpoint.method} ${endpoint.path}`,
+        metadata: {
+          parserVersion: PARSER_VERSION,
+          itemType: "api",
+          evidenceType: "openapi-operation",
+          openapiEvidenceKind: "operation",
+          method: endpoint.method.toLowerCase(),
+          path: endpoint.path,
+          operationId: endpoint.operationId,
+          sourceKind: "instruction",
+        },
+      }),
+    );
+  }
+
+  return evidence;
+}
+
+function createInlineEvidence(input: {
+  source: SourceRef;
+  label: string;
+  capturedAt: string;
+  summary: string;
+  excerpt: string;
+  metadata: Record<string, unknown>;
+}): EvidenceRef {
+  return EvidenceRefSchema.parse({
+    id: createEvidenceId(),
+    sourceId: input.source.id,
+    location: {
+      type: "inline-text",
+      label: input.label,
+    },
+    summary: input.summary,
+    excerpt: input.excerpt,
+    digest: sha256Digest(Buffer.from(input.excerpt, "utf8")),
+    capturedAt: input.capturedAt,
+    metadata: input.metadata,
+  });
+}
+
 function parseRequestText(requestText: string): ParsedIntakeRequest {
   const text = normalizeLineEndings(requestText);
   const urls = extractUrls(text);
@@ -279,6 +493,10 @@ function parseRequestText(requestText: string): ParsedIntakeRequest {
     publishPolicy: extractPublishPolicy(text),
     archivePolicy: extractArchivePolicy(text),
     visualPreviewPolicy: extractVisualPreviewPolicy(text),
+    gatePolicy: extractGatePolicy(text, {
+      figmaUrls,
+      inlineOpenApiBlocks,
+    }),
     targetHints: extractTargetHints(text, filePaths, figmaUrls),
   });
 }
@@ -440,6 +658,138 @@ function extractEndpointNotes(text: string): string[] {
   return [...endpoints];
 }
 
+type EndpointNote = {
+  method: string;
+  path: string;
+  operationId: string;
+};
+
+function parseEndpointNotes(text: string): EndpointNote[] {
+  const usedOperationIds = new Set<string>();
+
+  return extractEndpointNotes(text).map((endpointLine) => {
+    const match = endpointLine.match(/^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(.+)$/i);
+    const method = match?.[1]?.toUpperCase() ?? "GET";
+    const endpointPath = match?.[2] ?? "/";
+    const operationId = uniqueOperationId(
+      createOperationId({
+        method,
+        path: endpointPath,
+      }),
+      usedOperationIds,
+    );
+
+    return {
+      method,
+      path: endpointPath,
+      operationId,
+    };
+  });
+}
+
+type InlineOpenApiSourceDocument = {
+  path: string;
+  mediaType: string;
+  content: Buffer;
+  operationCount: number;
+};
+
+function buildInlineOpenApiSourceDocument(
+  parsed: ParsedIntakeRequest,
+): InlineOpenApiSourceDocument | undefined {
+  const endpoints = parseEndpointNotes(parsed.inlineOpenApiBlocks.join("\n"));
+
+  if (endpoints.length > 0) {
+    const document = buildMinimalOpenApiDocument(endpoints);
+
+    return {
+      path: "inline-openapi.json",
+      mediaType: "application/json",
+      content: Buffer.from(`${JSON.stringify(document, null, 2)}\n`, "utf8"),
+      operationCount: endpoints.length,
+    };
+  }
+
+  const openApiBlock = parsed.inlineOpenApiBlocks.find(looksLikeOpenApiDocument);
+
+  if (openApiBlock === undefined) {
+    return undefined;
+  }
+
+  return {
+    path: "inline-openapi.yaml",
+    mediaType: "application/yaml",
+    content: Buffer.from(`${openApiBlock.trim()}\n`, "utf8"),
+    operationCount: 0,
+  };
+}
+
+function buildMinimalOpenApiDocument(endpoints: EndpointNote[]): Record<string, unknown> {
+  const paths: Record<string, Record<string, unknown>> = {};
+
+  for (const endpoint of endpoints) {
+    paths[endpoint.path] ??= {};
+    paths[endpoint.path]![endpoint.method.toLowerCase()] = {
+      operationId: endpoint.operationId,
+      responses: {
+        "200": {
+          description: "OK",
+        },
+      },
+    };
+  }
+
+  return {
+    openapi: "3.1.0",
+    info: {
+      title: "Inline intake API",
+      version: "0.0.0",
+    },
+    paths,
+  };
+}
+
+function looksLikeOpenApiDocument(value: string): boolean {
+  return (
+    /(^|\n)\s*openapi\s*:/i.test(value) ||
+    /(^|\n)\s*paths\s*:/i.test(value) ||
+    /^\s*\{[\s\S]*"openapi"\s*:/i.test(value)
+  );
+}
+
+function createOperationId(input: { method: string; path: string }): string {
+  const pathSuffix = input.path
+    .split("/")
+    .filter((segment) => segment.length > 0)
+    .map((segment) => segment.replace(/[{}]/g, ""))
+    .flatMap((segment) => segment.split(/[^A-Za-z0-9]+/))
+    .filter((segment) => segment.length > 0)
+    .map(toPascalCase)
+    .join("");
+
+  return `${input.method.toLowerCase()}${pathSuffix.length === 0 ? "Root" : pathSuffix}`;
+}
+
+function uniqueOperationId(operationId: string, used: Set<string>): string {
+  let candidate = operationId;
+  let index = 2;
+
+  while (used.has(candidate)) {
+    candidate = `${operationId}${index}`;
+    index += 1;
+  }
+
+  used.add(candidate);
+
+  return candidate;
+}
+
+function toPascalCase(value: string): string {
+  const [first = "", ...rest] = value;
+
+  return `${first.toUpperCase()}${rest.join("")}`;
+}
+
 function extractBranchPolicy(text: string): z.infer<typeof BranchPolicySchema> {
   return BranchPolicySchema.parse({
     sourceBranch: matchBranch(text, [
@@ -502,6 +852,56 @@ function extractConstraints(text: string): string[] {
     .slice(0, 50);
 }
 
+function extractRequirementLines(text: string): string[] {
+  return unique(
+    normalizeLineEndings(text)
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => {
+        if (line.length === 0 || line.startsWith("```")) {
+          return false;
+        }
+
+        if (/^https?:\/\//i.test(line) || /^(figma|api|source|target)\s*:/i.test(line)) {
+          return false;
+        }
+
+        return /(implement|build|create|add|fix|support|compare|validate|verify|must|should|작업|구현|추가|수정|등록|검색|비교|검증|확인|해야|해줘|만들|올려)/i.test(
+          line,
+        );
+      })
+      .slice(0, 50),
+  );
+}
+
+function classifyConstraint(constraint: string): "policy" | "requirement" | "test" {
+  if (
+    /(pnpm|npm|yarn|bun|pytest|go test|cargo test|mvn|gradle|검증|테스트|test|typecheck|build)/i.test(
+      constraint,
+    )
+  ) {
+    return "test";
+  }
+
+  if (
+    /(do not|don't|never|하지\s*마|하지마|금지|머지|merge|archive|publish|PR|MR)/i.test(constraint)
+  ) {
+    return "policy";
+  }
+
+  return "requirement";
+}
+
+function compactSummary(value: string): string {
+  const normalized = value.trim().replace(/\s+/g, " ");
+
+  if (normalized.length <= 300) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, 297).trimEnd()}...`;
+}
+
 function extractPublishPolicy(text: string): z.infer<typeof PublishPolicySchema> {
   const lower = text.toLowerCase();
   const shouldPublish = /(publish|pr|mr|pull request|merge request|올려|요청|생성)/i.test(text)
@@ -546,6 +946,48 @@ function extractVisualPreviewPolicy(text: string): z.infer<typeof VisualPreviewP
 
   return VisualPreviewPolicySchema.parse({
     ...(includeDiff === undefined ? {} : { includeDiff }),
+  });
+}
+
+function extractGatePolicy(
+  text: string,
+  input: {
+    figmaUrls: string[];
+    inlineOpenApiBlocks: string[];
+  },
+): z.infer<typeof GatePolicySchema> {
+  const hasUiIntent =
+    input.figmaUrls.length > 0 ||
+    /(figma|화면|페이지|ui|ux|visual|브라우저|스크린샷|accessibility|a11y|성능|web\s*vitals|lighthouse)/i.test(
+      text,
+    );
+  const security =
+    /(security|secure|xss|csrf|csp|auth|authorization|authentication|permission|token|localStorage|sessionStorage|url\s*injection|보안|인증|인가|권한|토큰|취약|공격)/i.test(
+      text,
+    )
+      ? true
+      : undefined;
+  const observability =
+    /(observability|telemetry|otel|opentelemetry|logging|logger|log|metrics|trace|tracing|monitoring|관측|로깅|로그|메트릭|추적|모니터링)/i.test(
+      text,
+    )
+      ? true
+      : undefined;
+  const accessibility = /(accessibility|a11y|wcag|aria|스크린리더|접근성)/i.test(text)
+    ? true
+    : undefined;
+  const performance = /(performance|web\s*vitals|lighthouse|lcp|cls|inp|bundle|성능)/i.test(text)
+    ? true
+    : undefined;
+
+  return GatePolicySchema.parse({
+    openspec: true,
+    ...(security === undefined ? {} : { security }),
+    ...(observability === undefined ? {} : { observability }),
+    ...(accessibility === undefined && !hasUiIntent
+      ? {}
+      : { accessibility: accessibility ?? true }),
+    ...(performance === undefined && !hasUiIntent ? {} : { performance: performance ?? true }),
   });
 }
 

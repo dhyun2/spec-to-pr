@@ -114,12 +114,14 @@ export function buildReportGateRequirements(input: {
 }): ReportGateRequirements {
   const artifacts = input.artifacts ?? [];
   const sources = input.sources ?? [];
+  const gateIntent = extractGateIntent(artifacts);
   const hasSourceProfile = input.sources !== undefined;
   const hasFigma =
     hasFigmaVisualEvidence(artifacts) || sources.some((source) => source.kind === "figma");
   const hasOpenSpecScope =
     !hasSourceProfile ||
-    sources.some((source) => ["brief", "figma", "openapi"].includes(source.kind)) ||
+    gateIntent.openspec === true ||
+    sources.some((source) => ["instruction", "brief", "figma", "openapi"].includes(source.kind)) ||
     artifacts.some((artifact) =>
       ["openspec", "traceability-graph", "traceability-matrix", "gherkin-feature"].includes(
         artifact.kind,
@@ -131,10 +133,10 @@ export function buildReportGateRequirements(input: {
     runtime: true,
     functional: true,
     openspec: hasOpenSpecScope,
-    security: strictWhenUnprofiled || hasSecurityEvidence(artifacts),
-    accessibility: strictWhenUnprofiled || hasFigma,
-    performance: strictWhenUnprofiled || hasFigma,
-    observability: strictWhenUnprofiled || hasObservabilityEvidence(artifacts),
+    security: strictWhenUnprofiled || gateIntent.security === true,
+    accessibility: strictWhenUnprofiled || hasFigma || gateIntent.accessibility === true,
+    performance: strictWhenUnprofiled || hasFigma || gateIntent.performance === true,
+    observability: strictWhenUnprofiled || gateIntent.observability === true,
     figma: hasFigma,
   };
 }
@@ -183,14 +185,6 @@ function hasObservabilityEvidence(artifacts: ArtifactRef[]): boolean {
   );
 }
 
-function hasSecurityEvidence(artifacts: ArtifactRef[]): boolean {
-  return artifacts.some(
-    (artifact) =>
-      artifact.kind === "agent-result-report" &&
-      ["security-hardening", "security-report"].includes(String(artifact.metadata["reportKind"])),
-  );
-}
-
 function hasRequiredFigmaEvidence(artifacts: ArtifactRef[]): boolean {
   const hasProviderCapability = artifacts.some(
     (artifact) => artifact.kind === "figma-mcp-capability-report",
@@ -205,6 +199,48 @@ function hasRequiredFigmaEvidence(artifacts: ArtifactRef[]): boolean {
   );
 
   return hasProviderCapability && hasInventory && hasDesignContract;
+}
+
+type GateIntent = {
+  openspec?: boolean;
+  security?: boolean;
+  accessibility?: boolean;
+  performance?: boolean;
+  observability?: boolean;
+};
+
+function extractGateIntent(artifacts: ArtifactRef[]): GateIntent {
+  const parsedIntakeArtifact = [...artifacts]
+    .reverse()
+    .find((artifact) => artifact.kind === "parsed-intake-request");
+
+  if (parsedIntakeArtifact === undefined) {
+    return {};
+  }
+
+  const rawGatePolicy = parsedIntakeArtifact.metadata["gatePolicy"];
+
+  if (!isRecord(rawGatePolicy)) {
+    return {};
+  }
+
+  return {
+    ...optionalBooleanFlag(rawGatePolicy, "openspec"),
+    ...optionalBooleanFlag(rawGatePolicy, "security"),
+    ...optionalBooleanFlag(rawGatePolicy, "accessibility"),
+    ...optionalBooleanFlag(rawGatePolicy, "performance"),
+    ...optionalBooleanFlag(rawGatePolicy, "observability"),
+  };
+}
+
+function optionalBooleanFlag(record: Record<string, unknown>, key: keyof GateIntent): GateIntent {
+  const value = record[key];
+
+  return typeof value === "boolean" ? { [key]: value } : {};
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function hasFigmaVisualEvidence(artifacts: ArtifactRef[]): boolean {

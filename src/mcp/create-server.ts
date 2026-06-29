@@ -1784,7 +1784,7 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
     {
       title: "Parse intake request",
       description:
-        "Capture the original user request as instruction evidence and deterministically extract Figma, docs, branch, validation, and publishing hints.",
+        "Capture the original user request as instruction evidence and deterministically extract Figma, docs, inline OpenAPI/API notes, branch, validation, gate, visual preview, and publishing hints.",
       inputSchema: ParseIntakeRequestInputSchema.shape,
       outputSchema: ParseIntakeRequestResultSchema.shape,
       annotations: {

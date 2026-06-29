@@ -71,18 +71,14 @@ export class OpenApiIntakeService {
       }
     }
 
-    if (source.locator.type !== "file") {
-      throw new Error("Task 12 only supports file-based OpenAPI sources");
-    }
-
-    const sourcePath = source.locator.path;
-    const sourceMediaType = source.locator.mediaType;
+    const sourceDocument = openApiDocumentName(source);
+    const sourceMediaType = openApiMediaType(source);
     const timestamp = IsoDateTimeSchema.parse(this.now());
     const snapshotContent = await this.sourceSnapshotStore.readContent(sourceDigest);
 
     const parsed = parseOpenApiDocument({
       content: snapshotContent,
-      path: sourcePath,
+      path: sourceDocument,
       ...(sourceMediaType === undefined ? {} : { mediaType: sourceMediaType }),
     });
 
@@ -115,7 +111,7 @@ export class OpenApiIntakeService {
         sourceId: source.id,
         location: {
           type: "json-pointer",
-          document: sourcePath,
+          document: sourceDocument,
           pointer: operation.pointer,
         },
         summary: `${operation.method.toUpperCase()} ${operation.path}${
@@ -141,7 +137,7 @@ export class OpenApiIntakeService {
         sourceId: source.id,
         location: {
           type: "json-pointer",
-          document: sourcePath,
+          document: sourceDocument,
           pointer: schema.pointer,
         },
         summary: `Schema ${schema.name}`,
@@ -270,6 +266,42 @@ function requireSourceDigest(source: SourceRef): Sha256Digest {
   }
 
   return source.digest;
+}
+
+function openApiDocumentName(source: SourceRef): string {
+  if (source.locator.type === "file") {
+    return source.locator.path;
+  }
+
+  if (source.locator.type === "inline") {
+    return `${safeDocumentSegment(source.locator.label ?? source.id)}.openapi.json`;
+  }
+
+  if (source.locator.type === "url") {
+    return `${safeDocumentSegment(new URL(source.locator.url).hostname)}.openapi.json`;
+  }
+
+  return `${source.id}.openapi.json`;
+}
+
+function openApiMediaType(source: SourceRef): string | undefined {
+  if (
+    source.locator.type === "file" ||
+    source.locator.type === "inline" ||
+    source.locator.type === "url"
+  ) {
+    return source.locator.mediaType;
+  }
+
+  return undefined;
+}
+
+function safeDocumentSegment(value: string): string {
+  return value
+    .trim()
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 120);
 }
 
 function createOpenApiArtifact(input: {

@@ -90,7 +90,7 @@ describe("PR report collector", () => {
     expect(model.gapSummaries).toHaveLength(1);
   });
 
-  it("marks UI-only gates not applicable for instruction-only docs scope", () => {
+  it("requires OpenSpec but marks UI-only gates not applicable for instruction-only scope", () => {
     const run = RunManifestSchema.parse({
       ...createInitialRun(
         {
@@ -162,9 +162,14 @@ describe("PR report collector", () => {
       generatedAt: "2026-06-23T00:00:02.000Z",
     });
 
-    expect(model.decision).toBe("ready");
+    expect(model.decision).toBe("blocked");
     expect(model.gateRows).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({
+          gate: "OpenSpec / specification",
+          required: true,
+          status: "not-run",
+        }),
         expect.objectContaining({
           gate: "Accessibility",
           required: false,
