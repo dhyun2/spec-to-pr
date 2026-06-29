@@ -13,8 +13,10 @@ export const ReleaseVerificationResultSchema = z
 export type ReleaseVerificationResult = z.infer<typeof ReleaseVerificationResultSchema>;
 
 export const REQUIRED_RELEASE_FILES = [
+  ".claude-plugin/marketplace.json",
   ".claude-plugin/plugin.json",
   ".mcp.json",
+  "CHANGELOG.md",
   "dist/mcp/server.js",
   "package.json",
 ] as const;

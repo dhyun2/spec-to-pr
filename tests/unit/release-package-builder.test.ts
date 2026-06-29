@@ -36,8 +36,10 @@ describe("release package builder", () => {
     });
 
     expect(first.includedFiles).toEqual([
+      ".claude-plugin/marketplace.json",
       ".claude-plugin/plugin.json",
       ".mcp.json",
+      "CHANGELOG.md",
       "agents/release-reviewer.md",
       "dist/mcp/server.js",
       "package.json",
@@ -51,8 +53,10 @@ describe("release package builder", () => {
 
 async function writeFixtureProject(root: string): Promise<void> {
   const files = new Map<string, string>([
+    [".claude-plugin/marketplace.json", "{}\n"],
     [".claude-plugin/plugin.json", "{}\n"],
     [".mcp.json", "{}\n"],
+    ["CHANGELOG.md", "# Changelog\n"],
     ["dist/mcp/server.js", "console.log('server');\n"],
     ["package.json", '{"name":"fixture"}\n'],
     ["skills/prepare-release/SKILL.md", "# Skill\n"],

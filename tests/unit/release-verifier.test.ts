@@ -5,8 +5,10 @@ import { verifyReleasePackageFiles } from "../../src/release/index.js";
 describe("release verifier", () => {
   it("passes required plugin files", () => {
     const result = verifyReleasePackageFiles([
+      ".claude-plugin/marketplace.json",
       ".claude-plugin/plugin.json",
       ".mcp.json",
+      "CHANGELOG.md",
       "dist/mcp/server.js",
       "package.json",
       "skills/doctor/SKILL.md",
@@ -17,8 +19,10 @@ describe("release verifier", () => {
 
   it("rejects forbidden files", () => {
     const result = verifyReleasePackageFiles([
+      ".claude-plugin/marketplace.json",
       ".claude-plugin/plugin.json",
       ".mcp.json",
+      "CHANGELOG.md",
       "dist/mcp/server.js",
       "package.json",
       "node_modules/foo/index.js",

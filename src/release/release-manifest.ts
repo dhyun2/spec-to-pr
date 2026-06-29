@@ -38,8 +38,10 @@ export type ReleaseManifest = z.infer<typeof ReleaseManifestSchema>;
 export type ReleaseFeature = z.infer<typeof ReleaseFeatureSchema>;
 
 export const RELEASE_FILE_ALLOWLIST = [
+  ".claude-plugin/marketplace.json",
   ".claude-plugin/plugin.json",
   ".mcp.json",
+  "CHANGELOG.md",
   "dist/mcp/server.js",
   "dist/mcp/server.js.map",
   "package.json",
