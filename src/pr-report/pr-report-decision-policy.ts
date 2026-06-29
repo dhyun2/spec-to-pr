@@ -1,5 +1,6 @@
 import type { CheckResult } from "../runtime/check.js";
 import type { Gap } from "../runtime/gap.js";
+import type { ArtifactRef } from "../runtime/artifact.js";
 import type { ReportDecision } from "./pr-report-model.js";
 
 const MANDATORY_CHECK_KINDS = [
@@ -12,7 +13,11 @@ const MANDATORY_CHECK_KINDS = [
   "openspec",
 ] as const;
 
-export function decideReportStatus(input: { checks: CheckResult[]; gaps: Gap[] }): ReportDecision {
+export function decideReportStatus(input: {
+  checks: CheckResult[];
+  gaps: Gap[];
+  artifacts?: ArtifactRef[];
+}): ReportDecision {
   const mandatoryFailures = input.checks.some(
     (check) =>
       MANDATORY_CHECK_KINDS.some((kind) => kind === check.kind) && check.status === "failed",
@@ -27,6 +32,14 @@ export function decideReportStatus(input: { checks: CheckResult[]; gaps: Gap[] }
   );
 
   if (openBlockerGap) {
+    return "blocked";
+  }
+
+  if (input.checks.length === 0) {
+    return "blocked";
+  }
+
+  if (hasFigmaVisualEvidence(input.artifacts ?? []) && !hasVisualComparisonEvidence(input)) {
     return "blocked";
   }
 
@@ -49,4 +62,29 @@ export function decideReportStatus(input: { checks: CheckResult[]; gaps: Gap[] }
   }
 
   return "ready";
+}
+
+function hasFigmaVisualEvidence(artifacts: ArtifactRef[]): boolean {
+  return artifacts.some((artifact) =>
+    [
+      "figma-design-context",
+      "figma-screenshot",
+      "figma-design-inventory",
+      "figma-design-contract",
+    ].includes(artifact.kind),
+  );
+}
+
+function hasVisualComparisonEvidence(input: {
+  checks: CheckResult[];
+  artifacts?: ArtifactRef[];
+}): boolean {
+  return (
+    input.checks.some((check) => check.kind === "visual" && check.status === "passed") ||
+    (input.artifacts ?? []).some(
+      (artifact) =>
+        artifact.kind === "visual-report" &&
+        artifact.metadata["reportKind"] === "visual-report-json",
+    )
+  );
 }

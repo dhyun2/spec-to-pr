@@ -43,6 +43,25 @@ export const ReportGapSummarySchema = z
   })
   .strict();
 
+export const ReportGateRowSchema = z
+  .object({
+    gate: z.string().trim().min(1),
+    required: z.boolean(),
+    status: ReportSectionStatusSchema,
+    evidence: z.array(z.string().trim().min(1)).default([]),
+    notes: z.string().trim().min(1),
+  })
+  .strict();
+
+export const ReportArtifactSummaryRowSchema = z
+  .object({
+    item: z.string().trim().min(1),
+    status: ReportSectionStatusSchema,
+    artifacts: z.array(ArtifactIdSchema).default([]),
+    notes: z.string().trim().min(1),
+  })
+  .strict();
+
 export const RequirementTraceRowSchema = z
   .object({
     requirementId: z.string().trim().min(1),
@@ -90,12 +109,15 @@ export const PrReportViewModelSchema = z
     summaryBullets: z.array(z.string().trim().min(1)).default([]),
     runMetadata: z.record(z.string(), z.string()).default({}),
     reviewGuide: z.array(z.string().trim().min(1)).default([]),
+    gateRows: z.array(ReportGateRowSchema).default([]),
     specificationLinks: z.array(ReportLinkSchema).default([]),
     traceabilityRows: z.array(RequirementTraceRowSchema).default([]),
     changeScopeRows: z.array(z.record(z.string(), z.string())).default([]),
     apiRows: z.array(z.record(z.string(), z.string())).default([]),
     functionalChecks: z.array(ReportCheckSummarySchema).default([]),
     designChecks: z.array(ReportCheckSummarySchema).default([]),
+    figmaProviderRows: z.array(ReportArtifactSummaryRowSchema).default([]),
+    figmaInventoryRows: z.array(ReportArtifactSummaryRowSchema).default([]),
     visualRows: z.array(VisualComparisonRowSchema).default([]),
     accessibilityChecks: z.array(ReportCheckSummarySchema).default([]),
     performanceRows: z.array(PerformanceMetricRowSchema).default([]),
@@ -110,4 +132,6 @@ export const PrReportViewModelSchema = z
 export type ReportDecision = z.infer<typeof ReportDecisionSchema>;
 export type ReportSectionStatus = z.infer<typeof ReportSectionStatusSchema>;
 export type ReportCheckSummary = z.infer<typeof ReportCheckSummarySchema>;
+export type ReportGateRow = z.infer<typeof ReportGateRowSchema>;
+export type ReportArtifactSummaryRow = z.infer<typeof ReportArtifactSummaryRowSchema>;
 export type PrReportViewModel = z.infer<typeof PrReportViewModelSchema>;

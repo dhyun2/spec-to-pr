@@ -3,6 +3,16 @@ import { describe, expect, it } from "vitest";
 import { decideReportStatus } from "../../src/pr-report/pr-report-decision-policy.js";
 
 describe("PR report decision policy", () => {
+  it("blocks when no verification checks have run", () => {
+    const decision = decideReportStatus({
+      checks: [],
+      gaps: [],
+      artifacts: [],
+    });
+
+    expect(decision).toBe("blocked");
+  });
+
   it("blocks on mandatory check failure", () => {
     const decision = decideReportStatus({
       checks: [
@@ -16,6 +26,7 @@ describe("PR report decision policy", () => {
         },
       ],
       gaps: [],
+      artifacts: [],
     });
 
     expect(decision).toBe("blocked");
@@ -41,6 +52,7 @@ describe("PR report decision policy", () => {
           metadata: {},
         },
       ],
+      artifacts: [],
     });
 
     expect(decision).toBe("blocked");
@@ -48,7 +60,16 @@ describe("PR report decision policy", () => {
 
   it("drafts on open major gaps", () => {
     const decision = decideReportStatus({
-      checks: [],
+      checks: [
+        {
+          id: "chk_11111111111111111111111111111111",
+          name: "typecheck",
+          kind: "typecheck",
+          status: "passed",
+          exitCode: 0,
+          summary: "Typecheck passed",
+        },
+      ],
       gaps: [
         {
           id: "gap_11111111111111111111111111111111",
@@ -66,8 +87,40 @@ describe("PR report decision policy", () => {
           metadata: {},
         },
       ],
+      artifacts: [],
     });
 
     expect(decision).toBe("draft");
+  });
+
+  it("blocks Figma-backed reports when visual comparison has not run", () => {
+    const decision = decideReportStatus({
+      checks: [
+        {
+          id: "chk_11111111111111111111111111111111",
+          name: "typecheck",
+          kind: "typecheck",
+          status: "passed",
+          exitCode: 0,
+          summary: "Typecheck passed",
+        },
+      ],
+      gaps: [],
+      artifacts: [
+        {
+          id: "art_11111111111111111111111111111111",
+          kind: "figma-screenshot",
+          uri: "artifact://sha256/111",
+          mediaType: "image/png",
+          digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          producedBy: "orchestrator",
+          evidenceIds: [],
+          createdAt: "2026-06-23T00:00:00.000Z",
+          metadata: {},
+        },
+      ],
+    });
+
+    expect(decision).toBe("blocked");
   });
 });

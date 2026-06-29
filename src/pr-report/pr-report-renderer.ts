@@ -5,6 +5,7 @@ export function renderPrReportMarkdown(model: PrReportViewModel): string {
   return `${[
     renderSummary(model),
     renderRunMetadata(model),
+    renderGateSummary(model),
     renderReviewGuide(model),
     renderSpecification(model),
     renderRequirementTraceability(model),
@@ -12,8 +13,10 @@ export function renderPrReportMarkdown(model: PrReportViewModel): string {
     renderApi(model),
     renderFunctional(model),
     renderDesign(model),
+    renderFigmaProviderCapability(model),
+    renderFigmaDesignInventory(model),
     renderVisual(model),
-    renderScreenshotCompare(),
+    renderScreenshotCompare(model),
     renderNetworkVerification(),
     renderAccessibility(model),
     renderPerformance(model),
@@ -44,6 +47,27 @@ function renderRunMetadata(model: PrReportViewModel): string {
 
 function renderReviewGuide(model: PrReportViewModel): string {
   return ["## Review Guide", "", ...model.reviewGuide.map((item) => `- ${item}`)].join("\n");
+}
+
+function renderGateSummary(model: PrReportViewModel): string {
+  const rows = model.gateRows ?? [];
+
+  return [
+    "## Gate Summary",
+    "",
+    rows.length === 0
+      ? "No gate summary rows were found. A missing gate must not be treated as Pass."
+      : markdownTable(
+          ["Gate", "Required", "Status", "Evidence", "Notes"],
+          rows.map((row) => [
+            row.gate,
+            row.required ? "Yes" : "No",
+            row.status,
+            row.evidence.join("<br>") || "-",
+            row.notes,
+          ]),
+        ),
+  ].join("\n");
 }
 
 function renderSpecification(model: PrReportViewModel): string {
@@ -123,6 +147,36 @@ function renderDesign(model: PrReportViewModel): string {
   return renderCheckSection("## Design Contract", model.designChecks);
 }
 
+function renderFigmaProviderCapability(model: PrReportViewModel): string {
+  const rows = model.figmaProviderRows ?? [];
+
+  return [
+    "## Figma Provider Capability",
+    "",
+    rows.length === 0
+      ? "No Figma provider capability rows were found."
+      : markdownTable(
+          ["Item", "Status", "Artifacts", "Notes"],
+          rows.map((row) => [row.item, row.status, row.artifacts.join("<br>") || "-", row.notes]),
+        ),
+  ].join("\n");
+}
+
+function renderFigmaDesignInventory(model: PrReportViewModel): string {
+  const rows = model.figmaInventoryRows ?? [];
+
+  return [
+    "## Figma Design-System Inventory",
+    "",
+    rows.length === 0
+      ? "No Figma design-system inventory rows were found."
+      : markdownTable(
+          ["Item", "Status", "Artifacts", "Notes"],
+          rows.map((row) => [row.item, row.status, row.artifacts.join("<br>") || "-", row.notes]),
+        ),
+  ].join("\n");
+}
+
 function renderVisual(model: PrReportViewModel): string {
   return [
     "## Visual Regression",
@@ -130,9 +184,12 @@ function renderVisual(model: PrReportViewModel): string {
     model.visualRows.length === 0
       ? "No visual comparison rows were found."
       : markdownTable(
-          ["State", "Exact", "Review Match", "Result", "Notes"],
+          ["State", "Figma", "Browser", "Diff", "Exact", "Review Match", "Result", "Notes"],
           model.visualRows.map((row) => [
             row.state,
+            row.figmaArtifactId ?? "-",
+            row.browserArtifactId ?? "-",
+            row.diffArtifactId ?? "-",
             row.exactMatch === undefined ? "-" : `${row.exactMatch.toFixed(2)}%`,
             row.reviewMatch === undefined ? "-" : `${row.reviewMatch.toFixed(2)}%`,
             row.result,
@@ -144,11 +201,22 @@ function renderVisual(model: PrReportViewModel): string {
   ].join("\n");
 }
 
-function renderScreenshotCompare(): string {
+function renderScreenshotCompare(model: PrReportViewModel): string {
   return [
     "## Screenshot Compare",
     "",
-    "Screenshot comparison evidence is reported through the Visual Regression section and linked visual-report artifacts. A missing visual report must not be treated as Pass.",
+    model.visualRows.length === 0
+      ? "No Figma/browser screenshot comparison rows were found. Missing screenshot comparison evidence must keep the report out of Ready status."
+      : markdownTable(
+          ["Target", "Figma Baseline", "Browser Screenshot", "Diff", "Result"],
+          model.visualRows.map((row) => [
+            row.state,
+            row.figmaArtifactId ?? "-",
+            row.browserArtifactId ?? "-",
+            row.diffArtifactId ?? "-",
+            row.result,
+          ]),
+        ),
   ].join("\n");
 }
 

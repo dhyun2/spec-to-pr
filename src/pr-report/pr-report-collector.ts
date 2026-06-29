@@ -3,7 +3,12 @@ import type { ArtifactRef } from "../runtime/artifact.js";
 import type { CheckResult } from "../runtime/check.js";
 import type { Gap } from "../runtime/gap.js";
 import { decideReportStatus } from "./pr-report-decision-policy.js";
-import { PrReportViewModelSchema, type ReportCheckSummary } from "./pr-report-model.js";
+import {
+  PrReportViewModelSchema,
+  type ReportArtifactSummaryRow,
+  type ReportCheckSummary,
+  type ReportGateRow,
+} from "./pr-report-model.js";
 import type { PrReportViewModel, ReportSectionStatus } from "./pr-report-model.js";
 
 export function collectPrReportViewModel(input: {
@@ -17,6 +22,7 @@ export function collectPrReportViewModel(input: {
   const decision = decideReportStatus({
     checks: allChecks,
     gaps: input.run.gaps,
+    artifacts: input.run.artifacts,
   });
 
   return PrReportViewModelSchema.parse({
@@ -28,6 +34,7 @@ export function collectPrReportViewModel(input: {
     summaryBullets: summaryBulletsForRun(input.run),
     runMetadata: runMetadata(input.run),
     reviewGuide: reviewGuide(),
+    gateRows: gateRows(input.run.artifacts, allChecks),
     specificationLinks: specificationLinks(input.run.artifacts),
     traceabilityRows: [],
     changeScopeRows: changeScopeRows(input.run.artifacts),
@@ -40,6 +47,8 @@ export function collectPrReportViewModel(input: {
       "e2e",
     ]),
     designChecks: checksByKinds(allChecks, ["architecture"]),
+    figmaProviderRows: figmaProviderRows(input.run.artifacts),
+    figmaInventoryRows: figmaInventoryRows(input.run.artifacts),
     visualRows: visualRows(input.run.artifacts, allChecks),
     accessibilityChecks: checksByKinds(allChecks, ["accessibility"]),
     performanceRows: performanceRows(input.run.artifacts, allChecks),
@@ -88,6 +97,7 @@ function runMetadata(run: RunManifest): Record<string, string> {
 
 function reviewGuide(): string[] {
   return [
+    "Start with Gate Summary and Decision; blocked reports are not publishable.",
     "Review Specification to confirm which OpenSpec change is implemented.",
     "Review API Generator / API Contract for generated client and wrapper boundary.",
     "Review Functional Verification for requirement coverage and test status.",
@@ -95,6 +105,314 @@ function reviewGuide(): string[] {
     "Review Gaps And Review Notes for intentionally unimplemented or unsupported items.",
     "Do not treat this report as publish evidence until Task 31 publisher records a PR/MR URL.",
   ];
+}
+
+function gateRows(artifacts: ArtifactRef[], checks: CheckResult[]): ReportGateRow[] {
+  const hasFigma = hasFigmaEvidence(artifacts);
+
+  return [
+    {
+      gate: "Runtime verification",
+      required: true,
+      ...statusForCheckKinds(checks, ["lint", "typecheck", "build"], "lint/typecheck/build"),
+    },
+    {
+      gate: "Functional verification",
+      required: true,
+      ...statusForCheckKinds(
+        checks,
+        ["unit", "component", "contract", "acceptance", "e2e"],
+        "unit/component/contract/acceptance/e2e",
+      ),
+    },
+    {
+      gate: "OpenSpec / specification",
+      required: true,
+      ...statusForCheckKinds(checks, ["openspec"], "openspec"),
+    },
+    {
+      gate: "Figma provider capability",
+      required: hasFigma,
+      ...artifactGateStatus({
+        artifacts,
+        kinds: ["figma-mcp-capability-report", "figma-provider-policy"],
+        notApplicableWhen: !hasFigma,
+        notRunNote: "Figma evidence exists, but provider capability was not recorded.",
+        passNote: "Figma provider capability artifact is recorded.",
+      }),
+    },
+    {
+      gate: "Figma design inventory",
+      required: hasFigma,
+      ...artifactGateStatus({
+        artifacts,
+        kinds: ["figma-design-inventory", "figma-provider-comparison"],
+        notApplicableWhen: !hasFigma,
+        notRunNote: "Figma evidence exists, but design-system inventory was not recorded.",
+        passNote: "Figma design-system inventory artifact is recorded.",
+      }),
+    },
+    {
+      gate: "Visual regression",
+      required: hasFigma,
+      ...visualGateStatus({ artifacts, checks, hasFigma }),
+    },
+    {
+      gate: "Accessibility",
+      required: true,
+      ...statusForCheckKinds(checks, ["accessibility"], "accessibility"),
+    },
+    {
+      gate: "Performance / Web Vitals",
+      required: true,
+      ...combinedGateStatus({
+        checkStatus: statusForCheckKinds(checks, ["performance"], "performance"),
+        artifactStatus: artifactGateStatus({
+          artifacts,
+          kinds: ["performance-report"],
+          notApplicableWhen: false,
+          notRunNote: "No performance report artifact was recorded.",
+          passNote: "Performance report artifact is recorded.",
+        }),
+      }),
+    },
+    {
+      gate: "Security hardening",
+      required: true,
+      ...statusForCheckKinds(checks, ["security"], "security"),
+    },
+    {
+      gate: "Observability",
+      required: true,
+      ...artifactGateStatus({
+        artifacts,
+        kinds: ["telemetry-config"],
+        notApplicableWhen: false,
+        notRunNote: "No observability report artifact was recorded.",
+        passNote: "Observability report artifact is recorded.",
+      }),
+    },
+  ];
+}
+
+function figmaProviderRows(artifacts: ArtifactRef[]): ReportArtifactSummaryRow[] {
+  return summarizeArtifactKinds({
+    artifacts,
+    rows: [
+      {
+        item: "Provider capability",
+        kinds: ["figma-mcp-capability-report"],
+        missing: "No Figma provider capability report was recorded.",
+      },
+      {
+        item: "Provider policy",
+        kinds: ["figma-provider-policy"],
+        missing: "No provider selection policy artifact was recorded.",
+      },
+    ],
+  });
+}
+
+function figmaInventoryRows(artifacts: ArtifactRef[]): ReportArtifactSummaryRow[] {
+  return summarizeArtifactKinds({
+    artifacts,
+    rows: [
+      {
+        item: "Raw metadata",
+        kinds: ["figma-metadata", "figma-design-context"],
+        missing: "No raw Figma metadata or design context artifact was recorded.",
+      },
+      {
+        item: "Screenshot baseline",
+        kinds: ["figma-screenshot"],
+        missing: "No Figma screenshot baseline artifact was recorded.",
+      },
+      {
+        item: "Variables / styles",
+        kinds: ["figma-variable-defs"],
+        missing: "No Figma variable/style artifact was recorded.",
+      },
+      {
+        item: "Code Connect map",
+        kinds: ["figma-code-connect-map"],
+        missing: "No Figma Code Connect map artifact was recorded.",
+      },
+      {
+        item: "Design-system inventory",
+        kinds: ["figma-design-inventory", "figma-provider-comparison"],
+        missing: "No Figma design-system inventory artifact was recorded.",
+      },
+      {
+        item: "Design contract",
+        kinds: ["figma-design-contract", "design-system-map", "ui-implementation-rules"],
+        missing: "No Figma design contract artifact was recorded.",
+      },
+    ],
+  });
+}
+
+function statusForCheckKinds(
+  checks: CheckResult[],
+  kinds: string[],
+  label: string,
+): Pick<ReportGateRow, "status" | "evidence" | "notes"> {
+  const matchingChecks = checks.filter((check) => kinds.includes(check.kind));
+
+  if (matchingChecks.length === 0) {
+    return {
+      status: "not-run",
+      evidence: [],
+      notes: `No ${label} CheckResult was recorded.`,
+    };
+  }
+
+  if (matchingChecks.some((check) => check.status === "failed")) {
+    return {
+      status: "fail",
+      evidence: matchingChecks.map((check) => check.name),
+      notes: "At least one required check failed.",
+    };
+  }
+
+  if (matchingChecks.some((check) => check.status === "skipped")) {
+    return {
+      status: "skipped",
+      evidence: matchingChecks.map((check) => check.name),
+      notes: "At least one required check was skipped.",
+    };
+  }
+
+  return {
+    status: "pass",
+    evidence: matchingChecks.map((check) => check.name),
+    notes: "Recorded checks passed.",
+  };
+}
+
+function artifactGateStatus(input: {
+  artifacts: ArtifactRef[];
+  kinds: string[];
+  notApplicableWhen: boolean;
+  notRunNote: string;
+  passNote: string;
+}): Pick<ReportGateRow, "status" | "evidence" | "notes"> {
+  if (input.notApplicableWhen) {
+    return {
+      status: "not-applicable",
+      evidence: [],
+      notes: "No matching source evidence was recorded for this gate.",
+    };
+  }
+
+  const matchingArtifacts = input.artifacts.filter((artifact) =>
+    input.kinds.includes(artifact.kind),
+  );
+
+  if (matchingArtifacts.length === 0) {
+    return {
+      status: "not-run",
+      evidence: [],
+      notes: input.notRunNote,
+    };
+  }
+
+  return {
+    status: "pass",
+    evidence: matchingArtifacts.map((artifact) => artifact.id),
+    notes: input.passNote,
+  };
+}
+
+function visualGateStatus(input: {
+  artifacts: ArtifactRef[];
+  checks: CheckResult[];
+  hasFigma: boolean;
+}): Pick<ReportGateRow, "status" | "evidence" | "notes"> {
+  if (!input.hasFigma) {
+    return {
+      status: "not-applicable",
+      evidence: [],
+      notes: "No Figma-backed visual source was recorded.",
+    };
+  }
+
+  const visualReports = input.artifacts.filter(
+    (artifact) =>
+      artifact.kind === "visual-report" && artifact.metadata["reportKind"] === "visual-report-json",
+  );
+  const visualCheckStatus = statusForCheckKinds(input.checks, ["visual"], "visual");
+
+  if (visualReports.length > 0) {
+    return {
+      status: visualCheckStatus.status === "fail" ? "fail" : "pass",
+      evidence: [...visualReports.map((artifact) => artifact.id), ...visualCheckStatus.evidence],
+      notes: "Figma/browser visual comparison artifact is recorded.",
+    };
+  }
+
+  return {
+    status: "not-run",
+    evidence: visualCheckStatus.evidence,
+    notes: "Figma evidence exists, but no Figma/browser visual comparison artifact was recorded.",
+  };
+}
+
+function combinedGateStatus(input: {
+  checkStatus: Pick<ReportGateRow, "status" | "evidence" | "notes">;
+  artifactStatus: Pick<ReportGateRow, "status" | "evidence" | "notes">;
+}): Pick<ReportGateRow, "status" | "evidence" | "notes"> {
+  if (input.checkStatus.status === "fail" || input.artifactStatus.status === "fail") {
+    return {
+      status: "fail",
+      evidence: [...input.checkStatus.evidence, ...input.artifactStatus.evidence],
+      notes: "At least one check or artifact gate failed.",
+    };
+  }
+
+  if (input.checkStatus.status === "pass" || input.artifactStatus.status === "pass") {
+    return {
+      status: "pass",
+      evidence: [...input.checkStatus.evidence, ...input.artifactStatus.evidence],
+      notes: "Performance evidence was recorded.",
+    };
+  }
+
+  return input.checkStatus.status === "skipped" ? input.checkStatus : input.artifactStatus;
+}
+
+function summarizeArtifactKinds(input: {
+  artifacts: ArtifactRef[];
+  rows: Array<{
+    item: string;
+    kinds: string[];
+    missing: string;
+  }>;
+}): ReportArtifactSummaryRow[] {
+  return input.rows.map((row) => {
+    const matchingArtifacts = input.artifacts.filter((artifact) =>
+      row.kinds.includes(artifact.kind),
+    );
+
+    if (matchingArtifacts.length === 0) {
+      return {
+        item: row.item,
+        status: "not-run",
+        artifacts: [],
+        notes: row.missing,
+      };
+    }
+
+    return {
+      item: row.item,
+      status: "pass",
+      artifacts: matchingArtifacts.map((artifact) => artifact.id),
+      notes: "Recorded.",
+    };
+  });
+}
+
+function hasFigmaEvidence(artifacts: ArtifactRef[]): boolean {
+  return artifacts.some((artifact) => artifact.kind.startsWith("figma-"));
 }
 
 function specificationLinks(artifacts: ArtifactRef[]) {

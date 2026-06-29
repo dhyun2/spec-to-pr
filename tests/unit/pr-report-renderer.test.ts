@@ -15,12 +15,15 @@ describe("PR report renderer", () => {
         "Run ID": "run_11111111111111111111111111111111",
       },
       reviewGuide: ["Review gaps."],
+      gateRows: [],
       specificationLinks: [],
       traceabilityRows: [],
       changeScopeRows: [],
       apiRows: [],
       functionalChecks: [],
       designChecks: [],
+      figmaProviderRows: [],
+      figmaInventoryRows: [],
       visualRows: [],
       accessibilityChecks: [],
       performanceRows: [],
@@ -33,6 +36,9 @@ describe("PR report renderer", () => {
 
     expect(markdown).toContain("# Summary");
     expect(markdown).toContain("## Run Metadata");
+    expect(markdown).toContain("## Gate Summary");
+    expect(markdown).toContain("## Figma Provider Capability");
+    expect(markdown).toContain("## Figma Design-System Inventory");
     expect(markdown).toContain("## Screenshot Compare");
     expect(markdown).toContain("## Network Verification");
     expect(markdown).toContain("## Gaps And Review Notes");
