@@ -23,6 +23,7 @@ import type {
   ReviewRequestPayload,
   ReviewRequestPublisher,
 } from "../publisher/index.js";
+import { ReportDecisionSchema, type ReportDecision } from "../pr-report/pr-report-model.js";
 import { RunManifestSchema, RunSummarySchema, summarizeRun } from "../run/index.js";
 import { AgentResultSchema } from "../runtime/agent-result.js";
 import { ArtifactRefSchema } from "../runtime/artifact.js";
@@ -186,6 +187,7 @@ export class PublisherService {
     const reportBody = (await this.artifactStore.readContent(reportArtifact.digest)).toString(
       "utf8",
     );
+    const reportDecision = reportDecisionFromArtifact(reportArtifact);
     const detected = await this.detectTarget({
       runId: input.runId,
       remoteName: input.remoteName,
@@ -211,13 +213,14 @@ export class PublisherService {
       runId: run.id,
       target,
       payload,
+      reportDecision,
       requiredTokenEnv:
         target.host === "github"
           ? "GITHUB_TOKEN or GH_TOKEN"
           : "GITLAB_TOKEN or GITLAB_PRIVATE_TOKEN",
       willPushBranch: input.pushBranch,
-      willCreateOrUpdate: true,
-      warnings: buildPlanWarnings({ payload }),
+      willCreateOrUpdate: reportDecision !== "blocked",
+      warnings: buildPlanWarnings({ payload, reportDecision }),
       plannedAt: timestamp,
     });
   }
@@ -230,6 +233,23 @@ export class PublisherService {
     void confirm;
 
     const plan = await this.plan(planInput);
+    if (plan.reportDecision === "blocked") {
+      const result = blockedPublishResult({
+        runId: run.id,
+        target: plan.target,
+        reportArtifactId: plan.payload.reportArtifactId,
+        publishedAt: timestamp,
+      });
+
+      return this.recordPublishResult({
+        runId: run.id,
+        result,
+        payload: plan.payload,
+        timestamp,
+        addPublishingAgentResult: false,
+      });
+    }
+
     const result = await this.executePublish({
       run,
       plan,
@@ -254,6 +274,23 @@ export class PublisherService {
     void confirm;
 
     const plan = await this.plan(planInput);
+    if (plan.reportDecision === "blocked") {
+      const result = blockedPublishResult({
+        runId: run.id,
+        target: plan.target,
+        reportArtifactId: plan.payload.reportArtifactId,
+        publishedAt: timestamp,
+      });
+
+      return this.recordPublishResult({
+        runId: run.id,
+        result,
+        payload: plan.payload,
+        timestamp,
+        addPublishingAgentResult: false,
+      });
+    }
+
     const result = await this.executeUpdateBody({
       plan,
       requestNumber,
@@ -602,8 +639,23 @@ function defaultTitle(runId: string): string {
   return `spec-to-pr evidence report for ${runId}`;
 }
 
-function buildPlanWarnings(input: { payload: ReviewRequestPayload }): string[] {
+function reportDecisionFromArtifact(artifact: ArtifactRef): ReportDecision {
+  return ReportDecisionSchema.catch("blocked").parse(artifact.metadata["decision"]);
+}
+
+function buildPlanWarnings(input: {
+  payload: ReviewRequestPayload;
+  reportDecision: ReportDecision;
+}): string[] {
   const warnings: string[] = [];
+
+  if (input.reportDecision === "blocked") {
+    warnings.push(
+      "Report decision is blocked. Publishing is disabled until blockers are resolved.",
+    );
+  } else if (input.reportDecision !== "ready") {
+    warnings.push(`Report decision is ${input.reportDecision}. Publish only as a draft.`);
+  }
 
   if (input.payload.mode !== "draft") {
     warnings.push("Publish mode is ready, not draft. Ensure reviewer approval policy allows this.");
@@ -620,4 +672,23 @@ function findingCount(review: Record<string, unknown>): number {
   const findings = review["findings"];
 
   return Array.isArray(findings) ? findings.length : 0;
+}
+
+function blockedPublishResult(input: {
+  runId: string;
+  target: PublishTarget;
+  reportArtifactId: string;
+  publishedAt: string;
+}): PublishResult {
+  return PublishResultSchema.parse({
+    runId: input.runId,
+    status: "blocked",
+    target: input.target,
+    reportArtifactId: input.reportArtifactId,
+    errorCode: "PUBLISH_BLOCKED",
+    errorMessage:
+      "Report decision is blocked. Finish required gates or regenerate the report after resolving blockers.",
+    retryable: false,
+    publishedAt: input.publishedAt,
+  });
 }

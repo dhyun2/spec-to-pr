@@ -633,8 +633,8 @@ describe("spec-to-pr MCP stdio server", () => {
 
     expect(publishResult.structuredContent).toMatchObject({
       result: {
-        status: "failed",
-        errorCode: "PUBLISH_FAILED",
+        status: "blocked",
+        errorCode: "PUBLISH_BLOCKED",
       },
       publishResultArtifactId: expect.any(String),
     });
@@ -655,7 +655,7 @@ describe("spec-to-pr MCP stdio server", () => {
 
     expect(loadedPublishResult.structuredContent).toMatchObject({
       result: {
-        status: "failed",
+        status: "blocked",
       },
     });
 
@@ -675,7 +675,7 @@ describe("spec-to-pr MCP stdio server", () => {
 
     expect(updateResult.structuredContent).toMatchObject({
       result: {
-        status: "failed",
+        status: "blocked",
       },
     });
 

@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { ReportDecisionSchema } from "../pr-report/pr-report-model.js";
 import { ArtifactIdSchema, RunIdSchema } from "../runtime/ids.js";
 import { GitObjectIdSchema, IsoDateTimeSchema } from "../runtime/scalars.js";
 
@@ -61,6 +62,7 @@ export const PublishPlanSchema = z
     runId: RunIdSchema,
     target: PublishTargetSchema,
     payload: ReviewRequestPayloadSchema,
+    reportDecision: ReportDecisionSchema,
     requiredTokenEnv: z.string().trim().min(1),
     willPushBranch: z.boolean(),
     willCreateOrUpdate: z.boolean(),
