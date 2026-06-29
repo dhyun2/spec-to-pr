@@ -5,7 +5,7 @@ All notable changes to spec-to-pr are documented in this file.
 The project follows semantic versioning for Claude Code plugin releases. Release tags should use
 the Claude plugin tag format, for example `spec-to-pr--v0.1.0`.
 
-## Unreleased
+## 0.1.3 - 2026-06-29
 
 ### Added
 

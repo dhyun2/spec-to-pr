@@ -1,6 +1,6 @@
 {
   "name": "@spec-to-pr/plugin",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "type": "module",
   "description": "Claude Code and Codex plugin shell for evidence-driven spec-to-pr automation.",
