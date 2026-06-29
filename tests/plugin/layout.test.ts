@@ -5,7 +5,7 @@ import { z } from "zod";
 
 const ClaudePluginManifestSchema = z.object({
   name: z.literal("spec-to-pr"),
-  version: z.literal("0.1.6"),
+  version: z.literal("0.1.7"),
   license: z.literal("MIT"),
   skills: z.string().min(1),
   mcpServers: z.string().min(1),
@@ -13,17 +13,17 @@ const ClaudePluginManifestSchema = z.object({
 
 const MarketplaceSchema = z.object({
   name: z.literal("spec-to-pr"),
-  version: z.literal("0.1.6"),
+  version: z.literal("0.1.7"),
   plugins: z
     .array(
       z.object({
         name: z.literal("spec-to-pr"),
-        version: z.literal("0.1.6"),
+        version: z.literal("0.1.7"),
         license: z.literal("MIT"),
         source: z.object({
           source: z.literal("url"),
           url: z.literal("https://github.com/dhyun2/spec-to-pr.git"),
-          ref: z.literal("spec-to-pr--v0.1.6"),
+          ref: z.literal("spec-to-pr--v0.1.7"),
         }),
       }),
     )
@@ -32,7 +32,7 @@ const MarketplaceSchema = z.object({
 
 const CodexPluginManifestSchema = z.object({
   name: z.literal("spec-to-pr"),
-  version: z.literal("0.1.6"),
+  version: z.literal("0.1.7"),
   license: z.literal("MIT"),
   skills: z.literal("./skills/"),
   mcpServers: z.object({

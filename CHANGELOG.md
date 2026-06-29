@@ -7,6 +7,10 @@ the Claude plugin tag format, for example `spec-to-pr--v0.1.0`.
 
 ## Unreleased
 
+No unreleased changes yet.
+
+## 0.1.7 - 2026-06-29
+
 ### Added
 
 - Added release publishing scripts that bundle verification, package dry-run, git push, Claude
