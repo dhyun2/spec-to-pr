@@ -5,23 +5,25 @@ import { z } from "zod";
 
 const PluginManifestSchema = z.object({
   name: z.literal("spec-to-pr"),
-  version: z.string().min(1),
+  version: z.literal("0.1.1"),
+  license: z.literal("MIT"),
   skills: z.string().min(1),
   mcpServers: z.string().min(1),
 });
 
 const MarketplaceSchema = z.object({
   name: z.literal("spec-to-pr"),
-  version: z.string().min(1),
+  version: z.literal("0.1.1"),
   plugins: z
     .array(
       z.object({
         name: z.literal("spec-to-pr"),
-        version: z.string().min(1),
+        version: z.literal("0.1.1"),
+        license: z.literal("MIT"),
         source: z.object({
           source: z.literal("url"),
           url: z.literal("https://github.com/dhyun2/spec-to-pr.git"),
-          ref: z.literal("spec-to-pr--v0.1.0"),
+          ref: z.literal("spec-to-pr--v0.1.1"),
         }),
       }),
     )
@@ -76,5 +78,12 @@ describe("plugin layout", () => {
 
   it("contains the doctor skill", () => {
     expect(existsSync(path.join(root, "skills", "doctor", "SKILL.md"))).toBe(true);
+  });
+
+  it("ships an MIT license file", () => {
+    const licensePath = path.join(root, "LICENSE");
+    const license = readFileSync(licensePath, "utf8");
+
+    expect(license).toContain("MIT License");
   });
 });

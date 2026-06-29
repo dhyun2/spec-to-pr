@@ -2,12 +2,12 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "spec-to-pr",
   "displayName": "Spec to PR",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Evidence-driven Claude Code plugin for turning briefs, Figma designs, and OpenAPI contracts into verified pull requests.",
   "author": {
     "name": "Spec to PR Team"
   },
-  "license": "UNLICENSED",
+  "license": "MIT",
   "keywords": ["claude-code", "mcp", "openspec", "figma", "openapi", "gherkin", "fsd", "testing"],
   "skills": "./skills/",
   "mcpServers": "./.mcp.json"

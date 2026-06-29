@@ -5,6 +5,20 @@ All notable changes to spec-to-pr are documented in this file.
 The project follows semantic versioning for Claude Code plugin releases. Release tags should use
 the Claude plugin tag format, for example `spec-to-pr--v0.1.0`.
 
+## 0.1.1 - 2026-06-29
+
+### Changed
+
+- Licensed the Claude Code plugin release under MIT and added the repository `LICENSE` file.
+- Aligned `plugin.json`, `marketplace.json`, and package metadata on version `0.1.1`.
+- Kept marketplace installation on an HTTPS git source so users do not need GitHub SSH keys.
+
+### Verified
+
+- `claude plugin validate .claude-plugin/plugin.json --strict`
+- `claude plugin validate .claude-plugin/marketplace.json --strict`
+- `pnpm release:build 0.1.1 --dry-run`
+
 ## 0.1.0 - 2026-06-29
 
 ### Added
@@ -39,5 +53,3 @@ the Claude plugin tag format, for example `spec-to-pr--v0.1.0`.
 
 - This release prepares and validates a Claude Code plugin release candidate. Publishing to npm,
   GitHub Releases, or a hosted marketplace is still a separate maintainer action.
-- The package currently declares `UNLICENSED`; choose a public license before broad public
-  redistribution.
