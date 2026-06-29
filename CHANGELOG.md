@@ -5,6 +5,31 @@ All notable changes to spec-to-pr are documented in this file.
 The project follows semantic versioning for Claude Code plugin releases. Release tags should use
 the Claude plugin tag format, for example `spec-to-pr--v0.1.0`.
 
+## 0.1.2 - 2026-06-29
+
+### Fixed
+
+- Block PR reports when no quality gates are present, so incomplete runs cannot be presented as
+  review-ready.
+- Block Figma-backed PR reports when no visual comparison evidence is attached.
+- Prevent blocked reports from being published to GitHub or GitLab while still recording the
+  blocked publish attempt as an artifact.
+
+### Changed
+
+- Expanded PR reports with gate summaries, Figma provider capability, Figma design-system
+  inventory, and explicit screenshot comparison evidence.
+- Updated PR reporting and review publishing skills so agents stop before publishing blocked
+  workflows.
+- Aligned `plugin.json`, `marketplace.json`, and package metadata on version `0.1.2`.
+
+### Verified
+
+- `claude plugin validate .claude-plugin/plugin.json --strict`
+- `claude plugin validate .claude-plugin/marketplace.json --strict`
+- `pnpm release:build 0.1.2 --dry-run`
+- `pnpm check`
+
 ## 0.1.1 - 2026-06-29
 
 ### Changed
