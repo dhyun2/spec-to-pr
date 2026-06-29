@@ -93,4 +93,65 @@ describe("EvidenceGraphService", () => {
     expect(loaded.artifacts.some((artifact) => artifact.kind === "traceability-graph")).toBe(true);
     expect(loaded.artifacts.some((artifact) => artifact.kind === "traceability-matrix")).toBe(true);
   });
+
+  it("builds traceability gaps for long requirement labels", async () => {
+    const run = createInitialRun(
+      {
+        sources: [
+          {
+            id: "src_11111111111111111111111111111111",
+            kind: "brief",
+            locator: { type: "file", path: "docs/brief.md" },
+            digest,
+            capturedAt: now,
+            metadata: {},
+          },
+        ],
+      },
+      {
+        id: runId,
+        pluginVersion: "0.1.0",
+        projectRoot: "/tmp/project",
+        now,
+      },
+    );
+    const longRequirement = [
+      "Users can filter shops by region, brand, benefit, map position, delivery support,",
+      "reservation availability, operating hours, partner grade, and campaign exposure",
+      "while preserving the selected state across navigation and refresh",
+    ].join(" ");
+
+    run.evidence.push({
+      id: "ev_11111111111111111111111111111111",
+      sourceId: "src_11111111111111111111111111111111",
+      location: {
+        type: "file-lines",
+        path: "docs/brief.md",
+        startLine: 1,
+        endLine: 1,
+      },
+      summary: longRequirement,
+      excerpt: longRequirement,
+      digest,
+      capturedAt: now,
+      metadata: {
+        adapter: "brief-adapter-v1",
+        sourceDigest: digest,
+        itemType: "requirement",
+      },
+    });
+
+    await store.create(run);
+
+    const result = await service.buildEvidenceGraph({
+      runId,
+    });
+    const loaded = await store.get(runId);
+
+    expect(result.gapsAdded).toBe(2);
+    expect(loaded.gaps.every((gap) => gap.title.length <= 200)).toBe(true);
+    expect(loaded.gaps.every((gap) => gap.metadata["requirementLabel"] === longRequirement)).toBe(
+      true,
+    );
+  });
 });

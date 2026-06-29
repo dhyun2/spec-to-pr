@@ -5,6 +5,15 @@ All notable changes to spec-to-pr are documented in this file.
 The project follows semantic versioning for Claude Code plugin releases. Release tags should use
 the Claude plugin tag format, for example `spec-to-pr--v0.1.0`.
 
+## 0.1.5 - 2026-06-29
+
+### Fixed
+
+- Prevented `build_evidence_graph` from failing when generated traceability gap titles exceed the
+  runtime 200-character title limit.
+- Preserved the full long requirement label in gap metadata while using a compact title for API and
+  Figma traceability gaps.
+
 ## 0.1.4 - 2026-06-29
 
 ### Fixed

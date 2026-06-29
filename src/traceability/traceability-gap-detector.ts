@@ -14,6 +14,8 @@ export type TraceabilityGapDetectionResult = {
   orphanFigmaNodeIds: string[];
 };
 
+const GAP_TITLE_MAX_LENGTH = 200;
+
 export function detectTraceabilityGaps(input: {
   requirementNodes: TraceNode[];
   apiNodes: TraceNode[];
@@ -58,7 +60,7 @@ export function detectTraceabilityGaps(input: {
         category: "api",
         severity: "major",
         status: "open",
-        title: `Requirement has no linked API evidence: ${requirement.label}`,
+        title: gapTitle("Requirement has no linked API evidence", requirement.label),
         expected:
           "Every implementation-facing requirement should be linked to API evidence or explicitly marked as non-API.",
         observed:
@@ -68,6 +70,9 @@ export function detectTraceabilityGaps(input: {
         owner: "api-contract",
         createdAt: input.now,
         updatedAt: input.now,
+        metadata: {
+          requirementLabel: requirement.label,
+        },
       });
 
       gaps.push(gap);
@@ -80,7 +85,7 @@ export function detectTraceabilityGaps(input: {
         category: "design",
         severity: "major",
         status: "open",
-        title: `Requirement has no linked Figma evidence: ${requirement.label}`,
+        title: gapTitle("Requirement has no linked Figma evidence", requirement.label),
         expected:
           "Every user-facing requirement should be linked to Figma evidence or explicitly marked as non-visual.",
         observed: "No Figma node candidate was linked by the deterministic traceability builder.",
@@ -89,6 +94,9 @@ export function detectTraceabilityGaps(input: {
         owner: "design-ui",
         createdAt: input.now,
         updatedAt: input.now,
+        metadata: {
+          requirementLabel: requirement.label,
+        },
       });
 
       gaps.push(gap);
@@ -133,6 +141,18 @@ function append(map: Map<string, string[]>, key: string, value: string): void {
   const existing = map.get(key) ?? [];
   existing.push(value);
   map.set(key, existing);
+}
+
+function gapTitle(prefix: string, label: string): string {
+  const title = `${prefix}: ${label}`;
+  if (title.length <= GAP_TITLE_MAX_LENGTH) {
+    return title;
+  }
+
+  const labelBudget = GAP_TITLE_MAX_LENGTH - prefix.length - ": ".length - "...".length;
+  const compactLabel = label.slice(0, Math.max(1, labelBudget)).trimEnd();
+
+  return `${prefix}: ${compactLabel}...`;
 }
 
 function computeRowStatus(input: {

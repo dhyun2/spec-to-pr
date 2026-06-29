@@ -158,4 +158,35 @@ describe("traceability", () => {
     expect(gaps.gaps.some((gap) => gap.category === "api")).toBe(true);
     expect(gaps.matrix[0]?.status).toMatch(/missing-api/);
   });
+
+  it("keeps generated gap titles within runtime limits for long requirements", () => {
+    const run = createRunWithEvidence();
+    run.evidence = run.evidence.filter(
+      (evidence) => evidence.metadata["evidenceType"] !== "openapi-operation",
+    );
+    const requirement = run.evidence.find(
+      (evidence) => evidence.metadata["itemType"] === "requirement",
+    );
+
+    expect(requirement).toBeDefined();
+    requirement!.summary = [
+      "Users can filter shops by region, brand, benefit, map position, delivery support,",
+      "reservation availability, operating hours, partner grade, and campaign exposure",
+      "while preserving the selected state across navigation and refresh",
+    ].join(" ");
+    requirement!.excerpt = requirement!.summary;
+
+    const nodes = buildTraceNodes(run);
+    const links = buildTraceLinks(nodes);
+    const gaps = detectTraceabilityGaps({
+      requirementNodes: nodes.requirementNodes,
+      apiNodes: nodes.apiNodes,
+      figmaNodes: nodes.figmaNodes,
+      edges: links.edges,
+      now,
+    });
+
+    expect(gaps.gaps.length).toBeGreaterThan(0);
+    expect(gaps.gaps.every((gap) => gap.title.length <= 200)).toBe(true);
+  });
 });

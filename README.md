@@ -24,7 +24,7 @@ Figma, browser, and diff images directly in the PR/MR body.
 Task 33 adds a local release-readiness workflow:
 
 ```bash
-pnpm release:build 0.1.4 --dry-run
+pnpm release:build 0.1.5 --dry-run
 ```
 
 The workflow runs eval fixtures, security hardening checks, deterministic package generation, package verification, checksums, a release manifest, and release notes.
