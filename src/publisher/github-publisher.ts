@@ -126,6 +126,10 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
 
     const published: PublishedReviewAsset[] = [];
 
+    // Private repositories cannot render raw.githubusercontent.com images without
+    // auth, so we detect visibility once and fall back to plain links for them.
+    const isPrivate = await this.isPrivateRepo({ target: input.target, token: input.token });
+
     for (const asset of input.assets) {
       const assetPath = [
         ".spec-to-pr",
@@ -162,7 +166,19 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
 
       const uploaded = (await response.json()) as Record<string, unknown>;
       const content = uploaded["content"] as Record<string, unknown> | undefined;
-      const url = String(content?.["download_url"] ?? content?.["html_url"] ?? "");
+      const commit = uploaded["commit"] as Record<string, unknown> | undefined;
+      const commitSha = typeof commit?.["sha"] === "string" ? (commit["sha"] as string) : undefined;
+
+      // Public repos: pin the raw URL to the commit SHA so it survives branch
+      // deletion after merge. Private repos: raw URLs 404 for unauthenticated
+      // camo fetches, so link to the viewable blob instead and mark it as
+      // non-embeddable for the review-body renderer.
+      const embeddable = !isPrivate;
+      const url = isPrivate
+        ? String(content?.["html_url"] ?? content?.["download_url"] ?? "")
+        : commitSha !== undefined
+          ? `https://raw.githubusercontent.com/${input.target.owner}/${input.target.repo}/${commitSha}/${assetPath}`
+          : String(content?.["download_url"] ?? content?.["html_url"] ?? "");
 
       published.push(
         PublishedReviewAssetSchema.parse({
@@ -171,11 +187,33 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
           role: asset.role,
           label: asset.label,
           url,
+          embeddable,
         }),
       );
     }
 
     return published;
+  }
+
+  private async isPrivateRepo(input: {
+    target: PublishTarget & { owner: string; repo: string };
+    token: string;
+  }): Promise<boolean> {
+    const response = await this.githubFetch(
+      `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}`,
+      input.token,
+      { method: "GET" },
+    );
+
+    if (!response.ok) {
+      // If we cannot determine visibility, assume private so we prefer the safe
+      // link fallback over an image that might 404.
+      return true;
+    }
+
+    const repo = (await response.json()) as Record<string, unknown>;
+
+    return repo["private"] === true;
   }
 
   private async applyIssueMetadata(input: {

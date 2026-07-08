@@ -95,3 +95,12 @@ Return:
 This Skill does not merge the API agent worktree.
 
 Integration happens later in the integration task.
+
+## Host Compatibility And Subagent Fallback
+
+Subagent names differ by host:
+
+- Claude Code: the agents defined in `agents/` (for example `design-ui`, `api-contract`, `spec-bdd`, `integrator`, `review-council`, and the `*-reviewer` agents).
+- Codex: the same agents are defined in `.codex/agents/` as `spec-to-pr-<name>` (for example `spec-to-pr-design-ui`).
+
+If the host does not support named subagents, or a matching agent is not available, do not skip the lane. Perform the same instructions inline in the current thread and record the outcome with the same `record_*` MCP tool. Sequential in-thread execution is the supported fallback and must still produce the same structured result and evidence.

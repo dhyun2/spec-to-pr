@@ -48,7 +48,15 @@ Default target branch is `main` when the user does not provide one.
    - Run `generate_observability_config` and record observability review evidence.
 9. If Figma evidence exists, run the visual repair loop until `evaluate_visual_repair_loop` returns `passed` or a human-review blocker is recorded.
 10. Do not generate a final PR report while mandatory gate evidence is missing unless the report is intentionally blocked and will not be published.
-11. Run Review Council before final reporting.
+11. Run Review Council before final reporting, as a bounded re-review loop (Ralph-style), separate from the visual repair loop:
+    - Run `prepare_review_council` / `get_review_council_context`, review the lanes, and `record_review_council_result`.
+    - If the verdict is `approved`, continue to reporting.
+    - If the verdict is `changes_requested`, group the findings by category and re-run only the affected lane(s):
+      - `spec` findings → re-run the Spec/BDD lane.
+      - `api` findings → re-run the API Contract lane.
+      - `design`/`visual` findings → re-run the Design/UI lane (and the visual repair loop when Figma evidence exists).
+        After the targeted re-runs, reconvene the Council.
+    - Allow at most **2 Council re-review attempts** (counted separately from the visual repair loop). If the verdict is still `changes_requested` after the limit, stop the loop, keep the open gaps, and produce a `blocked` report instead of publishing.
 12. Generate the PR report with `generate_pr_report`. Use `language: "ko"` unless the user explicitly asks for English.
 13. Read the markdown body with `get_pr_report`.
 14. If the report decision is `blocked`, stop and report the missing/failed gates. Do not publish.

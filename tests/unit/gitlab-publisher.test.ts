@@ -43,10 +43,13 @@ describe("GitLabPublisherAdapter", () => {
     });
   });
 
-  it("uploads visual evidence images as project markdown uploads", async () => {
+  it("uploads visual evidence as project-relative uploads (no instance-root prefix)", async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse({
-        full_path: "/uploads/abc123/figma.png",
+        // Real GitLab responses include the project path in full_path.
+        url: "/uploads/abc123/figma.png",
+        full_path: "/acme/platform/spec-to-pr/uploads/abc123/figma.png",
+        markdown: "![figma.png](/uploads/abc123/figma.png)",
       }),
     );
     const adapter = new GitLabPublisherAdapter(fetchMock);
@@ -78,13 +81,16 @@ describe("GitLabPublisherAdapter", () => {
         }),
       }),
     );
+    // Keeps the project-scoped RELATIVE path; never prefixes the instance root
+    // (which would drop the project path and 404).
     expect(result).toEqual([
       {
         artifactId: "art_22222222222222222222222222222222",
         targetId: "home",
         role: "figma",
         label: "Figma",
-        url: "https://gitlab.com/uploads/abc123/figma.png",
+        url: "/acme/platform/spec-to-pr/uploads/abc123/figma.png",
+        embeddable: true,
       },
     ]);
   });

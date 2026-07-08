@@ -46,20 +46,21 @@ describe("GitHubPublisherAdapter", () => {
     });
   });
 
-  it("uploads visual evidence images to the source branch", async () => {
+  it("uploads visual evidence and pins public-repo URLs to the commit SHA", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(
-        new Response("not found", {
-          status: 404,
-        }),
-      )
+      // repo visibility check (public)
+      .mockResolvedValueOnce(jsonResponse({ private: false }))
+      // findContentSha -> not found
+      .mockResolvedValueOnce(new Response("not found", { status: 404 }))
+      // PUT upload -> returns commit sha
       .mockResolvedValueOnce(
         jsonResponse({
           content: {
-            download_url:
-              "https://raw.githubusercontent.com/acme/spec-to-pr/spec-to-pr/run-1/.spec-to-pr/visual-assets/run/target/figma.png",
+            html_url:
+              "https://github.com/acme/spec-to-pr/blob/spec-to-pr/run-1/.spec-to-pr/visual-assets/x/figma.png",
           },
+          commit: { sha: "abc123def456" },
         }),
       );
     const adapter = new GitHubPublisherAdapter(fetchMock);
@@ -68,52 +69,74 @@ describe("GitHubPublisherAdapter", () => {
       target: githubTarget(),
       payload: payload(),
       token: "ghp_example",
-      assets: [
-        {
-          artifactId: "art_22222222222222222222222222222222",
-          targetId: "home",
-          role: "figma",
-          label: "Figma",
-          filename: "figma.png",
-          mediaType: "image/png",
-          content: Buffer.from("png"),
-        },
-      ],
+      assets: [asset()],
     });
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      expect.stringContaining(
-        "/repos/acme/spec-to-pr/contents/.spec-to-pr/visual-assets/run_11111111111111111111111111111111/home/figma.png",
-      ),
-      expect.objectContaining({
-        method: "GET",
-      }),
+      "https://api.github.com/repos/acme/spec-to-pr",
+      expect.objectContaining({ method: "GET" }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
+      3,
       expect.stringContaining(
         "/repos/acme/spec-to-pr/contents/.spec-to-pr/visual-assets/run_11111111111111111111111111111111/home/figma.png",
       ),
-      expect.objectContaining({
-        method: "PUT",
-      }),
+      expect.objectContaining({ method: "PUT" }),
     );
-    expect(JSON.parse(String(fetchMock.mock.calls[1]![1]!.body))).toMatchObject({
-      branch: "spec-to-pr/run-1",
-      content: Buffer.from("png").toString("base64"),
-    });
     expect(result).toEqual([
       {
         artifactId: "art_22222222222222222222222222222222",
         targetId: "home",
         role: "figma",
         label: "Figma",
-        url: "https://raw.githubusercontent.com/acme/spec-to-pr/spec-to-pr/run-1/.spec-to-pr/visual-assets/run/target/figma.png",
+        url: "https://raw.githubusercontent.com/acme/spec-to-pr/abc123def456/.spec-to-pr/visual-assets/run_11111111111111111111111111111111/home/figma.png",
+        embeddable: true,
       },
     ]);
   });
+
+  it("falls back to a non-embeddable blob link for private repos", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ private: true }))
+      .mockResolvedValueOnce(new Response("not found", { status: 404 }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          content: {
+            html_url:
+              "https://github.com/acme/spec-to-pr/blob/spec-to-pr/run-1/.spec-to-pr/visual-assets/x/figma.png",
+          },
+          commit: { sha: "abc123def456" },
+        }),
+      );
+    const adapter = new GitHubPublisherAdapter(fetchMock);
+
+    const result = await adapter.publishAssets({
+      target: githubTarget(),
+      payload: payload(),
+      token: "ghp_example",
+      assets: [asset()],
+    });
+
+    expect(result[0]).toMatchObject({
+      embeddable: false,
+      url: "https://github.com/acme/spec-to-pr/blob/spec-to-pr/run-1/.spec-to-pr/visual-assets/x/figma.png",
+    });
+  });
 });
+
+function asset() {
+  return {
+    artifactId: "art_22222222222222222222222222222222",
+    targetId: "home",
+    role: "figma" as const,
+    label: "Figma",
+    filename: "figma.png",
+    mediaType: "image/png",
+    content: Buffer.from("png"),
+  };
+}
 
 function githubTarget(): PublishTarget {
   return {

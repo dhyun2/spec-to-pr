@@ -147,7 +147,12 @@ export class GitLabPublisherAdapter implements ReviewRequestPublisher {
       }
 
       const uploaded = (await response.json()) as Record<string, unknown>;
-      const rawUrl = String(uploaded["full_path"] ?? uploaded["url"] ?? "");
+      // GitLab uploads are project-scoped. `full_path` already includes the
+      // /{namespace}/{project}/uploads/... prefix; `url` is project-relative
+      // (/uploads/...). Both render inside the MR description because GitLab
+      // resolves them against the project. We keep the RELATIVE path and never
+      // prefix the instance root, which would drop the project path and 404.
+      const uploadPath = String(uploaded["full_path"] ?? uploaded["url"] ?? "");
 
       published.push(
         PublishedReviewAssetSchema.parse({
@@ -155,7 +160,8 @@ export class GitLabPublisherAdapter implements ReviewRequestPublisher {
           targetId: asset.targetId,
           role: asset.role,
           label: asset.label,
-          url: absoluteGitLabAssetUrl(input.target, rawUrl),
+          url: uploadPath,
+          embeddable: true,
         }),
       );
     }
@@ -208,12 +214,4 @@ function normalizeGitLabMr(
     created,
     updated,
   });
-}
-
-function absoluteGitLabAssetUrl(target: PublishTarget, rawUrl: string): string {
-  if (/^https?:\/\//i.test(rawUrl)) {
-    return rawUrl;
-  }
-
-  return new URL(rawUrl, target.webBaseUrl).toString();
 }

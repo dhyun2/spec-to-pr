@@ -26848,9 +26848,9 @@ var require_data = __commonJS({
   }
 });
 
-// node_modules/.pnpm/fast-uri@3.1.2/node_modules/fast-uri/lib/utils.js
+// node_modules/.pnpm/fast-uri@3.1.3/node_modules/fast-uri/lib/utils.js
 var require_utils = __commonJS({
-  "node_modules/.pnpm/fast-uri@3.1.2/node_modules/fast-uri/lib/utils.js"(exports, module) {
+  "node_modules/.pnpm/fast-uri@3.1.3/node_modules/fast-uri/lib/utils.js"(exports, module) {
     "use strict";
     var isUUID = RegExp.prototype.test.bind(/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/iu);
     var isIPv4 = RegExp.prototype.test.bind(/^(?:(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]\d|\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]\d|\d)$/u);
@@ -27161,9 +27161,9 @@ var require_utils = __commonJS({
   }
 });
 
-// node_modules/.pnpm/fast-uri@3.1.2/node_modules/fast-uri/lib/schemes.js
+// node_modules/.pnpm/fast-uri@3.1.3/node_modules/fast-uri/lib/schemes.js
 var require_schemes = __commonJS({
-  "node_modules/.pnpm/fast-uri@3.1.2/node_modules/fast-uri/lib/schemes.js"(exports, module) {
+  "node_modules/.pnpm/fast-uri@3.1.3/node_modules/fast-uri/lib/schemes.js"(exports, module) {
     "use strict";
     var { isUUID } = require_utils();
     var URN_REG = /([\da-z][\d\-a-z]{0,31}):((?:[\w!$'()*+,\-.:;=@]|%[\da-f]{2})+)/iu;
@@ -27371,9 +27371,9 @@ var require_schemes = __commonJS({
   }
 });
 
-// node_modules/.pnpm/fast-uri@3.1.2/node_modules/fast-uri/index.js
+// node_modules/.pnpm/fast-uri@3.1.3/node_modules/fast-uri/index.js
 var require_fast_uri = __commonJS({
-  "node_modules/.pnpm/fast-uri@3.1.2/node_modules/fast-uri/index.js"(exports, module) {
+  "node_modules/.pnpm/fast-uri@3.1.3/node_modules/fast-uri/index.js"(exports, module) {
     "use strict";
     var { normalizeIPv6, removeDotSegments, recomposeAuthority, normalizePercentEncoding, normalizePathEncoding, escapePreservingEscapes, reescapeHostDelimiters, isIPv4, nonSimpleDomain } = require_utils();
     var { SCHEMES, getSchemeHandler } = require_schemes();
@@ -27586,7 +27586,7 @@ var require_fast_uri = __commonJS({
         if (!options.unicodeSupport && (!schemeHandler || !schemeHandler.unicodeSupport)) {
           if (parsed.host && (options.domainHost || schemeHandler && schemeHandler.domainHost) && isIP === false && nonSimpleDomain(parsed.host)) {
             try {
-              parsed.host = URL.domainToASCII(parsed.host.toLowerCase());
+              parsed.host = new URL("http://" + parsed.host).hostname;
             } catch (e) {
               parsed.error = parsed.error || "Host's domain name can not be converted to ASCII: " + e;
             }
@@ -258587,7 +258587,11 @@ var init_publish_contracts = __esm({
       targetId: external_exports.string().trim().min(1),
       role: ReviewRequestAssetRoleSchema,
       label: external_exports.string().trim().min(1),
-      url: external_exports.string().trim().min(1)
+      url: external_exports.string().trim().min(1),
+      // Whether `url` renders as an inline <img> in the review host.
+      // GitHub private-repo raw URLs require auth and cannot be embedded, so the
+      // review body falls back to a plain link for those assets.
+      embeddable: external_exports.boolean().default(true)
     }).strict();
     PublishPlanSchema = external_exports.object({
       runId: RunIdSchema,
@@ -258630,31 +258634,51 @@ var init_publish_contracts = __esm({
 // src/publisher/remote-detector.ts
 function detectPublishTargetFromRemote(remote) {
   const normalized = normalizeGitRemoteUrl(remote.url);
-  if (normalized.host === "github.com") {
+  const kind = resolveHostKind(normalized.host);
+  if (kind === "github") {
     const [owner, repo] = normalized.pathParts;
     if (owner === void 0 || repo === void 0) {
       throw new Error(`Cannot parse GitHub remote URL: ${remote.url}`);
     }
+    const enterprise = normalized.host !== "github.com";
     return PublishTargetSchema.parse({
       host: "github",
-      webBaseUrl: "https://github.com",
-      apiBaseUrl: "https://api.github.com",
+      webBaseUrl: envUrl("SPEC_TO_PR_WEB_BASE_URL") ?? `https://${normalized.host}`,
+      // github.com uses api.github.com; GitHub Enterprise uses https://<host>/api/v3.
+      apiBaseUrl: envUrl("SPEC_TO_PR_API_BASE_URL") ?? (enterprise ? `https://${normalized.host}/api/v3` : "https://api.github.com"),
       owner,
       repo
     });
   }
-  if (normalized.host === "gitlab.com") {
+  if (kind === "gitlab") {
     if (normalized.pathParts.length < 2) {
       throw new Error(`Cannot parse GitLab remote URL: ${remote.url}`);
     }
     return PublishTargetSchema.parse({
       host: "gitlab",
-      webBaseUrl: "https://gitlab.com",
-      apiBaseUrl: "https://gitlab.com/api/v4",
+      webBaseUrl: envUrl("SPEC_TO_PR_WEB_BASE_URL") ?? `https://${normalized.host}`,
+      apiBaseUrl: envUrl("SPEC_TO_PR_API_BASE_URL") ?? `https://${normalized.host}/api/v4`,
       projectPath: normalized.pathParts.join("/")
     });
   }
-  throw new Error(`Unsupported Git remote host: ${normalized.host}`);
+  throw new Error(
+    `Unsupported Git remote host: ${normalized.host}. Set SPEC_TO_PR_GIT_HOST=github|gitlab (optionally with SPEC_TO_PR_API_BASE_URL and SPEC_TO_PR_WEB_BASE_URL) to publish to a self-hosted instance.`
+  );
+}
+function resolveHostKind(host) {
+  const override = process.env["SPEC_TO_PR_GIT_HOST"]?.trim().toLowerCase();
+  if (override === "github" || override === "gitlab") {
+    return override;
+  }
+  if (host === "github.com") return "github";
+  if (host === "gitlab.com") return "gitlab";
+  if (host.includes("gitlab")) return "gitlab";
+  if (host.includes("github")) return "github";
+  return void 0;
+}
+function envUrl(name) {
+  const value = process.env[name]?.trim();
+  return value !== void 0 && value.length > 0 ? value : void 0;
 }
 function normalizeGitRemoteUrl(rawUrl) {
   const trimmed = rawUrl.trim();
@@ -258695,27 +258719,60 @@ var init_remote_detector = __esm({
 });
 
 // src/publisher/token-provider.ts
+import { execFileSync } from "child_process";
 function readPublisherToken(host) {
-  if (host === "github") {
-    return readRequiredEnv(["GITHUB_TOKEN", "GH_TOKEN"], "GitHub");
+  const config2 = HOST_CONFIG[host];
+  const fromEnv = readEnvToken(config2.envNames);
+  if (fromEnv !== void 0) {
+    return fromEnv;
   }
-  return readRequiredEnv(["GITLAB_TOKEN", "GITLAB_PRIVATE_TOKEN"], "GitLab");
+  const fromCli = readCliToken(config2.cli);
+  if (fromCli !== void 0) {
+    return fromCli;
+  }
+  throw new Error(
+    `${config2.label} token is not configured. Set one of: ${config2.envNames.join(", ")}, or authenticate the ${config2.cli.command} CLI (${config2.cli.command} ${config2.cli.args.join(" ")}).`
+  );
 }
-function readRequiredEnv(names, label) {
+function readEnvToken(names) {
   for (const name of names) {
     const value = process.env[name];
     if (value !== void 0 && value.trim().length > 0) {
-      return {
-        token: value,
-        source: name
-      };
+      return { token: value, source: name };
     }
   }
-  throw new Error(`${label} token is not configured. Expected one of: ${names.join(", ")}`);
+  return void 0;
 }
+function readCliToken(cli) {
+  try {
+    const output = execFileSync(cli.command, cli.args, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 1e4
+    }).trim();
+    if (output.length > 0) {
+      return { token: output, source: `${cli.command} ${cli.args.join(" ")}` };
+    }
+  } catch {
+  }
+  return void 0;
+}
+var HOST_CONFIG;
 var init_token_provider = __esm({
   "src/publisher/token-provider.ts"() {
     "use strict";
+    HOST_CONFIG = {
+      github: {
+        label: "GitHub",
+        envNames: ["GITHUB_TOKEN", "GH_TOKEN"],
+        cli: { command: "gh", args: ["auth", "token"] }
+      },
+      gitlab: {
+        label: "GitLab",
+        envNames: ["GITLAB_TOKEN", "GITLAB_PRIVATE_TOKEN"],
+        cli: { command: "glab", args: ["auth", "token"] }
+      }
+    };
   }
 });
 
@@ -258859,6 +258916,7 @@ var init_github_publisher = __esm({
       async publishAssets(input) {
         assertGitHub(input.target);
         const published = [];
+        const isPrivate = await this.isPrivateRepo({ target: input.target, token: input.token });
         for (const asset of input.assets) {
           const assetPath = [
             ".spec-to-pr",
@@ -258893,18 +258951,34 @@ var init_github_publisher = __esm({
           }
           const uploaded = await response.json();
           const content = uploaded["content"];
-          const url2 = String(content?.["download_url"] ?? content?.["html_url"] ?? "");
+          const commit = uploaded["commit"];
+          const commitSha = typeof commit?.["sha"] === "string" ? commit["sha"] : void 0;
+          const embeddable = !isPrivate;
+          const url2 = isPrivate ? String(content?.["html_url"] ?? content?.["download_url"] ?? "") : commitSha !== void 0 ? `https://raw.githubusercontent.com/${input.target.owner}/${input.target.repo}/${commitSha}/${assetPath}` : String(content?.["download_url"] ?? content?.["html_url"] ?? "");
           published.push(
             PublishedReviewAssetSchema.parse({
               artifactId: asset.artifactId,
               targetId: asset.targetId,
               role: asset.role,
               label: asset.label,
-              url: url2
+              url: url2,
+              embeddable
             })
           );
         }
         return published;
+      }
+      async isPrivateRepo(input) {
+        const response = await this.githubFetch(
+          `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}`,
+          input.token,
+          { method: "GET" }
+        );
+        if (!response.ok) {
+          return true;
+        }
+        const repo = await response.json();
+        return repo["private"] === true;
       }
       async applyIssueMetadata(input) {
         if (input.payload.labels.length > 0) {
@@ -258987,12 +259061,6 @@ function normalizeGitLabMr(mr, created, updated, payload) {
     created,
     updated
   });
-}
-function absoluteGitLabAssetUrl(target, rawUrl) {
-  if (/^https?:\/\//i.test(rawUrl)) {
-    return rawUrl;
-  }
-  return new URL(rawUrl, target.webBaseUrl).toString();
 }
 var GitLabPublisherAdapter;
 var init_gitlab_publisher = __esm({
@@ -259092,14 +259160,15 @@ var init_gitlab_publisher = __esm({
             );
           }
           const uploaded = await response.json();
-          const rawUrl = String(uploaded["full_path"] ?? uploaded["url"] ?? "");
+          const uploadPath = String(uploaded["full_path"] ?? uploaded["url"] ?? "");
           published.push(
             PublishedReviewAssetSchema.parse({
               artifactId: asset.artifactId,
               targetId: asset.targetId,
               role: asset.role,
               label: asset.label,
-              url: absoluteGitLabAssetUrl(input.target, rawUrl)
+              url: uploadPath,
+              embeddable: true
             })
           );
         }
@@ -265217,11 +265286,14 @@ function renderVisualEvidencePreview(report, assets, locale = "en") {
       [figma, browser, diff].filter((asset) => asset !== void 0).map((asset) => `${asset.label}: \`${asset.artifactId}\``).join("<br>") || "-"
     ];
   });
+  const hasNonEmbeddable = assets.some((asset) => asset.embeddable === false);
+  const fallbackNote = hasNonEmbeddable ? locale === "ko" ? "\n> \uC774 \uC800\uC7A5\uC18C\uB294 \uC778\uB77C\uC778 \uC774\uBBF8\uC9C0 \uBBF8\uB9AC\uBCF4\uAE30\uAC00 \uC81C\uD55C\uB418\uC5B4(\uC608: private \uC800\uC7A5\uC18C) \uC774\uBBF8\uC9C0\uB97C \uB9C1\uD06C\uB85C \uB300\uCCB4\uD588\uC2B5\uB2C8\uB2E4. \uB9C1\uD06C\uB97C \uD074\uB9AD\uD558\uBA74 \uB85C\uADF8\uC778\uB41C \uC0C1\uD0DC\uC5D0\uC11C \uBCFC \uC218 \uC788\uC2B5\uB2C8\uB2E4." : "\n> Inline image previews are restricted for this repository (e.g. a private repo), so images are shown as links. Open them while signed in to view." : "";
   return [
     VISUAL_PREVIEW_START,
     locale === "ko" ? "## \uC2DC\uAC01 \uC99D\uAC70 \uBBF8\uB9AC\uBCF4\uAE30" : "## Visual Evidence Preview",
     "",
     locale === "ko" ? "Figma baseline, \uBE0C\uB77C\uC6B0\uC800 \uCEA1\uCC98, visual diff \uC774\uBBF8\uC9C0\uB97C \uB9AC\uBDF0\uC6A9\uC73C\uB85C \uC5C5\uB85C\uB4DC\uD588\uC2B5\uB2C8\uB2E4. \uB85C\uCEEC \uC99D\uAC70 \uCD94\uC801\uC744 \uC704\uD574 artifact ID\uB3C4 \uD568\uAED8 \uB0A8\uAE41\uB2C8\uB2E4." : "Figma baseline, browser capture, and visual diff are uploaded for review. Artifact IDs are kept for local evidence traceability.",
+    fallbackNote,
     "",
     locale === "ko" ? "| \uB300\uC0C1 | Figma | Browser | Diff | \uC810\uC218 | Artifact IDs |" : "| Target | Figma | Browser | Diff | Score | Artifact IDs |",
     "| --- | --- | --- | --- | --- | --- |",
@@ -265235,6 +265307,9 @@ function isKoreanReportBody(body) {
 function imageCell(asset, altPrefix) {
   if (asset === void 0) {
     return "-";
+  }
+  if (asset.embeddable === false) {
+    return `[${escapeMarkdownTableCell(`${altPrefix} \u2197`)}](${asset.url})`;
   }
   return `<img src="${escapeHtmlAttribute(asset.url)}" alt="${escapeHtmlAttribute(`${altPrefix} ${asset.targetId}`)}" width="260" />`;
 }
@@ -265676,12 +265751,24 @@ var init_publisher_service = __esm({
             publishedAssets: []
           };
         }
-        const publishedAssets = await input.publisher.publishAssets({
-          target: input.plan.target,
-          payload: input.plan.payload,
-          token: input.token,
-          assets: visualPreview.assets
-        });
+        let publishedAssets;
+        try {
+          publishedAssets = await input.publisher.publishAssets({
+            target: input.plan.target,
+            payload: input.plan.payload,
+            token: input.token,
+            assets: visualPreview.assets
+          });
+        } catch (error51) {
+          const message = error51 instanceof Error ? error51.message : String(error51);
+          console.error(
+            `[spec-to-pr] visual evidence upload failed, publishing without preview: ${message}`
+          );
+          return {
+            payload: input.plan.payload,
+            publishedAssets: []
+          };
+        }
         return {
           payload: ReviewRequestPayloadSchema.parse({
             ...input.plan.payload,

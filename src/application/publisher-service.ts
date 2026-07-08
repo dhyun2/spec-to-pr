@@ -495,12 +495,26 @@ export class PublisherService {
       };
     }
 
-    const publishedAssets = await input.publisher.publishAssets({
-      target: input.plan.target,
-      payload: input.plan.payload,
-      token: input.token,
-      assets: visualPreview.assets,
-    });
+    // Visual evidence upload is best-effort. A single failed image upload must
+    // not abort publishing the whole review request; degrade to the base body.
+    let publishedAssets: PublishedReviewAsset[];
+    try {
+      publishedAssets = await input.publisher.publishAssets({
+        target: input.plan.target,
+        payload: input.plan.payload,
+        token: input.token,
+        assets: visualPreview.assets,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(
+        `[spec-to-pr] visual evidence upload failed, publishing without preview: ${message}`,
+      );
+      return {
+        payload: input.plan.payload,
+        publishedAssets: [],
+      };
+    }
 
     return {
       payload: ReviewRequestPayloadSchema.parse({
@@ -890,6 +904,13 @@ function renderVisualEvidencePreview(
     ];
   });
 
+  const hasNonEmbeddable = assets.some((asset) => asset.embeddable === false);
+  const fallbackNote = hasNonEmbeddable
+    ? locale === "ko"
+      ? "\n> 이 저장소는 인라인 이미지 미리보기가 제한되어(예: private 저장소) 이미지를 링크로 대체했습니다. 링크를 클릭하면 로그인된 상태에서 볼 수 있습니다."
+      : "\n> Inline image previews are restricted for this repository (e.g. a private repo), so images are shown as links. Open them while signed in to view."
+    : "";
+
   return [
     VISUAL_PREVIEW_START,
     locale === "ko" ? "## 시각 증거 미리보기" : "## Visual Evidence Preview",
@@ -897,6 +918,7 @@ function renderVisualEvidencePreview(
     locale === "ko"
       ? "Figma baseline, 브라우저 캡처, visual diff 이미지를 리뷰용으로 업로드했습니다. 로컬 증거 추적을 위해 artifact ID도 함께 남깁니다."
       : "Figma baseline, browser capture, and visual diff are uploaded for review. Artifact IDs are kept for local evidence traceability.",
+    fallbackNote,
     "",
     locale === "ko"
       ? "| 대상 | Figma | Browser | Diff | 점수 | Artifact IDs |"
@@ -914,6 +936,12 @@ function isKoreanReportBody(body: string): boolean {
 function imageCell(asset: PublishedReviewAsset | undefined, altPrefix: string): string {
   if (asset === undefined) {
     return "-";
+  }
+
+  // Non-embeddable assets (e.g. private GitHub raw URLs) render as a plain link
+  // so the review body never shows a broken image.
+  if (asset.embeddable === false) {
+    return `[${escapeMarkdownTableCell(`${altPrefix} ↗`)}](${asset.url})`;
   }
 
   return `<img src="${escapeHtmlAttribute(asset.url)}" alt="${escapeHtmlAttribute(`${altPrefix} ${asset.targetId}`)}" width="260" />`;

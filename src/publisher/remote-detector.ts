@@ -14,37 +14,74 @@ export type GitRemoteInfo = z.infer<typeof GitRemoteInfoSchema>;
 
 export function detectPublishTargetFromRemote(remote: GitRemoteInfo): PublishTarget {
   const normalized = normalizeGitRemoteUrl(remote.url);
+  const kind = resolveHostKind(normalized.host);
 
-  if (normalized.host === "github.com") {
+  if (kind === "github") {
     const [owner, repo] = normalized.pathParts;
 
     if (owner === undefined || repo === undefined) {
       throw new Error(`Cannot parse GitHub remote URL: ${remote.url}`);
     }
 
+    const enterprise = normalized.host !== "github.com";
+
     return PublishTargetSchema.parse({
       host: "github",
-      webBaseUrl: "https://github.com",
-      apiBaseUrl: "https://api.github.com",
+      webBaseUrl: envUrl("SPEC_TO_PR_WEB_BASE_URL") ?? `https://${normalized.host}`,
+      // github.com uses api.github.com; GitHub Enterprise uses https://<host>/api/v3.
+      apiBaseUrl:
+        envUrl("SPEC_TO_PR_API_BASE_URL") ??
+        (enterprise ? `https://${normalized.host}/api/v3` : "https://api.github.com"),
       owner,
       repo,
     });
   }
 
-  if (normalized.host === "gitlab.com") {
+  if (kind === "gitlab") {
     if (normalized.pathParts.length < 2) {
       throw new Error(`Cannot parse GitLab remote URL: ${remote.url}`);
     }
 
     return PublishTargetSchema.parse({
       host: "gitlab",
-      webBaseUrl: "https://gitlab.com",
-      apiBaseUrl: "https://gitlab.com/api/v4",
+      webBaseUrl: envUrl("SPEC_TO_PR_WEB_BASE_URL") ?? `https://${normalized.host}`,
+      apiBaseUrl: envUrl("SPEC_TO_PR_API_BASE_URL") ?? `https://${normalized.host}/api/v4`,
       projectPath: normalized.pathParts.join("/"),
     });
   }
 
-  throw new Error(`Unsupported Git remote host: ${normalized.host}`);
+  throw new Error(
+    `Unsupported Git remote host: ${normalized.host}. ` +
+      `Set SPEC_TO_PR_GIT_HOST=github|gitlab (optionally with SPEC_TO_PR_API_BASE_URL and ` +
+      `SPEC_TO_PR_WEB_BASE_URL) to publish to a self-hosted instance.`,
+  );
+}
+
+/**
+ * Decide whether a remote host is GitHub or GitLab. Resolution order:
+ * 1. explicit SPEC_TO_PR_GIT_HOST override (for self-hosted instances),
+ * 2. exact known SaaS hosts,
+ * 3. hostname heuristic (contains "github"/"gitlab") for enterprise installs.
+ */
+function resolveHostKind(host: string): "github" | "gitlab" | undefined {
+  const override = process.env["SPEC_TO_PR_GIT_HOST"]?.trim().toLowerCase();
+
+  if (override === "github" || override === "gitlab") {
+    return override;
+  }
+
+  if (host === "github.com") return "github";
+  if (host === "gitlab.com") return "gitlab";
+  if (host.includes("gitlab")) return "gitlab";
+  if (host.includes("github")) return "github";
+
+  return undefined;
+}
+
+function envUrl(name: string): string | undefined {
+  const value = process.env[name]?.trim();
+
+  return value !== undefined && value.length > 0 ? value : undefined;
 }
 
 export function normalizeGitRemoteUrl(rawUrl: string): {

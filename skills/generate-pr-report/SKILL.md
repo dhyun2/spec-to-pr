@@ -77,3 +77,12 @@ If Figma evidence exists but no Figma/browser visual comparison report exists, r
 Do not change gap status.
 Do not mark skipped checks as passed.
 Do not claim OpenSpec archive has happened.
+
+## Host Compatibility And Subagent Fallback
+
+Subagent names differ by host:
+
+- Claude Code: the agents defined in `agents/` (for example `design-ui`, `api-contract`, `spec-bdd`, `integrator`, `review-council`, and the `*-reviewer` agents).
+- Codex: the same agents are defined in `.codex/agents/` as `spec-to-pr-<name>` (for example `spec-to-pr-design-ui`).
+
+If the host does not support named subagents, or a matching agent is not available, do not skip the lane. Perform the same instructions inline in the current thread and record the outcome with the same `record_*` MCP tool. Sequential in-thread execution is the supported fallback and must still produce the same structured result and evidence.

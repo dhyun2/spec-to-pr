@@ -1,3 +1,5 @@
+import { execFileSync } from "node:child_process";
+
 import type { ReviewHost } from "./publish-contracts.js";
 
 export type PublisherToken = {
@@ -5,25 +7,74 @@ export type PublisherToken = {
   source: string;
 };
 
+type HostTokenConfig = {
+  label: string;
+  envNames: string[];
+  cli: { command: string; args: string[] };
+};
+
+const HOST_CONFIG: Record<ReviewHost, HostTokenConfig> = {
+  github: {
+    label: "GitHub",
+    envNames: ["GITHUB_TOKEN", "GH_TOKEN"],
+    cli: { command: "gh", args: ["auth", "token"] },
+  },
+  gitlab: {
+    label: "GitLab",
+    envNames: ["GITLAB_TOKEN", "GITLAB_PRIVATE_TOKEN"],
+    cli: { command: "glab", args: ["auth", "token"] },
+  },
+};
+
 export function readPublisherToken(host: ReviewHost): PublisherToken {
-  if (host === "github") {
-    return readRequiredEnv(["GITHUB_TOKEN", "GH_TOKEN"], "GitHub");
+  const config = HOST_CONFIG[host];
+
+  // 1. Environment variables take precedence (explicit, CI-friendly).
+  const fromEnv = readEnvToken(config.envNames);
+
+  if (fromEnv !== undefined) {
+    return fromEnv;
   }
 
-  return readRequiredEnv(["GITLAB_TOKEN", "GITLAB_PRIVATE_TOKEN"], "GitLab");
+  // 2. Fall back to the host CLI if it is installed and authenticated.
+  const fromCli = readCliToken(config.cli);
+
+  if (fromCli !== undefined) {
+    return fromCli;
+  }
+
+  throw new Error(
+    `${config.label} token is not configured. Set one of: ${config.envNames.join(", ")}, ` +
+      `or authenticate the ${config.cli.command} CLI (${config.cli.command} ${config.cli.args.join(" ")}).`,
+  );
 }
 
-function readRequiredEnv(names: string[], label: string): PublisherToken {
+function readEnvToken(names: string[]): PublisherToken | undefined {
   for (const name of names) {
     const value = process.env[name];
 
     if (value !== undefined && value.trim().length > 0) {
-      return {
-        token: value,
-        source: name,
-      };
+      return { token: value, source: name };
     }
   }
 
-  throw new Error(`${label} token is not configured. Expected one of: ${names.join(", ")}`);
+  return undefined;
+}
+
+function readCliToken(cli: { command: string; args: string[] }): PublisherToken | undefined {
+  try {
+    const output = execFileSync(cli.command, cli.args, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 10_000,
+    }).trim();
+
+    if (output.length > 0) {
+      return { token: output, source: `${cli.command} ${cli.args.join(" ")}` };
+    }
+  } catch {
+    // CLI missing or not authenticated: fall through to the configuration error.
+  }
+
+  return undefined;
 }

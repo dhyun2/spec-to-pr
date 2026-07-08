@@ -66,6 +66,10 @@ export const PublishedReviewAssetSchema = z
     role: ReviewRequestAssetRoleSchema,
     label: z.string().trim().min(1),
     url: z.string().trim().min(1),
+    // Whether `url` renders as an inline <img> in the review host.
+    // GitHub private-repo raw URLs require auth and cannot be embedded, so the
+    // review body falls back to a plain link for those assets.
+    embeddable: z.boolean().default(true),
   })
   .strict();
 

@@ -612,6 +612,7 @@ class FakePublisher implements ReviewRequestPublisher {
       targetId: "home-desktop",
       label: asset.role === "figma" ? "Figma" : asset.role === "browser" ? "Browser" : "Diff",
       url: `https://github.example/assets/${asset.role}.png`,
+      embeddable: true,
     }));
   }
 
