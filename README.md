@@ -2,6 +2,8 @@
 
 Claude Code and Codex plugin shell for evidence-driven spec-to-pr automation.
 
+한국어 버전: [README.ko.md](README.ko.md)
+
 ## Codex
 
 Codex support has two surfaces:

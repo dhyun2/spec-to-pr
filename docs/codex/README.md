@@ -1,5 +1,7 @@
 # Codex Integration
 
+한국어 버전: [README.ko.md](README.ko.md)
+
 spec-to-pr exposes two Codex surfaces:
 
 1. **Codex plugin**: installable UX for Codex app and CLI users. It bundles the
@@ -79,10 +81,61 @@ body from memory.
 
 When visual comparison PNG artifacts exist, the publisher uploads Figma,
 browser, and diff images to the review host and injects a `Visual Evidence
-Preview` section into the PR/MR body. GitLab uses project markdown uploads.
-GitHub publishes the images to the source branch under `.spec-to-pr/visual-assets/`
-and links their raw URLs.
+Preview` section into the PR/MR body. GitLab uses project markdown uploads and
+keeps the project-relative upload path so images render in the MR description.
+GitHub publishes the images to the source branch under `.spec-to-pr/visual-assets/`;
+for public repos it embeds a commit-SHA-pinned raw URL (stable after branch
+deletion), and for private repos it falls back to a plain blob link because raw
+URLs are not embeddable without authentication. A single failed image upload
+degrades to publishing without the preview rather than failing the whole PR/MR.
 
 Publishing means creating or updating a draft GitHub Pull Request or GitLab
 Merge Request. It does not merge, approve, close, or mark the request ready for
 review.
+
+## Skill Frontmatter Compatibility
+
+Skill files (`skills/*/SKILL.md`) use YAML frontmatter written for Claude Code.
+Codex reads the skill body and ignores the Claude-specific keys:
+
+| Frontmatter key            | Claude Code | Codex   |
+| -------------------------- | ----------- | ------- |
+| `name`, `description`      | used        | used    |
+| `allowed-tools`            | used        | ignored |
+| `disable-model-invocation` | used        | ignored |
+| `argument-hint`            | used        | ignored |
+
+The ignored keys are harmless on Codex. MCP tools are always available under the
+normalized `mcp__spec_to_pr__*` namespace regardless of `allowed-tools`.
+
+## Subagent Parity
+
+Claude agents live in `agents/*.md`. The Codex equivalents live in
+`.codex/agents/*.toml` as `spec-to-pr-<name>`, covering every implementation
+lane and reviewer (spec-bdd, api-contract, design-ui, integrator,
+review-council, and the gate/report/publish/release reviewers), plus the
+Codex-only `spec-to-pr-design-ui-repair`.
+
+If a host cannot spawn a named subagent, each lane/reviewer skill instructs the
+model to run the same steps inline in the current thread and record results with
+the same `record_*` MCP tool. No lane is skipped.
+
+## Self-Hosted GitHub / GitLab
+
+`github.com` and `gitlab.com` are auto-detected. For GitHub Enterprise or
+self-hosted GitLab, the hostname is matched heuristically (a host containing
+`gitlab`/`github`), and the API base is derived (`/api/v4` for GitLab,
+`/api/v3` for GitHub Enterprise). Override detection when needed:
+
+```bash
+export SPEC_TO_PR_GIT_HOST=gitlab            # or github
+export SPEC_TO_PR_API_BASE_URL=https://scm.internal/api/v4
+export SPEC_TO_PR_WEB_BASE_URL=https://scm.internal
+```
+
+## Publisher Tokens
+
+Publisher tokens are read from the environment first, then from the host CLI:
+
+- GitHub: `GITHUB_TOKEN` / `GH_TOKEN`, else `gh auth token`.
+- GitLab: `GITLAB_TOKEN` / `GITLAB_PRIVATE_TOKEN`, else `glab auth token`.
