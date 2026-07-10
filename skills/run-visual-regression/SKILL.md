@@ -1,0 +1,84 @@
+---
+name: Run Visual Regression
+description: Capture browser screenshots and compare them against stored Figma screenshot artifacts.
+disable-model-invocation: false
+argument-hint: "<run-id> <change-name>"
+allowed-tools: mcp__spec-to-pr__plan_visual_regression mcp__spec_to_pr__plan_visual_regression mcp__spec-to-pr__capture_browser_screenshots mcp__spec_to_pr__capture_browser_screenshots mcp__spec-to-pr__compare_visual_snapshots mcp__spec_to_pr__compare_visual_snapshots mcp__spec-to-pr__get_visual_report mcp__spec_to_pr__get_visual_report mcp__spec-to-pr__record_visual_review_result mcp__spec_to_pr__record_visual_review_result mcp__spec-to-pr__get_run mcp__spec_to_pr__get_run
+---
+
+# Run Visual Regression
+
+## MCP Tool Namespace
+
+Tool names in this skill are written without the host prefix. Use the namespace exposed in the current host:
+
+- Codex: `mcp__spec_to_pr__<tool>`
+- Claude Code: `mcp__spec-to-pr__<tool>`
+
+You run visual regression for an existing spec-to-pr Run.
+
+## Inputs
+
+Expected arguments:
+
+```text
+<run-id> <change-name>
+```
+
+## Procedure
+
+1. Call `plan_visual_regression`.
+2. Confirm the plan has:
+   - Figma baseline artifacts
+   - browser target routes or stories
+   - viewport information
+   - mask policy
+   - component-level targets with `comparisonScope: "component"` when component contracts exist
+   - for legacy migrations, legacy-vs-target targets and visual/resource contract evidence for image URLs, marker assets, root/global CSS selectors, API params, query/hash, geolocation/current-location, native bridge, and URL-open behavior
+3. Call `capture_browser_screenshots`.
+4. Call `compare_visual_snapshots`.
+   - For component contract targets, the resulting visual report artifact must preserve `comparisonScope: "component"` and meet the contract threshold, normally `reviewMatch >= 0.97`.
+5. Call `get_visual_report`.
+   - For legacy migrations, keep legacy-vs-target parity separate from Figma-vs-target design fidelity. Figma score alone does not satisfy migration pass/fail.
+   - Masked dynamic regions must cite resource contract evidence. Do not count a mask as proof that legacy/API image or map bindings were preserved.
+6. If the report contains failed or review-needed comparisons:
+   - invoke the `visual-regression-reviewer` subagent
+   - provide the visual report artifact IDs
+   - ask it to triage mismatches only
+   - do not ask it to modify source code
+7. Call `record_visual_review_result` if a visual review result is produced.
+8. Call `get_run` to confirm artifacts and gaps were recorded.
+
+## Report
+
+Return:
+
+- visual target count
+- browser screenshots captured
+- comparisons completed
+- exact match range
+- review match range
+- failed comparisons
+- review-needed comparisons
+- visual report artifact ID
+- visual review artifact ID if any
+
+## Important Boundaries
+
+Do not claim that UI code was fixed.
+Do not update baselines automatically.
+Do not hide masks.
+Do not use masks to bypass legacy resource binding verification.
+Do not treat review commentary as pass/fail source of truth.
+Do not run publisher tools.
+
+Task 26 records visual evidence and visual review triage only.
+
+## Host Compatibility And Subagent Fallback
+
+Subagent names differ by host:
+
+- Claude Code: the agents defined in `agents/` (for example `design-ui`, `api-contract`, `spec-bdd`, `integrator`, `review-council`, and the `*-reviewer` agents).
+- Codex: the same agents are defined in `.codex/agents/` as `spec-to-pr-<name>` (for example `spec-to-pr-design-ui`).
+
+If the host does not support named subagents, or a matching agent is not available, do not skip the lane. Perform the same instructions inline in the current thread and record the outcome with the same `record_*` MCP tool. Sequential in-thread execution is the supported fallback and must still produce the same structured result and evidence.

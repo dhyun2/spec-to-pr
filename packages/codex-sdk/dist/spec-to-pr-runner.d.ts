@@ -1,0 +1,30 @@
+import { type ApprovalMode, type ModelReasoningEffort, type RunResult, type SandboxMode } from "@openai/codex-sdk";
+import type { CodexVisualRepairPolicy } from "./workflow-policy.js";
+export type SpecToPrCodexRunInput = {
+    workingDirectory: string;
+    prompt?: string;
+    briefPath?: string;
+    docsPath?: string;
+    figmaUrl?: string;
+    openApiPath?: string;
+    resumeThreadId?: string;
+    model?: string;
+    modelReasoningEffort?: ModelReasoningEffort;
+    sandboxMode?: SandboxMode;
+    approvalPolicy?: ApprovalMode;
+    additionalDirectories?: string[];
+    codexPathOverride?: string;
+    env?: Record<string, string>;
+    outputSchema?: unknown;
+    enableReviewAgents?: boolean;
+    enableVisualRepairLoop?: boolean;
+    visualRepairPolicy?: Partial<CodexVisualRepairPolicy>;
+};
+export type SpecToPrCodexRunResult = {
+    threadId: string | null;
+    finalResponse: string;
+    usage: RunResult["usage"];
+    items: RunResult["items"];
+};
+export declare function runSpecToPrWithCodex(input: SpecToPrCodexRunInput): Promise<SpecToPrCodexRunResult>;
+export declare function buildSpecToPrPrompt(input: SpecToPrCodexRunInput): string;

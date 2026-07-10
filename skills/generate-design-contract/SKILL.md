@@ -1,0 +1,91 @@
+---
+name: Generate Design Contract
+description: Generate a Figma design contract and design-system mapping for a spec-to-pr Run.
+disable-model-invocation: false
+argument-hint: "<run-id> <change-name> <figma-inventory-artifact-id>"
+allowed-tools: mcp__spec-to-pr__generate_figma_design_contract mcp__spec_to_pr__generate_figma_design_contract mcp__spec-to-pr__get_run mcp__spec_to_pr__get_run
+---
+
+# Generate Figma Design Contract
+
+## MCP Tool Namespace
+
+Tool names in this skill are written without the host prefix. Use the namespace exposed in the current host:
+
+- Codex: `mcp__spec_to_pr__<tool>`
+- Claude Code: `mcp__spec-to-pr__<tool>`
+
+You generate a design implementation contract from an existing Figma design inventory artifact.
+
+## Why this skill exists
+
+The Design/UI Agent must not implement directly from screenshots or raw Figma metadata.
+
+Before UI implementation, the system must produce a contract that defines:
+
+- which code component maps to each Figma component
+- which node-level component contract fixes dimensions, spacing, radius, typography, icon/logo placement, variant props, and component visual acceptance thresholds
+- which code token maps to each Figma variable
+- which typography class maps to each Figma text style
+- which Figma style-like component props normalize to existing UI-library variants or tokens
+- which assets require export or existing code mapping
+- which missing mappings must remain as design gaps
+
+## Inputs
+
+Expected arguments:
+
+```text
+<run-id> <change-name> <figma-inventory-artifact-id>
+```
+
+## Procedure
+
+1. Call `generate_figma_design_contract` with:
+   - `runId`
+   - `changeName`
+   - `figmaInventoryArtifactId`
+2. Call `get_run` to confirm:
+   - design contract artifacts were added
+   - design gaps were recorded when mappings are missing
+3. Report:
+   - changed files
+   - component mapping count
+   - component contract count
+   - token mapping count
+   - typography mapping count
+   - asset mapping count
+   - gap IDs
+
+## How future agents consume this output
+
+The Design/UI Agent must read:
+
+- `figma-design-contract.json`
+- `component-map.json`
+- `component-contracts.json`
+- `token-map.json`
+- `typography-map.json`
+- `asset-map.json`
+- `ui-implementation-rules.md`
+
+The agent must:
+
+- use mapped code components
+- implement each component variant from `component-contracts.json` before relying on full-screen screenshot similarity
+- use mapped tokens/classes/css variables
+- convert Figma style-like component props to supported UI-library variants/tokens when a project design system exists
+- avoid hard-coded visual values when mappings exist
+- record a design gap before using explicit style overrides for missing variants/tokens
+- cite design gaps when mappings are missing
+- avoid inventing Figma states that are not backed by evidence
+- record component-level visual comparison evidence for component contracts; full-screen visual scores do not replace component contract evidence
+
+## Important boundaries
+
+Do not claim that UI was implemented.
+Do not create or modify UI source code.
+Do not run visual regression.
+Do not close design gaps without resolution artifacts.
+
+Task 17 only generates the design contract used by later UI agents.
