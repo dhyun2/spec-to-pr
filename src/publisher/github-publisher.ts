@@ -133,7 +133,7 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
     for (const asset of input.assets) {
       const assetPath = [
         ".spec-to-pr",
-        "visual-assets",
+        asset.role === "e2e-video" ? "feature-evidence" : "visual-assets",
         input.payload.runId,
         safePathSegment(asset.targetId),
         asset.filename,
@@ -150,7 +150,7 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
         {
           method: "PUT",
           body: JSON.stringify({
-            message: `chore(spec-to-pr): publish visual evidence ${asset.artifactId}`,
+            message: `chore(spec-to-pr): publish review evidence ${asset.artifactId}`,
             content: asset.content.toString("base64"),
             branch: input.payload.sourceBranch,
             ...(existingSha === undefined ? {} : { sha: existingSha }),
@@ -160,7 +160,7 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
 
       if (!response.ok) {
         throw new Error(
-          `GitHub upload visual asset failed: ${response.status} ${await response.text()}`,
+          `GitHub upload review asset failed: ${response.status} ${await response.text()}`,
         );
       }
 
@@ -173,7 +173,7 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
       // deletion after merge. Private repos: raw URLs 404 for unauthenticated
       // camo fetches, so link to the viewable blob instead and mark it as
       // non-embeddable for the review-body renderer.
-      const embeddable = !isPrivate;
+      const embeddable = !isPrivate && asset.role !== "e2e-video";
       const url = isPrivate
         ? String(content?.["html_url"] ?? content?.["download_url"] ?? "")
         : commitSha !== undefined

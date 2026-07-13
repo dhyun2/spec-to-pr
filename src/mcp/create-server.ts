@@ -35,6 +35,7 @@ const DURABLE_STAGES = [
   "archive",
 ] as const;
 const REVIEWER_ROLES = ["functional-reviewer", "design-reviewer"] as const;
+const DELIVERY_MODES = ["auto", "brief", "legacy", "feature", "figma"] as const;
 
 const EmptyInputSchema = z.object({}).strict();
 const WorkflowInfoSchema = z
@@ -46,11 +47,16 @@ const WorkflowInfoSchema = z
     tools: z.tuple(TOOL_NAMES.map((name) => z.literal(name)) as ToolTuple),
     durableStages: z.tuple(DURABLE_STAGES.map((name) => z.literal(name)) as StageTuple),
     reviewerRoles: z.tuple(REVIEWER_ROLES.map((name) => z.literal(name)) as ReviewerTuple),
+    deliveryModes: z.tuple(DELIVERY_MODES.map((name) => z.literal(name)) as DeliveryModeTuple),
     capabilities: z
       .object({
         apiReadyBeforeUi: z.literal(true),
+        explicitApiReadyCheckpoint: z.literal(true),
         independentReviews: z.literal(true),
         conditionalDesignReview: z.literal(true),
+        targetedFeatureEvidence: z.literal(true),
+        featureVideoPublishing: z.literal(true),
+        hostFigmaIntake: z.literal(true),
       })
       .strict(),
   })
@@ -79,6 +85,13 @@ type ReviewerTuple = [
   z.ZodLiteral<(typeof REVIEWER_ROLES)[0]>,
   z.ZodLiteral<(typeof REVIEWER_ROLES)[1]>,
 ];
+type DeliveryModeTuple = [
+  z.ZodLiteral<(typeof DELIVERY_MODES)[0]>,
+  z.ZodLiteral<(typeof DELIVERY_MODES)[1]>,
+  z.ZodLiteral<(typeof DELIVERY_MODES)[2]>,
+  z.ZodLiteral<(typeof DELIVERY_MODES)[3]>,
+  z.ZodLiteral<(typeof DELIVERY_MODES)[4]>,
+];
 
 type StructuredResult = Record<string, unknown>;
 
@@ -103,10 +116,15 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
         tools: TOOL_NAMES,
         durableStages: DURABLE_STAGES,
         reviewerRoles: REVIEWER_ROLES,
+        deliveryModes: DELIVERY_MODES,
         capabilities: {
           apiReadyBeforeUi: true,
+          explicitApiReadyCheckpoint: true,
           independentReviews: true,
           conditionalDesignReview: true,
+          targetedFeatureEvidence: true,
+          featureVideoPublishing: true,
+          hostFigmaIntake: true,
         },
       }),
   );
@@ -137,7 +155,7 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
     "workflow_submit",
     {
       title: "Submit workflow result",
-      description: "Record contracts, implementation, Figma, or review evidence for a Run.",
+      description: "Record contracts, API readiness, implementation, Figma, or review evidence.",
       inputSchema: WorkflowSubmitInputSchema.shape,
       outputSchema: WorkflowStatusSchema.shape,
     },

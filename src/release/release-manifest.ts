@@ -56,7 +56,6 @@ export const RELEASE_DIRECTORY_ALLOWLIST = [
   "skills/",
   "agents/",
   "schemas/runtime/",
-  "docs/codex/",
   "packages/codex-sdk/",
 ] as const;
 
@@ -78,28 +77,28 @@ export const RELEASE_FORBIDDEN_PATTERNS = [
 export function defaultFeatureStatuses(): ReleaseFeature[] {
   return [
     ReleaseFeatureSchema.parse({
-      taskId: "01-08",
-      name: "Foundation, intake, source registry, and brief adapter",
+      taskId: "v2-facade",
+      name: "Seven public workflow tools and eight durable stages",
       status: "verified",
-      evidence: ["pnpm test", "runtime contract tests"],
+      evidence: ["MCP stdio smoke", "workflow contract tests"],
     }),
     ReleaseFeatureSchema.parse({
-      taskId: "09-17",
-      name: "Figma, OpenAPI, evidence graph, OpenSpec, Gherkin, API/design contracts",
-      status: "implemented",
-      evidence: ["integration tests", "MCP stdio smoke"],
-    }),
-    ReleaseFeatureSchema.parse({
-      taskId: "18-32",
-      name: "Agent runtime, quality gates, PR publishing, and archive lifecycle",
-      status: "implemented",
-      evidence: ["integration tests", "release readiness evals"],
-    }),
-    ReleaseFeatureSchema.parse({
-      taskId: "33",
-      name: "Evals, hardening, and release package preparation",
+      taskId: "delivery-profiles",
+      name: "Brief, legacy, feature, and Figma delivery profiles",
       status: "verified",
-      evidence: ["release verifier tests", "deterministic package builder tests"],
+      evidence: ["delivery policy tests", "workflow integration tests"],
+    }),
+    ReleaseFeatureSchema.parse({
+      taskId: "api-ready",
+      name: "Single-context API readiness before API-backed UI",
+      status: "verified",
+      evidence: ["API-ready schema tests", "workflow integration tests"],
+    }),
+    ReleaseFeatureSchema.parse({
+      taskId: "split-review",
+      name: "Independent functional and conditional design review",
+      status: "verified",
+      evidence: ["review contract tests", "plugin layout validation"],
     }),
   ];
 }

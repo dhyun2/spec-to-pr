@@ -79,8 +79,94 @@ describe("Codex SDK workflow policy", () => {
     });
 
     expect(prompt).toContain("one implementation context");
-    expect(prompt).toContain("api-ready");
+    expect(prompt).toContain('kind: "api-ready"');
+    expect(prompt).toContain("apiArtifacts");
+    expect(prompt).toContain("contractTests");
     expect(prompt).toContain("mocks");
     expect(prompt.indexOf("mocks")).toBeLessThan(prompt.indexOf("UI completion"));
+  });
+
+  it("passes explicit brief and legacy delivery profiles to workflow_start", () => {
+    const brief = buildSpecToPrPrompt({
+      workingDirectory: "/tmp/project",
+      deliveryMode: "brief",
+      changeKind: "feature",
+      publication: "draft",
+      briefPath: "docs/brief.md",
+    });
+    const legacy = buildSpecToPrPrompt({
+      workingDirectory: "/tmp/project",
+      deliveryMode: "legacy",
+      changeKind: "fix",
+      publication: "draft",
+      prompt: "Fix only the affected parser behavior.",
+    });
+
+    expect(brief).toContain('mode: "brief"');
+    expect(brief).toContain('briefPath: "docs/brief.md"');
+    expect(brief).toContain("design-reviewer");
+    expect(brief).toContain("workflow_status snapshot");
+    expect(legacy).toContain('mode: "legacy"');
+    expect(legacy).toContain("focused baseline");
+  });
+
+  it("rejects incomplete mode-specific SDK inputs before starting Codex", () => {
+    expect(() =>
+      buildSpecToPrPrompt({
+        workingDirectory: "/tmp/project",
+        deliveryMode: "brief",
+      }),
+    ).toThrow(/briefPath/);
+    expect(() =>
+      buildSpecToPrPrompt({
+        workingDirectory: "/tmp/project",
+        deliveryMode: "figma",
+      }),
+    ).toThrow(/figmaUrl/);
+    expect(() =>
+      buildSpecToPrPrompt({
+        workingDirectory: "/tmp/project",
+        deliveryMode: "legacy",
+      }),
+    ).toThrow(/concrete prompt/);
+    expect(() =>
+      buildSpecToPrPrompt({
+        workingDirectory: "/tmp/project",
+        deliveryMode: "feature",
+      }),
+    ).toThrow(/concrete prompt/);
+  });
+
+  it("limits feature validation to one targeted E2E and one video", () => {
+    const prompt = buildSpecToPrPrompt({
+      workingDirectory: "/tmp/project",
+      deliveryMode: "feature",
+      changeKind: "feature",
+      publication: "draft",
+      prompt: "Add user-facing checkout.",
+    });
+
+    expect(prompt).toContain('mode: "feature"');
+    expect(prompt).toContain("exactly one .webm or .mp4");
+    expect(prompt).toContain("Never run the full-project E2E suite by default");
+    expect(prompt).toContain("featureEvidence");
+    expect(prompt).toContain("positive testCount");
+    expect(prompt).toContain("non-target codex/<short-slug>");
+    expect(prompt).toContain("commit all intended changes");
+  });
+
+  it("uses connected Figma intake and does not publish by default for Figma-only delivery", () => {
+    const prompt = buildSpecToPrPrompt({
+      workingDirectory: "/tmp/project",
+      deliveryMode: "figma",
+      changeKind: "design",
+      figmaUrl: "https://figma.com/design/example",
+    });
+
+    expect(prompt).toContain('mode: "figma"');
+    expect(prompt).toContain('publication: "none"');
+    expect(prompt).toContain("connected Figma capability");
+    expect(prompt).toContain("figma-bundle");
+    expect(prompt).toContain("before contracts");
   });
 });

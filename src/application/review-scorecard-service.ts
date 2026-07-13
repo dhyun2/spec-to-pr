@@ -500,9 +500,12 @@ function scorePublishSync(artifacts: ArtifactRef[], threshold: number): ReviewSc
 
   const synced =
     !["failed", "blocked"].includes(String(publishResult.metadata["status"] ?? "")) &&
+    publishResult.metadata["requestDraft"] !== false &&
     publishResult.metadata["requestSynced"] !== false &&
     (publishResult.metadata["visualPreviewExpected"] !== true ||
-      publishResult.metadata["visualPreviewSynced"] === true);
+      publishResult.metadata["visualPreviewSynced"] === true) &&
+    (publishResult.metadata["featureVideoExpected"] !== true ||
+      publishResult.metadata["featureVideoSynced"] === true);
 
   return dimension({
     id: "publish-sync",
@@ -510,8 +513,8 @@ function scorePublishSync(artifacts: ArtifactRef[], threshold: number): ReviewSc
     score: synced ? 10 : 0,
     threshold,
     notes: synced
-      ? "Generated PR/MR body and required visual previews were synchronized."
-      : "Publish result did not confirm generated body or required visual preview synchronization.",
+      ? "Generated PR/MR body and required review evidence were synchronized."
+      : "Publish result did not confirm generated body or required review evidence synchronization.",
     evidence: [publishResult.id],
   });
 }

@@ -211,6 +211,107 @@ describe("plugin layout", () => {
     expect(implement.indexOf("api-ready")).toBeLessThan(
       implement.indexOf("UI evidence submission"),
     );
+
+    const main = readFileSync(path.join(root, "skills", "spec-to-pr", "SKILL.md"), "utf8");
+    for (const mode of ["brief", "legacy", "feature", "figma"]) {
+      expect(main).toContain(`\`${mode}\``);
+    }
+    for (const field of [
+      "projectRoot",
+      "requestText",
+      "scope",
+      "mode",
+      "changeKind",
+      "publication",
+      "briefPath",
+      "figmaUrl",
+    ]) {
+      expect(main).toContain(`\`${field}\``);
+    }
+    expect(main).toContain("Figma defaults to `publication: none`");
+    expect(implement).toContain("targeted-feature");
+    expect(implement).toContain("exactly one");
+    expect(implement).toContain("full-project E2E");
+    expect(implement).toContain("kind: api-ready");
+    for (const group of ["types", "schemas", "wrappers", "mocks", "contractTests"]) {
+      expect(implement).toContain(`\`${group}\``);
+    }
+
+    const intake = readFileSync(path.join(root, "skills", "intake-contracts", "SKILL.md"), "utf8");
+    expect(intake).toContain("connected Figma");
+    expect(intake).toContain("figma-bundle");
+    for (const field of ["fileUrl", "nodeIds", "manifestPath", "visualPaths", "artifactPaths"]) {
+      expect(intake).toContain(`\`${field}\``);
+    }
+    expect(intake).toContain("provider: host-connected-figma");
+    expect(intake).toContain("`capturedAt`");
+    const intakeBody = intake.slice(intake.indexOf("# Intake"));
+    expect(intakeBody.indexOf("figma-bundle")).toBeLessThan(
+      intakeBody.indexOf("Submit `contracts`"),
+    );
+
+    const functionalAgent = readFileSync(
+      path.join(root, "agents", "functional-reviewer.md"),
+      "utf8",
+    );
+    const designAgent = readFileSync(path.join(root, "agents", "design-reviewer.md"), "utf8");
+    expect(functionalAgent).toContain("targeted-feature");
+    expect(functionalAgent).toContain("full-project E2E");
+    expect(functionalAgent).toContain("immutable review packet");
+    expect(functionalAgent).toContain("Do not call workflow tools");
+    for (const requirement of [
+      "one unchained Playwright invocation",
+      "exactly equal to `testSelector`",
+      "non-zero-duration WebM or MP4 container",
+      "implementationContextId",
+      "testCount",
+    ]) {
+      expect(functionalAgent).toContain(requirement);
+    }
+    expect(designAgent).toContain("does not replace a visual baseline");
+    expect(designAgent).toContain("immutable review packet");
+
+    const functionalReviewSkill = readFileSync(
+      path.join(root, "skills", "review-functional", "SKILL.md"),
+      "utf8",
+    );
+    for (const requirement of [
+      "one unchained Playwright invocation",
+      "exactly equal to `testSelector`",
+      "non-zero-duration WebM or MP4 container",
+      "implementationContextId",
+      "testCount",
+    ]) {
+      expect(functionalReviewSkill).toContain(requirement);
+    }
+
+    const codexFunctionalAgent = readFileSync(
+      path.join(root, ".codex", "agents", "spec-to-pr-functional-reviewer.toml"),
+      "utf8",
+    );
+    for (const requirement of [
+      "implementationContextId",
+      "testCount",
+      "non-zero-duration",
+      "25 MB",
+    ]) {
+      expect(codexFunctionalAgent).toContain(requirement);
+    }
+
+    const publish = readFileSync(path.join(root, "skills", "publish", "SKILL.md"), "utf8");
+    for (const field of [
+      "runId",
+      "mode",
+      "sourceBranch",
+      "targetBranch",
+      "pushBranch",
+      "confirm",
+    ]) {
+      expect(publish).toContain(`\`${field}\``);
+    }
+    expect(publish).toContain("source branch");
+    expect(publish).toContain("working tree is clean");
+    expect(publish).toContain("at least one commit ahead");
   });
 
   it("keeps v2 definitions host-neutral and limited to the seven workflow tools", () => {
@@ -325,7 +426,7 @@ describe("plugin layout", () => {
     );
 
     expect(installation).not.toContain(":::info");
-    expect(installation).toContain("제품 표시명은 **SpecToPR**입니다.");
+    expect(installation).toContain("제품명은 **SpecToPR**");
   });
 
   it("uses SpecToPR as the only public navbar brand", () => {

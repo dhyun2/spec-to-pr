@@ -1,7 +1,8 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+import { PNG } from "pngjs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ArtifactBlobStore } from "../../src/artifact-registry/artifact-blob-store.js";
@@ -19,6 +20,9 @@ import { JsonProfileStore } from "../../src/profile/profile-store.js";
 import { SourceSnapshotStore } from "../../src/source-registry/snapshot-store.js";
 import { SqliteRunStore } from "../../src/store/sqlite-run-store.js";
 
+const FIGMA_URL = "https://www.figma.com/design/abc/file?node-id=1-2";
+const FEATURE_CONTEXT_ID = `ctx_${"x".repeat(124)}`;
+
 describe("WorkflowService", () => {
   let directory: string;
   let store: SqliteRunStore;
@@ -29,16 +33,54 @@ describe("WorkflowService", () => {
     directory = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-workflow-"));
     for (const relativePath of [
       "generated/api.ts",
+      "generated/schema.ts",
+      "generated/wrapper.ts",
       "generated/mock.ts",
       "test-results/unit.json",
       "test-results/contract.json",
+      "test-results/api-contract.json",
       "visual/diff.png",
       "contracts/requirements.json",
+      "contracts/legacy-baseline.md",
+      "figma/design-context.json",
+      "test-results/checkout.json",
+      "test-results/checkout.mp4",
+      "briefs/checkout.md",
     ]) {
       const absolutePath = path.join(directory, relativePath);
       await mkdir(path.dirname(absolutePath), { recursive: true });
       await writeFile(absolutePath, `${relativePath}\n`, "utf8");
     }
+    await writeFile(
+      path.join(directory, "briefs/checkout.md"),
+      "Build a responsive checkout screen backed by the checkout API.\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(directory, "test-results/api-contract.json"),
+      JSON.stringify({ status: "passed" }),
+      "utf8",
+    );
+    await writeFile(
+      path.join(directory, "test-results/checkout.json"),
+      JSON.stringify({
+        status: "passed",
+        selector: "e2e/checkout.spec.ts",
+        implementationContextId: FEATURE_CONTEXT_ID,
+        testCount: 1,
+      }),
+      "utf8",
+    );
+    await writeFile(path.join(directory, "test-results/checkout.mp4"), validMp4());
+    await writeFile(
+      path.join(directory, "figma/design-context.json"),
+      JSON.stringify(figmaManifest()),
+      "utf8",
+    );
+    await writeFile(
+      path.join(directory, "visual/diff.png"),
+      PNG.sync.write(new PNG({ width: 1, height: 1 })),
+    );
     store = new SqliteRunStore(path.join(directory, "runs.sqlite3"));
     const artifacts = new ArtifactBlobStore(path.join(directory, "artifacts"));
 
@@ -79,6 +121,352 @@ describe("WorkflowService", () => {
     expect(status).not.toHaveProperty("agentResults");
   });
 
+  it("records an explicit delivery profile without adding stages", async () => {
+    const status = await service.start({
+      projectRoot: directory,
+      requestText: "Implement the supplied product brief",
+      scope: "auto",
+      mode: "brief",
+      changeKind: "feature",
+      publication: "draft",
+      briefPath: "briefs/checkout.md",
+    });
+
+    expect(status.stages).toHaveLength(8);
+    expect(status.deliveryProfile).toMatchObject({
+      mode: "brief",
+      changeKind: "feature",
+      publication: "draft",
+      briefPath: "briefs/checkout.md",
+    });
+    expect(status.scope).toMatchObject({ ui: true, api: true });
+    const stored = await store.get(status.runId);
+    expect(
+      stored.sources.some(
+        (source) =>
+          source.locator.type === "inline" && source.locator.label === "brief:briefs/checkout.md",
+      ),
+    ).toBe(true);
+  });
+
+  it("defaults older v2 Runs without delivery profiles to the lightweight auto profile", async () => {
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Refactor the parser",
+      scope: "non-ui",
+    });
+    const run = await store.get(started.runId);
+    await store.save(
+      {
+        ...run,
+        revision: run.revision + 1,
+        stages: run.stages.map((item) =>
+          item.name === "intake" && item.checkpoint !== undefined
+            ? {
+                ...item,
+                checkpoint: {
+                  ...item.checkpoint,
+                  data: {
+                    scope: item.checkpoint.data["scope"],
+                    gatePlan: item.checkpoint.data["gatePlan"],
+                  },
+                },
+              }
+            : item,
+        ),
+      },
+      run.revision,
+    );
+
+    await expect(service.status({ runId: started.runId })).resolves.toMatchObject({
+      deliveryProfile: { mode: "auto", publication: "draft" },
+    });
+  });
+
+  it("rejects invalid mode inputs before creating a durable Run", async () => {
+    await expect(
+      service.start({
+        projectRoot: directory,
+        requestText: "Implement this design",
+        scope: "docs",
+        mode: "figma",
+        changeKind: "design",
+      }),
+    ).rejects.toThrow();
+    await expect(store.list()).resolves.toHaveLength(0);
+  });
+
+  it("blocks legacy contracts without a focused baseline", async () => {
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Fix parsing behavior in the existing project",
+      scope: "non-ui",
+      mode: "legacy",
+      changeKind: "fix",
+      publication: "draft",
+    });
+
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "contracts",
+          status: "passed",
+          summary: "Captured the requested delta only.",
+          artifactPaths: ["contracts/requirements.json"],
+          baselinePaths: [],
+        },
+      }),
+    ).rejects.toThrow(/baseline/i);
+
+    const accepted = await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "contracts",
+        status: "passed",
+        summary: "Captured current behavior and the requested delta.",
+        artifactPaths: ["contracts/requirements.json", "contracts/legacy-baseline.md"],
+        baselinePaths: ["contracts/legacy-baseline.md"],
+      },
+    });
+
+    expect(accepted.nextActions[0]?.kind).toBe("implement");
+  });
+
+  it("blocks Figma contracts until a real bundle is submitted", async () => {
+    const figmaUrl = FIGMA_URL;
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: `Implement ${figmaUrl}`,
+      scope: "ui",
+      mode: "figma",
+      changeKind: "design",
+      figmaUrl,
+    });
+    expect(started.deliveryProfile.publication).toBe("none");
+
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "contracts",
+          status: "passed",
+          summary: "Mapped design requirements.",
+          artifactPaths: ["contracts/requirements.json"],
+        },
+      }),
+    ).rejects.toThrow(/Figma bundle/i);
+
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "figma-bundle",
+        provider: "host-connected-figma",
+        capturedAt: "2026-07-13T00:00:00.000Z",
+        fileUrl: figmaUrl,
+        nodeIds: ["1:2"],
+        manifestPath: "figma/design-context.json",
+        artifactPaths: ["figma/design-context.json", "visual/diff.png"],
+      },
+    });
+
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "figma-bundle",
+          provider: "host-connected-figma",
+          capturedAt: "2026-07-13T00:00:00.000Z",
+          fileUrl: figmaUrl,
+          nodeIds: ["1:2"],
+          manifestPath: "figma/design-context.json",
+          artifactPaths: ["figma/design-context.json", "visual/diff.png"],
+        },
+      }),
+    ).rejects.toThrow(/already/i);
+
+    const accepted = await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "contracts",
+        status: "passed",
+        summary: "Mapped real design evidence.",
+        artifactPaths: ["contracts/requirements.json"],
+      },
+    });
+    expect(accepted.nextActions[0]?.kind).toBe("implement");
+  });
+
+  it("requires a targeted feature E2E and exactly one video only in feature mode", async () => {
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Add the user-facing checkout feature",
+      scope: "ui",
+      mode: "feature",
+      changeKind: "feature",
+      publication: "draft",
+    });
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "contracts",
+        status: "passed",
+        summary: "Feature contracts ready.",
+        artifactPaths: ["contracts/requirements.json"],
+      },
+    });
+
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "implementation",
+          status: "passed",
+          summary: "Feature implemented without targeted evidence.",
+          apiReady: false,
+          uiChanged: true,
+          changedFiles: ["src/checkout.tsx"],
+          artifactPaths: ["test-results/unit.json"],
+        },
+      }),
+    ).rejects.toThrow(/targeted feature E2E/i);
+
+    const featureSubmission = {
+      kind: "implementation",
+      status: "passed",
+      summary: "Feature implemented with one targeted E2E recording.",
+      apiReady: false,
+      uiChanged: true,
+      changedFiles: ["src/checkout.tsx"],
+      artifactPaths: [
+        "test-results/contract.json",
+        "test-results/checkout.json",
+        "test-results/checkout.mp4",
+      ],
+      implementationContextId: FEATURE_CONTEXT_ID,
+      featureEvidence: {
+        scope: "targeted-feature",
+        testSelector: "e2e/checkout.spec.ts",
+        testCommand: "playwright test e2e/checkout.spec.ts",
+        resultPath: "test-results/checkout.json",
+        videoPath: "test-results/checkout.mp4",
+      },
+    } as const;
+
+    await writeFile(
+      path.join(directory, "test-results/checkout.json"),
+      JSON.stringify({ status: "failed" }),
+      "utf8",
+    );
+    await expect(
+      service.submit({ runId: started.runId, submission: featureSubmission }),
+    ).rejects.toThrow(/Feature result/i);
+    await writeFile(
+      path.join(directory, "test-results/checkout.json"),
+      JSON.stringify({
+        status: "passed",
+        selector: "e2e/checkout.spec.ts",
+        implementationContextId: FEATURE_CONTEXT_ID,
+        testCount: 0,
+      }),
+      "utf8",
+    );
+    await expect(
+      service.submit({ runId: started.runId, submission: featureSubmission }),
+    ).rejects.toThrow(/Feature result/i);
+    await writeFile(
+      path.join(directory, "test-results/checkout.json"),
+      JSON.stringify({
+        status: "passed",
+        selector: "e2e/checkout.spec.ts",
+        implementationContextId: FEATURE_CONTEXT_ID,
+        testCount: 1,
+      }),
+      "utf8",
+    );
+    await writeFile(path.join(directory, "test-results/checkout.mp4"), "not a video", "utf8");
+    await expect(
+      service.submit({ runId: started.runId, submission: featureSubmission }),
+    ).rejects.toThrow(/WebM or MP4/i);
+    await writeFile(path.join(directory, "test-results/checkout.mp4"), validMp4());
+
+    const implemented = await service.submit({
+      runId: started.runId,
+      submission: featureSubmission,
+    });
+
+    expect(implemented.nextActions.map((action) => action.kind).sort()).toEqual([
+      "review-design",
+      "review-functional",
+    ]);
+  });
+
+  it("rejects malformed Figma manifests and fake visual files", async () => {
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: `Implement ${FIGMA_URL}`,
+      scope: "ui",
+      mode: "figma",
+      changeKind: "design",
+      figmaUrl: FIGMA_URL,
+    });
+    const submission = {
+      kind: "figma-bundle",
+      provider: "host-connected-figma",
+      capturedAt: "2026-07-13T00:00:00.000Z",
+      fileUrl: FIGMA_URL,
+      nodeIds: ["1:2"],
+      manifestPath: "figma/design-context.json",
+      artifactPaths: ["figma/design-context.json", "visual/diff.png"],
+    } as const;
+
+    await writeFile(path.join(directory, submission.manifestPath), "not json", "utf8");
+    await expect(service.submit({ runId: started.runId, submission })).rejects.toThrow(
+      /Figma manifest/i,
+    );
+
+    await writeFile(
+      path.join(directory, submission.manifestPath),
+      JSON.stringify(figmaManifest()),
+      "utf8",
+    );
+    await writeFile(path.join(directory, "visual/diff.png"), "not png", "utf8");
+    await expect(service.submit({ runId: started.runId, submission })).rejects.toThrow(
+      /valid PNG/i,
+    );
+  });
+
+  it("records at most one Figma bundle under concurrent submissions", async () => {
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: `Implement ${FIGMA_URL}`,
+      scope: "ui",
+      mode: "figma",
+      changeKind: "design",
+      figmaUrl: FIGMA_URL,
+    });
+    const input = {
+      runId: started.runId,
+      submission: {
+        kind: "figma-bundle",
+        provider: "host-connected-figma",
+        capturedAt: "2026-07-13T00:00:00.000Z",
+        fileUrl: FIGMA_URL,
+        nodeIds: ["1:2"],
+        manifestPath: "figma/design-context.json",
+        artifactPaths: ["figma/design-context.json", "visual/diff.png"],
+      },
+    } as const;
+
+    const results = await Promise.allSettled([service.submit(input), service.submit(input)]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    const run = await store.get(started.runId);
+    expect(
+      run.artifacts.filter((artifact) => artifact.kind === "figma-design-context"),
+    ).toHaveLength(1);
+  });
+
   it("enforces contracts and API-ready before accepting UI implementation", async () => {
     const started = await service.start({
       projectRoot: directory,
@@ -117,6 +505,47 @@ describe("WorkflowService", () => {
         submission: {
           kind: "implementation",
           status: "passed",
+          summary: "UI claimed API readiness without checkpoint evidence.",
+          apiReady: true,
+          uiChanged: true,
+          changedFiles: ["src/checkout.tsx"],
+          artifactPaths: ["test-results/unit.json"],
+        },
+      }),
+    ).rejects.toThrow("api-ready");
+
+    await writeFile(path.join(directory, "generated/mock.ts"), "", "utf8");
+    await expect(submitApiReady(service, started.runId)).rejects.toThrow(/empty/i);
+    await writeFile(path.join(directory, "generated/mock.ts"), "export const mock = {};\n", "utf8");
+
+    const apiReady = await submitApiReady(service, started.runId);
+    expect(apiReady.stages.find((item) => item.name === "implementation")).toMatchObject({
+      status: "pending",
+      checkpoint: "api-ready",
+    });
+
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "implementation",
+          status: "passed",
+          summary: "A different implementation context tried to finish the UI.",
+          apiReady: true,
+          implementationContextId: "ctx_different_02",
+          uiChanged: true,
+          changedFiles: ["src/checkout.tsx"],
+          artifactPaths: ["test-results/unit.json"],
+        },
+      }),
+    ).rejects.toThrow(/context/i);
+
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "implementation",
+          status: "passed",
           summary: "UI implemented without mock readiness.",
           apiReady: false,
           uiChanged: true,
@@ -125,6 +554,49 @@ describe("WorkflowService", () => {
         },
       }),
     ).rejects.toThrow("api-ready");
+  });
+
+  it("rejects API-ready categories that alias one physical file", async () => {
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Implement a checkout UI backed by an API",
+      scope: "ui",
+    });
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "contracts",
+        status: "passed",
+        summary: "API and UI contracts are ready.",
+        artifactPaths: ["contracts/requirements.json"],
+      },
+    });
+
+    const aliases = ["type.ts", "schema.ts", "wrapper.ts", "mock.ts", "contract.json"];
+    await mkdir(path.join(directory, "aliases"), { recursive: true });
+    for (const alias of aliases) {
+      await link(path.join(directory, "generated/api.ts"), path.join(directory, "aliases", alias));
+    }
+
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "api-ready",
+          status: "passed",
+          summary: "The same file is disguised as five API artifacts.",
+          implementationContextId: "ctx_checkout_01",
+          artifactPaths: aliases.map((item) => `aliases/${item}`),
+          apiArtifacts: {
+            types: ["aliases/type.ts"],
+            schemas: ["aliases/schema.ts"],
+            wrappers: ["aliases/wrapper.ts"],
+            mocks: ["aliases/mock.ts"],
+            contractTests: ["aliases/contract.json"],
+          },
+        },
+      }),
+    ).rejects.toThrow(/distinct physical evidence files/i);
   });
 
   it("runs functional and design reviews independently after one implementation", async () => {
@@ -143,6 +615,7 @@ describe("WorkflowService", () => {
         artifactPaths: ["generated/mock.ts"],
       },
     });
+    await submitApiReady(service, started.runId);
     const implemented = await service.submit({
       runId: started.runId,
       submission: {
@@ -150,6 +623,7 @@ describe("WorkflowService", () => {
         status: "passed",
         summary: "API-backed UI implemented.",
         apiReady: true,
+        implementationContextId: "ctx_checkout_01",
         uiChanged: true,
         changedFiles: ["src/checkout.tsx"],
         artifactPaths: ["test-results/contract.json"],
@@ -259,6 +733,70 @@ describe("WorkflowService", () => {
 
     expect(ready.stages.find((stage) => stage.name === "design-review")?.status).toBe("skipped");
     expect(ready.status).toBe("publish-ready");
+  });
+
+  it("completes after report when draft publication was not requested", async () => {
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Refactor the parser without publishing",
+      scope: "non-ui",
+      publication: "none",
+    });
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "contracts",
+        status: "passed",
+        summary: "Requirements normalized.",
+        artifactPaths: ["contracts/requirements.json"],
+      },
+    });
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "implementation",
+        status: "passed",
+        summary: "Parser changed.",
+        apiReady: false,
+        uiChanged: false,
+        changedFiles: ["src/parser.ts"],
+        artifactPaths: ["test-results/unit.json"],
+      },
+    });
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "functional-review",
+        verdict: "approved",
+        summary: "Focused test passed.",
+        findings: [],
+        requirements: [{ id: "parser", verdict: "accepted" }],
+        artifactPaths: ["test-results/unit.json"],
+        gateResults: [
+          {
+            id: "functional",
+            status: "passed",
+            evidencePaths: ["test-results/unit.json"],
+          },
+        ],
+      },
+    });
+
+    const completed = await service.advance({ runId: started.runId, until: "publish-ready" });
+
+    expect(completed.status).toBe("completed");
+    expect(completed.nextActions).toEqual([]);
+    expect(completed.stages.find((item) => item.name === "publish")?.status).toBe("skipped");
+
+    const publish = vi.fn();
+    service = new WorkflowService({
+      ...dependencies,
+      publisherService: { publish } as unknown as PublisherService,
+    });
+    await expect(service.publish(publishInput(started.runId))).rejects.toThrow(
+      /publication was not requested/i,
+    );
+    expect(publish).not.toHaveBeenCalled();
   });
 
   it("rejects missing or out-of-project evidence instead of trusting path claims", async () => {
@@ -407,6 +945,30 @@ describe("WorkflowService", () => {
       expectedWorkflowStatus: "publish-ready",
     },
     {
+      name: "non-draft publication",
+      result: {
+        status: "passed" as const,
+        requestSynced: true,
+        request: {
+          host: "github" as const,
+          url: "https://github.com/acme/spec-to-pr/pull/123",
+          number: "123",
+          draft: false,
+          sourceBranch: "codex/fast-workflow-v2",
+          targetBranch: "main",
+          created: false,
+          updated: true,
+        },
+        visualPreviewExpected: false,
+        visualPreviewSynced: false,
+        partialReasons: [],
+        retryable: false,
+      },
+      expectedCode: "PUBLISH_PARTIAL",
+      expectedRetryable: true,
+      expectedWorkflowStatus: "publish-ready",
+    },
+    {
       name: "blocked publication",
       result: {
         status: "blocked" as const,
@@ -474,6 +1036,16 @@ describe("WorkflowService", () => {
             runId,
             status: "passed",
             requestSynced: true,
+            request: {
+              host: "github",
+              url: "https://github.com/acme/spec-to-pr/pull/123",
+              number: "123",
+              draft: true,
+              sourceBranch: "codex/fast-workflow-v2",
+              targetBranch: "main",
+              created: true,
+              updated: false,
+            },
             visualPreviewExpected: true,
             visualPreviewSynced: true,
             fallbackMode: "none",
@@ -514,6 +1086,16 @@ describe("WorkflowService", () => {
               runId,
               status: "passed",
               requestSynced: true,
+              request: {
+                host: "github",
+                url: "https://github.com/acme/spec-to-pr/pull/123",
+                number: "123",
+                draft: true,
+                sourceBranch: "codex/fast-workflow-v2",
+                targetBranch: "main",
+                created: true,
+                updated: false,
+              },
               visualPreviewExpected: false,
               visualPreviewSynced: false,
               fallbackMode: "none",
@@ -648,6 +1230,32 @@ async function preparePublishReadyWorkflow(
   return started.runId;
 }
 
+async function submitApiReady(service: WorkflowService, runId: string) {
+  return service.submit({
+    runId,
+    submission: {
+      kind: "api-ready",
+      status: "passed",
+      summary: "API types, schemas, wrappers, mocks, and contract tests are ready.",
+      implementationContextId: "ctx_checkout_01",
+      artifactPaths: [
+        "generated/api.ts",
+        "generated/schema.ts",
+        "generated/wrapper.ts",
+        "generated/mock.ts",
+        "test-results/api-contract.json",
+      ],
+      apiArtifacts: {
+        types: ["generated/api.ts"],
+        schemas: ["generated/schema.ts"],
+        wrappers: ["generated/wrapper.ts"],
+        mocks: ["generated/mock.ts"],
+        contractTests: ["test-results/api-contract.json"],
+      },
+    },
+  });
+}
+
 function publishInput(runId: string) {
   return {
     runId,
@@ -658,4 +1266,32 @@ function publishInput(runId: string) {
     pushBranch: true,
     confirm: true,
   };
+}
+
+function figmaManifest() {
+  return {
+    provider: "host-connected-figma" as const,
+    capturedAt: "2026-07-13T00:00:00.000Z",
+    fileUrl: FIGMA_URL,
+    nodeIds: ["1:2"],
+    visualPaths: ["visual/diff.png"],
+  };
+}
+
+function validMp4(): Buffer {
+  const box = (type: string, payload: Buffer) => {
+    const output = Buffer.alloc(8 + payload.length);
+    output.writeUInt32BE(output.length, 0);
+    output.write(type, 4, 4, "ascii");
+    payload.copy(output, 8);
+    return output;
+  };
+  const movieHeader = Buffer.alloc(24);
+  movieHeader.writeUInt32BE(1_000, 12);
+  movieHeader.writeUInt32BE(1_000, 16);
+  return Buffer.concat([
+    box("ftyp", Buffer.from("isom\0\0\0\0isom", "binary")),
+    box("moov", Buffer.concat([box("mvhd", movieHeader), box("trak", Buffer.alloc(8))])),
+    box("mdat", Buffer.alloc(32, 1)),
+  ]);
 }

@@ -71,10 +71,15 @@ describe("spec-to-pr MCP workflow facade", () => {
         "archive",
       ],
       reviewerRoles: ["functional-reviewer", "design-reviewer"],
+      deliveryModes: ["auto", "brief", "legacy", "feature", "figma"],
       capabilities: {
         apiReadyBeforeUi: true,
+        explicitApiReadyCheckpoint: true,
         independentReviews: true,
         conditionalDesignReview: true,
+        targetedFeatureEvidence: true,
+        featureVideoPublishing: true,
+        hostFigmaIntake: true,
       },
     });
 
@@ -91,6 +96,7 @@ describe("spec-to-pr MCP workflow facade", () => {
     expect(started.structuredContent).toMatchObject({
       status: "needs-external-action",
       currentStage: "contracts",
+      deliveryProfile: { mode: "auto", publication: "draft" },
     });
 
     const status = await client.callTool({ name: "workflow_status", arguments: { runId } });

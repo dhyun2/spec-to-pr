@@ -26,6 +26,11 @@ describe("release notes", () => {
 
     expect(notes).toContain("# spec-to-pr 0.1.0");
     expect(notes).toContain("- Eval status: passed");
+    expect(notes).toContain("v2-facade");
+    expect(notes).toContain("delivery-profiles");
+    expect(notes).toContain("api-ready");
+    expect(notes).toContain("split-review");
+    expect(notes).not.toContain("01-08");
     expect(notes).toContain("This task prepares a release candidate only.");
   });
 });

@@ -7,6 +7,13 @@ description: Use when a v2 workflow requests intake or contract preparation from
 
 Start with `workflow_status`, then use `workflow_advance` to confirm the `prepare-contracts` action.
 
-Collect only supplied or repository-backed requirements. Resolve applicable scope, acceptance criteria, API operations and schemas, design evidence, and explicit gaps. Never invent undocumented API or UI behavior.
+Read `deliveryProfile` and collect only supplied or repository-backed requirements:
 
-Record the result with `workflow_submit` as a `contracts` submission containing `passed`, `failed`, or `blocked`, a compact summary, and artifact paths. Use `blocked` when required evidence is absent. Advance only after the accepted submission is visible in status.
+- `brief`: read the declared `briefPath` and preserve its acceptance criteria and gaps.
+- `legacy`: capture focused current-behavior evidence for the requested delta and include it in `baselinePaths`; do not inventory the whole repository.
+- `figma`: use the host's connected Figma capability to fetch real nodes, screenshots, variables, assets, and component context. Before contracts, submit exactly one `kind: figma-bundle` with `provider: host-connected-figma`, ISO `capturedAt`, `fileUrl` exactly matching the delivery profile, nonempty `nodeIds`, a declared JSON `manifestPath`, and project-local `artifactPaths` containing that manifest plus one or more actual PNG files. The strict manifest repeats `provider`, `capturedAt`, `fileUrl`, and `nodeIds`, and its `visualPaths` exactly list the PNG paths. Do not use URL-only claims, repeat the bundle, poll, or add runtime Figma micro-tools.
+- `feature` and `auto`: normalize requirements without adding mode-specific artifacts at intake.
+
+Resolve applicable scope, acceptance criteria, API operations and schemas, design evidence, and explicit gaps. Never invent undocumented API or UI behavior.
+
+Submit `contracts` with `passed`, `failed`, or `blocked`, a compact summary, artifact paths, and legacy `baselinePaths` when required. Use `blocked` when required evidence is absent. Advance only after the accepted submission is visible in `workflow_status`.

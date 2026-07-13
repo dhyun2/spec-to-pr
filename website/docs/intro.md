@@ -6,50 +6,54 @@ title: SpecToPR 소개
 
 # SpecToPR
 
-**기획서 + Figma + OpenAPI**로 새 프로젝트를 만들거나, 그중 **기획서 자리를 레거시 프로젝트로 대체**해 기존 동작을 이관할 수 있습니다. 어느 쪽이든 같은 검증 파이프라인을 거쳐 코드뿐 아니라 **"구현이 올바르다는 증거"까지 함께 담긴 draft PR/MR**을 만드는 Claude Code · Codex 플러그인입니다.
+SpecToPR은 기획서, 레거시 변경 요청, 사용자 기능, Figma 디자인을 검증된 구현과 draft PR/MR로 연결하는 Claude Code · Codex 플러그인입니다.
 
 ```mermaid
 flowchart LR
-    subgraph S["요구사항 근거 — 둘 중 하나"]
-      A["A. 신규 개발<br/>📄 기획서"]
-      B["B. 레거시 이관<br/>🗂 레거시 프로젝트<br/>(기획서 대체)"]
-    end
-    F["🎨 Figma"] --> E
-    O["📡 OpenAPI"] --> E
-    A --> E["공통 Evidence Graph<br/>요구사항 · 디자인 · API 연결"]
-    B --> E
-    E --> P["동일한 SpecToPR 파이프라인<br/>계약 생성 → 3개 lane → 검토·통합 → gate"]
-    P --> R["✅ Draft PR/MR<br/>+ 스코어카드 + 시각 증거"]
+    B["brief"] --> W["하나의 v2 workflow"]
+    L["legacy change"] --> W
+    F["user-facing feature"] --> W
+    G["Figma URL"] --> W
+    W --> I["API·UI 한 context"]
+    I --> R1["functional review"]
+    I --> R2["UI일 때 design review"]
+    R1 --> D["draft PR/MR"]
+    R2 --> D
 ```
 
-## 무엇이 다른가
+## 네 가지 모드
 
-일반적인 "AI가 코드 짜줌" 도구와 달리, SpecToPR은 **증거 우선(evidence-first)** 원칙으로 동작합니다.
+| 모드      | 주는 것                     | 추가로 확인하는 것              | 결과                             |
+| --------- | --------------------------- | ------------------------------- | -------------------------------- |
+| `brief`   | 기획서/명세 + 저장소        | 수용 조건과 계약                | draft PR/MR                      |
+| `legacy`  | 저장소 + 구체적인 변경 요청 | 요청 범위의 현재 동작 baseline  | draft PR/MR                      |
+| `feature` | 사용자에게 보이는 기능 요청 | 해당 기능 E2E + 영상 정확히 1개 | 영상 링크가 있는 draft PR/MR     |
+| `figma`   | Figma URL + 저장소          | 실제 Figma context와 시각 증거  | 디자인 구현, 요청 시 draft PR/MR |
 
-- **증거 우선** — 자연어 "완료했습니다"가 아니라 evidence · check · diff · gap 같은 **결정론적 산출물**만 완료로 인정합니다.
-- **계약 우선** — 에이전트가 코드에 손대기 전에 OpenSpec · Gherkin · API 계약 · Design Contract를 먼저 확정합니다.
-- **격리 실행** — 3개 구현 lane(Spec/BDD · API · UI)을 각각 **git worktree로 격리**해 병렬 구현하고, Review Council의 교차 검토 후 병합합니다.
-- **점수와 루프** — 9개 차원 스코어카드(기본 임계값 8.0/10)로 평가하고, 기준 미달이면 **한정된(bounded) 수리 루프**를 자동으로 돌립니다.
-- **사람이 최종 결정** — 플러그인은 **draft** PR/MR까지만 만듭니다. merge · approve · ready 전환은 항상 사람이 합니다.
+`feature` 모드만 변경 기능을 고른 단일 Playwright E2E를 실행합니다. 명령 체이닝, `--list`/`--pass-with-no-tests`, 프로젝트 전체 E2E는 거부하며, `status: passed`·정확한 selector·같은 `implementationContextId`·양수 `testCount`만 담은 strict JSON과 재생 시간이 0보다 큰 구조적으로 유효한 영상 하나를 요구합니다. 다른 모드에는 feature 영상 비용을 붙이지 않습니다.
 
-## 두 가지 사용 모드
+Figma는 호스트에 연결된 기능으로 읽고 `provider: host-connected-figma`, ISO `capturedAt`, 같은 `fileUrl`, 비어 있지 않은 `nodeIds`, JSON `manifestPath`, strict manifest의 PNG `visualPaths`를 실제 산출물과 함께 `figma-bundle` 한 번으로 제출합니다. SpecToPR runtime에 Figma 전용 microtool이나 polling을 두지 않습니다.
 
-두 모드의 차이는 **요구사항의 출처 하나**뿐입니다. A는 기획서를 요구사항 근거로 사용하고, B는 기획서 대신 레거시 프로젝트에서 기능 인벤토리를 추출합니다. Figma·OpenAPI 수집부터 Evidence Graph, OpenSpec·Gherkin·계약 생성, 구현 lane, Review Council, gate, draft PR까지의 나머지 흐름은 같습니다.
+## 작게 유지한 실행 표면
 
-| 모드                      | 요구사항 근거                | 함께 쓰는 입력  | 공통 결과                                  |
-| ------------------------- | ---------------------------- | --------------- | ------------------------------------------ |
-| **A. 신규 프로젝트 개발** | 기획서(md/pdf/html)          | Figma + OpenAPI | 새 프로젝트 구현 + 검증 증거 + draft PR/MR |
-| **B. 레거시 이관 개발**   | 레거시 프로젝트(기획서 대체) | Figma + OpenAPI | 기능 이관 구현 + 동등성 증거 + draft PR/MR |
+- MCP tool 7개
+- durable stage 8개
+- skill 9개
+- reviewer 2개
 
-Figma나 OpenAPI가 없는 경우에도 실행할 수 있지만, 없는 근거는 자동으로 추측하지 않고 gap 또는 조건부 gate로 기록합니다.
+API와 UI는 한 구현 context에서 처리합니다. API 기반 UI는 물리적으로 서로 다른 비어 있지 않은 type, schema, wrapper, mock 파일과 passing contract-test JSON을 `implementationContextId`와 함께 `api-ready`로 먼저 기록하고 최종 구현에 같은 ID를 씁니다. Path, symlink, hard link alias는 별도 증거가 아니며 `apiReady: true`만으로는 부족합니다. Orchestrator가 immutable status/contracts/diff/evidence packet을 넘기므로 functional/design reviewer는 workflow tool 없이 독립적으로 판정합니다. Design review는 UI 범위에만 적용됩니다.
 
-각 모드의 프롬프트 예시는 [사용 레시피](/usage/recipes)에 있습니다.
+검증은 변경 범위에 비례합니다. 필요한 증거가 없거나 실패하면 막고, 선택 사항인 검사를 무조건 실행하지 않습니다. 전체 matrix와 package 검증은 release 작업에만 둡니다.
 
-## 처음이라면 이 순서로
+:::info Draft까지만
+SpecToPR은 target이 아닌 `codex/*` source branch에 의도한 변경을 commit한 뒤 draft PR/MR을 만들거나 갱신할 수 있습니다. Runtime은 clean tree와 target보다 한 개 이상 앞선 commit을 확인하며 merge, approve, close, ready 전환은 하지 않습니다.
+:::
 
-1. [사전 준비물](/getting-started/prerequisites) — Node 22+, 토큰, Figma MCP 연결 확인
-2. [설치](/getting-started/installation) — Claude Code 또는 Codex에 플러그인 설치
-3. [퀵스타트](/getting-started/quickstart) — 첫 실행부터 draft PR까지 따라하기
-4. [사용 레시피](/usage/recipes) — 내 상황에 맞는 프롬프트 복사해서 쓰기
+## 시작하기
 
-파이프라인 내부가 궁금하다면 [파이프라인 구조](/concepts/pipeline) → [서브에이전트](/concepts/subagents) → [평가와 루프 엔지니어링](/concepts/scoring-and-loops) 순서를 추천합니다.
+1. [사전 준비물](/getting-started/prerequisites)
+2. [설치](/getting-started/installation)
+3. [퀵스타트](/getting-started/quickstart)
+4. [사용 레시피](/usage/recipes)
+
+내부 계약은 [파이프라인](/concepts/pipeline), 전체 skill은 [스킬 레퍼런스](/reference/skills)에서 확인할 수 있습니다.

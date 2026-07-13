@@ -1,74 +1,46 @@
 ---
 sidebar_position: 1
-title: 스킬 27개
+title: 스킬 9개
 ---
 
-# 스킬 레퍼런스 (27개)
+# 스킬 레퍼런스
 
-모든 스킬은 `/spec-to-pr:<이름>`으로 호출합니다. 오케스트레이터(`/spec-to-pr`)가 알아서 순서대로 호출하므로 평소에는 직접 부를 일이 적지만, 부분 실행·디버깅 때 유용합니다.
+SpecToPR v2가 유지하는 skill은 정확히 9개입니다.
 
-## 오케스트레이터
+| Skill                           | 언제 쓰나                      | 핵심 경계                                                    |
+| ------------------------------- | ------------------------------ | ------------------------------------------------------------ |
+| `/spec-to-pr`                   | 전체 workflow 실행             | delivery profile 하나, public tool 7개만 사용                |
+| `/spec-to-pr:doctor`            | 설치/contract 진단             | `workflow_info`가 v2 표면과 일치해야 함                      |
+| `/spec-to-pr:intake-contracts`  | intake source와 contracts 준비 | real evidence만 제출; legacy baseline/Figma bundle 조건 확인 |
+| `/spec-to-pr:implement`         | 계약 기반 구현                 | API·UI 한 context, evidence-backed `api-ready` before UI     |
+| `/spec-to-pr:review-functional` | code scope 독립 검토           | requirement와 required functional gate evidence 확인         |
+| `/spec-to-pr:review-design`     | UI scope 독립 검토             | visual/interaction/design-system/accessibility 확인          |
+| `/spec-to-pr:publish`           | publish-ready Run 발행         | draft PR/MR과 required asset sync만 수행                     |
+| `/spec-to-pr:archive-openspec`  | merge 뒤 archive               | authoritative merge evidence 필수, polling 없음              |
+| `/spec-to-pr:prepare-release`   | plugin 자체 release 준비       | full matrix/hardening/package/cross-host checks              |
 
-| 스킬          | 역할                                                                                              |
-| ------------- | ------------------------------------------------------------------------------------------------- |
-| `/spec-to-pr` | 전체 파이프라인 실행. `<project-root> [brief/docs/figma/openapi] [source-branch] [target-branch]` |
+## Mode routing
 
-## 진단
+오케스트레이터가 `workflow_start`에 delivery profile을 기록합니다.
 
-| 스킬                       | 역할                               | 관련 태스크                                     |
-| -------------------------- | ---------------------------------- | ----------------------------------------------- |
-| `/spec-to-pr:doctor`       | 플러그인·MCP kernel 실행 경로 점검 | [T01](/tasks/01-executable-plugin-shell)        |
-| `/spec-to-pr:figma-doctor` | Figma MCP provider·capability 진단 | [T09](/tasks/09-figma-mcp-capability-discovery) |
+- `brief`: `briefPath` 필수
+- `legacy`: concrete change request와 focused baseline 필수
+- `feature`: user-facing UI일 때 changed-feature E2E와 영상 정확히 한 개
+- `figma`: `figmaUrl`과 real `figma-bundle` 필수
+- `auto`: mode-specific evidence를 임의로 활성화하지 않음
 
-## 수집·분석
+네 모드는 같은 `intake-contracts`, `implement`, review, publish skill을 재사용합니다. Mode마다 별도 skill이나 agent lane을 만들지 않습니다.
 
-| 스킬                             | 역할                                                                         | 관련 태스크                                                     |
-| -------------------------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `/spec-to-pr:figma-intake`       | Figma URL 등록 + MCP 산출물(디자인 컨텍스트·스크린샷·변수·Code Connect) 기록 | [T10](/tasks/10-figma-source-intake-and-raw-artifact-recording) |
-| `/spec-to-pr:analyze-openapi`    | OpenAPI 스냅샷·오퍼레이션·스키마·gap 분석                                    | [T12](/tasks/12-openapi-intake-adapter)                         |
-| `/spec-to-pr:build-traceability` | 기획서·Figma·OpenAPI를 잇는 Evidence Graph 생성                              | [T13](/tasks/13-evidence-graph-requirement-traceability)        |
+## Reviewer와 skill의 차이
 
-## 생성
+`review-functional`과 `review-design`은 workflow 지침이고, 실제 독립 role은 각각 `functional-reviewer`와 `design-reviewer`입니다. Reviewer는 implementation을 수정하지 않고 verdict와 evidence를 제출합니다. Design reviewer는 UI scope가 아니면 호출하지 않습니다.
 
-| 스킬                                   | 역할                                               | 관련 태스크                                                     |
-| -------------------------------------- | -------------------------------------------------- | --------------------------------------------------------------- |
-| `/spec-to-pr:generate-openspec`        | 추적 매트릭스 → OpenSpec 제안 문서                 | [T14](/tasks/14-openspec-change-generator)                      |
-| `/spec-to-pr:generate-gherkin`         | OpenSpec → Gherkin + 테스트 매트릭스               | [T15](/tasks/15-gherkin-and-test-matrix-generator)              |
-| `/spec-to-pr:generate-api-pipeline`    | OpenAPI → 타입(Zod)·래퍼·mock·계약 테스트 스켈레톤 | [T16](/tasks/16-api-generator-drift-wrapper-pipeline)           |
-| `/spec-to-pr:generate-design-contract` | Figma → Design Contract + 디자인 시스템 매핑       | [T17](/tasks/17-figma-design-contract-and-design-system-mapper) |
+## Public tool과 skill의 차이
 
-## 에이전트 lane
+Skill은 호스트가 읽는 실행 지침이고, durable 상태 변경은 다음 7개 MCP tool이 담당합니다.
 
-| 스킬                                | 역할                              | 관련 태스크                                      |
-| ----------------------------------- | --------------------------------- | ------------------------------------------------ |
-| `/spec-to-pr:prepare-agent-runtime` | worktree + context pack 준비      | [T18](/tasks/18-worktree-isolated-agent-runtime) |
-| `/spec-to-pr:run-spec-bdd`          | Spec/BDD lane 실행                | [T19](/tasks/19-spec-bdd-agent-lane)             |
-| `/spec-to-pr:run-api-contract`      | API Contract lane 실행            | [T20](/tasks/20-api-contract-agent-lane)         |
-| `/spec-to-pr:run-design-ui`         | Design/UI lane 실행               | [T21](/tasks/21-design-ui-agent-lane)            |
-| `/spec-to-pr:run-review-council`    | 교차 검토 → verdict               | [T22](/tasks/22-review-council-and-gap-ledger)   |
-| `/spec-to-pr:run-integration`       | 승인된 변경 통합 + bounded repair | [T23](/tasks/23-integration-bounded-repair-loop) |
+`workflow_info`, `workflow_start`, `workflow_advance`, `workflow_submit`, `workflow_status`, `workflow_publish`, `workflow_archive`
 
-## 검증 게이트
+삭제된 v1 skill 이름이나 내부 domain service를 직접 호출하는 방식은 지원하지 않습니다.
 
-| 스킬                                 | 역할                                  | 관련 태스크                                           |
-| ------------------------------------ | ------------------------------------- | ----------------------------------------------------- |
-| `/spec-to-pr:run-architecture-guard` | FSD 경계·public API 규칙 검증         | [T24](/tasks/24-fsd-architecture-source-guards)       |
-| `/spec-to-pr:run-quality-gates`      | lint·typecheck·build·테스트           | [T25](/tasks/25-quality-gate-runner)                  |
-| `/spec-to-pr:run-visual-regression`  | 스크린샷 캡처·비교                    | [T26](/tasks/26-visual-regression-screenshot-compare) |
-| `/spec-to-pr:run-visual-repair-loop` | 0.98 도달까지 bounded 수리            | [T26](/tasks/26-visual-regression-screenshot-compare) |
-| `/spec-to-pr:run-accessibility-gate` | 접근성 검사                           | [T27](/tasks/27-accessibility-gate)                   |
-| `/spec-to-pr:run-performance-gate`   | Lighthouse·Web Vitals                 | [T28](/tasks/28-performance-and-web-vitals)           |
-| `/spec-to-pr:setup-observability`    | OpenTelemetry·로그 상관관계 설정 생성 | [T29](/tasks/29-opentelemetry-and-log-correlation)    |
-
-## 발행·마무리
-
-| 스킬                                 | 역할                           | 관련 태스크                                                   |
-| ------------------------------------ | ------------------------------ | ------------------------------------------------------------- |
-| `/spec-to-pr:generate-pr-report`     | 증거 기반 PR/MR 본문 생성      | [T30](/tasks/30-evidence-driven-pr-report)                    |
-| `/spec-to-pr:publish-review-request` | draft PR/MR 생성·갱신          | [T31](/tasks/31-github-gitlab-publishers)                     |
-| `/spec-to-pr:archive-openspec`       | 머지 확인 후 OpenSpec 아카이브 | [T32](/tasks/32-manual-post-merge-openspec-archive-lifecycle) |
-| `/spec-to-pr:prepare-release`        | 플러그인 릴리즈 검증           | [T33](/tasks/33-evals-hardening-release)                      |
-
-:::note 스킬 vs MCP tool
-스킬은 사람이 부르는 인터페이스이고, 실제 상태 변경은 스킬이 내부에서 호출하는 **kernel MCP tool**(80여 개)이 수행합니다. T02~T08 같은 기반 태스크는 전용 스킬 없이 오케스트레이터가 tool을 직접 호출합니다.
-:::
+API-backed UI의 `api-ready` 제출은 같은 `workflow_submit`을 사용합니다. `artifactPaths`와 `apiArtifacts`의 `types`, `schemas`, `wrappers`, `mocks`, `contractTests`는 물리적으로 서로 다른 비어 있지 않은 project-local 파일을 가리키고, contract-test JSON은 `status: passed`를 보고해야 합니다. Path, symlink, hard link alias는 별도 증거가 아닙니다. `implementationContextId`는 최종 구현과 같아야 합니다. Public tool이나 stage는 추가되지 않습니다.

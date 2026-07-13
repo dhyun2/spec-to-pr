@@ -4,11 +4,6 @@ export type CodexReviewAgentProfile = {
   output: string;
 };
 
-export type CodexVisualRepairPolicy = {
-  minPassingScore: number;
-  maxAttempts: number;
-};
-
 export type CodexReviewAgentInstructionOptions = {
   includeFunctionalReview?: boolean;
   includeDesignReview?: boolean;
@@ -23,11 +18,6 @@ export const CODEX_WORKFLOW_TOOL_NAMES = [
   "workflow_publish",
   "workflow_archive",
 ] as const;
-
-export const DEFAULT_CODEX_VISUAL_REPAIR_POLICY: CodexVisualRepairPolicy = {
-  minPassingScore: 0.98,
-  maxAttempts: 3,
-};
 
 export const CODEX_REVIEW_AGENT_PROFILES: CodexReviewAgentProfile[] = [
   {
@@ -64,7 +54,8 @@ export function buildCodexReviewAgentInstructions(
   return [
     "Request only the reviewers applicable to the classified scope.",
     "Functional and design reviews are independent and may run in parallel after implementation.",
-    "Submit each verdict through workflow_submit with structured gateResults and real project-local artifact paths; missing or empty evidence cannot approve a gate.",
+    "After implementation, the orchestrator must call workflow_status and give each reviewer an immutable review packet containing the workflow_status snapshot, accepted contracts, diff, and evidence paths.",
+    "Reviewers do not call workflow tools or edit implementation; each returns a literal schema-shaped submission payload. The orchestrator validates it and submits each verdict through workflow_submit with structured gateResults and real project-local artifact paths; missing or empty evidence cannot approve a gate.",
     "",
     "Applicable reviewers:",
     ...profiles.map(
@@ -73,27 +64,11 @@ export function buildCodexReviewAgentInstructions(
   ].join("\n");
 }
 
-export function buildCodexVisualRepairInstructions(
-  policy: Partial<CodexVisualRepairPolicy> = {},
-): string {
-  const resolved = {
-    ...DEFAULT_CODEX_VISUAL_REPAIR_POLICY,
-    ...policy,
-  };
-
-  return [
-    "When the UI scope has a Figma or legacy visual baseline, complete a bounded visual repair loop within the same implementation context.",
-    `Target visual score: ${(resolved.minPassingScore * 100).toFixed(2)}%.`,
-    `Maximum repair attempts: ${resolved.maxAttempts} attempt(s).`,
-    "Use workflow_advance to obtain each requested action and workflow_submit to return comparison and repair evidence.",
-    "Stop with the reported blocker when the attempt cap is reached; never invent passing visual evidence.",
-  ].join("\n");
-}
-
 export function buildCodexPublishInstructions(): string {
   return [
     "Publishing policy:",
     "- Use workflow_status to confirm that required implementation evidence and applicable reviewer verdicts are complete.",
+    "- Work on a non-target codex/* source branch. Before publishing, commit only intended changes, require a clean tree, and verify at least one commit beyond the target branch.",
     "- Use workflow_publish only when the user requested publication and the workflow reports publish readiness.",
     "- Publication creates or updates a draft PR/MR; it never merges, approves, closes, or marks it ready for review.",
     "- Use workflow_archive only after merge evidence exists and the user explicitly requests archival.",

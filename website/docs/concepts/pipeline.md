@@ -1,117 +1,86 @@
 ---
 sidebar_position: 1
-title: 파이프라인 구조 (26 스테이지)
+title: v2 파이프라인
 ---
 
-# 파이프라인 구조
+# v2 파이프라인
 
-하나의 요청은 하나의 **Run**이 되고, Run은 **26개 스테이지**를 위에서 아래로 통과합니다. 각 스테이지는 이전 스테이지의 산출물만 입력으로 받는 결정론적 단위입니다.
+네 delivery mode는 별도 pipeline이 아니라 하나의 Run과 하나의 delivery profile을 공유합니다.
 
-```mermaid
-flowchart TB
-    subgraph P1["① Foundation + Intake"]
-      direction LR
-      s1[intake] --> s2[project-profile] --> s3[source-registry]
-    end
-    subgraph P2["② 소스 어댑터 (병렬)"]
-      direction LR
-      s4[brief-adapter]
-      s5[figma-adapter]
-      s6[openapi-adapter]
-    end
-    subgraph P3["③ 계약 생성"]
-      direction LR
-      s7[evidence-graph] --> s8[openspec] --> s9[gherkin-test-matrix]
-      s9 --> s10[api-contract] & s11[design-contract]
-    end
-    subgraph P4["④ 에이전트 lane (worktree 격리 · 병렬)"]
-      direction LR
-      s12[agent-runtime] --> s13[spec-bdd] & s14[api-agent] & s15[design-ui]
-    end
-    subgraph P5["⑤ 검토와 통합"]
-      direction LR
-      s16[review-council] --> s17[integration]
-    end
-    subgraph P6["⑥ 검증 게이트 (병렬)"]
-      direction LR
-      s18[fsd-guard]
-      s19[quality-gates]
-      s20[visual-regression]
-      s21[accessibility]
-      s22[performance]
-      s23[observability]
-    end
-    subgraph P7["⑦ 발행과 마무리"]
-      direction LR
-      s24[pr-report] --> s25[publisher] --> s26[openspec-archive]
-    end
-    P1 --> P2 --> P3 --> P4 --> P5 --> P6 --> P7
-```
+## 7개 public tool
 
-## 단계별 요약
+| Tool               | 역할                                                                     |
+| ------------------ | ------------------------------------------------------------------------ |
+| `workflow_info`    | contract version, tool/stage/reviewer inventory 확인                     |
+| `workflow_start`   | Run 생성, scope와 delivery profile 기록                                  |
+| `workflow_advance` | 다음 외부 action 또는 terminal 상태까지 deterministic 진행               |
+| `workflow_submit`  | contracts, API-ready, implementation, Figma bundle, review evidence 제출 |
+| `workflow_status`  | stage, blocker, next action, artifact handle 조회                        |
+| `workflow_publish` | canonical report로 draft PR/MR preview 또는 실행                         |
+| `workflow_archive` | merge 확인 후 explicit archive preview 또는 실행                         |
 
-| 단계        | 스테이지                                                   | 하는 일                                                                                  | 태스크 문서                                                                                                              |
-| ----------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| ① 수집      | intake → project-profile → source-registry                 | 요청 파싱, 프로젝트 관례 감지(프레임워크·FSD·디자인시스템), 입력 스냅샷을 SHA-256로 고정 | [T06](/tasks/06-intake-manifest-and-project-profiler)~[T07](/tasks/07-source-registry-and-content-addressing)            |
-| ② 어댑터    | brief / figma / openapi-adapter                            | 기획서·Figma·OpenAPI에서 각각 증거 추출 (셋은 병렬)                                      | [T08](/tasks/08-brief-adapter)~[T12](/tasks/12-openapi-intake-adapter)                                                   |
-| ③ 계약      | evidence-graph → openspec → gherkin → api/design-contract  | 증거를 연결해 추적 매트릭스를 만들고 OpenSpec·Gherkin·API·디자인 계약 확정               | [T13](/tasks/13-evidence-graph-requirement-traceability)~[T17](/tasks/17-figma-design-contract-and-design-system-mapper) |
-| ④ 구현      | agent-runtime → 3개 lane                                   | worktree 격리된 3개 에이전트가 병렬 구현                                                 | [T18](/tasks/18-worktree-isolated-agent-runtime)~[T21](/tasks/21-design-ui-agent-lane)                                   |
-| ⑤ 검토·통합 | review-council → integration                               | 교차 검토 verdict → 승인된 변경만 통합 worktree로                                        | [T22](/tasks/22-review-council-and-gap-ledger)~[T23](/tasks/23-integration-bounded-repair-loop)                          |
-| ⑥ 게이트    | fsd-guard · quality · visual · a11y · perf · observability | 결정론적 검증 게이트 6종 (병렬)                                                          | [T24](/tasks/24-fsd-architecture-source-guards)~[T29](/tasks/29-opentelemetry-and-log-correlation)                       |
-| ⑦ 발행      | pr-report → publisher → openspec-archive                   | 증거 기반 PR 본문 생성 → draft 발행 → (머지 후) 아카이브                                 | [T30](/tasks/30-evidence-driven-pr-report)~[T32](/tasks/32-manual-post-merge-openspec-archive-lifecycle)                 |
+이 목록 밖의 v1 microtool은 public contract가 아닙니다.
 
-## 스테이지의 생명주기
-
-모든 스테이지는 같은 상태 기계를 따릅니다.
+## 8개 durable stage
 
 ```mermaid
-stateDiagram-v2
-    [*] --> pending
-    pending --> running
-    running --> passed
-    running --> failed
-    running --> blocked
-    running --> skipped
-    failed --> running : 재시도 (기본 최대 3회)
-    blocked --> running : 조건 해소 후
-    skipped --> running
-    passed --> [*]
+flowchart LR
+    I["1. intake"] --> C["2. contracts"]
+    C --> M["3. implementation"]
+    M --> F["4. functional-review"]
+    M --> D["5. design-review"]
+    F --> R["6. report"]
+    D --> R
+    R --> P["7. publish"]
+    P --> A["8. archive"]
 ```
 
-- **lease** — 스테이지 시작 시 5분 TTL의 lease를 획득하고 heartbeat로 갱신합니다. 에이전트가 죽어도 lease가 만료되면 다른 워커가 이어받을 수 있습니다.
-- **checkpoint** — 스테이지마다 체크포인트가 저장되어, Run이 어디서 끊겨도 그 지점부터 재개됩니다.
-- **waived** — 사람이 명시적으로 면제한 스테이지 상태. 면제 사유가 기록됩니다.
+| Stage               | 완료 조건                                                                                        |
+| ------------------- | ------------------------------------------------------------------------------------------------ |
+| `intake`            | scope와 delivery profile이 기록됨                                                                |
+| `contracts`         | 필요한 요구사항/API/mock/design contract와 mode-specific intake evidence가 실제 파일로 제출됨    |
+| `implementation`    | API-backed UI는 선행 `api-ready` evidence 필수; feature는 targeted E2E + 영상 1개                |
+| `functional-review` | 코드 scope의 필수 기능 gate와 requirement가 독립적으로 승인됨                                    |
+| `design-review`     | UI scope의 visual/interaction/accessibility evidence가 독립적으로 승인됨; 비-UI면 not applicable |
+| `report`            | 두 review와 required gate에서 canonical publish decision 생성                                    |
+| `publish`           | publication이 `draft`일 때 draft review request와 필수 asset sync                                |
+| `archive`           | authoritative merge evidence가 있을 때 명시적으로 실행                                           |
 
-실제로 SQLite에 기록되는 스테이지 하나의 상태는 이런 모양입니다:
+Stage는 pending/running/passed/failed/blocked/skipped/waived 상태와 lease/checkpoint를 durable ledger에 보관합니다. 사용자는 세부 stage machine microtool 대신 `workflow_advance`와 `workflow_status`를 사용합니다.
 
-```json title="실행 중인 visual-regression 스테이지의 기록 (요약)"
-{
-  "stage": "visual-regression",
-  "status": "running",
-  "attempt": 2,
-  "maxAttempts": 3,
-  "lease": {
-    "workerId": "worker-a1b2",
-    "acquiredAt": "2026-07-10T02:10:00Z",
-    "heartbeatAt": "2026-07-10T02:14:30Z",
-    "expiresAt": "2026-07-10T02:19:30Z"
-  },
-  "checkpoint": { "name": "captured-screenshots", "data": { "captured": 4, "compared": 2 } }
-}
+## 하나의 implementation context
+
+```mermaid
+flowchart LR
+    AC["accepted contracts"] --> API["API types · schemas · wrappers"]
+    API --> MOCK["mocks · contract-test evidence"]
+    MOCK --> READY["workflow_submit: api-ready"]
+    READY --> UI["feature · UI implementation"]
+    UI --> E["focused implementation evidence"]
 ```
 
-이 기록 덕분에 다음 질문들에 항상 결정적으로 답할 수 있습니다:
+API와 UI를 별도 agent/worktree로 나누지 않으므로 context handoff와 integration lane이 없습니다. API 없는 변경은 해당 준비를 not applicable로 처리합니다. API-backed UI는 물리적으로 서로 다른 비어 있지 않은 type/schema/wrapper/mock 파일과 `status: passed`인 JSON contract-test 결과를 안정적인 `implementationContextId`와 함께 `apiArtifacts`로 제출합니다. Path, symlink, hard link alias는 별도 증거가 아닙니다. 최종 구현은 같은 ID를 반복해야 하며 `apiReady: true` 주장만으로 완료될 수 없습니다.
 
-- **"지금 누가 이 스테이지를 잡고 있나?"** → `lease.workerId`. `expiresAt`이 지났으면 죽은 워커 — 다른 워커가 인수 가능
-- **"이거 다시 시도해도 되나?"** → `attempt 2 / maxAttempts 3` — 한 번 남음
-- **"어디서부터 이어 하나?"** → checkpoint `captured-screenshots`: 스크린샷 4장 중 2장 비교 완료 지점부터
+## 두 개의 독립 review
 
-스테이지 전이는 전부 kernel의 MCP tool로만 일어납니다: `start_stage`(lease 발급) → `heartbeat_stage`(갱신) → `complete_stage` / `fail_stage` / `block_stage` / `skip_stage` (**현재 lease 보유자만 호출 가능**) → 재개 시 `get_resume_plan`이 다음 대상과 만료된 lease를 식별합니다.
+- `functional-reviewer`: code scope에 적용. 계약 일치, diff, 관련 테스트, architecture/security 등 필요한 gate를 확인합니다.
+- `design-reviewer`: UI scope에만 적용. design baseline, design-system 사용, responsive/interaction state, accessibility를 확인합니다.
 
-## 왜 스테이지를 이렇게 잘게 나눴나
+구현 뒤 orchestrator가 `workflow_status` snapshot, accepted contracts, diff, evidence path로 immutable packet을 만들고 두 reviewer에게 전달합니다. Reviewer는 workflow tool을 직접 호출하거나 implementation을 수정하지 않고 schema-shaped verdict를 반환합니다. UI scope라면 병렬로 검토할 수 있습니다. 한 reviewer가 다른 verdict를 대신하거나 합산 Review Council을 두지 않습니다.
 
-- **재개 가능성** — 26개 중 20번째에서 실패해도 앞의 19개를 다시 하지 않습니다.
-- **증거의 경계** — 각 스테이지의 산출물이 명확해야 "어느 근거로 이 코드가 나왔나"를 역추적할 수 있습니다.
-- **병렬성** — 의존이 없는 스테이지(어댑터 3종, 게이트 6종, lane 3개)는 병렬로 돕니다.
+## Mode별 조건부 evidence
 
-33개 태스크(T01~~T33)와 26개 런타임 스테이지의 관계: 태스크는 **구현 단위**(빌드 순서), 스테이지는 **실행 단위**(런타임 순서)입니다. T01~~T05(Foundation)는 런타임 스테이지가 아니라 모든 스테이지가 딛고 서는 기반 계층입니다. 전체 의존 관계는 [태스크 의존 그래프](/reference/task-graph)를 보세요.
+| Mode      | Contracts 이전/중                                | Implementation                                 |
+| --------- | ------------------------------------------------ | ---------------------------------------------- |
+| `brief`   | `briefPath`의 acceptance criteria                | 관련 검사                                      |
+| `legacy`  | 요청 delta의 focused baseline                    | 영향받은 회귀 검사                             |
+| `feature` | 일반 contracts                                   | 단일 Playwright + passing JSON + 유효 영상 1개 |
+| `figma`   | host Figma capability → typed `figma-bundle` 1개 | UI/visual evidence                             |
+
+Mode는 tool, stage, lane을 추가하지 않습니다. Feature mode만 영상 비용을 지며 full-project E2E는 기본이 아닙니다. Figma provider는 runtime 밖에 있고 polling하지 않습니다.
+
+## Gate와 publication
+
+일반 change는 사용 가능한 format/lint, typecheck, build, 관련 functional test를 기본으로 합니다. OpenSpec, architecture, targeted security, visual, accessibility, performance는 scope에 따라 적용되고 observability는 opt-in입니다. Full matrix와 release hardening은 explicit release workflow 전용입니다.
+
+`workflow_publish`는 draft만 생성/갱신합니다. Merge 뒤의 archive는 별도 사용자 action이며 자동 polling하지 않습니다.

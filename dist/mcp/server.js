@@ -32283,6 +32283,2094 @@ var init_mcp = __esm({
   }
 });
 
+// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/chunkstream.js
+var require_chunkstream = __commonJS({
+  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/chunkstream.js"(exports, module) {
+    "use strict";
+    var util2 = __require("util");
+    var Stream = __require("stream");
+    var ChunkStream = module.exports = function() {
+      Stream.call(this);
+      this._buffers = [];
+      this._buffered = 0;
+      this._reads = [];
+      this._paused = false;
+      this._encoding = "utf8";
+      this.writable = true;
+    };
+    util2.inherits(ChunkStream, Stream);
+    ChunkStream.prototype.read = function(length, callback) {
+      this._reads.push({
+        length: Math.abs(length),
+        // if length < 0 then at most this length
+        allowLess: length < 0,
+        func: callback
+      });
+      process.nextTick(
+        function() {
+          this._process();
+          if (this._paused && this._reads && this._reads.length > 0) {
+            this._paused = false;
+            this.emit("drain");
+          }
+        }.bind(this)
+      );
+    };
+    ChunkStream.prototype.write = function(data, encoding) {
+      if (!this.writable) {
+        this.emit("error", new Error("Stream not writable"));
+        return false;
+      }
+      let dataBuffer;
+      if (Buffer.isBuffer(data)) {
+        dataBuffer = data;
+      } else {
+        dataBuffer = Buffer.from(data, encoding || this._encoding);
+      }
+      this._buffers.push(dataBuffer);
+      this._buffered += dataBuffer.length;
+      this._process();
+      if (this._reads && this._reads.length === 0) {
+        this._paused = true;
+      }
+      return this.writable && !this._paused;
+    };
+    ChunkStream.prototype.end = function(data, encoding) {
+      if (data) {
+        this.write(data, encoding);
+      }
+      this.writable = false;
+      if (!this._buffers) {
+        return;
+      }
+      if (this._buffers.length === 0) {
+        this._end();
+      } else {
+        this._buffers.push(null);
+        this._process();
+      }
+    };
+    ChunkStream.prototype.destroySoon = ChunkStream.prototype.end;
+    ChunkStream.prototype._end = function() {
+      if (this._reads.length > 0) {
+        this.emit("error", new Error("Unexpected end of input"));
+      }
+      this.destroy();
+    };
+    ChunkStream.prototype.destroy = function() {
+      if (!this._buffers) {
+        return;
+      }
+      this.writable = false;
+      this._reads = null;
+      this._buffers = null;
+      this.emit("close");
+    };
+    ChunkStream.prototype._processReadAllowingLess = function(read) {
+      this._reads.shift();
+      let smallerBuf = this._buffers[0];
+      if (smallerBuf.length > read.length) {
+        this._buffered -= read.length;
+        this._buffers[0] = smallerBuf.slice(read.length);
+        read.func.call(this, smallerBuf.slice(0, read.length));
+      } else {
+        this._buffered -= smallerBuf.length;
+        this._buffers.shift();
+        read.func.call(this, smallerBuf);
+      }
+    };
+    ChunkStream.prototype._processRead = function(read) {
+      this._reads.shift();
+      let pos = 0;
+      let count = 0;
+      let data = Buffer.alloc(read.length);
+      while (pos < read.length) {
+        let buf = this._buffers[count++];
+        let len = Math.min(buf.length, read.length - pos);
+        buf.copy(data, pos, 0, len);
+        pos += len;
+        if (len !== buf.length) {
+          this._buffers[--count] = buf.slice(len);
+        }
+      }
+      if (count > 0) {
+        this._buffers.splice(0, count);
+      }
+      this._buffered -= read.length;
+      read.func.call(this, data);
+    };
+    ChunkStream.prototype._process = function() {
+      try {
+        while (this._buffered > 0 && this._reads && this._reads.length > 0) {
+          let read = this._reads[0];
+          if (read.allowLess) {
+            this._processReadAllowingLess(read);
+          } else if (this._buffered >= read.length) {
+            this._processRead(read);
+          } else {
+            break;
+          }
+        }
+        if (this._buffers && !this.writable) {
+          this._end();
+        }
+      } catch (ex) {
+        this.emit("error", ex);
+      }
+    };
+  }
+});
+
+// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/interlace.js
+var require_interlace = __commonJS({
+  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/interlace.js"(exports) {
+    "use strict";
+    var imagePasses = [
+      {
+        // pass 1 - 1px
+        x: [0],
+        y: [0]
+      },
+      {
+        // pass 2 - 1px
+        x: [4],
+        y: [0]
+      },
+      {
+        // pass 3 - 2px
+        x: [0, 4],
+        y: [4]
+      },
+      {
+        // pass 4 - 4px
+        x: [2, 6],
+        y: [0, 4]
+      },
+      {
+        // pass 5 - 8px
+        x: [0, 2, 4, 6],
+        y: [2, 6]
+      },
+      {
+        // pass 6 - 16px
+        x: [1, 3, 5, 7],
+        y: [0, 2, 4, 6]
+      },
+      {
+        // pass 7 - 32px
+        x: [0, 1, 2, 3, 4, 5, 6, 7],
+        y: [1, 3, 5, 7]
+      }
+    ];
+    exports.getImagePasses = function(width, height) {
+      let images = [];
+      let xLeftOver = width % 8;
+      let yLeftOver = height % 8;
+      let xRepeats = (width - xLeftOver) / 8;
+      let yRepeats = (height - yLeftOver) / 8;
+      for (let i = 0; i < imagePasses.length; i++) {
+        let pass = imagePasses[i];
+        let passWidth = xRepeats * pass.x.length;
+        let passHeight = yRepeats * pass.y.length;
+        for (let j = 0; j < pass.x.length; j++) {
+          if (pass.x[j] < xLeftOver) {
+            passWidth++;
+          } else {
+            break;
+          }
+        }
+        for (let j = 0; j < pass.y.length; j++) {
+          if (pass.y[j] < yLeftOver) {
+            passHeight++;
+          } else {
+            break;
+          }
+        }
+        if (passWidth > 0 && passHeight > 0) {
+          images.push({ width: passWidth, height: passHeight, index: i });
+        }
+      }
+      return images;
+    };
+    exports.getInterlaceIterator = function(width) {
+      return function(x, y, pass) {
+        let outerXLeftOver = x % imagePasses[pass].x.length;
+        let outerX = (x - outerXLeftOver) / imagePasses[pass].x.length * 8 + imagePasses[pass].x[outerXLeftOver];
+        let outerYLeftOver = y % imagePasses[pass].y.length;
+        let outerY = (y - outerYLeftOver) / imagePasses[pass].y.length * 8 + imagePasses[pass].y[outerYLeftOver];
+        return outerX * 4 + outerY * width * 4;
+      };
+    };
+  }
+});
+
+// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/paeth-predictor.js
+var require_paeth_predictor = __commonJS({
+  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/paeth-predictor.js"(exports, module) {
+    "use strict";
+    module.exports = function paethPredictor(left, above, upLeft) {
+      let paeth = left + above - upLeft;
+      let pLeft = Math.abs(paeth - left);
+      let pAbove = Math.abs(paeth - above);
+      let pUpLeft = Math.abs(paeth - upLeft);
+      if (pLeft <= pAbove && pLeft <= pUpLeft) {
+        return left;
+      }
+      if (pAbove <= pUpLeft) {
+        return above;
+      }
+      return upLeft;
+    };
+  }
+});
+
+// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/filter-parse.js
+var require_filter_parse = __commonJS({
+  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/filter-parse.js"(exports, module) {
+    "use strict";
+    var interlaceUtils = require_interlace();
+    var paethPredictor = require_paeth_predictor();
+    function getByteWidth(width, bpp, depth) {
+      let byteWidth = width * bpp;
+      if (depth !== 8) {
+        byteWidth = Math.ceil(byteWidth / (8 / depth));
+      }
+      return byteWidth;
+    }
+    var Filter = module.exports = function(bitmapInfo, dependencies) {
+      let width = bitmapInfo.width;
+      let height = bitmapInfo.height;
+      let interlace = bitmapInfo.interlace;
+      let bpp = bitmapInfo.bpp;
+      let depth = bitmapInfo.depth;
+      this.read = dependencies.read;
+      this.write = dependencies.write;
+      this.complete = dependencies.complete;
+      this._imageIndex = 0;
+      this._images = [];
+      if (interlace) {
+        let passes = interlaceUtils.getImagePasses(width, height);
+        for (let i = 0; i < passes.length; i++) {
+          this._images.push({
+            byteWidth: getByteWidth(passes[i].width, bpp, depth),
+            height: passes[i].height,
+            lineIndex: 0
+          });
+        }
+      } else {
+        this._images.push({
+          byteWidth: getByteWidth(width, bpp, depth),
+          height,
+          lineIndex: 0
+        });
+      }
+      if (depth === 8) {
+        this._xComparison = bpp;
+      } else if (depth === 16) {
+        this._xComparison = bpp * 2;
+      } else {
+        this._xComparison = 1;
+      }
+    };
+    Filter.prototype.start = function() {
+      this.read(
+        this._images[this._imageIndex].byteWidth + 1,
+        this._reverseFilterLine.bind(this)
+      );
+    };
+    Filter.prototype._unFilterType1 = function(rawData, unfilteredLine, byteWidth) {
+      let xComparison = this._xComparison;
+      let xBiggerThan = xComparison - 1;
+      for (let x = 0; x < byteWidth; x++) {
+        let rawByte = rawData[1 + x];
+        let f1Left = x > xBiggerThan ? unfilteredLine[x - xComparison] : 0;
+        unfilteredLine[x] = rawByte + f1Left;
+      }
+    };
+    Filter.prototype._unFilterType2 = function(rawData, unfilteredLine, byteWidth) {
+      let lastLine = this._lastLine;
+      for (let x = 0; x < byteWidth; x++) {
+        let rawByte = rawData[1 + x];
+        let f2Up = lastLine ? lastLine[x] : 0;
+        unfilteredLine[x] = rawByte + f2Up;
+      }
+    };
+    Filter.prototype._unFilterType3 = function(rawData, unfilteredLine, byteWidth) {
+      let xComparison = this._xComparison;
+      let xBiggerThan = xComparison - 1;
+      let lastLine = this._lastLine;
+      for (let x = 0; x < byteWidth; x++) {
+        let rawByte = rawData[1 + x];
+        let f3Up = lastLine ? lastLine[x] : 0;
+        let f3Left = x > xBiggerThan ? unfilteredLine[x - xComparison] : 0;
+        let f3Add = Math.floor((f3Left + f3Up) / 2);
+        unfilteredLine[x] = rawByte + f3Add;
+      }
+    };
+    Filter.prototype._unFilterType4 = function(rawData, unfilteredLine, byteWidth) {
+      let xComparison = this._xComparison;
+      let xBiggerThan = xComparison - 1;
+      let lastLine = this._lastLine;
+      for (let x = 0; x < byteWidth; x++) {
+        let rawByte = rawData[1 + x];
+        let f4Up = lastLine ? lastLine[x] : 0;
+        let f4Left = x > xBiggerThan ? unfilteredLine[x - xComparison] : 0;
+        let f4UpLeft = x > xBiggerThan && lastLine ? lastLine[x - xComparison] : 0;
+        let f4Add = paethPredictor(f4Left, f4Up, f4UpLeft);
+        unfilteredLine[x] = rawByte + f4Add;
+      }
+    };
+    Filter.prototype._reverseFilterLine = function(rawData) {
+      let filter = rawData[0];
+      let unfilteredLine;
+      let currentImage = this._images[this._imageIndex];
+      let byteWidth = currentImage.byteWidth;
+      if (filter === 0) {
+        unfilteredLine = rawData.slice(1, byteWidth + 1);
+      } else {
+        unfilteredLine = Buffer.alloc(byteWidth);
+        switch (filter) {
+          case 1:
+            this._unFilterType1(rawData, unfilteredLine, byteWidth);
+            break;
+          case 2:
+            this._unFilterType2(rawData, unfilteredLine, byteWidth);
+            break;
+          case 3:
+            this._unFilterType3(rawData, unfilteredLine, byteWidth);
+            break;
+          case 4:
+            this._unFilterType4(rawData, unfilteredLine, byteWidth);
+            break;
+          default:
+            throw new Error("Unrecognised filter type - " + filter);
+        }
+      }
+      this.write(unfilteredLine);
+      currentImage.lineIndex++;
+      if (currentImage.lineIndex >= currentImage.height) {
+        this._lastLine = null;
+        this._imageIndex++;
+        currentImage = this._images[this._imageIndex];
+      } else {
+        this._lastLine = unfilteredLine;
+      }
+      if (currentImage) {
+        this.read(currentImage.byteWidth + 1, this._reverseFilterLine.bind(this));
+      } else {
+        this._lastLine = null;
+        this.complete();
+      }
+    };
+  }
+});
+
+// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/filter-parse-async.js
+var require_filter_parse_async = __commonJS({
+  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/filter-parse-async.js"(exports, module) {
+    "use strict";
+    var util2 = __require("util");
+    var ChunkStream = require_chunkstream();
+    var Filter = require_filter_parse();
+    var FilterAsync = module.exports = function(bitmapInfo) {
+      ChunkStream.call(this);
+      let buffers = [];
+      let that = this;
+      this._filter = new Filter(bitmapInfo, {
+        read: this.read.bind(this),
+        write: function(buffer) {
+          buffers.push(buffer);
+        },
+        complete: function() {
+          that.emit("complete", Buffer.concat(buffers));
+        }
+      });
+      this._filter.start();
+    };
+    util2.inherits(FilterAsync, ChunkStream);
+  }
+});
+
+// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/constants.js
+var require_constants = __commonJS({
+  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/constants.js"(exports, module) {
+    "use strict";
+    module.exports = {
+      PNG_SIGNATURE: [137, 80, 78, 71, 13, 10, 26, 10],
+      TYPE_IHDR: 1229472850,
+      TYPE_IEND: 1229278788,
+      TYPE_IDAT: 1229209940,
+      TYPE_PLTE: 1347179589,
+      TYPE_tRNS: 1951551059,
+      // eslint-disable-line camelcase
+      TYPE_gAMA: 1732332865,
+      // eslint-disable-line camelcase
+      // color-type bits
+      COLORTYPE_GRAYSCALE: 0,
+      COLORTYPE_PALETTE: 1,
+      COLORTYPE_COLOR: 2,
+      COLORTYPE_ALPHA: 4,
+      // e.g. grayscale and alpha
+      // color-type combinations
+      COLORTYPE_PALETTE_COLOR: 3,
+      COLORTYPE_COLOR_ALPHA: 6,
+      COLORTYPE_TO_BPP_MAP: {
+        0: 1,
+        2: 3,
+        3: 1,
+        4: 2,
+        6: 4
+      },
+      GAMMA_DIVISION: 1e5
+    };
+  }
+});
+
+// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/crc.js
+var require_crc = __commonJS({
+  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/crc.js"(exports, module) {
+    "use strict";
+    var crcTable = [];
+    (function() {
+      for (let i = 0; i < 256; i++) {
+        let currentCrc = i;
+        for (let j = 0; j < 8; j++) {
+          if (currentCrc & 1) {
+            currentCrc = 3988292384 ^ currentCrc >>> 1;
+          } else {
+            currentCrc = currentCrc >>> 1;
+          }
+        }
+        crcTable[i] = currentCrc;
+      }
+    })();
+    var CrcCalculator = module.exports = function() {
+      this._crc = -1;
+    };
+    CrcCalculator.prototype.write = function(data) {
+      for (let i = 0; i < data.length; i++) {
+        this._crc = crcTable[(this._crc ^ data[i]) & 255] ^ this._crc >>> 8;
+      }
+      return true;
+    };
+    CrcCalculator.prototype.crc32 = function() {
+      return this._crc ^ -1;
+    };
+    CrcCalculator.crc32 = function(buf) {
+      let crc = -1;
+      for (let i = 0; i < buf.length; i++) {
+        crc = crcTable[(crc ^ buf[i]) & 255] ^ crc >>> 8;
+      }
+      return crc ^ -1;
+    };
+  }
+});
+
+// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/parser.js
+var require_parser = __commonJS({
+  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/parser.js"(exports, module) {
+    "use strict";
+    var constants = require_constants();
+    var CrcCalculator = require_crc();
+    var Parser = module.exports = function(options, dependencies) {
+      this._options = options;
+      options.checkCRC = options.checkCRC !== false;
+      this._hasIHDR = false;
+      this._hasIEND = false;
+      this._emittedHeadersFinished = false;
+      this._palette = [];
+      this._colorType = 0;
+      this._chunks = {};
+      this._chunks[constants.TYPE_IHDR] = this._handleIHDR.bind(this);
+      this._chunks[constants.TYPE_IEND] = this._handleIEND.bind(this);
+      this._chunks[constants.TYPE_IDAT] = this._handleIDAT.bind(this);
+      this._chunks[constants.TYPE_PLTE] = this._handlePLTE.bind(this);
+      this._chunks[constants.TYPE_tRNS] = this._handleTRNS.bind(this);
+      this._chunks[constants.TYPE_gAMA] = this._handleGAMA.bind(this);
+      this.read = dependencies.read;
+      this.error = dependencies.error;
+      this.metadata = dependencies.metadata;
+      this.gamma = dependencies.gamma;
+      this.transColor = dependencies.transColor;
+      this.palette = dependencies.palette;
+      this.parsed = dependencies.parsed;
+      this.inflateData = dependencies.inflateData;
+      this.finished = dependencies.finished;
+      this.simpleTransparency = dependencies.simpleTransparency;
+      this.headersFinished = dependencies.headersFinished || function() {
+      };
+    };
+    Parser.prototype.start = function() {
+      this.read(constants.PNG_SIGNATURE.length, this._parseSignature.bind(this));
+    };
+    Parser.prototype._parseSignature = function(data) {
+      let signature = constants.PNG_SIGNATURE;
+      for (let i = 0; i < signature.length; i++) {
+        if (data[i] !== signature[i]) {
+          this.error(new Error("Invalid file signature"));
+          return;
+        }
+      }
+      this.read(8, this._parseChunkBegin.bind(this));
+    };
+    Parser.prototype._parseChunkBegin = function(data) {
+      let length = data.readUInt32BE(0);
+      let type = data.readUInt32BE(4);
+      let name = "";
+      for (let i = 4; i < 8; i++) {
+        name += String.fromCharCode(data[i]);
+      }
+      let ancillary = Boolean(data[4] & 32);
+      if (!this._hasIHDR && type !== constants.TYPE_IHDR) {
+        this.error(new Error("Expected IHDR on beggining"));
+        return;
+      }
+      this._crc = new CrcCalculator();
+      this._crc.write(Buffer.from(name));
+      if (this._chunks[type]) {
+        return this._chunks[type](length);
+      }
+      if (!ancillary) {
+        this.error(new Error("Unsupported critical chunk type " + name));
+        return;
+      }
+      this.read(length + 4, this._skipChunk.bind(this));
+    };
+    Parser.prototype._skipChunk = function() {
+      this.read(8, this._parseChunkBegin.bind(this));
+    };
+    Parser.prototype._handleChunkEnd = function() {
+      this.read(4, this._parseChunkEnd.bind(this));
+    };
+    Parser.prototype._parseChunkEnd = function(data) {
+      let fileCrc = data.readInt32BE(0);
+      let calcCrc = this._crc.crc32();
+      if (this._options.checkCRC && calcCrc !== fileCrc) {
+        this.error(new Error("Crc error - " + fileCrc + " - " + calcCrc));
+        return;
+      }
+      if (!this._hasIEND) {
+        this.read(8, this._parseChunkBegin.bind(this));
+      }
+    };
+    Parser.prototype._handleIHDR = function(length) {
+      this.read(length, this._parseIHDR.bind(this));
+    };
+    Parser.prototype._parseIHDR = function(data) {
+      this._crc.write(data);
+      let width = data.readUInt32BE(0);
+      let height = data.readUInt32BE(4);
+      let depth = data[8];
+      let colorType = data[9];
+      let compr = data[10];
+      let filter = data[11];
+      let interlace = data[12];
+      if (depth !== 8 && depth !== 4 && depth !== 2 && depth !== 1 && depth !== 16) {
+        this.error(new Error("Unsupported bit depth " + depth));
+        return;
+      }
+      if (!(colorType in constants.COLORTYPE_TO_BPP_MAP)) {
+        this.error(new Error("Unsupported color type"));
+        return;
+      }
+      if (compr !== 0) {
+        this.error(new Error("Unsupported compression method"));
+        return;
+      }
+      if (filter !== 0) {
+        this.error(new Error("Unsupported filter method"));
+        return;
+      }
+      if (interlace !== 0 && interlace !== 1) {
+        this.error(new Error("Unsupported interlace method"));
+        return;
+      }
+      this._colorType = colorType;
+      let bpp = constants.COLORTYPE_TO_BPP_MAP[this._colorType];
+      this._hasIHDR = true;
+      this.metadata({
+        width,
+        height,
+        depth,
+        interlace: Boolean(interlace),
+        palette: Boolean(colorType & constants.COLORTYPE_PALETTE),
+        color: Boolean(colorType & constants.COLORTYPE_COLOR),
+        alpha: Boolean(colorType & constants.COLORTYPE_ALPHA),
+        bpp,
+        colorType
+      });
+      this._handleChunkEnd();
+    };
+    Parser.prototype._handlePLTE = function(length) {
+      this.read(length, this._parsePLTE.bind(this));
+    };
+    Parser.prototype._parsePLTE = function(data) {
+      this._crc.write(data);
+      let entries = Math.floor(data.length / 3);
+      for (let i = 0; i < entries; i++) {
+        this._palette.push([data[i * 3], data[i * 3 + 1], data[i * 3 + 2], 255]);
+      }
+      this.palette(this._palette);
+      this._handleChunkEnd();
+    };
+    Parser.prototype._handleTRNS = function(length) {
+      this.simpleTransparency();
+      this.read(length, this._parseTRNS.bind(this));
+    };
+    Parser.prototype._parseTRNS = function(data) {
+      this._crc.write(data);
+      if (this._colorType === constants.COLORTYPE_PALETTE_COLOR) {
+        if (this._palette.length === 0) {
+          this.error(new Error("Transparency chunk must be after palette"));
+          return;
+        }
+        if (data.length > this._palette.length) {
+          this.error(new Error("More transparent colors than palette size"));
+          return;
+        }
+        for (let i = 0; i < data.length; i++) {
+          this._palette[i][3] = data[i];
+        }
+        this.palette(this._palette);
+      }
+      if (this._colorType === constants.COLORTYPE_GRAYSCALE) {
+        this.transColor([data.readUInt16BE(0)]);
+      }
+      if (this._colorType === constants.COLORTYPE_COLOR) {
+        this.transColor([
+          data.readUInt16BE(0),
+          data.readUInt16BE(2),
+          data.readUInt16BE(4)
+        ]);
+      }
+      this._handleChunkEnd();
+    };
+    Parser.prototype._handleGAMA = function(length) {
+      this.read(length, this._parseGAMA.bind(this));
+    };
+    Parser.prototype._parseGAMA = function(data) {
+      this._crc.write(data);
+      this.gamma(data.readUInt32BE(0) / constants.GAMMA_DIVISION);
+      this._handleChunkEnd();
+    };
+    Parser.prototype._handleIDAT = function(length) {
+      if (!this._emittedHeadersFinished) {
+        this._emittedHeadersFinished = true;
+        this.headersFinished();
+      }
+      this.read(-length, this._parseIDAT.bind(this, length));
+    };
+    Parser.prototype._parseIDAT = function(length, data) {
+      this._crc.write(data);
+      if (this._colorType === constants.COLORTYPE_PALETTE_COLOR && this._palette.length === 0) {
+        throw new Error("Expected palette not found");
+      }
+      this.inflateData(data);
+      let leftOverLength = length - data.length;
+      if (leftOverLength > 0) {
+        this._handleIDAT(leftOverLength);
+      } else {
+        this._handleChunkEnd();
+      }
+    };
+    Parser.prototype._handleIEND = function(length) {
+      this.read(length, this._parseIEND.bind(this));
+    };
+    Parser.prototype._parseIEND = function(data) {
+      this._crc.write(data);
+      this._hasIEND = true;
+      this._handleChunkEnd();
+      if (this.finished) {
+        this.finished();
+      }
+    };
+  }
+});
+
+// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/bitmapper.js
+var require_bitmapper = __commonJS({
+  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/bitmapper.js"(exports) {
+    "use strict";
+    var interlaceUtils = require_interlace();
+    var pixelBppMapper = [
+      // 0 - dummy entry
+      function() {
+      },
+      // 1 - L
+      // 0: 0, 1: 0, 2: 0, 3: 0xff
+      function(pxData, data, pxPos, rawPos) {
+        if (rawPos === data.length) {
+          throw new Error("Ran out of data");
+        }
+        let pixel = data[rawPos];
+        pxData[pxPos] = pixel;
+        pxData[pxPos + 1] = pixel;
+        pxData[pxPos + 2] = pixel;
+        pxData[pxPos + 3] = 255;
+      },
+      // 2 - LA
+      // 0: 0, 1: 0, 2: 0, 3: 1
+      function(pxData, data, pxPos, rawPos) {
+        if (rawPos + 1 >= data.length) {
+          throw new Error("Ran out of data");
+        }
+        let pixel = data[rawPos];
+        pxData[pxPos] = pixel;
+        pxData[pxPos + 1] = pixel;
+        pxData[pxPos + 2] = pixel;
+        pxData[pxPos + 3] = data[rawPos + 1];
+      },
+      // 3 - RGB
+      // 0: 0, 1: 1, 2: 2, 3: 0xff
+      function(pxData, data, pxPos, rawPos) {
+        if (rawPos + 2 >= data.length) {
+          throw new Error("Ran out of data");
+        }
+        pxData[pxPos] = data[rawPos];
+        pxData[pxPos + 1] = data[rawPos + 1];
+        pxData[pxPos + 2] = data[rawPos + 2];
+        pxData[pxPos + 3] = 255;
+      },
+      // 4 - RGBA
+      // 0: 0, 1: 1, 2: 2, 3: 3
+      function(pxData, data, pxPos, rawPos) {
+        if (rawPos + 3 >= data.length) {
+          throw new Error("Ran out of data");
+        }
+        pxData[pxPos] = data[rawPos];
+        pxData[pxPos + 1] = data[rawPos + 1];
+        pxData[pxPos + 2] = data[rawPos + 2];
+        pxData[pxPos + 3] = data[rawPos + 3];
+      }
+    ];
+    var pixelBppCustomMapper = [
+      // 0 - dummy entry
+      function() {
+      },
+      // 1 - L
+      // 0: 0, 1: 0, 2: 0, 3: 0xff
+      function(pxData, pixelData, pxPos, maxBit) {
+        let pixel = pixelData[0];
+        pxData[pxPos] = pixel;
+        pxData[pxPos + 1] = pixel;
+        pxData[pxPos + 2] = pixel;
+        pxData[pxPos + 3] = maxBit;
+      },
+      // 2 - LA
+      // 0: 0, 1: 0, 2: 0, 3: 1
+      function(pxData, pixelData, pxPos) {
+        let pixel = pixelData[0];
+        pxData[pxPos] = pixel;
+        pxData[pxPos + 1] = pixel;
+        pxData[pxPos + 2] = pixel;
+        pxData[pxPos + 3] = pixelData[1];
+      },
+      // 3 - RGB
+      // 0: 0, 1: 1, 2: 2, 3: 0xff
+      function(pxData, pixelData, pxPos, maxBit) {
+        pxData[pxPos] = pixelData[0];
+        pxData[pxPos + 1] = pixelData[1];
+        pxData[pxPos + 2] = pixelData[2];
+        pxData[pxPos + 3] = maxBit;
+      },
+      // 4 - RGBA
+      // 0: 0, 1: 1, 2: 2, 3: 3
+      function(pxData, pixelData, pxPos) {
+        pxData[pxPos] = pixelData[0];
+        pxData[pxPos + 1] = pixelData[1];
+        pxData[pxPos + 2] = pixelData[2];
+        pxData[pxPos + 3] = pixelData[3];
+      }
+    ];
+    function bitRetriever(data, depth) {
+      let leftOver = [];
+      let i = 0;
+      function split() {
+        if (i === data.length) {
+          throw new Error("Ran out of data");
+        }
+        let byte = data[i];
+        i++;
+        let byte8, byte7, byte6, byte5, byte4, byte3, byte2, byte1;
+        switch (depth) {
+          default:
+            throw new Error("unrecognised depth");
+          case 16:
+            byte2 = data[i];
+            i++;
+            leftOver.push((byte << 8) + byte2);
+            break;
+          case 4:
+            byte2 = byte & 15;
+            byte1 = byte >> 4;
+            leftOver.push(byte1, byte2);
+            break;
+          case 2:
+            byte4 = byte & 3;
+            byte3 = byte >> 2 & 3;
+            byte2 = byte >> 4 & 3;
+            byte1 = byte >> 6 & 3;
+            leftOver.push(byte1, byte2, byte3, byte4);
+            break;
+          case 1:
+            byte8 = byte & 1;
+            byte7 = byte >> 1 & 1;
+            byte6 = byte >> 2 & 1;
+            byte5 = byte >> 3 & 1;
+            byte4 = byte >> 4 & 1;
+            byte3 = byte >> 5 & 1;
+            byte2 = byte >> 6 & 1;
+            byte1 = byte >> 7 & 1;
+            leftOver.push(byte1, byte2, byte3, byte4, byte5, byte6, byte7, byte8);
+            break;
+        }
+      }
+      return {
+        get: function(count) {
+          while (leftOver.length < count) {
+            split();
+          }
+          let returner = leftOver.slice(0, count);
+          leftOver = leftOver.slice(count);
+          return returner;
+        },
+        resetAfterLine: function() {
+          leftOver.length = 0;
+        },
+        end: function() {
+          if (i !== data.length) {
+            throw new Error("extra data found");
+          }
+        }
+      };
+    }
+    function mapImage8Bit(image, pxData, getPxPos, bpp, data, rawPos) {
+      let imageWidth = image.width;
+      let imageHeight = image.height;
+      let imagePass = image.index;
+      for (let y = 0; y < imageHeight; y++) {
+        for (let x = 0; x < imageWidth; x++) {
+          let pxPos = getPxPos(x, y, imagePass);
+          pixelBppMapper[bpp](pxData, data, pxPos, rawPos);
+          rawPos += bpp;
+        }
+      }
+      return rawPos;
+    }
+    function mapImageCustomBit(image, pxData, getPxPos, bpp, bits, maxBit) {
+      let imageWidth = image.width;
+      let imageHeight = image.height;
+      let imagePass = image.index;
+      for (let y = 0; y < imageHeight; y++) {
+        for (let x = 0; x < imageWidth; x++) {
+          let pixelData = bits.get(bpp);
+          let pxPos = getPxPos(x, y, imagePass);
+          pixelBppCustomMapper[bpp](pxData, pixelData, pxPos, maxBit);
+        }
+        bits.resetAfterLine();
+      }
+    }
+    exports.dataToBitMap = function(data, bitmapInfo) {
+      let width = bitmapInfo.width;
+      let height = bitmapInfo.height;
+      let depth = bitmapInfo.depth;
+      let bpp = bitmapInfo.bpp;
+      let interlace = bitmapInfo.interlace;
+      let bits;
+      if (depth !== 8) {
+        bits = bitRetriever(data, depth);
+      }
+      let pxData;
+      if (depth <= 8) {
+        pxData = Buffer.alloc(width * height * 4);
+      } else {
+        pxData = new Uint16Array(width * height * 4);
+      }
+      let maxBit = Math.pow(2, depth) - 1;
+      let rawPos = 0;
+      let images;
+      let getPxPos;
+      if (interlace) {
+        images = interlaceUtils.getImagePasses(width, height);
+        getPxPos = interlaceUtils.getInterlaceIterator(width, height);
+      } else {
+        let nonInterlacedPxPos = 0;
+        getPxPos = function() {
+          let returner = nonInterlacedPxPos;
+          nonInterlacedPxPos += 4;
+          return returner;
+        };
+        images = [{ width, height }];
+      }
+      for (let imageIndex = 0; imageIndex < images.length; imageIndex++) {
+        if (depth === 8) {
+          rawPos = mapImage8Bit(
+            images[imageIndex],
+            pxData,
+            getPxPos,
+            bpp,
+            data,
+            rawPos
+          );
+        } else {
+          mapImageCustomBit(
+            images[imageIndex],
+            pxData,
+            getPxPos,
+            bpp,
+            bits,
+            maxBit
+          );
+        }
+      }
+      if (depth === 8) {
+        if (rawPos !== data.length) {
+          throw new Error("extra data found");
+        }
+      } else {
+        bits.end();
+      }
+      return pxData;
+    };
+  }
+});
+
+// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/format-normaliser.js
+var require_format_normaliser = __commonJS({
+  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/format-normaliser.js"(exports, module) {
+    "use strict";
+    function dePalette(indata, outdata, width, height, palette) {
+      let pxPos = 0;
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          let color = palette[indata[pxPos]];
+          if (!color) {
+            throw new Error("index " + indata[pxPos] + " not in palette");
+          }
+          for (let i = 0; i < 4; i++) {
+            outdata[pxPos + i] = color[i];
+          }
+          pxPos += 4;
+        }
+      }
+    }
+    function replaceTransparentColor(indata, outdata, width, height, transColor) {
+      let pxPos = 0;
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          let makeTrans = false;
+          if (transColor.length === 1) {
+            if (transColor[0] === indata[pxPos]) {
+              makeTrans = true;
+            }
+          } else if (transColor[0] === indata[pxPos] && transColor[1] === indata[pxPos + 1] && transColor[2] === indata[pxPos + 2]) {
+            makeTrans = true;
+          }
+          if (makeTrans) {
+            for (let i = 0; i < 4; i++) {
+              outdata[pxPos + i] = 0;
+            }
+          }
+          pxPos += 4;
+        }
+      }
+    }
+    function scaleDepth(indata, outdata, width, height, depth) {
+      let maxOutSample = 255;
+      let maxInSample = Math.pow(2, depth) - 1;
+      let pxPos = 0;
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          for (let i = 0; i < 4; i++) {
+            outdata[pxPos + i] = Math.floor(
+              indata[pxPos + i] * maxOutSample / maxInSample + 0.5
+            );
+          }
+          pxPos += 4;
+        }
+      }
+    }
+    module.exports = function(indata, imageData, skipRescale = false) {
+      let depth = imageData.depth;
+      let width = imageData.width;
+      let height = imageData.height;
+      let colorType = imageData.colorType;
+      let transColor = imageData.transColor;
+      let palette = imageData.palette;
+      let outdata = indata;
+      if (colorType === 3) {
+        dePalette(indata, outdata, width, height, palette);
+      } else {
+        if (transColor) {
+          replaceTransparentColor(indata, outdata, width, height, transColor);
+        }
+        if (depth !== 8 && !skipRescale) {
+          if (depth === 16) {
+            outdata = Buffer.alloc(width * height * 4);
+          }
+          scaleDepth(indata, outdata, width, height, depth);
+        }
+      }
+      return outdata;
+    };
+  }
+});
+
+// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/parser-async.js
+var require_parser_async = __commonJS({
+  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/parser-async.js"(exports, module) {
+    "use strict";
+    var util2 = __require("util");
+    var zlib = __require("zlib");
+    var ChunkStream = require_chunkstream();
+    var FilterAsync = require_filter_parse_async();
+    var Parser = require_parser();
+    var bitmapper = require_bitmapper();
+    var formatNormaliser = require_format_normaliser();
+    var ParserAsync = module.exports = function(options) {
+      ChunkStream.call(this);
+      this._parser = new Parser(options, {
+        read: this.read.bind(this),
+        error: this._handleError.bind(this),
+        metadata: this._handleMetaData.bind(this),
+        gamma: this.emit.bind(this, "gamma"),
+        palette: this._handlePalette.bind(this),
+        transColor: this._handleTransColor.bind(this),
+        finished: this._finished.bind(this),
+        inflateData: this._inflateData.bind(this),
+        simpleTransparency: this._simpleTransparency.bind(this),
+        headersFinished: this._headersFinished.bind(this)
+      });
+      this._options = options;
+      this.writable = true;
+      this._parser.start();
+    };
+    util2.inherits(ParserAsync, ChunkStream);
+    ParserAsync.prototype._handleError = function(err) {
+      this.emit("error", err);
+      this.writable = false;
+      this.destroy();
+      if (this._inflate && this._inflate.destroy) {
+        this._inflate.destroy();
+      }
+      if (this._filter) {
+        this._filter.destroy();
+        this._filter.on("error", function() {
+        });
+      }
+      this.errord = true;
+    };
+    ParserAsync.prototype._inflateData = function(data) {
+      if (!this._inflate) {
+        if (this._bitmapInfo.interlace) {
+          this._inflate = zlib.createInflate();
+          this._inflate.on("error", this.emit.bind(this, "error"));
+          this._filter.on("complete", this._complete.bind(this));
+          this._inflate.pipe(this._filter);
+        } else {
+          let rowSize = (this._bitmapInfo.width * this._bitmapInfo.bpp * this._bitmapInfo.depth + 7 >> 3) + 1;
+          let imageSize = rowSize * this._bitmapInfo.height;
+          let chunkSize = Math.max(imageSize, zlib.Z_MIN_CHUNK);
+          this._inflate = zlib.createInflate({ chunkSize });
+          let leftToInflate = imageSize;
+          let emitError = this.emit.bind(this, "error");
+          this._inflate.on("error", function(err) {
+            if (!leftToInflate) {
+              return;
+            }
+            emitError(err);
+          });
+          this._filter.on("complete", this._complete.bind(this));
+          let filterWrite = this._filter.write.bind(this._filter);
+          this._inflate.on("data", function(chunk) {
+            if (!leftToInflate) {
+              return;
+            }
+            if (chunk.length > leftToInflate) {
+              chunk = chunk.slice(0, leftToInflate);
+            }
+            leftToInflate -= chunk.length;
+            filterWrite(chunk);
+          });
+          this._inflate.on("end", this._filter.end.bind(this._filter));
+        }
+      }
+      this._inflate.write(data);
+    };
+    ParserAsync.prototype._handleMetaData = function(metaData) {
+      this._metaData = metaData;
+      this._bitmapInfo = Object.create(metaData);
+      this._filter = new FilterAsync(this._bitmapInfo);
+    };
+    ParserAsync.prototype._handleTransColor = function(transColor) {
+      this._bitmapInfo.transColor = transColor;
+    };
+    ParserAsync.prototype._handlePalette = function(palette) {
+      this._bitmapInfo.palette = palette;
+    };
+    ParserAsync.prototype._simpleTransparency = function() {
+      this._metaData.alpha = true;
+    };
+    ParserAsync.prototype._headersFinished = function() {
+      this.emit("metadata", this._metaData);
+    };
+    ParserAsync.prototype._finished = function() {
+      if (this.errord) {
+        return;
+      }
+      if (!this._inflate) {
+        this.emit("error", "No Inflate block");
+      } else {
+        this._inflate.end();
+      }
+    };
+    ParserAsync.prototype._complete = function(filteredData) {
+      if (this.errord) {
+        return;
+      }
+      let normalisedBitmapData;
+      try {
+        let bitmapData = bitmapper.dataToBitMap(filteredData, this._bitmapInfo);
+        normalisedBitmapData = formatNormaliser(
+          bitmapData,
+          this._bitmapInfo,
+          this._options.skipRescale
+        );
+        bitmapData = null;
+      } catch (ex) {
+        this._handleError(ex);
+        return;
+      }
+      this.emit("parsed", normalisedBitmapData);
+    };
+  }
+});
+
+// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/bitpacker.js
+var require_bitpacker = __commonJS({
+  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/bitpacker.js"(exports, module) {
+    "use strict";
+    var constants = require_constants();
+    module.exports = function(dataIn, width, height, options) {
+      let outHasAlpha = [constants.COLORTYPE_COLOR_ALPHA, constants.COLORTYPE_ALPHA].indexOf(
+        options.colorType
+      ) !== -1;
+      if (options.colorType === options.inputColorType) {
+        let bigEndian = (function() {
+          let buffer = new ArrayBuffer(2);
+          new DataView(buffer).setInt16(
+            0,
+            256,
+            true
+            /* littleEndian */
+          );
+          return new Int16Array(buffer)[0] !== 256;
+        })();
+        if (options.bitDepth === 8 || options.bitDepth === 16 && bigEndian) {
+          return dataIn;
+        }
+      }
+      let data = options.bitDepth !== 16 ? dataIn : new Uint16Array(dataIn.buffer);
+      let maxValue = 255;
+      let inBpp = constants.COLORTYPE_TO_BPP_MAP[options.inputColorType];
+      if (inBpp === 4 && !options.inputHasAlpha) {
+        inBpp = 3;
+      }
+      let outBpp = constants.COLORTYPE_TO_BPP_MAP[options.colorType];
+      if (options.bitDepth === 16) {
+        maxValue = 65535;
+        outBpp *= 2;
+      }
+      let outData = Buffer.alloc(width * height * outBpp);
+      let inIndex = 0;
+      let outIndex = 0;
+      let bgColor = options.bgColor || {};
+      if (bgColor.red === void 0) {
+        bgColor.red = maxValue;
+      }
+      if (bgColor.green === void 0) {
+        bgColor.green = maxValue;
+      }
+      if (bgColor.blue === void 0) {
+        bgColor.blue = maxValue;
+      }
+      function getRGBA() {
+        let red;
+        let green;
+        let blue;
+        let alpha = maxValue;
+        switch (options.inputColorType) {
+          case constants.COLORTYPE_COLOR_ALPHA:
+            alpha = data[inIndex + 3];
+            red = data[inIndex];
+            green = data[inIndex + 1];
+            blue = data[inIndex + 2];
+            break;
+          case constants.COLORTYPE_COLOR:
+            red = data[inIndex];
+            green = data[inIndex + 1];
+            blue = data[inIndex + 2];
+            break;
+          case constants.COLORTYPE_ALPHA:
+            alpha = data[inIndex + 1];
+            red = data[inIndex];
+            green = red;
+            blue = red;
+            break;
+          case constants.COLORTYPE_GRAYSCALE:
+            red = data[inIndex];
+            green = red;
+            blue = red;
+            break;
+          default:
+            throw new Error(
+              "input color type:" + options.inputColorType + " is not supported at present"
+            );
+        }
+        if (options.inputHasAlpha) {
+          if (!outHasAlpha) {
+            alpha /= maxValue;
+            red = Math.min(
+              Math.max(Math.round((1 - alpha) * bgColor.red + alpha * red), 0),
+              maxValue
+            );
+            green = Math.min(
+              Math.max(Math.round((1 - alpha) * bgColor.green + alpha * green), 0),
+              maxValue
+            );
+            blue = Math.min(
+              Math.max(Math.round((1 - alpha) * bgColor.blue + alpha * blue), 0),
+              maxValue
+            );
+          }
+        }
+        return { red, green, blue, alpha };
+      }
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          let rgba = getRGBA(data, inIndex);
+          switch (options.colorType) {
+            case constants.COLORTYPE_COLOR_ALPHA:
+            case constants.COLORTYPE_COLOR:
+              if (options.bitDepth === 8) {
+                outData[outIndex] = rgba.red;
+                outData[outIndex + 1] = rgba.green;
+                outData[outIndex + 2] = rgba.blue;
+                if (outHasAlpha) {
+                  outData[outIndex + 3] = rgba.alpha;
+                }
+              } else {
+                outData.writeUInt16BE(rgba.red, outIndex);
+                outData.writeUInt16BE(rgba.green, outIndex + 2);
+                outData.writeUInt16BE(rgba.blue, outIndex + 4);
+                if (outHasAlpha) {
+                  outData.writeUInt16BE(rgba.alpha, outIndex + 6);
+                }
+              }
+              break;
+            case constants.COLORTYPE_ALPHA:
+            case constants.COLORTYPE_GRAYSCALE: {
+              let grayscale = (rgba.red + rgba.green + rgba.blue) / 3;
+              if (options.bitDepth === 8) {
+                outData[outIndex] = grayscale;
+                if (outHasAlpha) {
+                  outData[outIndex + 1] = rgba.alpha;
+                }
+              } else {
+                outData.writeUInt16BE(grayscale, outIndex);
+                if (outHasAlpha) {
+                  outData.writeUInt16BE(rgba.alpha, outIndex + 2);
+                }
+              }
+              break;
+            }
+            default:
+              throw new Error("unrecognised color Type " + options.colorType);
+          }
+          inIndex += inBpp;
+          outIndex += outBpp;
+        }
+      }
+      return outData;
+    };
+  }
+});
+
+// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/filter-pack.js
+var require_filter_pack = __commonJS({
+  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/filter-pack.js"(exports, module) {
+    "use strict";
+    var paethPredictor = require_paeth_predictor();
+    function filterNone(pxData, pxPos, byteWidth, rawData, rawPos) {
+      for (let x = 0; x < byteWidth; x++) {
+        rawData[rawPos + x] = pxData[pxPos + x];
+      }
+    }
+    function filterSumNone(pxData, pxPos, byteWidth) {
+      let sum = 0;
+      let length = pxPos + byteWidth;
+      for (let i = pxPos; i < length; i++) {
+        sum += Math.abs(pxData[i]);
+      }
+      return sum;
+    }
+    function filterSub(pxData, pxPos, byteWidth, rawData, rawPos, bpp) {
+      for (let x = 0; x < byteWidth; x++) {
+        let left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
+        let val = pxData[pxPos + x] - left;
+        rawData[rawPos + x] = val;
+      }
+    }
+    function filterSumSub(pxData, pxPos, byteWidth, bpp) {
+      let sum = 0;
+      for (let x = 0; x < byteWidth; x++) {
+        let left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
+        let val = pxData[pxPos + x] - left;
+        sum += Math.abs(val);
+      }
+      return sum;
+    }
+    function filterUp(pxData, pxPos, byteWidth, rawData, rawPos) {
+      for (let x = 0; x < byteWidth; x++) {
+        let up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0;
+        let val = pxData[pxPos + x] - up;
+        rawData[rawPos + x] = val;
+      }
+    }
+    function filterSumUp(pxData, pxPos, byteWidth) {
+      let sum = 0;
+      let length = pxPos + byteWidth;
+      for (let x = pxPos; x < length; x++) {
+        let up = pxPos > 0 ? pxData[x - byteWidth] : 0;
+        let val = pxData[x] - up;
+        sum += Math.abs(val);
+      }
+      return sum;
+    }
+    function filterAvg(pxData, pxPos, byteWidth, rawData, rawPos, bpp) {
+      for (let x = 0; x < byteWidth; x++) {
+        let left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
+        let up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0;
+        let val = pxData[pxPos + x] - (left + up >> 1);
+        rawData[rawPos + x] = val;
+      }
+    }
+    function filterSumAvg(pxData, pxPos, byteWidth, bpp) {
+      let sum = 0;
+      for (let x = 0; x < byteWidth; x++) {
+        let left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
+        let up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0;
+        let val = pxData[pxPos + x] - (left + up >> 1);
+        sum += Math.abs(val);
+      }
+      return sum;
+    }
+    function filterPaeth(pxData, pxPos, byteWidth, rawData, rawPos, bpp) {
+      for (let x = 0; x < byteWidth; x++) {
+        let left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
+        let up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0;
+        let upleft = pxPos > 0 && x >= bpp ? pxData[pxPos + x - (byteWidth + bpp)] : 0;
+        let val = pxData[pxPos + x] - paethPredictor(left, up, upleft);
+        rawData[rawPos + x] = val;
+      }
+    }
+    function filterSumPaeth(pxData, pxPos, byteWidth, bpp) {
+      let sum = 0;
+      for (let x = 0; x < byteWidth; x++) {
+        let left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
+        let up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0;
+        let upleft = pxPos > 0 && x >= bpp ? pxData[pxPos + x - (byteWidth + bpp)] : 0;
+        let val = pxData[pxPos + x] - paethPredictor(left, up, upleft);
+        sum += Math.abs(val);
+      }
+      return sum;
+    }
+    var filters = {
+      0: filterNone,
+      1: filterSub,
+      2: filterUp,
+      3: filterAvg,
+      4: filterPaeth
+    };
+    var filterSums = {
+      0: filterSumNone,
+      1: filterSumSub,
+      2: filterSumUp,
+      3: filterSumAvg,
+      4: filterSumPaeth
+    };
+    module.exports = function(pxData, width, height, options, bpp) {
+      let filterTypes;
+      if (!("filterType" in options) || options.filterType === -1) {
+        filterTypes = [0, 1, 2, 3, 4];
+      } else if (typeof options.filterType === "number") {
+        filterTypes = [options.filterType];
+      } else {
+        throw new Error("unrecognised filter types");
+      }
+      if (options.bitDepth === 16) {
+        bpp *= 2;
+      }
+      let byteWidth = width * bpp;
+      let rawPos = 0;
+      let pxPos = 0;
+      let rawData = Buffer.alloc((byteWidth + 1) * height);
+      let sel = filterTypes[0];
+      for (let y = 0; y < height; y++) {
+        if (filterTypes.length > 1) {
+          let min = Infinity;
+          for (let i = 0; i < filterTypes.length; i++) {
+            let sum = filterSums[filterTypes[i]](pxData, pxPos, byteWidth, bpp);
+            if (sum < min) {
+              sel = filterTypes[i];
+              min = sum;
+            }
+          }
+        }
+        rawData[rawPos] = sel;
+        rawPos++;
+        filters[sel](pxData, pxPos, byteWidth, rawData, rawPos, bpp);
+        rawPos += byteWidth;
+        pxPos += byteWidth;
+      }
+      return rawData;
+    };
+  }
+});
+
+// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/packer.js
+var require_packer = __commonJS({
+  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/packer.js"(exports, module) {
+    "use strict";
+    var constants = require_constants();
+    var CrcStream = require_crc();
+    var bitPacker = require_bitpacker();
+    var filter = require_filter_pack();
+    var zlib = __require("zlib");
+    var Packer = module.exports = function(options) {
+      this._options = options;
+      options.deflateChunkSize = options.deflateChunkSize || 32 * 1024;
+      options.deflateLevel = options.deflateLevel != null ? options.deflateLevel : 9;
+      options.deflateStrategy = options.deflateStrategy != null ? options.deflateStrategy : 3;
+      options.inputHasAlpha = options.inputHasAlpha != null ? options.inputHasAlpha : true;
+      options.deflateFactory = options.deflateFactory || zlib.createDeflate;
+      options.bitDepth = options.bitDepth || 8;
+      options.colorType = typeof options.colorType === "number" ? options.colorType : constants.COLORTYPE_COLOR_ALPHA;
+      options.inputColorType = typeof options.inputColorType === "number" ? options.inputColorType : constants.COLORTYPE_COLOR_ALPHA;
+      if ([
+        constants.COLORTYPE_GRAYSCALE,
+        constants.COLORTYPE_COLOR,
+        constants.COLORTYPE_COLOR_ALPHA,
+        constants.COLORTYPE_ALPHA
+      ].indexOf(options.colorType) === -1) {
+        throw new Error(
+          "option color type:" + options.colorType + " is not supported at present"
+        );
+      }
+      if ([
+        constants.COLORTYPE_GRAYSCALE,
+        constants.COLORTYPE_COLOR,
+        constants.COLORTYPE_COLOR_ALPHA,
+        constants.COLORTYPE_ALPHA
+      ].indexOf(options.inputColorType) === -1) {
+        throw new Error(
+          "option input color type:" + options.inputColorType + " is not supported at present"
+        );
+      }
+      if (options.bitDepth !== 8 && options.bitDepth !== 16) {
+        throw new Error(
+          "option bit depth:" + options.bitDepth + " is not supported at present"
+        );
+      }
+    };
+    Packer.prototype.getDeflateOptions = function() {
+      return {
+        chunkSize: this._options.deflateChunkSize,
+        level: this._options.deflateLevel,
+        strategy: this._options.deflateStrategy
+      };
+    };
+    Packer.prototype.createDeflate = function() {
+      return this._options.deflateFactory(this.getDeflateOptions());
+    };
+    Packer.prototype.filterData = function(data, width, height) {
+      let packedData = bitPacker(data, width, height, this._options);
+      let bpp = constants.COLORTYPE_TO_BPP_MAP[this._options.colorType];
+      let filteredData = filter(packedData, width, height, this._options, bpp);
+      return filteredData;
+    };
+    Packer.prototype._packChunk = function(type, data) {
+      let len = data ? data.length : 0;
+      let buf = Buffer.alloc(len + 12);
+      buf.writeUInt32BE(len, 0);
+      buf.writeUInt32BE(type, 4);
+      if (data) {
+        data.copy(buf, 8);
+      }
+      buf.writeInt32BE(
+        CrcStream.crc32(buf.slice(4, buf.length - 4)),
+        buf.length - 4
+      );
+      return buf;
+    };
+    Packer.prototype.packGAMA = function(gamma) {
+      let buf = Buffer.alloc(4);
+      buf.writeUInt32BE(Math.floor(gamma * constants.GAMMA_DIVISION), 0);
+      return this._packChunk(constants.TYPE_gAMA, buf);
+    };
+    Packer.prototype.packIHDR = function(width, height) {
+      let buf = Buffer.alloc(13);
+      buf.writeUInt32BE(width, 0);
+      buf.writeUInt32BE(height, 4);
+      buf[8] = this._options.bitDepth;
+      buf[9] = this._options.colorType;
+      buf[10] = 0;
+      buf[11] = 0;
+      buf[12] = 0;
+      return this._packChunk(constants.TYPE_IHDR, buf);
+    };
+    Packer.prototype.packIDAT = function(data) {
+      return this._packChunk(constants.TYPE_IDAT, data);
+    };
+    Packer.prototype.packIEND = function() {
+      return this._packChunk(constants.TYPE_IEND, null);
+    };
+  }
+});
+
+// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/packer-async.js
+var require_packer_async = __commonJS({
+  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/packer-async.js"(exports, module) {
+    "use strict";
+    var util2 = __require("util");
+    var Stream = __require("stream");
+    var constants = require_constants();
+    var Packer = require_packer();
+    var PackerAsync = module.exports = function(opt) {
+      Stream.call(this);
+      let options = opt || {};
+      this._packer = new Packer(options);
+      this._deflate = this._packer.createDeflate();
+      this.readable = true;
+    };
+    util2.inherits(PackerAsync, Stream);
+    PackerAsync.prototype.pack = function(data, width, height, gamma) {
+      this.emit("data", Buffer.from(constants.PNG_SIGNATURE));
+      this.emit("data", this._packer.packIHDR(width, height));
+      if (gamma) {
+        this.emit("data", this._packer.packGAMA(gamma));
+      }
+      let filteredData = this._packer.filterData(data, width, height);
+      this._deflate.on("error", this.emit.bind(this, "error"));
+      this._deflate.on(
+        "data",
+        function(compressedData) {
+          this.emit("data", this._packer.packIDAT(compressedData));
+        }.bind(this)
+      );
+      this._deflate.on(
+        "end",
+        function() {
+          this.emit("data", this._packer.packIEND());
+          this.emit("end");
+        }.bind(this)
+      );
+      this._deflate.end(filteredData);
+    };
+  }
+});
+
+// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/sync-inflate.js
+var require_sync_inflate = __commonJS({
+  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/sync-inflate.js"(exports, module) {
+    "use strict";
+    var assert2 = __require("assert").ok;
+    var zlib = __require("zlib");
+    var util2 = __require("util");
+    var kMaxLength = __require("buffer").kMaxLength;
+    function Inflate(opts) {
+      if (!(this instanceof Inflate)) {
+        return new Inflate(opts);
+      }
+      if (opts && opts.chunkSize < zlib.Z_MIN_CHUNK) {
+        opts.chunkSize = zlib.Z_MIN_CHUNK;
+      }
+      zlib.Inflate.call(this, opts);
+      this._offset = this._offset === void 0 ? this._outOffset : this._offset;
+      this._buffer = this._buffer || this._outBuffer;
+      if (opts && opts.maxLength != null) {
+        this._maxLength = opts.maxLength;
+      }
+    }
+    function createInflate(opts) {
+      return new Inflate(opts);
+    }
+    function _close(engine, callback) {
+      if (callback) {
+        process.nextTick(callback);
+      }
+      if (!engine._handle) {
+        return;
+      }
+      engine._handle.close();
+      engine._handle = null;
+    }
+    Inflate.prototype._processChunk = function(chunk, flushFlag, asyncCb) {
+      if (typeof asyncCb === "function") {
+        return zlib.Inflate._processChunk.call(this, chunk, flushFlag, asyncCb);
+      }
+      let self = this;
+      let availInBefore = chunk && chunk.length;
+      let availOutBefore = this._chunkSize - this._offset;
+      let leftToInflate = this._maxLength;
+      let inOff = 0;
+      let buffers = [];
+      let nread = 0;
+      let error51;
+      this.on("error", function(err) {
+        error51 = err;
+      });
+      function handleChunk(availInAfter, availOutAfter) {
+        if (self._hadError) {
+          return;
+        }
+        let have = availOutBefore - availOutAfter;
+        assert2(have >= 0, "have should not go down");
+        if (have > 0) {
+          let out = self._buffer.slice(self._offset, self._offset + have);
+          self._offset += have;
+          if (out.length > leftToInflate) {
+            out = out.slice(0, leftToInflate);
+          }
+          buffers.push(out);
+          nread += out.length;
+          leftToInflate -= out.length;
+          if (leftToInflate === 0) {
+            return false;
+          }
+        }
+        if (availOutAfter === 0 || self._offset >= self._chunkSize) {
+          availOutBefore = self._chunkSize;
+          self._offset = 0;
+          self._buffer = Buffer.allocUnsafe(self._chunkSize);
+        }
+        if (availOutAfter === 0) {
+          inOff += availInBefore - availInAfter;
+          availInBefore = availInAfter;
+          return true;
+        }
+        return false;
+      }
+      assert2(this._handle, "zlib binding closed");
+      let res;
+      do {
+        res = this._handle.writeSync(
+          flushFlag,
+          chunk,
+          // in
+          inOff,
+          // in_off
+          availInBefore,
+          // in_len
+          this._buffer,
+          // out
+          this._offset,
+          //out_off
+          availOutBefore
+        );
+        res = res || this._writeState;
+      } while (!this._hadError && handleChunk(res[0], res[1]));
+      if (this._hadError) {
+        throw error51;
+      }
+      if (nread >= kMaxLength) {
+        _close(this);
+        throw new RangeError(
+          "Cannot create final Buffer. It would be larger than 0x" + kMaxLength.toString(16) + " bytes"
+        );
+      }
+      let buf = Buffer.concat(buffers, nread);
+      _close(this);
+      return buf;
+    };
+    util2.inherits(Inflate, zlib.Inflate);
+    function zlibBufferSync(engine, buffer) {
+      if (typeof buffer === "string") {
+        buffer = Buffer.from(buffer);
+      }
+      if (!(buffer instanceof Buffer)) {
+        throw new TypeError("Not a string or buffer");
+      }
+      let flushFlag = engine._finishFlushFlag;
+      if (flushFlag == null) {
+        flushFlag = zlib.Z_FINISH;
+      }
+      return engine._processChunk(buffer, flushFlag);
+    }
+    function inflateSync(buffer, opts) {
+      return zlibBufferSync(new Inflate(opts), buffer);
+    }
+    module.exports = exports = inflateSync;
+    exports.Inflate = Inflate;
+    exports.createInflate = createInflate;
+    exports.inflateSync = inflateSync;
+  }
+});
+
+// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/sync-reader.js
+var require_sync_reader = __commonJS({
+  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/sync-reader.js"(exports, module) {
+    "use strict";
+    var SyncReader = module.exports = function(buffer) {
+      this._buffer = buffer;
+      this._reads = [];
+    };
+    SyncReader.prototype.read = function(length, callback) {
+      this._reads.push({
+        length: Math.abs(length),
+        // if length < 0 then at most this length
+        allowLess: length < 0,
+        func: callback
+      });
+    };
+    SyncReader.prototype.process = function() {
+      while (this._reads.length > 0 && this._buffer.length) {
+        let read = this._reads[0];
+        if (this._buffer.length && (this._buffer.length >= read.length || read.allowLess)) {
+          this._reads.shift();
+          let buf = this._buffer;
+          this._buffer = buf.slice(read.length);
+          read.func.call(this, buf.slice(0, read.length));
+        } else {
+          break;
+        }
+      }
+      if (this._reads.length > 0) {
+        throw new Error("There are some read requests waitng on finished stream");
+      }
+      if (this._buffer.length > 0) {
+        throw new Error("unrecognised content at end of stream");
+      }
+    };
+  }
+});
+
+// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/filter-parse-sync.js
+var require_filter_parse_sync = __commonJS({
+  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/filter-parse-sync.js"(exports) {
+    "use strict";
+    var SyncReader = require_sync_reader();
+    var Filter = require_filter_parse();
+    exports.process = function(inBuffer, bitmapInfo) {
+      let outBuffers = [];
+      let reader = new SyncReader(inBuffer);
+      let filter = new Filter(bitmapInfo, {
+        read: reader.read.bind(reader),
+        write: function(bufferPart) {
+          outBuffers.push(bufferPart);
+        },
+        complete: function() {
+        }
+      });
+      filter.start();
+      reader.process();
+      return Buffer.concat(outBuffers);
+    };
+  }
+});
+
+// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/parser-sync.js
+var require_parser_sync = __commonJS({
+  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/parser-sync.js"(exports, module) {
+    "use strict";
+    var hasSyncZlib = true;
+    var zlib = __require("zlib");
+    var inflateSync = require_sync_inflate();
+    if (!zlib.deflateSync) {
+      hasSyncZlib = false;
+    }
+    var SyncReader = require_sync_reader();
+    var FilterSync = require_filter_parse_sync();
+    var Parser = require_parser();
+    var bitmapper = require_bitmapper();
+    var formatNormaliser = require_format_normaliser();
+    module.exports = function(buffer, options) {
+      if (!hasSyncZlib) {
+        throw new Error(
+          "To use the sync capability of this library in old node versions, please pin pngjs to v2.3.0"
+        );
+      }
+      let err;
+      function handleError(_err_) {
+        err = _err_;
+      }
+      let metaData;
+      function handleMetaData(_metaData_) {
+        metaData = _metaData_;
+      }
+      function handleTransColor(transColor) {
+        metaData.transColor = transColor;
+      }
+      function handlePalette(palette) {
+        metaData.palette = palette;
+      }
+      function handleSimpleTransparency() {
+        metaData.alpha = true;
+      }
+      let gamma;
+      function handleGamma(_gamma_) {
+        gamma = _gamma_;
+      }
+      let inflateDataList = [];
+      function handleInflateData(inflatedData2) {
+        inflateDataList.push(inflatedData2);
+      }
+      let reader = new SyncReader(buffer);
+      let parser = new Parser(options, {
+        read: reader.read.bind(reader),
+        error: handleError,
+        metadata: handleMetaData,
+        gamma: handleGamma,
+        palette: handlePalette,
+        transColor: handleTransColor,
+        inflateData: handleInflateData,
+        simpleTransparency: handleSimpleTransparency
+      });
+      parser.start();
+      reader.process();
+      if (err) {
+        throw err;
+      }
+      let inflateData = Buffer.concat(inflateDataList);
+      inflateDataList.length = 0;
+      let inflatedData;
+      if (metaData.interlace) {
+        inflatedData = zlib.inflateSync(inflateData);
+      } else {
+        let rowSize = (metaData.width * metaData.bpp * metaData.depth + 7 >> 3) + 1;
+        let imageSize = rowSize * metaData.height;
+        inflatedData = inflateSync(inflateData, {
+          chunkSize: imageSize,
+          maxLength: imageSize
+        });
+      }
+      inflateData = null;
+      if (!inflatedData || !inflatedData.length) {
+        throw new Error("bad png - invalid inflate data response");
+      }
+      let unfilteredData = FilterSync.process(inflatedData, metaData);
+      inflateData = null;
+      let bitmapData = bitmapper.dataToBitMap(unfilteredData, metaData);
+      unfilteredData = null;
+      let normalisedBitmapData = formatNormaliser(
+        bitmapData,
+        metaData,
+        options.skipRescale
+      );
+      metaData.data = normalisedBitmapData;
+      metaData.gamma = gamma || 0;
+      return metaData;
+    };
+  }
+});
+
+// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/packer-sync.js
+var require_packer_sync = __commonJS({
+  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/packer-sync.js"(exports, module) {
+    "use strict";
+    var hasSyncZlib = true;
+    var zlib = __require("zlib");
+    if (!zlib.deflateSync) {
+      hasSyncZlib = false;
+    }
+    var constants = require_constants();
+    var Packer = require_packer();
+    module.exports = function(metaData, opt) {
+      if (!hasSyncZlib) {
+        throw new Error(
+          "To use the sync capability of this library in old node versions, please pin pngjs to v2.3.0"
+        );
+      }
+      let options = opt || {};
+      let packer = new Packer(options);
+      let chunks = [];
+      chunks.push(Buffer.from(constants.PNG_SIGNATURE));
+      chunks.push(packer.packIHDR(metaData.width, metaData.height));
+      if (metaData.gamma) {
+        chunks.push(packer.packGAMA(metaData.gamma));
+      }
+      let filteredData = packer.filterData(
+        metaData.data,
+        metaData.width,
+        metaData.height
+      );
+      let compressedData = zlib.deflateSync(
+        filteredData,
+        packer.getDeflateOptions()
+      );
+      filteredData = null;
+      if (!compressedData || !compressedData.length) {
+        throw new Error("bad png - invalid compressed data response");
+      }
+      chunks.push(packer.packIDAT(compressedData));
+      chunks.push(packer.packIEND());
+      return Buffer.concat(chunks);
+    };
+  }
+});
+
+// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/png-sync.js
+var require_png_sync = __commonJS({
+  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/png-sync.js"(exports) {
+    "use strict";
+    var parse3 = require_parser_sync();
+    var pack = require_packer_sync();
+    exports.read = function(buffer, options) {
+      return parse3(buffer, options || {});
+    };
+    exports.write = function(png, options) {
+      return pack(png, options);
+    };
+  }
+});
+
+// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/png.js
+var require_png = __commonJS({
+  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/png.js"(exports) {
+    "use strict";
+    var util2 = __require("util");
+    var Stream = __require("stream");
+    var Parser = require_parser_async();
+    var Packer = require_packer_async();
+    var PNGSync = require_png_sync();
+    var PNG2 = exports.PNG = function(options) {
+      Stream.call(this);
+      options = options || {};
+      this.width = options.width | 0;
+      this.height = options.height | 0;
+      this.data = this.width > 0 && this.height > 0 ? Buffer.alloc(4 * this.width * this.height) : null;
+      if (options.fill && this.data) {
+        this.data.fill(0);
+      }
+      this.gamma = 0;
+      this.readable = this.writable = true;
+      this._parser = new Parser(options);
+      this._parser.on("error", this.emit.bind(this, "error"));
+      this._parser.on("close", this._handleClose.bind(this));
+      this._parser.on("metadata", this._metadata.bind(this));
+      this._parser.on("gamma", this._gamma.bind(this));
+      this._parser.on(
+        "parsed",
+        function(data) {
+          this.data = data;
+          this.emit("parsed", data);
+        }.bind(this)
+      );
+      this._packer = new Packer(options);
+      this._packer.on("data", this.emit.bind(this, "data"));
+      this._packer.on("end", this.emit.bind(this, "end"));
+      this._parser.on("close", this._handleClose.bind(this));
+      this._packer.on("error", this.emit.bind(this, "error"));
+    };
+    util2.inherits(PNG2, Stream);
+    PNG2.sync = PNGSync;
+    PNG2.prototype.pack = function() {
+      if (!this.data || !this.data.length) {
+        this.emit("error", "No data provided");
+        return this;
+      }
+      process.nextTick(
+        function() {
+          this._packer.pack(this.data, this.width, this.height, this.gamma);
+        }.bind(this)
+      );
+      return this;
+    };
+    PNG2.prototype.parse = function(data, callback) {
+      if (callback) {
+        let onParsed, onError;
+        onParsed = function(parsedData) {
+          this.removeListener("error", onError);
+          this.data = parsedData;
+          callback(null, this);
+        }.bind(this);
+        onError = function(err) {
+          this.removeListener("parsed", onParsed);
+          callback(err, null);
+        }.bind(this);
+        this.once("parsed", onParsed);
+        this.once("error", onError);
+      }
+      this.end(data);
+      return this;
+    };
+    PNG2.prototype.write = function(data) {
+      this._parser.write(data);
+      return true;
+    };
+    PNG2.prototype.end = function(data) {
+      this._parser.end(data);
+    };
+    PNG2.prototype._metadata = function(metadata) {
+      this.width = metadata.width;
+      this.height = metadata.height;
+      this.emit("metadata", metadata);
+    };
+    PNG2.prototype._gamma = function(gamma) {
+      this.gamma = gamma;
+    };
+    PNG2.prototype._handleClose = function() {
+      if (!this._parser.writable && !this._packer.readable) {
+        this.emit("close");
+      }
+    };
+    PNG2.bitblt = function(src, dst, srcX, srcY, width, height, deltaX, deltaY) {
+      srcX |= 0;
+      srcY |= 0;
+      width |= 0;
+      height |= 0;
+      deltaX |= 0;
+      deltaY |= 0;
+      if (srcX > src.width || srcY > src.height || srcX + width > src.width || srcY + height > src.height) {
+        throw new Error("bitblt reading outside image");
+      }
+      if (deltaX > dst.width || deltaY > dst.height || deltaX + width > dst.width || deltaY + height > dst.height) {
+        throw new Error("bitblt writing outside image");
+      }
+      for (let y = 0; y < height; y++) {
+        src.data.copy(
+          dst.data,
+          (deltaY + y) * dst.width + deltaX << 2,
+          (srcY + y) * src.width + srcX << 2,
+          (srcY + y) * src.width + srcX + width << 2
+        );
+      }
+    };
+    PNG2.prototype.bitblt = function(dst, srcX, srcY, width, height, deltaX, deltaY) {
+      PNG2.bitblt(this, dst, srcX, srcY, width, height, deltaX, deltaY);
+      return this;
+    };
+    PNG2.adjustGamma = function(src) {
+      if (src.gamma) {
+        for (let y = 0; y < src.height; y++) {
+          for (let x = 0; x < src.width; x++) {
+            let idx = src.width * y + x << 2;
+            for (let i = 0; i < 3; i++) {
+              let sample = src.data[idx + i] / 255;
+              sample = Math.pow(sample, 1 / 2.2 / src.gamma);
+              src.data[idx + i] = Math.round(sample * 255);
+            }
+          }
+        }
+        src.gamma = 0;
+      }
+    };
+    PNG2.prototype.adjustGamma = function() {
+      PNG2.adjustGamma(this);
+    };
+  }
+});
+
 // src/runtime/ids.ts
 function prefixedId(prefix) {
   return external_exports.string().regex(
@@ -32453,7 +34541,106 @@ var init_id_factory = __esm({
 });
 
 // src/workflow/workflow-contracts.ts
-var WorkflowScopeSchema, ReviewVerdictSchema, ReviewFindingSeveritySchema, RequirementVerdictSchema, WorkflowGateIdSchema, ReviewFindingSchema, ReviewRequirementSchema, ReviewGateResultSchema, ReviewSubmissionSchema, ContractsSubmissionSchema, ImplementationSubmissionSchema, FigmaBundleSubmissionSchema, WorkflowSubmissionSchema, WorkflowActionSchema, WorkflowStageSummarySchema, WorkflowStatusSchema;
+function isTargetedPlaywrightCommand(command, selector) {
+  if (/(?:&&|\|\||[;&|`\n\r]|\$\()/.test(command)) return false;
+  const tokens = tokenizeCommand(command);
+  if (tokens === void 0) return false;
+  let index = 0;
+  if (["npx", "bunx", "yarn"].includes(tokens[index] ?? "")) index += 1;
+  if (tokens[index] === "pnpm") {
+    index += 1;
+    if (tokens[index] === "exec") index += 1;
+  }
+  if (!["playwright", "./node_modules/.bin/playwright"].includes(tokens[index] ?? "")) {
+    return false;
+  }
+  if (tokens[index + 1] !== "test") return false;
+  const args = tokens.slice(index + 2);
+  const parsed = parsePlaywrightArguments(args);
+  if (parsed === void 0) return false;
+  if (/^@/.test(selector)) {
+    return parsed.positionals.length === 0 && parsed.grep.length === 1 && parsed.grep[0] === selector;
+  }
+  if (/^--project(?:=|\s+)/.test(selector)) {
+    const project = selector.replace(/^--project(?:=|\s+)/, "");
+    return parsed.positionals.length === 0 && parsed.projects.length === 1 && parsed.projects[0] === project;
+  }
+  return parsed.positionals.length === 1 && parsed.positionals[0] === selector;
+}
+function tokenizeCommand(command) {
+  const tokens = [];
+  let token = "";
+  let quote;
+  let escaped = false;
+  for (const character of command.trim()) {
+    if (escaped) {
+      token += character;
+      escaped = false;
+    } else if (character === "\\" && quote !== "'") {
+      escaped = true;
+    } else if (quote !== void 0) {
+      if (character === quote) quote = void 0;
+      else token += character;
+    } else if (character === "'" || character === '"') {
+      quote = character;
+    } else if (/\s/.test(character)) {
+      if (token.length > 0) {
+        tokens.push(token);
+        token = "";
+      }
+    } else {
+      token += character;
+    }
+  }
+  if (escaped || quote !== void 0) return void 0;
+  if (token.length > 0) tokens.push(token);
+  return tokens;
+}
+function parsePlaywrightArguments(args) {
+  const positionals = [];
+  const grep = [];
+  const projects = [];
+  const forbiddenOptions = /* @__PURE__ */ new Set(["--list", "--pass-with-no-tests"]);
+  const optionsWithValues = /* @__PURE__ */ new Set([
+    "--config",
+    "--grep-invert",
+    "--output",
+    "--reporter",
+    "--repeat-each",
+    "--retries",
+    "--shard",
+    "--timeout",
+    "--trace",
+    "--workers"
+  ]);
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === "--" || /^-[^-]/.test(argument)) return void 0;
+    if (forbiddenOptions.has(argument)) return void 0;
+    if (argument.startsWith("--grep=")) {
+      grep.push(argument.slice("--grep=".length));
+    } else if (argument === "--grep") {
+      const value = args[++index];
+      if (value === void 0 || value.startsWith("-")) return void 0;
+      grep.push(value);
+    } else if (argument.startsWith("--project=")) {
+      projects.push(argument.slice("--project=".length));
+    } else if (argument === "--project") {
+      const value = args[++index];
+      if (value === void 0 || value.startsWith("-")) return void 0;
+      projects.push(value);
+    } else if (optionsWithValues.has(argument)) {
+      const value = args[++index];
+      if (value === void 0 || value.startsWith("-")) return void 0;
+    } else if (argument.startsWith("--")) {
+      continue;
+    } else {
+      positionals.push(argument);
+    }
+  }
+  return { positionals, grep, projects };
+}
+var WorkflowScopeSchema, DeliveryModeSchema, ChangeKindSchema, PublicationIntentSchema, FigmaFileUrlSchema, ImplementationContextIdSchema, DeliveryProfileSchema, ReviewVerdictSchema, ReviewFindingSeveritySchema, RequirementVerdictSchema, WorkflowGateIdSchema, ReviewFindingSchema, ReviewRequirementSchema, ReviewGateResultSchema, ReviewSubmissionSchema, ContractsSubmissionSchema, ApiArtifactsSchema, ApiReadySubmissionSchema, FeatureEvidenceSchema, ImplementationSubmissionSchema, FigmaBundleSubmissionSchema, WorkflowSubmissionSchema, WorkflowActionSchema, WorkflowStageSummarySchema, WorkflowStatusSchema;
 var init_workflow_contracts = __esm({
   "src/workflow/workflow-contracts.ts"() {
     "use strict";
@@ -32468,6 +34655,37 @@ var init_workflow_contracts = __esm({
       securitySensitive: external_exports.boolean(),
       performanceSensitive: external_exports.boolean(),
       observabilityRequested: external_exports.boolean()
+    }).strict();
+    DeliveryModeSchema = external_exports.enum(["auto", "brief", "legacy", "feature", "figma"]);
+    ChangeKindSchema = external_exports.enum([
+      "auto",
+      "feature",
+      "fix",
+      "refactor",
+      "migration",
+      "design",
+      "docs"
+    ]);
+    PublicationIntentSchema = external_exports.enum(["draft", "none"]);
+    FigmaFileUrlSchema = external_exports.string().url().refine((value) => {
+      const parsed = new URL(value);
+      const host = parsed.hostname.toLowerCase();
+      return (host === "figma.com" || host === "www.figma.com") && /^\/(?:design|file|proto)\//i.test(parsed.pathname);
+    }, "Figma URL must be a figma.com design, file, or prototype URL");
+    ImplementationContextIdSchema = external_exports.string().trim().min(8).max(128).regex(/^[a-z0-9][a-z0-9._:-]+$/i, "Implementation context ID contains unsupported characters");
+    DeliveryProfileSchema = external_exports.object({
+      mode: DeliveryModeSchema,
+      changeKind: ChangeKindSchema,
+      publication: PublicationIntentSchema,
+      briefPath: external_exports.string().trim().min(1).optional(),
+      figmaUrl: FigmaFileUrlSchema.optional(),
+      requirements: external_exports.object({
+        brief: external_exports.boolean(),
+        legacyBaseline: external_exports.boolean(),
+        targetedFeatureE2E: external_exports.boolean(),
+        featureVideo: external_exports.boolean(),
+        figmaBundle: external_exports.boolean()
+      }).strict()
     }).strict();
     ReviewVerdictSchema = external_exports.enum(["approved", "changes-requested", "blocked"]);
     ReviewFindingSeveritySchema = external_exports.enum(["minor", "major", "blocker"]);
@@ -32580,7 +34798,8 @@ var init_workflow_contracts = __esm({
       kind: external_exports.literal("contracts"),
       status: external_exports.enum(["passed", "failed", "blocked"]),
       summary: external_exports.string().trim().min(1).max(4e3),
-      artifactPaths: external_exports.array(external_exports.string().trim().min(1)).default([])
+      artifactPaths: external_exports.array(external_exports.string().trim().min(1)).default([]),
+      baselinePaths: external_exports.array(external_exports.string().trim().min(1)).default([])
     }).strict().superRefine((submission, context) => {
       if (submission.status === "passed" && submission.artifactPaths.length === 0) {
         context.addIssue({
@@ -32589,15 +34808,72 @@ var init_workflow_contracts = __esm({
           message: "Passed contracts require generated contract artifacts"
         });
       }
+      submission.baselinePaths.forEach((baselinePath, index) => {
+        if (!submission.artifactPaths.includes(baselinePath)) {
+          context.addIssue({
+            code: "custom",
+            path: ["baselinePaths", index],
+            message: "Every baseline must be included in artifactPaths"
+          });
+        }
+      });
     });
+    ApiArtifactsSchema = external_exports.object({
+      types: external_exports.array(external_exports.string().trim().min(1)).min(1),
+      schemas: external_exports.array(external_exports.string().trim().min(1)).min(1),
+      wrappers: external_exports.array(external_exports.string().trim().min(1)).min(1),
+      mocks: external_exports.array(external_exports.string().trim().min(1)).min(1),
+      contractTests: external_exports.array(external_exports.string().trim().min(1)).min(1)
+    }).strict();
+    ApiReadySubmissionSchema = external_exports.object({
+      kind: external_exports.literal("api-ready"),
+      status: external_exports.literal("passed"),
+      summary: external_exports.string().trim().min(1).max(4e3),
+      implementationContextId: ImplementationContextIdSchema,
+      artifactPaths: external_exports.array(external_exports.string().trim().min(1)).min(1),
+      apiArtifacts: ApiArtifactsSchema
+    }).strict().superRefine((submission, context) => {
+      const categorizedPaths = /* @__PURE__ */ new Set();
+      for (const [group, paths] of Object.entries(submission.apiArtifacts)) {
+        paths.forEach((artifactPath, index) => {
+          if (!submission.artifactPaths.includes(artifactPath)) {
+            context.addIssue({
+              code: "custom",
+              path: ["apiArtifacts", group, index],
+              message: "Every API-ready artifact must be included in artifactPaths"
+            });
+          }
+          if (categorizedPaths.has(artifactPath)) {
+            context.addIssue({
+              code: "custom",
+              path: ["apiArtifacts", group, index],
+              message: "API-ready artifact categories must use distinct evidence files"
+            });
+          }
+          categorizedPaths.add(artifactPath);
+        });
+      }
+    });
+    FeatureEvidenceSchema = external_exports.object({
+      scope: external_exports.literal("targeted-feature"),
+      testSelector: external_exports.string().trim().min(3).max(500).refine(
+        (selector) => /(?:^|[/\\])[^/\\]+\.(?:spec|test)\.[cm]?[jt]sx?$/i.test(selector) || /^@[a-z0-9][a-z0-9._-]+$/i.test(selector) || /^--project(?:=|\s+)[a-z0-9][a-z0-9._-]+$/i.test(selector),
+        "Feature E2E selector must be a specific test file, @tag, or --project value"
+      ),
+      testCommand: external_exports.string().trim().min(1).max(2e3),
+      resultPath: external_exports.string().trim().min(1),
+      videoPath: external_exports.string().trim().regex(/\.(?:webm|mp4)$/i, "Feature video must be .webm or .mp4")
+    }).strict();
     ImplementationSubmissionSchema = external_exports.object({
       kind: external_exports.literal("implementation"),
       status: external_exports.enum(["passed", "failed", "blocked"]),
       summary: external_exports.string().trim().min(1).max(4e3),
       apiReady: external_exports.boolean(),
+      implementationContextId: ImplementationContextIdSchema.optional(),
       uiChanged: external_exports.boolean(),
       changedFiles: external_exports.array(external_exports.string().trim().min(1)).default([]),
-      artifactPaths: external_exports.array(external_exports.string().trim().min(1)).default([])
+      artifactPaths: external_exports.array(external_exports.string().trim().min(1)).default([]),
+      featureEvidence: FeatureEvidenceSchema.optional()
     }).strict().superRefine((submission, context) => {
       if (submission.status === "passed" && submission.artifactPaths.length === 0) {
         context.addIssue({
@@ -32606,22 +34882,83 @@ var init_workflow_contracts = __esm({
           message: "Passed implementation requires executable evidence artifacts"
         });
       }
-      if (submission.status === "passed" && submission.uiChanged && !submission.apiReady) {
-        context.addIssue({
-          code: "custom",
-          path: ["apiReady"],
-          message: "UI implementation requires the api-ready checkpoint"
-        });
+      if (submission.featureEvidence !== void 0) {
+        const evidence = submission.featureEvidence;
+        if (submission.implementationContextId === void 0) {
+          context.addIssue({
+            code: "custom",
+            path: ["implementationContextId"],
+            message: "Feature evidence requires an implementationContextId"
+          });
+        }
+        if (!isTargetedPlaywrightCommand(evidence.testCommand, evidence.testSelector)) {
+          context.addIssue({
+            code: "custom",
+            path: ["featureEvidence", "testCommand"],
+            message: "Targeted E2E command must be one unchained Playwright invocation with the declared selector as an argument"
+          });
+        }
+        for (const [key, evidencePath] of [
+          ["resultPath", evidence.resultPath],
+          ["videoPath", evidence.videoPath]
+        ]) {
+          if (!submission.artifactPaths.includes(evidencePath)) {
+            context.addIssue({
+              code: "custom",
+              path: ["featureEvidence", key],
+              message: `${key} must be included in artifactPaths`
+            });
+          }
+        }
+        const videos = submission.artifactPaths.filter(
+          (artifactPath) => /\.(?:webm|mp4)$/i.test(artifactPath)
+        );
+        if (videos.length !== 1 || videos[0] !== evidence.videoPath) {
+          context.addIssue({
+            code: "custom",
+            path: ["artifactPaths"],
+            message: "Feature evidence requires exactly one declared video"
+          });
+        }
       }
     });
     FigmaBundleSubmissionSchema = external_exports.object({
       kind: external_exports.literal("figma-bundle"),
-      fileUrl: external_exports.string().url(),
-      nodeIds: external_exports.array(external_exports.string().trim().min(1)).default([]),
-      artifactPaths: external_exports.array(external_exports.string().trim().min(1)).default([])
-    }).strict();
+      provider: external_exports.literal("host-connected-figma"),
+      capturedAt: external_exports.string().datetime({ offset: true }),
+      fileUrl: FigmaFileUrlSchema,
+      nodeIds: external_exports.array(external_exports.string().trim().min(1)).min(1),
+      manifestPath: external_exports.string().trim().regex(/\.json$/i, "Figma manifest must be a JSON file"),
+      artifactPaths: external_exports.array(external_exports.string().trim().min(1)).min(1)
+    }).strict().superRefine((submission, context) => {
+      if (!submission.artifactPaths.includes(submission.manifestPath)) {
+        context.addIssue({
+          code: "custom",
+          path: ["manifestPath"],
+          message: "Figma manifest must be included in artifactPaths"
+        });
+      }
+      if (new Set(submission.artifactPaths).size !== submission.artifactPaths.length) {
+        context.addIssue({
+          code: "custom",
+          path: ["artifactPaths"],
+          message: "Figma bundle artifact paths must be unique"
+        });
+      }
+      const visualPaths = submission.artifactPaths.filter(
+        (artifactPath) => artifactPath !== submission.manifestPath
+      );
+      if (visualPaths.length === 0 || visualPaths.some((artifactPath) => !/\.png$/i.test(artifactPath))) {
+        context.addIssue({
+          code: "custom",
+          path: ["artifactPaths"],
+          message: "Figma bundle requires one JSON manifest and one or more PNG visuals"
+        });
+      }
+    });
     WorkflowSubmissionSchema = external_exports.union([
       ContractsSubmissionSchema,
+      ApiReadySubmissionSchema,
       ImplementationSubmissionSchema,
       ReviewSubmissionSchema,
       FigmaBundleSubmissionSchema
@@ -32640,13 +34977,15 @@ var init_workflow_contracts = __esm({
     ]);
     WorkflowStageSummarySchema = external_exports.object({
       name: external_exports.string().trim().min(1),
-      status: external_exports.enum(["pending", "running", "passed", "failed", "blocked", "skipped", "waived"])
+      status: external_exports.enum(["pending", "running", "passed", "failed", "blocked", "skipped", "waived"]),
+      checkpoint: external_exports.string().trim().min(1).optional()
     }).strict();
     WorkflowStatusSchema = external_exports.object({
       runId: RunIdSchema,
       status: external_exports.enum(["running", "needs-external-action", "blocked", "publish-ready", "completed"]),
       currentStage: external_exports.string().trim().min(1).optional(),
       scope: WorkflowScopeSchema,
+      deliveryProfile: DeliveryProfileSchema,
       stages: external_exports.array(WorkflowStageSummarySchema),
       nextActions: external_exports.array(WorkflowActionSchema),
       blockers: external_exports.array(external_exports.string().trim().min(1)),
@@ -32743,12 +35082,47 @@ var init_gate_policy = __esm({
   }
 });
 
+// src/workflow/delivery-policy.ts
+function buildDeliveryProfile(input) {
+  if (input.mode === "brief" && input.briefPath === void 0) {
+    throw new Error("brief mode requires briefPath");
+  }
+  if (input.mode === "figma" && input.figmaUrl === void 0) {
+    throw new Error("figma mode requires figmaUrl");
+  }
+  if ((input.mode === "feature" || input.mode === "figma") && !input.scope.ui) {
+    throw new Error(`${input.mode} mode requires UI scope`);
+  }
+  const userFacingFeature = input.mode === "feature" && input.scope.ui;
+  return DeliveryProfileSchema.parse({
+    mode: input.mode,
+    changeKind: input.changeKind,
+    publication: input.publication,
+    ...input.briefPath === void 0 ? {} : { briefPath: input.briefPath },
+    ...input.figmaUrl === void 0 ? {} : { figmaUrl: input.figmaUrl },
+    requirements: {
+      brief: input.mode === "brief",
+      legacyBaseline: input.mode === "legacy",
+      targetedFeatureE2E: userFacingFeature,
+      featureVideo: userFacingFeature,
+      figmaBundle: input.mode === "figma"
+    }
+  });
+}
+var init_delivery_policy = __esm({
+  "src/workflow/delivery-policy.ts"() {
+    "use strict";
+    init_workflow_contracts();
+  }
+});
+
 // src/workflow/index.ts
 var init_workflow = __esm({
   "src/workflow/index.ts"() {
     "use strict";
     init_workflow_contracts();
     init_gate_policy();
+    init_delivery_policy();
   }
 });
 
@@ -32756,7 +35130,7 @@ var init_workflow = __esm({
 import { readFile, realpath, stat } from "fs/promises";
 import path from "path";
 function publishResultIsFullySynced(result) {
-  return result.status === "passed" && result.requestSynced && (!result.visualPreviewExpected || result.visualPreviewSynced) && result.partialReasons.length === 0;
+  return result.status === "passed" && result.requestSynced && result.request?.draft === true && (!result.visualPreviewExpected || result.visualPreviewSynced) && (!result.featureVideoExpected || result.featureVideoSynced) && result.partialReasons.length === 0;
 }
 function publishStageError(result) {
   const partial2 = result.status === "passed";
@@ -32775,6 +35149,22 @@ function scopeFromRun(run) {
   }
   return parsed.data;
 }
+function deliveryProfileFromRun(run) {
+  const rawProfile = stage(run, "intake").checkpoint?.data["deliveryProfile"];
+  if (rawProfile === void 0) {
+    return buildDeliveryProfile({
+      mode: "auto",
+      changeKind: "auto",
+      publication: "draft",
+      scope: scopeFromRun(run)
+    });
+  }
+  const parsed = DeliveryProfileSchema.safeParse(rawProfile);
+  if (!parsed.success) {
+    throw new Error(`Run ${run.id} uses an unsupported delivery profile`);
+  }
+  return parsed.data;
+}
 function stage(run, name) {
   const value = run.stages.find((item) => item.name === name);
   if (value === void 0) {
@@ -32782,7 +35172,7 @@ function stage(run, name) {
   }
   return value;
 }
-function actionsForRun(run, scope) {
+function actionsForRun(run, scope, profile) {
   if (isActionable(stage(run, "contracts"))) {
     return [WorkflowActionSchema.parse({ kind: "prepare-contracts", runId: run.id })];
   }
@@ -32791,7 +35181,7 @@ function actionsForRun(run, scope) {
       WorkflowActionSchema.parse({
         kind: "implement",
         runId: run.id,
-        requireApiReady: scope.ui || scope.api
+        requireApiReady: scope.ui && scope.api
       })
     ];
   }
@@ -32805,7 +35195,7 @@ function actionsForRun(run, scope) {
   if (scope.ui && isActionable(stage(run, "design-review"))) {
     actions.push(WorkflowActionSchema.parse({ kind: "review-design", runId: run.id }));
   }
-  if (stage(run, "report").status === "passed" && isActionable(stage(run, "publish"))) {
+  if (profile.publication === "draft" && stage(run, "report").status === "passed" && isActionable(stage(run, "publish"))) {
     actions.push(WorkflowActionSchema.parse({ kind: "publish-draft", runId: run.id }));
   }
   return actions;
@@ -32819,8 +35209,39 @@ function stageForSubmission(submission) {
   return submission.kind;
 }
 function assertSubmissionPrerequisites(run, submission) {
+  const profile = deliveryProfileFromRun(run);
+  if (submission.kind === "api-ready" && stage(run, "contracts").status !== "passed") {
+    throw new Error("The contracts stage must pass before the api-ready checkpoint");
+  }
+  if (submission.kind === "contracts" && submission.status === "passed" && profile.requirements.legacyBaseline && submission.baselinePaths.length === 0) {
+    throw new Error("Legacy mode requires a focused baseline before contracts can pass");
+  }
+  if (submission.kind === "contracts" && submission.status === "passed" && profile.requirements.figmaBundle && !run.artifacts.some(
+    (artifact) => artifact.metadata["workflowSubmissionKind"] === "figma-bundle"
+  )) {
+    throw new Error("Figma bundle evidence must be submitted before contracts can pass");
+  }
+  if (submission.kind === "figma-bundle" && profile.figmaUrl !== void 0 && submission.fileUrl !== profile.figmaUrl) {
+    throw new Error("Figma bundle URL must match the delivery profile");
+  }
+  if (submission.kind === "figma-bundle" && run.artifacts.some((artifact) => artifact.metadata["workflowSubmissionKind"] === "figma-bundle")) {
+    throw new Error("A Figma bundle was already submitted for this Run");
+  }
+  if (submission.kind === "figma-bundle" && stage(run, "contracts").status !== "pending") {
+    throw new Error("Figma bundle evidence must be submitted before contracts begin");
+  }
+  if (submission.kind === "implementation" && submission.status === "passed" && profile.requirements.targetedFeatureE2E && submission.featureEvidence === void 0) {
+    throw new Error(
+      "User-facing feature mode requires targeted feature E2E evidence and one video"
+    );
+  }
   if (submission.kind === "implementation" && stage(run, "contracts").status !== "passed") {
     throw new Error("The contracts stage must pass before implementation begins");
+  }
+  if (submission.kind === "implementation" && submission.status === "passed" && scopeFromRun(run).ui && scopeFromRun(run).api && (stage(run, "implementation").checkpoint?.name !== "api-ready" || !submission.apiReady || submission.implementationContextId !== stage(run, "implementation").checkpoint?.data["implementationContextId"])) {
+    throw new Error(
+      "API-backed UI implementation requires a real api-ready checkpoint from the same implementation context before completion"
+    );
   }
   if ((submission.kind === "functional-review" || submission.kind === "design-review") && stage(run, "implementation").status !== "passed") {
     throw new Error("The implementation stage must pass before review begins");
@@ -32863,11 +35284,131 @@ function mediaTypeForPath(filePath) {
   if (extension === ".png") return "image/png";
   if (extension === ".jpg" || extension === ".jpeg") return "image/jpeg";
   if (extension === ".svg") return "image/svg+xml";
+  if (extension === ".webm") return "video/webm";
+  if (extension === ".mp4") return "video/mp4";
   if (extension === ".md") return "text/markdown";
   if ([".ts", ".tsx", ".js", ".jsx", ".css", ".txt", ".log"].includes(extension)) {
     return "text/plain";
   }
   return "application/octet-stream";
+}
+function apiArtifactRole(artifacts, evidencePath) {
+  return Object.keys(artifacts).find(
+    (role) => artifacts[role].includes(evidencePath)
+  );
+}
+function assertPassingJsonResult(content, evidencePath) {
+  let parsed;
+  try {
+    parsed = JSON.parse(content.toString("utf8"));
+  } catch {
+    throw new Error(`Evidence must be a passing JSON test result: ${evidencePath}`);
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`Evidence must be a passing JSON test result: ${evidencePath}`);
+  }
+  const result = parsed;
+  if (result["status"] !== "passed") {
+    throw new Error(`Evidence must be a passing targeted test result: ${evidencePath}`);
+  }
+}
+function assertPassingFeatureResult(content, evidencePath, expectedSelector, expectedContextId) {
+  let parsed;
+  try {
+    parsed = JSON.parse(content.toString("utf8"));
+  } catch {
+    throw new Error(`Feature evidence must be an exact passing JSON result: ${evidencePath}`);
+  }
+  const result = FeatureResultSchema.safeParse(parsed);
+  if (!result.success || result.data.selector !== expectedSelector) {
+    throw new Error(
+      `Feature result must identify selector ${String(expectedSelector)}: ${evidencePath}`
+    );
+  }
+  if (result.data.implementationContextId !== expectedContextId) {
+    throw new Error(`Feature result must match the implementationContextId: ${evidencePath}`);
+  }
+}
+function assertFigmaManifest(content, evidencePath, submission) {
+  let raw;
+  try {
+    raw = JSON.parse(content.toString("utf8"));
+  } catch {
+    throw new Error(`Figma manifest must be valid JSON: ${evidencePath}`);
+  }
+  const parsed = FigmaManifestSchema.safeParse(raw);
+  const expectedVisualPaths = submission.artifactPaths.filter(
+    (artifactPath) => artifactPath !== submission.manifestPath
+  );
+  if (!parsed.success || parsed.data.provider !== submission.provider || parsed.data.capturedAt !== submission.capturedAt || parsed.data.fileUrl !== submission.fileUrl || JSON.stringify(parsed.data.nodeIds) !== JSON.stringify(submission.nodeIds) || JSON.stringify(parsed.data.visualPaths) !== JSON.stringify(expectedVisualPaths)) {
+    throw new Error(`Figma manifest provenance does not match its submission: ${evidencePath}`);
+  }
+}
+function assertPng(content, evidencePath) {
+  try {
+    const image = import_pngjs.PNG.sync.read(content);
+    if (image.width < 1 || image.height < 1) throw new Error("empty image");
+  } catch {
+    throw new Error(`Figma visual must be a valid PNG image: ${evidencePath}`);
+  }
+}
+function videoDurationMs(content) {
+  return mp4DurationMs(content) ?? webmDurationMs(content);
+}
+function mp4DurationMs(content) {
+  const topLevel = readMp4Boxes(content, 0, content.length);
+  const ftyp = topLevel.find((box) => box.type === "ftyp");
+  const moov = topLevel.find((box) => box.type === "moov");
+  const mdat = topLevel.find((box) => box.type === "mdat");
+  if (ftyp === void 0 || moov === void 0 || mdat === void 0 || mdat.end <= mdat.start + 8) {
+    return void 0;
+  }
+  const movieBoxes = readMp4Boxes(content, moov.start + 8, moov.end);
+  const movieHeader = movieBoxes.find((box) => box.type === "mvhd");
+  if (movieHeader === void 0 || !movieBoxes.some((box) => box.type === "trak")) return void 0;
+  const payload = movieHeader.start + 8;
+  if (payload + 20 > movieHeader.end) return void 0;
+  const version2 = content[payload];
+  if (version2 === 0) {
+    const timescale = content.readUInt32BE(payload + 12);
+    const duration3 = content.readUInt32BE(payload + 16);
+    return timescale > 0 && duration3 > 0 ? duration3 / timescale * 1e3 : void 0;
+  }
+  if (version2 === 1 && payload + 32 <= movieHeader.end) {
+    const timescale = content.readUInt32BE(payload + 20);
+    const duration3 = content.readBigUInt64BE(payload + 24);
+    return timescale > 0 && duration3 > 0n ? Number(duration3) / timescale * 1e3 : void 0;
+  }
+  return void 0;
+}
+function readMp4Boxes(content, start, end) {
+  const boxes = [];
+  let offset = start;
+  while (offset + 8 <= end) {
+    const size = content.readUInt32BE(offset);
+    if (size < 8 || offset + size > end) return [];
+    boxes.push({
+      type: content.subarray(offset + 4, offset + 8).toString("ascii"),
+      start: offset,
+      end: offset + size
+    });
+    offset += size;
+  }
+  return offset === end ? boxes : [];
+}
+function webmDurationMs(content) {
+  const has = (bytes) => content.indexOf(Buffer.from(bytes)) >= 0;
+  if (content.length < 64 || !content.subarray(0, 4).equals(Buffer.from([26, 69, 223, 163])) || !has([24, 83, 128, 103]) || !has([22, 84, 174, 107]) || !has([31, 67, 182, 117]) || !has([163])) {
+    return void 0;
+  }
+  const durationId = content.indexOf(Buffer.from([68, 137]));
+  if (durationId < 0 || durationId + 3 >= content.length) return void 0;
+  const sizeByte = content[durationId + 2];
+  if ((sizeByte & 128) === 0) return void 0;
+  const size = sizeByte & 127;
+  const valueOffset = durationId + 3;
+  const duration3 = size === 4 && valueOffset + 4 <= content.length ? content.readFloatBE(valueOffset) : size === 8 && valueOffset + 8 <= content.length ? content.readDoubleBE(valueOffset) : void 0;
+  return duration3 !== void 0 && Number.isFinite(duration3) && duration3 > 0 ? duration3 : void 0;
 }
 function submissionOutcome(submission) {
   if ("verdict" in submission) {
@@ -32876,10 +35417,29 @@ function submissionOutcome(submission) {
   return submission.status;
 }
 function producerForSubmission(submission) {
-  if (submission.kind === "implementation") return "implementation";
+  if (submission.kind === "implementation" || submission.kind === "api-ready") {
+    return "implementation";
+  }
   if (submission.kind === "functional-review") return "functional-reviewer";
   if (submission.kind === "design-review") return "design-reviewer";
   return "orchestrator";
+}
+async function readProjectTextFile(projectRoot, filePath, label) {
+  const root = await realpath(projectRoot);
+  const requestedPath = path.isAbsolute(filePath) ? path.normalize(filePath) : path.resolve(root, filePath);
+  assertWithinProjectRoot(root, requestedPath, filePath);
+  let resolvedPath;
+  try {
+    resolvedPath = await realpath(requestedPath);
+  } catch {
+    throw new Error(`${label} file does not exist: ${filePath}`);
+  }
+  assertWithinProjectRoot(root, resolvedPath, filePath);
+  const details = await stat(resolvedPath);
+  if (!details.isFile()) throw new Error(`${label} path must reference a file: ${filePath}`);
+  if (details.size > 1024 * 1024)
+    throw new Error(`${label} file exceeds the 1 MB limit: ${filePath}`);
+  return readFile(resolvedPath, "utf8");
 }
 function latestArtifact(run, kind, reportKind) {
   const artifact = [...run.artifacts].reverse().find((item) => item.kind === kind && item.metadata["reportKind"] === reportKind);
@@ -32888,10 +35448,11 @@ function latestArtifact(run, kind, reportKind) {
   }
   return artifact;
 }
-var WORKER_ID, DEFAULT_EXTERNAL_LEASE_TTL_MS, DEFAULT_EXTERNAL_HEARTBEAT_MS, WorkflowStartInputSchema, WorkflowAdvanceInputSchema, WorkflowSubmitInputSchema, WorkflowStatusInputSchema, WorkflowPublishInputSchema, WorkflowArchiveInputSchema, WorkflowService;
+var import_pngjs, WORKER_ID, DEFAULT_EXTERNAL_LEASE_TTL_MS, DEFAULT_EXTERNAL_HEARTBEAT_MS, FigmaManifestSchema, FeatureResultSchema, WorkflowStartInputSchema, WorkflowAdvanceInputSchema, WorkflowSubmitInputSchema, WorkflowStatusInputSchema, WorkflowPublishInputSchema, WorkflowArchiveInputSchema, WorkflowService;
 var init_workflow_service = __esm({
   "src/application/workflow-service.ts"() {
     "use strict";
+    import_pngjs = __toESM(require_png(), 1);
     init_zod();
     init_artifact();
     init_id_factory();
@@ -32900,11 +35461,53 @@ var init_workflow_service = __esm({
     WORKER_ID = "workflow-orchestrator";
     DEFAULT_EXTERNAL_LEASE_TTL_MS = 15 * 60 * 1e3;
     DEFAULT_EXTERNAL_HEARTBEAT_MS = 60 * 1e3;
+    FigmaManifestSchema = external_exports.object({
+      provider: external_exports.literal("host-connected-figma"),
+      capturedAt: external_exports.string().datetime({ offset: true }),
+      fileUrl: FigmaFileUrlSchema,
+      nodeIds: external_exports.array(external_exports.string().trim().min(1)).min(1),
+      visualPaths: external_exports.array(
+        external_exports.string().trim().regex(/\.png$/i)
+      ).min(1)
+    }).strict();
+    FeatureResultSchema = external_exports.object({
+      status: external_exports.literal("passed"),
+      selector: external_exports.string().trim().min(1),
+      implementationContextId: ImplementationContextIdSchema,
+      testCount: external_exports.number().int().positive()
+    }).strict();
     WorkflowStartInputSchema = external_exports.object({
       projectRoot: external_exports.string().trim().min(1),
       requestText: external_exports.string().trim().min(1).max(2e5),
-      scope: external_exports.enum(["auto", "ui", "non-ui", "docs"]).default("auto")
-    }).strict();
+      scope: external_exports.enum(["auto", "ui", "non-ui", "docs"]).default("auto"),
+      mode: DeliveryModeSchema.default("auto"),
+      changeKind: ChangeKindSchema.default("auto"),
+      publication: PublicationIntentSchema.optional(),
+      briefPath: external_exports.string().trim().min(1).optional(),
+      figmaUrl: FigmaFileUrlSchema.optional()
+    }).strict().superRefine((input, context) => {
+      if (input.mode === "brief" && input.briefPath === void 0) {
+        context.addIssue({
+          code: "custom",
+          path: ["briefPath"],
+          message: "brief mode requires briefPath"
+        });
+      }
+      if (input.mode === "figma" && input.figmaUrl === void 0) {
+        context.addIssue({
+          code: "custom",
+          path: ["figmaUrl"],
+          message: "figma mode requires figmaUrl"
+        });
+      }
+      if ((input.mode === "feature" || input.mode === "figma") && input.scope !== "auto" && input.scope !== "ui") {
+        context.addIssue({
+          code: "custom",
+          path: ["scope"],
+          message: `${input.mode} mode requires UI scope`
+        });
+      }
+    });
     WorkflowAdvanceInputSchema = external_exports.object({
       runId: RunIdSchema,
       until: external_exports.enum(["boundary", "report", "publish-ready"]).default("boundary")
@@ -32924,6 +35527,13 @@ var init_workflow_service = __esm({
       pushBranch: external_exports.boolean().default(true),
       confirm: external_exports.boolean().default(false)
     }).strict().superRefine((input, context) => {
+      if (input.sourceBranch === input.targetBranch) {
+        context.addIssue({
+          code: "custom",
+          path: ["sourceBranch"],
+          message: "Draft publication requires sourceBranch to differ from targetBranch"
+        });
+      }
       if (input.mode === "execute" && !input.confirm) {
         context.addIssue({
           code: "custom",
@@ -32972,6 +35582,8 @@ var init_workflow_service = __esm({
       externalHeartbeatMs;
       async start(rawInput) {
         const input = WorkflowStartInputSchema.parse(rawInput);
+        const briefText = input.mode === "brief" && input.briefPath !== void 0 ? await readProjectTextFile(input.projectRoot, input.briefPath, "Brief") : void 0;
+        const publication = input.publication ?? (input.mode === "figma" ? "none" : "draft");
         const created = await this.dependencies.runService.createRun({
           projectRoot: input.projectRoot,
           sources: []
@@ -32985,25 +35597,45 @@ var init_workflow_service = __esm({
           runId: created.id,
           requestText: input.requestText
         });
+        const parsedBrief = briefText === void 0 || input.briefPath === void 0 ? void 0 : await this.dependencies.intakeRequestService.parseIntakeRequest({
+          runId: created.id,
+          requestText: briefText,
+          label: `brief:${input.briefPath}`
+        });
         await this.dependencies.profileService.inspectProject({
           runId: created.id,
           projectRoot: input.projectRoot
         });
+        const figmaUrl = input.figmaUrl ?? parsed.parsed.figmaUrls[0];
+        const explicitScope = (input.mode === "feature" || input.mode === "figma") && input.scope === "auto" ? "ui" : input.scope;
         const scope = classifyWorkflowScope({
-          requestText: input.requestText,
-          explicitScope: input.scope,
-          figmaUrls: parsed.parsed.figmaUrls
+          requestText: briefText === void 0 ? input.requestText : `${input.requestText}
+
+${briefText}`,
+          explicitScope,
+          figmaUrls: figmaUrl === void 0 ? parsed.parsed.figmaUrls : [figmaUrl]
         });
         const gatePlan = buildGatePlan(scope);
+        const deliveryProfile = buildDeliveryProfile({
+          mode: input.mode,
+          changeKind: input.changeKind,
+          publication,
+          scope,
+          ...input.briefPath === void 0 ? {} : { briefPath: input.briefPath },
+          ...figmaUrl === void 0 ? {} : { figmaUrl }
+        });
         await this.dependencies.stageService.complete({
           runId: created.id,
           stageName: "intake",
           workerId: WORKER_ID,
           leaseId: started.stage.lease.id,
-          artifactIds: [parsed.artifact.id],
+          artifactIds: [
+            parsed.artifact.id,
+            ...parsedBrief === void 0 ? [] : [parsedBrief.artifact.id]
+          ],
           checkpoint: {
             name: "scope-classified",
-            data: { scope, gatePlan }
+            data: { scope, gatePlan, deliveryProfile }
           }
         });
         return this.status({ runId: created.id });
@@ -33013,6 +35645,7 @@ var init_workflow_service = __esm({
         for (let step = 0; step < 8; step += 1) {
           const run = await this.dependencies.runStore.get(input.runId);
           const scope = scopeFromRun(run);
+          const deliveryProfile = deliveryProfileFromRun(run);
           const designStage = stage(run, "design-review");
           const functionalStage = stage(run, "functional-review");
           const reportStage = stage(run, "report");
@@ -33027,6 +35660,11 @@ var init_workflow_service = __esm({
             }
             continue;
           }
+          if (reportStage.status === "passed" && deliveryProfile.publication === "none" && stage(run, "publish").status === "pending") {
+            await this.skipStage(run.id, "publish", "Draft publication was not requested.");
+            await this.skipStage(run.id, "archive", "Archive is an explicit post-merge action.");
+            continue;
+          }
           return this.status({ runId: input.runId });
         }
         throw new Error(`Workflow ${input.runId} exceeded the deterministic advance limit`);
@@ -33039,6 +35677,15 @@ var init_workflow_service = __esm({
         const evidenceArtifacts = await this.ingestSubmissionEvidence(run, submission);
         if (submission.kind === "figma-bundle") {
           await this.recordSubmissionArtifact(run, submission, evidenceArtifacts);
+          return this.status({ runId: run.id });
+        }
+        if (submission.kind === "api-ready") {
+          const artifact2 = await this.recordSubmissionArtifact(run, submission, evidenceArtifacts);
+          await this.recordApiReadyCheckpoint(
+            run.id,
+            [...evidenceArtifacts.map((item) => item.id), artifact2.id],
+            submission.implementationContextId
+          );
           return this.status({ runId: run.id });
         }
         const stageName = stageForSubmission(submission);
@@ -33063,10 +35710,12 @@ var init_workflow_service = __esm({
             artifactIds,
             ...submission.kind === "implementation" ? {
               checkpoint: {
-                name: "api-ready",
+                name: "implementation-complete",
                 data: {
                   apiReady: submission.apiReady,
-                  uiChanged: submission.uiChanged
+                  implementationContextId: submission.implementationContextId,
+                  uiChanged: submission.uiChanged,
+                  apiReadyArtifactIds: stage(run, "implementation").checkpoint?.data["artifactIds"] ?? []
                 }
               }
             } : {}
@@ -33091,7 +35740,8 @@ var init_workflow_service = __esm({
         const input = WorkflowStatusInputSchema.parse(rawInput);
         const run = await this.dependencies.runStore.get(input.runId);
         const scope = scopeFromRun(run);
-        const nextActions = actionsForRun(run, scope);
+        const deliveryProfile = deliveryProfileFromRun(run);
+        const nextActions = actionsForRun(run, scope, deliveryProfile);
         const currentStage = run.stages.find(
           (item) => !["passed", "skipped", "waived"].includes(item.status)
         );
@@ -33100,13 +35750,19 @@ var init_workflow_service = __esm({
         );
         const reportPassed = stage(run, "report").status === "passed";
         const publishPassed = stage(run, "publish").status === "passed";
-        const status = publishPassed ? "completed" : blockers.length > 0 ? "blocked" : reportPassed ? "publish-ready" : nextActions.length > 0 ? "needs-external-action" : "running";
+        const publicationCompleted = publishPassed || deliveryProfile.publication === "none" && stage(run, "publish").status === "skipped";
+        const status = publicationCompleted ? "completed" : blockers.length > 0 ? "blocked" : reportPassed ? "publish-ready" : nextActions.length > 0 ? "needs-external-action" : "running";
         return WorkflowStatusSchema.parse({
           runId: run.id,
           status,
           ...currentStage === void 0 ? {} : { currentStage: currentStage.name },
           scope,
-          stages: run.stages.map((item) => ({ name: item.name, status: item.status })),
+          deliveryProfile,
+          stages: run.stages.map((item) => ({
+            name: item.name,
+            status: item.status,
+            ...item.name === "implementation" && item.checkpoint !== void 0 ? { checkpoint: item.checkpoint.name } : {}
+          })),
           nextActions,
           blockers,
           artifactIds: run.artifacts.map((artifact) => artifact.id)
@@ -33119,6 +35775,9 @@ var init_workflow_service = __esm({
           throw new Error("Publishing is unavailable in this runtime");
         }
         const run = await this.dependencies.runStore.get(input.runId);
+        if (deliveryProfileFromRun(run).publication !== "draft") {
+          throw new Error("Draft publication was not requested for this workflow");
+        }
         const reportArtifact = latestArtifact(run, "pr-report", "pr-body-markdown");
         const baseInput = {
           runId: run.id,
@@ -33289,6 +35948,11 @@ var init_workflow_service = __esm({
           }
         });
         const current = await this.dependencies.runStore.get(run.id);
+        if (submission.kind === "figma-bundle" && current.artifacts.some(
+          (existing) => existing.metadata["workflowSubmissionKind"] === "figma-bundle"
+        )) {
+          throw new Error("A Figma bundle was already submitted for this Run");
+        }
         await this.dependencies.runStore.save(
           {
             ...current,
@@ -33330,10 +35994,38 @@ var init_workflow_service = __esm({
           throw error51;
         }
       }
+      async recordApiReadyCheckpoint(runId, artifactIds, implementationContextId) {
+        const current = await this.dependencies.runStore.get(RunIdSchema.parse(runId));
+        const timestamp = this.now();
+        const implementation = stage(current, "implementation");
+        if (!["pending", "failed", "blocked"].includes(implementation.status)) {
+          throw new Error("api-ready evidence must be submitted before implementation completes");
+        }
+        await this.dependencies.runStore.save(
+          {
+            ...current,
+            revision: current.revision + 1,
+            updatedAt: timestamp,
+            stages: current.stages.map(
+              (item) => item.name === "implementation" ? {
+                ...item,
+                artifactIds: [.../* @__PURE__ */ new Set([...item.artifactIds, ...artifactIds])],
+                checkpoint: {
+                  name: "api-ready",
+                  data: { apiReady: true, artifactIds, implementationContextId },
+                  updatedAt: timestamp
+                }
+              } : item
+            )
+          },
+          current.revision
+        );
+      }
       async ingestSubmissionEvidence(run, submission) {
         const root = await realpath(run.projectRoot);
         const timestamp = this.now();
         const artifacts = [];
+        const apiPhysicalFiles = /* @__PURE__ */ new Map();
         for (const evidencePath of submission.artifactPaths) {
           const requestedPath = path.isAbsolute(evidencePath) ? path.normalize(evidencePath) : path.resolve(root, evidencePath);
           assertWithinProjectRoot(root, requestedPath, evidencePath);
@@ -33351,9 +36043,51 @@ var init_workflow_service = __esm({
           if (details.size > 50 * 1024 * 1024) {
             throw new Error(`Evidence file exceeds the 50 MB limit: ${evidencePath}`);
           }
+          if (details.size === 0) {
+            throw new Error(`Evidence file is empty: ${evidencePath}`);
+          }
+          const featureEvidenceRole = submission.kind === "implementation" && submission.featureEvidence?.videoPath === evidencePath ? "video" : submission.kind === "implementation" && submission.featureEvidence?.resultPath === evidencePath ? "result" : void 0;
+          if (featureEvidenceRole === "video" && details.size > 25 * 1024 * 1024) {
+            throw new Error(`Feature video exceeds the 25 MB limit: ${evidencePath}`);
+          }
+          const content = await readFile(resolvedPath);
+          if (featureEvidenceRole === "video" && videoDurationMs(content) === void 0) {
+            throw new Error(
+              `Feature video must be a valid WebM or MP4 container with non-zero duration: ${evidencePath}`
+            );
+          }
+          if (featureEvidenceRole === "result" && submission.kind === "implementation") {
+            assertPassingFeatureResult(
+              content,
+              evidencePath,
+              submission.featureEvidence?.testSelector,
+              submission.implementationContextId
+            );
+          }
+          const apiEvidenceRole = submission.kind === "api-ready" ? apiArtifactRole(submission.apiArtifacts, evidencePath) : void 0;
+          if (apiEvidenceRole !== void 0) {
+            const physicalFile = `${String(details.dev)}:${String(details.ino)}`;
+            const existingRole = apiPhysicalFiles.get(physicalFile);
+            if (existingRole !== void 0) {
+              throw new Error(
+                `API-ready categories require distinct physical evidence files; ${evidencePath} aliases ${existingRole}`
+              );
+            }
+            apiPhysicalFiles.set(physicalFile, evidencePath);
+          }
+          if (apiEvidenceRole === "contractTests") {
+            assertPassingJsonResult(content, evidencePath);
+          }
+          if (submission.kind === "figma-bundle") {
+            if (evidencePath === submission.manifestPath) {
+              assertFigmaManifest(content, evidencePath, submission);
+            } else {
+              assertPng(content, evidencePath);
+            }
+          }
           const mediaType = mediaTypeForPath(resolvedPath);
           const blob = await this.dependencies.artifactStore.writeBlob({
-            content: await readFile(resolvedPath),
+            content,
             mediaType,
             storedAt: timestamp,
             label: path.basename(resolvedPath)
@@ -33372,7 +36106,10 @@ var init_workflow_service = __esm({
                 adapter: "workflow-v2-evidence",
                 projectRelativePath: path.relative(root, resolvedPath),
                 byteLength: details.size,
-                workflowSubmissionKind: submission.kind
+                workflowSubmissionKind: submission.kind,
+                ...featureEvidenceRole === void 0 ? {} : { featureEvidenceRole },
+                ...apiEvidenceRole === void 0 ? {} : { apiEvidenceRole },
+                ...submission.kind !== "figma-bundle" ? {} : { figmaProvider: submission.provider, figmaCapturedAt: submission.capturedAt }
               }
             })
           );
@@ -33486,10 +36223,15 @@ function createKernelServer(servicesProvider) {
       tools: TOOL_NAMES,
       durableStages: DURABLE_STAGES,
       reviewerRoles: REVIEWER_ROLES,
+      deliveryModes: DELIVERY_MODES,
       capabilities: {
         apiReadyBeforeUi: true,
+        explicitApiReadyCheckpoint: true,
         independentReviews: true,
-        conditionalDesignReview: true
+        conditionalDesignReview: true,
+        targetedFeatureEvidence: true,
+        featureVideoPublishing: true,
+        hostFigmaIntake: true
       }
     })
   );
@@ -33517,7 +36259,7 @@ function createKernelServer(servicesProvider) {
     "workflow_submit",
     {
       title: "Submit workflow result",
-      description: "Record contracts, implementation, Figma, or review evidence for a Run.",
+      description: "Record contracts, API readiness, implementation, Figma, or review evidence.",
       inputSchema: WorkflowSubmitInputSchema.shape,
       outputSchema: WorkflowStatusSchema.shape
     },
@@ -33567,7 +36309,7 @@ function asStructuredContent(value) {
   }
   return { result: value };
 }
-var CONTRACT_VERSION, SERVER_NAME, TOOL_NAMES, DURABLE_STAGES, REVIEWER_ROLES, EmptyInputSchema, WorkflowInfoSchema;
+var CONTRACT_VERSION, SERVER_NAME, TOOL_NAMES, DURABLE_STAGES, REVIEWER_ROLES, DELIVERY_MODES, EmptyInputSchema, WorkflowInfoSchema;
 var init_create_server = __esm({
   "src/mcp/create-server.ts"() {
     "use strict";
@@ -33598,6 +36340,7 @@ var init_create_server = __esm({
       "archive"
     ];
     REVIEWER_ROLES = ["functional-reviewer", "design-reviewer"];
+    DELIVERY_MODES = ["auto", "brief", "legacy", "feature", "figma"];
     EmptyInputSchema = external_exports.object({}).strict();
     WorkflowInfoSchema = external_exports.object({
       pluginName: external_exports.literal("spec-to-pr"),
@@ -33607,10 +36350,15 @@ var init_create_server = __esm({
       tools: external_exports.tuple(TOOL_NAMES.map((name) => external_exports.literal(name))),
       durableStages: external_exports.tuple(DURABLE_STAGES.map((name) => external_exports.literal(name))),
       reviewerRoles: external_exports.tuple(REVIEWER_ROLES.map((name) => external_exports.literal(name))),
+      deliveryModes: external_exports.tuple(DELIVERY_MODES.map((name) => external_exports.literal(name))),
       capabilities: external_exports.object({
         apiReadyBeforeUi: external_exports.literal(true),
+        explicitApiReadyCheckpoint: external_exports.literal(true),
         independentReviews: external_exports.literal(true),
-        conditionalDesignReview: external_exports.literal(true)
+        conditionalDesignReview: external_exports.literal(true),
+        targetedFeatureEvidence: external_exports.literal(true),
+        featureVideoPublishing: external_exports.literal(true),
+        hostFigmaIntake: external_exports.literal(true)
       }).strict()
     }).strict();
   }
@@ -36129,7 +38877,7 @@ var init_publish_contracts = __esm({
     init_ids();
     init_scalars();
     ReviewHostSchema = external_exports.enum(["github", "gitlab"]);
-    PublishModeSchema = external_exports.enum(["draft", "ready"]);
+    PublishModeSchema = external_exports.literal("draft");
     PublishTargetSchema = external_exports.object({
       host: ReviewHostSchema,
       webBaseUrl: external_exports.string().url(),
@@ -36171,7 +38919,13 @@ var init_publish_contracts = __esm({
       assignees: external_exports.array(external_exports.string().trim().min(1)).default([]),
       reportArtifactId: ArtifactIdSchema
     }).strict();
-    ReviewRequestAssetRoleSchema = external_exports.enum(["figma", "browser", "diff", "overlay"]);
+    ReviewRequestAssetRoleSchema = external_exports.enum([
+      "figma",
+      "browser",
+      "diff",
+      "overlay",
+      "e2e-video"
+    ]);
     PublishedReviewAssetSchema = external_exports.object({
       artifactId: ArtifactIdSchema,
       targetId: external_exports.string().trim().min(1),
@@ -36216,6 +38970,8 @@ var init_publish_contracts = __esm({
       requestSynced: external_exports.boolean().default(false),
       visualPreviewExpected: external_exports.boolean().default(false),
       visualPreviewSynced: external_exports.boolean().default(false),
+      featureVideoExpected: external_exports.boolean().default(false),
+      featureVideoSynced: external_exports.boolean().default(false),
       fallbackMode: external_exports.enum(["none", "gitlab-push-option"]).default("none"),
       partialReasons: external_exports.array(external_exports.string().trim().min(1)).default([]),
       errorCode: external_exports.string().trim().min(1).optional(),
@@ -36515,7 +39271,7 @@ var init_github_publisher = __esm({
         for (const asset of input.assets) {
           const assetPath = [
             ".spec-to-pr",
-            "visual-assets",
+            asset.role === "e2e-video" ? "feature-evidence" : "visual-assets",
             input.payload.runId,
             safePathSegment(asset.targetId),
             asset.filename
@@ -36532,7 +39288,7 @@ var init_github_publisher = __esm({
             {
               method: "PUT",
               body: JSON.stringify({
-                message: `chore(spec-to-pr): publish visual evidence ${asset.artifactId}`,
+                message: `chore(spec-to-pr): publish review evidence ${asset.artifactId}`,
                 content: asset.content.toString("base64"),
                 branch: input.payload.sourceBranch,
                 ...existingSha === void 0 ? {} : { sha: existingSha }
@@ -36541,14 +39297,14 @@ var init_github_publisher = __esm({
           );
           if (!response.ok) {
             throw new Error(
-              `GitHub upload visual asset failed: ${response.status} ${await response.text()}`
+              `GitHub upload review asset failed: ${response.status} ${await response.text()}`
             );
           }
           const uploaded = await response.json();
           const content = uploaded["content"];
           const commit = uploaded["commit"];
           const commitSha = typeof commit?.["sha"] === "string" ? commit["sha"] : void 0;
-          const embeddable = !isPrivate;
+          const embeddable = !isPrivate && asset.role !== "e2e-video";
           const url2 = isPrivate ? String(content?.["html_url"] ?? content?.["download_url"] ?? "") : commitSha !== void 0 ? `https://raw.githubusercontent.com/${input.target.owner}/${input.target.repo}/${commitSha}/${assetPath}` : String(content?.["download_url"] ?? content?.["html_url"] ?? "");
           published.push(
             PublishedReviewAssetSchema.parse({
@@ -36751,7 +39507,7 @@ var init_gitlab_publisher = __esm({
           );
           if (!response.ok) {
             throw new Error(
-              `GitLab upload visual asset failed: ${response.status} ${await response.text()}`
+              `GitLab upload review asset failed: ${response.status} ${await response.text()}`
             );
           }
           const uploaded = await response.json();
@@ -36763,7 +39519,7 @@ var init_gitlab_publisher = __esm({
               role: asset.role,
               label: asset.label,
               url: uploadPath,
-              embeddable: true
+              embeddable: asset.role !== "e2e-video"
             })
           );
         }
@@ -38374,2108 +41130,6 @@ var init_profile_service = __esm({
   }
 });
 
-// src/visual/browser-capture-runner.ts
-var init_browser_capture_runner = __esm({
-  "src/visual/browser-capture-runner.ts"() {
-    "use strict";
-  }
-});
-
-// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/chunkstream.js
-var require_chunkstream = __commonJS({
-  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/chunkstream.js"(exports, module) {
-    "use strict";
-    var util2 = __require("util");
-    var Stream = __require("stream");
-    var ChunkStream = module.exports = function() {
-      Stream.call(this);
-      this._buffers = [];
-      this._buffered = 0;
-      this._reads = [];
-      this._paused = false;
-      this._encoding = "utf8";
-      this.writable = true;
-    };
-    util2.inherits(ChunkStream, Stream);
-    ChunkStream.prototype.read = function(length, callback) {
-      this._reads.push({
-        length: Math.abs(length),
-        // if length < 0 then at most this length
-        allowLess: length < 0,
-        func: callback
-      });
-      process.nextTick(
-        function() {
-          this._process();
-          if (this._paused && this._reads && this._reads.length > 0) {
-            this._paused = false;
-            this.emit("drain");
-          }
-        }.bind(this)
-      );
-    };
-    ChunkStream.prototype.write = function(data, encoding) {
-      if (!this.writable) {
-        this.emit("error", new Error("Stream not writable"));
-        return false;
-      }
-      let dataBuffer;
-      if (Buffer.isBuffer(data)) {
-        dataBuffer = data;
-      } else {
-        dataBuffer = Buffer.from(data, encoding || this._encoding);
-      }
-      this._buffers.push(dataBuffer);
-      this._buffered += dataBuffer.length;
-      this._process();
-      if (this._reads && this._reads.length === 0) {
-        this._paused = true;
-      }
-      return this.writable && !this._paused;
-    };
-    ChunkStream.prototype.end = function(data, encoding) {
-      if (data) {
-        this.write(data, encoding);
-      }
-      this.writable = false;
-      if (!this._buffers) {
-        return;
-      }
-      if (this._buffers.length === 0) {
-        this._end();
-      } else {
-        this._buffers.push(null);
-        this._process();
-      }
-    };
-    ChunkStream.prototype.destroySoon = ChunkStream.prototype.end;
-    ChunkStream.prototype._end = function() {
-      if (this._reads.length > 0) {
-        this.emit("error", new Error("Unexpected end of input"));
-      }
-      this.destroy();
-    };
-    ChunkStream.prototype.destroy = function() {
-      if (!this._buffers) {
-        return;
-      }
-      this.writable = false;
-      this._reads = null;
-      this._buffers = null;
-      this.emit("close");
-    };
-    ChunkStream.prototype._processReadAllowingLess = function(read) {
-      this._reads.shift();
-      let smallerBuf = this._buffers[0];
-      if (smallerBuf.length > read.length) {
-        this._buffered -= read.length;
-        this._buffers[0] = smallerBuf.slice(read.length);
-        read.func.call(this, smallerBuf.slice(0, read.length));
-      } else {
-        this._buffered -= smallerBuf.length;
-        this._buffers.shift();
-        read.func.call(this, smallerBuf);
-      }
-    };
-    ChunkStream.prototype._processRead = function(read) {
-      this._reads.shift();
-      let pos = 0;
-      let count = 0;
-      let data = Buffer.alloc(read.length);
-      while (pos < read.length) {
-        let buf = this._buffers[count++];
-        let len = Math.min(buf.length, read.length - pos);
-        buf.copy(data, pos, 0, len);
-        pos += len;
-        if (len !== buf.length) {
-          this._buffers[--count] = buf.slice(len);
-        }
-      }
-      if (count > 0) {
-        this._buffers.splice(0, count);
-      }
-      this._buffered -= read.length;
-      read.func.call(this, data);
-    };
-    ChunkStream.prototype._process = function() {
-      try {
-        while (this._buffered > 0 && this._reads && this._reads.length > 0) {
-          let read = this._reads[0];
-          if (read.allowLess) {
-            this._processReadAllowingLess(read);
-          } else if (this._buffered >= read.length) {
-            this._processRead(read);
-          } else {
-            break;
-          }
-        }
-        if (this._buffers && !this.writable) {
-          this._end();
-        }
-      } catch (ex) {
-        this.emit("error", ex);
-      }
-    };
-  }
-});
-
-// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/interlace.js
-var require_interlace = __commonJS({
-  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/interlace.js"(exports) {
-    "use strict";
-    var imagePasses = [
-      {
-        // pass 1 - 1px
-        x: [0],
-        y: [0]
-      },
-      {
-        // pass 2 - 1px
-        x: [4],
-        y: [0]
-      },
-      {
-        // pass 3 - 2px
-        x: [0, 4],
-        y: [4]
-      },
-      {
-        // pass 4 - 4px
-        x: [2, 6],
-        y: [0, 4]
-      },
-      {
-        // pass 5 - 8px
-        x: [0, 2, 4, 6],
-        y: [2, 6]
-      },
-      {
-        // pass 6 - 16px
-        x: [1, 3, 5, 7],
-        y: [0, 2, 4, 6]
-      },
-      {
-        // pass 7 - 32px
-        x: [0, 1, 2, 3, 4, 5, 6, 7],
-        y: [1, 3, 5, 7]
-      }
-    ];
-    exports.getImagePasses = function(width, height) {
-      let images = [];
-      let xLeftOver = width % 8;
-      let yLeftOver = height % 8;
-      let xRepeats = (width - xLeftOver) / 8;
-      let yRepeats = (height - yLeftOver) / 8;
-      for (let i = 0; i < imagePasses.length; i++) {
-        let pass = imagePasses[i];
-        let passWidth = xRepeats * pass.x.length;
-        let passHeight = yRepeats * pass.y.length;
-        for (let j = 0; j < pass.x.length; j++) {
-          if (pass.x[j] < xLeftOver) {
-            passWidth++;
-          } else {
-            break;
-          }
-        }
-        for (let j = 0; j < pass.y.length; j++) {
-          if (pass.y[j] < yLeftOver) {
-            passHeight++;
-          } else {
-            break;
-          }
-        }
-        if (passWidth > 0 && passHeight > 0) {
-          images.push({ width: passWidth, height: passHeight, index: i });
-        }
-      }
-      return images;
-    };
-    exports.getInterlaceIterator = function(width) {
-      return function(x, y, pass) {
-        let outerXLeftOver = x % imagePasses[pass].x.length;
-        let outerX = (x - outerXLeftOver) / imagePasses[pass].x.length * 8 + imagePasses[pass].x[outerXLeftOver];
-        let outerYLeftOver = y % imagePasses[pass].y.length;
-        let outerY = (y - outerYLeftOver) / imagePasses[pass].y.length * 8 + imagePasses[pass].y[outerYLeftOver];
-        return outerX * 4 + outerY * width * 4;
-      };
-    };
-  }
-});
-
-// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/paeth-predictor.js
-var require_paeth_predictor = __commonJS({
-  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/paeth-predictor.js"(exports, module) {
-    "use strict";
-    module.exports = function paethPredictor(left, above, upLeft) {
-      let paeth = left + above - upLeft;
-      let pLeft = Math.abs(paeth - left);
-      let pAbove = Math.abs(paeth - above);
-      let pUpLeft = Math.abs(paeth - upLeft);
-      if (pLeft <= pAbove && pLeft <= pUpLeft) {
-        return left;
-      }
-      if (pAbove <= pUpLeft) {
-        return above;
-      }
-      return upLeft;
-    };
-  }
-});
-
-// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/filter-parse.js
-var require_filter_parse = __commonJS({
-  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/filter-parse.js"(exports, module) {
-    "use strict";
-    var interlaceUtils = require_interlace();
-    var paethPredictor = require_paeth_predictor();
-    function getByteWidth(width, bpp, depth) {
-      let byteWidth = width * bpp;
-      if (depth !== 8) {
-        byteWidth = Math.ceil(byteWidth / (8 / depth));
-      }
-      return byteWidth;
-    }
-    var Filter = module.exports = function(bitmapInfo, dependencies) {
-      let width = bitmapInfo.width;
-      let height = bitmapInfo.height;
-      let interlace = bitmapInfo.interlace;
-      let bpp = bitmapInfo.bpp;
-      let depth = bitmapInfo.depth;
-      this.read = dependencies.read;
-      this.write = dependencies.write;
-      this.complete = dependencies.complete;
-      this._imageIndex = 0;
-      this._images = [];
-      if (interlace) {
-        let passes = interlaceUtils.getImagePasses(width, height);
-        for (let i = 0; i < passes.length; i++) {
-          this._images.push({
-            byteWidth: getByteWidth(passes[i].width, bpp, depth),
-            height: passes[i].height,
-            lineIndex: 0
-          });
-        }
-      } else {
-        this._images.push({
-          byteWidth: getByteWidth(width, bpp, depth),
-          height,
-          lineIndex: 0
-        });
-      }
-      if (depth === 8) {
-        this._xComparison = bpp;
-      } else if (depth === 16) {
-        this._xComparison = bpp * 2;
-      } else {
-        this._xComparison = 1;
-      }
-    };
-    Filter.prototype.start = function() {
-      this.read(
-        this._images[this._imageIndex].byteWidth + 1,
-        this._reverseFilterLine.bind(this)
-      );
-    };
-    Filter.prototype._unFilterType1 = function(rawData, unfilteredLine, byteWidth) {
-      let xComparison = this._xComparison;
-      let xBiggerThan = xComparison - 1;
-      for (let x = 0; x < byteWidth; x++) {
-        let rawByte = rawData[1 + x];
-        let f1Left = x > xBiggerThan ? unfilteredLine[x - xComparison] : 0;
-        unfilteredLine[x] = rawByte + f1Left;
-      }
-    };
-    Filter.prototype._unFilterType2 = function(rawData, unfilteredLine, byteWidth) {
-      let lastLine = this._lastLine;
-      for (let x = 0; x < byteWidth; x++) {
-        let rawByte = rawData[1 + x];
-        let f2Up = lastLine ? lastLine[x] : 0;
-        unfilteredLine[x] = rawByte + f2Up;
-      }
-    };
-    Filter.prototype._unFilterType3 = function(rawData, unfilteredLine, byteWidth) {
-      let xComparison = this._xComparison;
-      let xBiggerThan = xComparison - 1;
-      let lastLine = this._lastLine;
-      for (let x = 0; x < byteWidth; x++) {
-        let rawByte = rawData[1 + x];
-        let f3Up = lastLine ? lastLine[x] : 0;
-        let f3Left = x > xBiggerThan ? unfilteredLine[x - xComparison] : 0;
-        let f3Add = Math.floor((f3Left + f3Up) / 2);
-        unfilteredLine[x] = rawByte + f3Add;
-      }
-    };
-    Filter.prototype._unFilterType4 = function(rawData, unfilteredLine, byteWidth) {
-      let xComparison = this._xComparison;
-      let xBiggerThan = xComparison - 1;
-      let lastLine = this._lastLine;
-      for (let x = 0; x < byteWidth; x++) {
-        let rawByte = rawData[1 + x];
-        let f4Up = lastLine ? lastLine[x] : 0;
-        let f4Left = x > xBiggerThan ? unfilteredLine[x - xComparison] : 0;
-        let f4UpLeft = x > xBiggerThan && lastLine ? lastLine[x - xComparison] : 0;
-        let f4Add = paethPredictor(f4Left, f4Up, f4UpLeft);
-        unfilteredLine[x] = rawByte + f4Add;
-      }
-    };
-    Filter.prototype._reverseFilterLine = function(rawData) {
-      let filter = rawData[0];
-      let unfilteredLine;
-      let currentImage = this._images[this._imageIndex];
-      let byteWidth = currentImage.byteWidth;
-      if (filter === 0) {
-        unfilteredLine = rawData.slice(1, byteWidth + 1);
-      } else {
-        unfilteredLine = Buffer.alloc(byteWidth);
-        switch (filter) {
-          case 1:
-            this._unFilterType1(rawData, unfilteredLine, byteWidth);
-            break;
-          case 2:
-            this._unFilterType2(rawData, unfilteredLine, byteWidth);
-            break;
-          case 3:
-            this._unFilterType3(rawData, unfilteredLine, byteWidth);
-            break;
-          case 4:
-            this._unFilterType4(rawData, unfilteredLine, byteWidth);
-            break;
-          default:
-            throw new Error("Unrecognised filter type - " + filter);
-        }
-      }
-      this.write(unfilteredLine);
-      currentImage.lineIndex++;
-      if (currentImage.lineIndex >= currentImage.height) {
-        this._lastLine = null;
-        this._imageIndex++;
-        currentImage = this._images[this._imageIndex];
-      } else {
-        this._lastLine = unfilteredLine;
-      }
-      if (currentImage) {
-        this.read(currentImage.byteWidth + 1, this._reverseFilterLine.bind(this));
-      } else {
-        this._lastLine = null;
-        this.complete();
-      }
-    };
-  }
-});
-
-// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/filter-parse-async.js
-var require_filter_parse_async = __commonJS({
-  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/filter-parse-async.js"(exports, module) {
-    "use strict";
-    var util2 = __require("util");
-    var ChunkStream = require_chunkstream();
-    var Filter = require_filter_parse();
-    var FilterAsync = module.exports = function(bitmapInfo) {
-      ChunkStream.call(this);
-      let buffers = [];
-      let that = this;
-      this._filter = new Filter(bitmapInfo, {
-        read: this.read.bind(this),
-        write: function(buffer) {
-          buffers.push(buffer);
-        },
-        complete: function() {
-          that.emit("complete", Buffer.concat(buffers));
-        }
-      });
-      this._filter.start();
-    };
-    util2.inherits(FilterAsync, ChunkStream);
-  }
-});
-
-// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/constants.js
-var require_constants = __commonJS({
-  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/constants.js"(exports, module) {
-    "use strict";
-    module.exports = {
-      PNG_SIGNATURE: [137, 80, 78, 71, 13, 10, 26, 10],
-      TYPE_IHDR: 1229472850,
-      TYPE_IEND: 1229278788,
-      TYPE_IDAT: 1229209940,
-      TYPE_PLTE: 1347179589,
-      TYPE_tRNS: 1951551059,
-      // eslint-disable-line camelcase
-      TYPE_gAMA: 1732332865,
-      // eslint-disable-line camelcase
-      // color-type bits
-      COLORTYPE_GRAYSCALE: 0,
-      COLORTYPE_PALETTE: 1,
-      COLORTYPE_COLOR: 2,
-      COLORTYPE_ALPHA: 4,
-      // e.g. grayscale and alpha
-      // color-type combinations
-      COLORTYPE_PALETTE_COLOR: 3,
-      COLORTYPE_COLOR_ALPHA: 6,
-      COLORTYPE_TO_BPP_MAP: {
-        0: 1,
-        2: 3,
-        3: 1,
-        4: 2,
-        6: 4
-      },
-      GAMMA_DIVISION: 1e5
-    };
-  }
-});
-
-// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/crc.js
-var require_crc = __commonJS({
-  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/crc.js"(exports, module) {
-    "use strict";
-    var crcTable = [];
-    (function() {
-      for (let i = 0; i < 256; i++) {
-        let currentCrc = i;
-        for (let j = 0; j < 8; j++) {
-          if (currentCrc & 1) {
-            currentCrc = 3988292384 ^ currentCrc >>> 1;
-          } else {
-            currentCrc = currentCrc >>> 1;
-          }
-        }
-        crcTable[i] = currentCrc;
-      }
-    })();
-    var CrcCalculator = module.exports = function() {
-      this._crc = -1;
-    };
-    CrcCalculator.prototype.write = function(data) {
-      for (let i = 0; i < data.length; i++) {
-        this._crc = crcTable[(this._crc ^ data[i]) & 255] ^ this._crc >>> 8;
-      }
-      return true;
-    };
-    CrcCalculator.prototype.crc32 = function() {
-      return this._crc ^ -1;
-    };
-    CrcCalculator.crc32 = function(buf) {
-      let crc = -1;
-      for (let i = 0; i < buf.length; i++) {
-        crc = crcTable[(crc ^ buf[i]) & 255] ^ crc >>> 8;
-      }
-      return crc ^ -1;
-    };
-  }
-});
-
-// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/parser.js
-var require_parser = __commonJS({
-  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/parser.js"(exports, module) {
-    "use strict";
-    var constants = require_constants();
-    var CrcCalculator = require_crc();
-    var Parser = module.exports = function(options, dependencies) {
-      this._options = options;
-      options.checkCRC = options.checkCRC !== false;
-      this._hasIHDR = false;
-      this._hasIEND = false;
-      this._emittedHeadersFinished = false;
-      this._palette = [];
-      this._colorType = 0;
-      this._chunks = {};
-      this._chunks[constants.TYPE_IHDR] = this._handleIHDR.bind(this);
-      this._chunks[constants.TYPE_IEND] = this._handleIEND.bind(this);
-      this._chunks[constants.TYPE_IDAT] = this._handleIDAT.bind(this);
-      this._chunks[constants.TYPE_PLTE] = this._handlePLTE.bind(this);
-      this._chunks[constants.TYPE_tRNS] = this._handleTRNS.bind(this);
-      this._chunks[constants.TYPE_gAMA] = this._handleGAMA.bind(this);
-      this.read = dependencies.read;
-      this.error = dependencies.error;
-      this.metadata = dependencies.metadata;
-      this.gamma = dependencies.gamma;
-      this.transColor = dependencies.transColor;
-      this.palette = dependencies.palette;
-      this.parsed = dependencies.parsed;
-      this.inflateData = dependencies.inflateData;
-      this.finished = dependencies.finished;
-      this.simpleTransparency = dependencies.simpleTransparency;
-      this.headersFinished = dependencies.headersFinished || function() {
-      };
-    };
-    Parser.prototype.start = function() {
-      this.read(constants.PNG_SIGNATURE.length, this._parseSignature.bind(this));
-    };
-    Parser.prototype._parseSignature = function(data) {
-      let signature = constants.PNG_SIGNATURE;
-      for (let i = 0; i < signature.length; i++) {
-        if (data[i] !== signature[i]) {
-          this.error(new Error("Invalid file signature"));
-          return;
-        }
-      }
-      this.read(8, this._parseChunkBegin.bind(this));
-    };
-    Parser.prototype._parseChunkBegin = function(data) {
-      let length = data.readUInt32BE(0);
-      let type = data.readUInt32BE(4);
-      let name = "";
-      for (let i = 4; i < 8; i++) {
-        name += String.fromCharCode(data[i]);
-      }
-      let ancillary = Boolean(data[4] & 32);
-      if (!this._hasIHDR && type !== constants.TYPE_IHDR) {
-        this.error(new Error("Expected IHDR on beggining"));
-        return;
-      }
-      this._crc = new CrcCalculator();
-      this._crc.write(Buffer.from(name));
-      if (this._chunks[type]) {
-        return this._chunks[type](length);
-      }
-      if (!ancillary) {
-        this.error(new Error("Unsupported critical chunk type " + name));
-        return;
-      }
-      this.read(length + 4, this._skipChunk.bind(this));
-    };
-    Parser.prototype._skipChunk = function() {
-      this.read(8, this._parseChunkBegin.bind(this));
-    };
-    Parser.prototype._handleChunkEnd = function() {
-      this.read(4, this._parseChunkEnd.bind(this));
-    };
-    Parser.prototype._parseChunkEnd = function(data) {
-      let fileCrc = data.readInt32BE(0);
-      let calcCrc = this._crc.crc32();
-      if (this._options.checkCRC && calcCrc !== fileCrc) {
-        this.error(new Error("Crc error - " + fileCrc + " - " + calcCrc));
-        return;
-      }
-      if (!this._hasIEND) {
-        this.read(8, this._parseChunkBegin.bind(this));
-      }
-    };
-    Parser.prototype._handleIHDR = function(length) {
-      this.read(length, this._parseIHDR.bind(this));
-    };
-    Parser.prototype._parseIHDR = function(data) {
-      this._crc.write(data);
-      let width = data.readUInt32BE(0);
-      let height = data.readUInt32BE(4);
-      let depth = data[8];
-      let colorType = data[9];
-      let compr = data[10];
-      let filter = data[11];
-      let interlace = data[12];
-      if (depth !== 8 && depth !== 4 && depth !== 2 && depth !== 1 && depth !== 16) {
-        this.error(new Error("Unsupported bit depth " + depth));
-        return;
-      }
-      if (!(colorType in constants.COLORTYPE_TO_BPP_MAP)) {
-        this.error(new Error("Unsupported color type"));
-        return;
-      }
-      if (compr !== 0) {
-        this.error(new Error("Unsupported compression method"));
-        return;
-      }
-      if (filter !== 0) {
-        this.error(new Error("Unsupported filter method"));
-        return;
-      }
-      if (interlace !== 0 && interlace !== 1) {
-        this.error(new Error("Unsupported interlace method"));
-        return;
-      }
-      this._colorType = colorType;
-      let bpp = constants.COLORTYPE_TO_BPP_MAP[this._colorType];
-      this._hasIHDR = true;
-      this.metadata({
-        width,
-        height,
-        depth,
-        interlace: Boolean(interlace),
-        palette: Boolean(colorType & constants.COLORTYPE_PALETTE),
-        color: Boolean(colorType & constants.COLORTYPE_COLOR),
-        alpha: Boolean(colorType & constants.COLORTYPE_ALPHA),
-        bpp,
-        colorType
-      });
-      this._handleChunkEnd();
-    };
-    Parser.prototype._handlePLTE = function(length) {
-      this.read(length, this._parsePLTE.bind(this));
-    };
-    Parser.prototype._parsePLTE = function(data) {
-      this._crc.write(data);
-      let entries = Math.floor(data.length / 3);
-      for (let i = 0; i < entries; i++) {
-        this._palette.push([data[i * 3], data[i * 3 + 1], data[i * 3 + 2], 255]);
-      }
-      this.palette(this._palette);
-      this._handleChunkEnd();
-    };
-    Parser.prototype._handleTRNS = function(length) {
-      this.simpleTransparency();
-      this.read(length, this._parseTRNS.bind(this));
-    };
-    Parser.prototype._parseTRNS = function(data) {
-      this._crc.write(data);
-      if (this._colorType === constants.COLORTYPE_PALETTE_COLOR) {
-        if (this._palette.length === 0) {
-          this.error(new Error("Transparency chunk must be after palette"));
-          return;
-        }
-        if (data.length > this._palette.length) {
-          this.error(new Error("More transparent colors than palette size"));
-          return;
-        }
-        for (let i = 0; i < data.length; i++) {
-          this._palette[i][3] = data[i];
-        }
-        this.palette(this._palette);
-      }
-      if (this._colorType === constants.COLORTYPE_GRAYSCALE) {
-        this.transColor([data.readUInt16BE(0)]);
-      }
-      if (this._colorType === constants.COLORTYPE_COLOR) {
-        this.transColor([
-          data.readUInt16BE(0),
-          data.readUInt16BE(2),
-          data.readUInt16BE(4)
-        ]);
-      }
-      this._handleChunkEnd();
-    };
-    Parser.prototype._handleGAMA = function(length) {
-      this.read(length, this._parseGAMA.bind(this));
-    };
-    Parser.prototype._parseGAMA = function(data) {
-      this._crc.write(data);
-      this.gamma(data.readUInt32BE(0) / constants.GAMMA_DIVISION);
-      this._handleChunkEnd();
-    };
-    Parser.prototype._handleIDAT = function(length) {
-      if (!this._emittedHeadersFinished) {
-        this._emittedHeadersFinished = true;
-        this.headersFinished();
-      }
-      this.read(-length, this._parseIDAT.bind(this, length));
-    };
-    Parser.prototype._parseIDAT = function(length, data) {
-      this._crc.write(data);
-      if (this._colorType === constants.COLORTYPE_PALETTE_COLOR && this._palette.length === 0) {
-        throw new Error("Expected palette not found");
-      }
-      this.inflateData(data);
-      let leftOverLength = length - data.length;
-      if (leftOverLength > 0) {
-        this._handleIDAT(leftOverLength);
-      } else {
-        this._handleChunkEnd();
-      }
-    };
-    Parser.prototype._handleIEND = function(length) {
-      this.read(length, this._parseIEND.bind(this));
-    };
-    Parser.prototype._parseIEND = function(data) {
-      this._crc.write(data);
-      this._hasIEND = true;
-      this._handleChunkEnd();
-      if (this.finished) {
-        this.finished();
-      }
-    };
-  }
-});
-
-// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/bitmapper.js
-var require_bitmapper = __commonJS({
-  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/bitmapper.js"(exports) {
-    "use strict";
-    var interlaceUtils = require_interlace();
-    var pixelBppMapper = [
-      // 0 - dummy entry
-      function() {
-      },
-      // 1 - L
-      // 0: 0, 1: 0, 2: 0, 3: 0xff
-      function(pxData, data, pxPos, rawPos) {
-        if (rawPos === data.length) {
-          throw new Error("Ran out of data");
-        }
-        let pixel = data[rawPos];
-        pxData[pxPos] = pixel;
-        pxData[pxPos + 1] = pixel;
-        pxData[pxPos + 2] = pixel;
-        pxData[pxPos + 3] = 255;
-      },
-      // 2 - LA
-      // 0: 0, 1: 0, 2: 0, 3: 1
-      function(pxData, data, pxPos, rawPos) {
-        if (rawPos + 1 >= data.length) {
-          throw new Error("Ran out of data");
-        }
-        let pixel = data[rawPos];
-        pxData[pxPos] = pixel;
-        pxData[pxPos + 1] = pixel;
-        pxData[pxPos + 2] = pixel;
-        pxData[pxPos + 3] = data[rawPos + 1];
-      },
-      // 3 - RGB
-      // 0: 0, 1: 1, 2: 2, 3: 0xff
-      function(pxData, data, pxPos, rawPos) {
-        if (rawPos + 2 >= data.length) {
-          throw new Error("Ran out of data");
-        }
-        pxData[pxPos] = data[rawPos];
-        pxData[pxPos + 1] = data[rawPos + 1];
-        pxData[pxPos + 2] = data[rawPos + 2];
-        pxData[pxPos + 3] = 255;
-      },
-      // 4 - RGBA
-      // 0: 0, 1: 1, 2: 2, 3: 3
-      function(pxData, data, pxPos, rawPos) {
-        if (rawPos + 3 >= data.length) {
-          throw new Error("Ran out of data");
-        }
-        pxData[pxPos] = data[rawPos];
-        pxData[pxPos + 1] = data[rawPos + 1];
-        pxData[pxPos + 2] = data[rawPos + 2];
-        pxData[pxPos + 3] = data[rawPos + 3];
-      }
-    ];
-    var pixelBppCustomMapper = [
-      // 0 - dummy entry
-      function() {
-      },
-      // 1 - L
-      // 0: 0, 1: 0, 2: 0, 3: 0xff
-      function(pxData, pixelData, pxPos, maxBit) {
-        let pixel = pixelData[0];
-        pxData[pxPos] = pixel;
-        pxData[pxPos + 1] = pixel;
-        pxData[pxPos + 2] = pixel;
-        pxData[pxPos + 3] = maxBit;
-      },
-      // 2 - LA
-      // 0: 0, 1: 0, 2: 0, 3: 1
-      function(pxData, pixelData, pxPos) {
-        let pixel = pixelData[0];
-        pxData[pxPos] = pixel;
-        pxData[pxPos + 1] = pixel;
-        pxData[pxPos + 2] = pixel;
-        pxData[pxPos + 3] = pixelData[1];
-      },
-      // 3 - RGB
-      // 0: 0, 1: 1, 2: 2, 3: 0xff
-      function(pxData, pixelData, pxPos, maxBit) {
-        pxData[pxPos] = pixelData[0];
-        pxData[pxPos + 1] = pixelData[1];
-        pxData[pxPos + 2] = pixelData[2];
-        pxData[pxPos + 3] = maxBit;
-      },
-      // 4 - RGBA
-      // 0: 0, 1: 1, 2: 2, 3: 3
-      function(pxData, pixelData, pxPos) {
-        pxData[pxPos] = pixelData[0];
-        pxData[pxPos + 1] = pixelData[1];
-        pxData[pxPos + 2] = pixelData[2];
-        pxData[pxPos + 3] = pixelData[3];
-      }
-    ];
-    function bitRetriever(data, depth) {
-      let leftOver = [];
-      let i = 0;
-      function split() {
-        if (i === data.length) {
-          throw new Error("Ran out of data");
-        }
-        let byte = data[i];
-        i++;
-        let byte8, byte7, byte6, byte5, byte4, byte3, byte2, byte1;
-        switch (depth) {
-          default:
-            throw new Error("unrecognised depth");
-          case 16:
-            byte2 = data[i];
-            i++;
-            leftOver.push((byte << 8) + byte2);
-            break;
-          case 4:
-            byte2 = byte & 15;
-            byte1 = byte >> 4;
-            leftOver.push(byte1, byte2);
-            break;
-          case 2:
-            byte4 = byte & 3;
-            byte3 = byte >> 2 & 3;
-            byte2 = byte >> 4 & 3;
-            byte1 = byte >> 6 & 3;
-            leftOver.push(byte1, byte2, byte3, byte4);
-            break;
-          case 1:
-            byte8 = byte & 1;
-            byte7 = byte >> 1 & 1;
-            byte6 = byte >> 2 & 1;
-            byte5 = byte >> 3 & 1;
-            byte4 = byte >> 4 & 1;
-            byte3 = byte >> 5 & 1;
-            byte2 = byte >> 6 & 1;
-            byte1 = byte >> 7 & 1;
-            leftOver.push(byte1, byte2, byte3, byte4, byte5, byte6, byte7, byte8);
-            break;
-        }
-      }
-      return {
-        get: function(count) {
-          while (leftOver.length < count) {
-            split();
-          }
-          let returner = leftOver.slice(0, count);
-          leftOver = leftOver.slice(count);
-          return returner;
-        },
-        resetAfterLine: function() {
-          leftOver.length = 0;
-        },
-        end: function() {
-          if (i !== data.length) {
-            throw new Error("extra data found");
-          }
-        }
-      };
-    }
-    function mapImage8Bit(image, pxData, getPxPos, bpp, data, rawPos) {
-      let imageWidth = image.width;
-      let imageHeight = image.height;
-      let imagePass = image.index;
-      for (let y = 0; y < imageHeight; y++) {
-        for (let x = 0; x < imageWidth; x++) {
-          let pxPos = getPxPos(x, y, imagePass);
-          pixelBppMapper[bpp](pxData, data, pxPos, rawPos);
-          rawPos += bpp;
-        }
-      }
-      return rawPos;
-    }
-    function mapImageCustomBit(image, pxData, getPxPos, bpp, bits, maxBit) {
-      let imageWidth = image.width;
-      let imageHeight = image.height;
-      let imagePass = image.index;
-      for (let y = 0; y < imageHeight; y++) {
-        for (let x = 0; x < imageWidth; x++) {
-          let pixelData = bits.get(bpp);
-          let pxPos = getPxPos(x, y, imagePass);
-          pixelBppCustomMapper[bpp](pxData, pixelData, pxPos, maxBit);
-        }
-        bits.resetAfterLine();
-      }
-    }
-    exports.dataToBitMap = function(data, bitmapInfo) {
-      let width = bitmapInfo.width;
-      let height = bitmapInfo.height;
-      let depth = bitmapInfo.depth;
-      let bpp = bitmapInfo.bpp;
-      let interlace = bitmapInfo.interlace;
-      let bits;
-      if (depth !== 8) {
-        bits = bitRetriever(data, depth);
-      }
-      let pxData;
-      if (depth <= 8) {
-        pxData = Buffer.alloc(width * height * 4);
-      } else {
-        pxData = new Uint16Array(width * height * 4);
-      }
-      let maxBit = Math.pow(2, depth) - 1;
-      let rawPos = 0;
-      let images;
-      let getPxPos;
-      if (interlace) {
-        images = interlaceUtils.getImagePasses(width, height);
-        getPxPos = interlaceUtils.getInterlaceIterator(width, height);
-      } else {
-        let nonInterlacedPxPos = 0;
-        getPxPos = function() {
-          let returner = nonInterlacedPxPos;
-          nonInterlacedPxPos += 4;
-          return returner;
-        };
-        images = [{ width, height }];
-      }
-      for (let imageIndex = 0; imageIndex < images.length; imageIndex++) {
-        if (depth === 8) {
-          rawPos = mapImage8Bit(
-            images[imageIndex],
-            pxData,
-            getPxPos,
-            bpp,
-            data,
-            rawPos
-          );
-        } else {
-          mapImageCustomBit(
-            images[imageIndex],
-            pxData,
-            getPxPos,
-            bpp,
-            bits,
-            maxBit
-          );
-        }
-      }
-      if (depth === 8) {
-        if (rawPos !== data.length) {
-          throw new Error("extra data found");
-        }
-      } else {
-        bits.end();
-      }
-      return pxData;
-    };
-  }
-});
-
-// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/format-normaliser.js
-var require_format_normaliser = __commonJS({
-  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/format-normaliser.js"(exports, module) {
-    "use strict";
-    function dePalette(indata, outdata, width, height, palette) {
-      let pxPos = 0;
-      for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-          let color = palette[indata[pxPos]];
-          if (!color) {
-            throw new Error("index " + indata[pxPos] + " not in palette");
-          }
-          for (let i = 0; i < 4; i++) {
-            outdata[pxPos + i] = color[i];
-          }
-          pxPos += 4;
-        }
-      }
-    }
-    function replaceTransparentColor(indata, outdata, width, height, transColor) {
-      let pxPos = 0;
-      for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-          let makeTrans = false;
-          if (transColor.length === 1) {
-            if (transColor[0] === indata[pxPos]) {
-              makeTrans = true;
-            }
-          } else if (transColor[0] === indata[pxPos] && transColor[1] === indata[pxPos + 1] && transColor[2] === indata[pxPos + 2]) {
-            makeTrans = true;
-          }
-          if (makeTrans) {
-            for (let i = 0; i < 4; i++) {
-              outdata[pxPos + i] = 0;
-            }
-          }
-          pxPos += 4;
-        }
-      }
-    }
-    function scaleDepth(indata, outdata, width, height, depth) {
-      let maxOutSample = 255;
-      let maxInSample = Math.pow(2, depth) - 1;
-      let pxPos = 0;
-      for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-          for (let i = 0; i < 4; i++) {
-            outdata[pxPos + i] = Math.floor(
-              indata[pxPos + i] * maxOutSample / maxInSample + 0.5
-            );
-          }
-          pxPos += 4;
-        }
-      }
-    }
-    module.exports = function(indata, imageData, skipRescale = false) {
-      let depth = imageData.depth;
-      let width = imageData.width;
-      let height = imageData.height;
-      let colorType = imageData.colorType;
-      let transColor = imageData.transColor;
-      let palette = imageData.palette;
-      let outdata = indata;
-      if (colorType === 3) {
-        dePalette(indata, outdata, width, height, palette);
-      } else {
-        if (transColor) {
-          replaceTransparentColor(indata, outdata, width, height, transColor);
-        }
-        if (depth !== 8 && !skipRescale) {
-          if (depth === 16) {
-            outdata = Buffer.alloc(width * height * 4);
-          }
-          scaleDepth(indata, outdata, width, height, depth);
-        }
-      }
-      return outdata;
-    };
-  }
-});
-
-// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/parser-async.js
-var require_parser_async = __commonJS({
-  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/parser-async.js"(exports, module) {
-    "use strict";
-    var util2 = __require("util");
-    var zlib = __require("zlib");
-    var ChunkStream = require_chunkstream();
-    var FilterAsync = require_filter_parse_async();
-    var Parser = require_parser();
-    var bitmapper = require_bitmapper();
-    var formatNormaliser = require_format_normaliser();
-    var ParserAsync = module.exports = function(options) {
-      ChunkStream.call(this);
-      this._parser = new Parser(options, {
-        read: this.read.bind(this),
-        error: this._handleError.bind(this),
-        metadata: this._handleMetaData.bind(this),
-        gamma: this.emit.bind(this, "gamma"),
-        palette: this._handlePalette.bind(this),
-        transColor: this._handleTransColor.bind(this),
-        finished: this._finished.bind(this),
-        inflateData: this._inflateData.bind(this),
-        simpleTransparency: this._simpleTransparency.bind(this),
-        headersFinished: this._headersFinished.bind(this)
-      });
-      this._options = options;
-      this.writable = true;
-      this._parser.start();
-    };
-    util2.inherits(ParserAsync, ChunkStream);
-    ParserAsync.prototype._handleError = function(err) {
-      this.emit("error", err);
-      this.writable = false;
-      this.destroy();
-      if (this._inflate && this._inflate.destroy) {
-        this._inflate.destroy();
-      }
-      if (this._filter) {
-        this._filter.destroy();
-        this._filter.on("error", function() {
-        });
-      }
-      this.errord = true;
-    };
-    ParserAsync.prototype._inflateData = function(data) {
-      if (!this._inflate) {
-        if (this._bitmapInfo.interlace) {
-          this._inflate = zlib.createInflate();
-          this._inflate.on("error", this.emit.bind(this, "error"));
-          this._filter.on("complete", this._complete.bind(this));
-          this._inflate.pipe(this._filter);
-        } else {
-          let rowSize = (this._bitmapInfo.width * this._bitmapInfo.bpp * this._bitmapInfo.depth + 7 >> 3) + 1;
-          let imageSize = rowSize * this._bitmapInfo.height;
-          let chunkSize = Math.max(imageSize, zlib.Z_MIN_CHUNK);
-          this._inflate = zlib.createInflate({ chunkSize });
-          let leftToInflate = imageSize;
-          let emitError = this.emit.bind(this, "error");
-          this._inflate.on("error", function(err) {
-            if (!leftToInflate) {
-              return;
-            }
-            emitError(err);
-          });
-          this._filter.on("complete", this._complete.bind(this));
-          let filterWrite = this._filter.write.bind(this._filter);
-          this._inflate.on("data", function(chunk) {
-            if (!leftToInflate) {
-              return;
-            }
-            if (chunk.length > leftToInflate) {
-              chunk = chunk.slice(0, leftToInflate);
-            }
-            leftToInflate -= chunk.length;
-            filterWrite(chunk);
-          });
-          this._inflate.on("end", this._filter.end.bind(this._filter));
-        }
-      }
-      this._inflate.write(data);
-    };
-    ParserAsync.prototype._handleMetaData = function(metaData) {
-      this._metaData = metaData;
-      this._bitmapInfo = Object.create(metaData);
-      this._filter = new FilterAsync(this._bitmapInfo);
-    };
-    ParserAsync.prototype._handleTransColor = function(transColor) {
-      this._bitmapInfo.transColor = transColor;
-    };
-    ParserAsync.prototype._handlePalette = function(palette) {
-      this._bitmapInfo.palette = palette;
-    };
-    ParserAsync.prototype._simpleTransparency = function() {
-      this._metaData.alpha = true;
-    };
-    ParserAsync.prototype._headersFinished = function() {
-      this.emit("metadata", this._metaData);
-    };
-    ParserAsync.prototype._finished = function() {
-      if (this.errord) {
-        return;
-      }
-      if (!this._inflate) {
-        this.emit("error", "No Inflate block");
-      } else {
-        this._inflate.end();
-      }
-    };
-    ParserAsync.prototype._complete = function(filteredData) {
-      if (this.errord) {
-        return;
-      }
-      let normalisedBitmapData;
-      try {
-        let bitmapData = bitmapper.dataToBitMap(filteredData, this._bitmapInfo);
-        normalisedBitmapData = formatNormaliser(
-          bitmapData,
-          this._bitmapInfo,
-          this._options.skipRescale
-        );
-        bitmapData = null;
-      } catch (ex) {
-        this._handleError(ex);
-        return;
-      }
-      this.emit("parsed", normalisedBitmapData);
-    };
-  }
-});
-
-// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/bitpacker.js
-var require_bitpacker = __commonJS({
-  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/bitpacker.js"(exports, module) {
-    "use strict";
-    var constants = require_constants();
-    module.exports = function(dataIn, width, height, options) {
-      let outHasAlpha = [constants.COLORTYPE_COLOR_ALPHA, constants.COLORTYPE_ALPHA].indexOf(
-        options.colorType
-      ) !== -1;
-      if (options.colorType === options.inputColorType) {
-        let bigEndian = (function() {
-          let buffer = new ArrayBuffer(2);
-          new DataView(buffer).setInt16(
-            0,
-            256,
-            true
-            /* littleEndian */
-          );
-          return new Int16Array(buffer)[0] !== 256;
-        })();
-        if (options.bitDepth === 8 || options.bitDepth === 16 && bigEndian) {
-          return dataIn;
-        }
-      }
-      let data = options.bitDepth !== 16 ? dataIn : new Uint16Array(dataIn.buffer);
-      let maxValue = 255;
-      let inBpp = constants.COLORTYPE_TO_BPP_MAP[options.inputColorType];
-      if (inBpp === 4 && !options.inputHasAlpha) {
-        inBpp = 3;
-      }
-      let outBpp = constants.COLORTYPE_TO_BPP_MAP[options.colorType];
-      if (options.bitDepth === 16) {
-        maxValue = 65535;
-        outBpp *= 2;
-      }
-      let outData = Buffer.alloc(width * height * outBpp);
-      let inIndex = 0;
-      let outIndex = 0;
-      let bgColor = options.bgColor || {};
-      if (bgColor.red === void 0) {
-        bgColor.red = maxValue;
-      }
-      if (bgColor.green === void 0) {
-        bgColor.green = maxValue;
-      }
-      if (bgColor.blue === void 0) {
-        bgColor.blue = maxValue;
-      }
-      function getRGBA() {
-        let red;
-        let green;
-        let blue;
-        let alpha = maxValue;
-        switch (options.inputColorType) {
-          case constants.COLORTYPE_COLOR_ALPHA:
-            alpha = data[inIndex + 3];
-            red = data[inIndex];
-            green = data[inIndex + 1];
-            blue = data[inIndex + 2];
-            break;
-          case constants.COLORTYPE_COLOR:
-            red = data[inIndex];
-            green = data[inIndex + 1];
-            blue = data[inIndex + 2];
-            break;
-          case constants.COLORTYPE_ALPHA:
-            alpha = data[inIndex + 1];
-            red = data[inIndex];
-            green = red;
-            blue = red;
-            break;
-          case constants.COLORTYPE_GRAYSCALE:
-            red = data[inIndex];
-            green = red;
-            blue = red;
-            break;
-          default:
-            throw new Error(
-              "input color type:" + options.inputColorType + " is not supported at present"
-            );
-        }
-        if (options.inputHasAlpha) {
-          if (!outHasAlpha) {
-            alpha /= maxValue;
-            red = Math.min(
-              Math.max(Math.round((1 - alpha) * bgColor.red + alpha * red), 0),
-              maxValue
-            );
-            green = Math.min(
-              Math.max(Math.round((1 - alpha) * bgColor.green + alpha * green), 0),
-              maxValue
-            );
-            blue = Math.min(
-              Math.max(Math.round((1 - alpha) * bgColor.blue + alpha * blue), 0),
-              maxValue
-            );
-          }
-        }
-        return { red, green, blue, alpha };
-      }
-      for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-          let rgba = getRGBA(data, inIndex);
-          switch (options.colorType) {
-            case constants.COLORTYPE_COLOR_ALPHA:
-            case constants.COLORTYPE_COLOR:
-              if (options.bitDepth === 8) {
-                outData[outIndex] = rgba.red;
-                outData[outIndex + 1] = rgba.green;
-                outData[outIndex + 2] = rgba.blue;
-                if (outHasAlpha) {
-                  outData[outIndex + 3] = rgba.alpha;
-                }
-              } else {
-                outData.writeUInt16BE(rgba.red, outIndex);
-                outData.writeUInt16BE(rgba.green, outIndex + 2);
-                outData.writeUInt16BE(rgba.blue, outIndex + 4);
-                if (outHasAlpha) {
-                  outData.writeUInt16BE(rgba.alpha, outIndex + 6);
-                }
-              }
-              break;
-            case constants.COLORTYPE_ALPHA:
-            case constants.COLORTYPE_GRAYSCALE: {
-              let grayscale = (rgba.red + rgba.green + rgba.blue) / 3;
-              if (options.bitDepth === 8) {
-                outData[outIndex] = grayscale;
-                if (outHasAlpha) {
-                  outData[outIndex + 1] = rgba.alpha;
-                }
-              } else {
-                outData.writeUInt16BE(grayscale, outIndex);
-                if (outHasAlpha) {
-                  outData.writeUInt16BE(rgba.alpha, outIndex + 2);
-                }
-              }
-              break;
-            }
-            default:
-              throw new Error("unrecognised color Type " + options.colorType);
-          }
-          inIndex += inBpp;
-          outIndex += outBpp;
-        }
-      }
-      return outData;
-    };
-  }
-});
-
-// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/filter-pack.js
-var require_filter_pack = __commonJS({
-  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/filter-pack.js"(exports, module) {
-    "use strict";
-    var paethPredictor = require_paeth_predictor();
-    function filterNone(pxData, pxPos, byteWidth, rawData, rawPos) {
-      for (let x = 0; x < byteWidth; x++) {
-        rawData[rawPos + x] = pxData[pxPos + x];
-      }
-    }
-    function filterSumNone(pxData, pxPos, byteWidth) {
-      let sum = 0;
-      let length = pxPos + byteWidth;
-      for (let i = pxPos; i < length; i++) {
-        sum += Math.abs(pxData[i]);
-      }
-      return sum;
-    }
-    function filterSub(pxData, pxPos, byteWidth, rawData, rawPos, bpp) {
-      for (let x = 0; x < byteWidth; x++) {
-        let left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
-        let val = pxData[pxPos + x] - left;
-        rawData[rawPos + x] = val;
-      }
-    }
-    function filterSumSub(pxData, pxPos, byteWidth, bpp) {
-      let sum = 0;
-      for (let x = 0; x < byteWidth; x++) {
-        let left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
-        let val = pxData[pxPos + x] - left;
-        sum += Math.abs(val);
-      }
-      return sum;
-    }
-    function filterUp(pxData, pxPos, byteWidth, rawData, rawPos) {
-      for (let x = 0; x < byteWidth; x++) {
-        let up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0;
-        let val = pxData[pxPos + x] - up;
-        rawData[rawPos + x] = val;
-      }
-    }
-    function filterSumUp(pxData, pxPos, byteWidth) {
-      let sum = 0;
-      let length = pxPos + byteWidth;
-      for (let x = pxPos; x < length; x++) {
-        let up = pxPos > 0 ? pxData[x - byteWidth] : 0;
-        let val = pxData[x] - up;
-        sum += Math.abs(val);
-      }
-      return sum;
-    }
-    function filterAvg(pxData, pxPos, byteWidth, rawData, rawPos, bpp) {
-      for (let x = 0; x < byteWidth; x++) {
-        let left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
-        let up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0;
-        let val = pxData[pxPos + x] - (left + up >> 1);
-        rawData[rawPos + x] = val;
-      }
-    }
-    function filterSumAvg(pxData, pxPos, byteWidth, bpp) {
-      let sum = 0;
-      for (let x = 0; x < byteWidth; x++) {
-        let left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
-        let up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0;
-        let val = pxData[pxPos + x] - (left + up >> 1);
-        sum += Math.abs(val);
-      }
-      return sum;
-    }
-    function filterPaeth(pxData, pxPos, byteWidth, rawData, rawPos, bpp) {
-      for (let x = 0; x < byteWidth; x++) {
-        let left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
-        let up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0;
-        let upleft = pxPos > 0 && x >= bpp ? pxData[pxPos + x - (byteWidth + bpp)] : 0;
-        let val = pxData[pxPos + x] - paethPredictor(left, up, upleft);
-        rawData[rawPos + x] = val;
-      }
-    }
-    function filterSumPaeth(pxData, pxPos, byteWidth, bpp) {
-      let sum = 0;
-      for (let x = 0; x < byteWidth; x++) {
-        let left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
-        let up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0;
-        let upleft = pxPos > 0 && x >= bpp ? pxData[pxPos + x - (byteWidth + bpp)] : 0;
-        let val = pxData[pxPos + x] - paethPredictor(left, up, upleft);
-        sum += Math.abs(val);
-      }
-      return sum;
-    }
-    var filters = {
-      0: filterNone,
-      1: filterSub,
-      2: filterUp,
-      3: filterAvg,
-      4: filterPaeth
-    };
-    var filterSums = {
-      0: filterSumNone,
-      1: filterSumSub,
-      2: filterSumUp,
-      3: filterSumAvg,
-      4: filterSumPaeth
-    };
-    module.exports = function(pxData, width, height, options, bpp) {
-      let filterTypes;
-      if (!("filterType" in options) || options.filterType === -1) {
-        filterTypes = [0, 1, 2, 3, 4];
-      } else if (typeof options.filterType === "number") {
-        filterTypes = [options.filterType];
-      } else {
-        throw new Error("unrecognised filter types");
-      }
-      if (options.bitDepth === 16) {
-        bpp *= 2;
-      }
-      let byteWidth = width * bpp;
-      let rawPos = 0;
-      let pxPos = 0;
-      let rawData = Buffer.alloc((byteWidth + 1) * height);
-      let sel = filterTypes[0];
-      for (let y = 0; y < height; y++) {
-        if (filterTypes.length > 1) {
-          let min = Infinity;
-          for (let i = 0; i < filterTypes.length; i++) {
-            let sum = filterSums[filterTypes[i]](pxData, pxPos, byteWidth, bpp);
-            if (sum < min) {
-              sel = filterTypes[i];
-              min = sum;
-            }
-          }
-        }
-        rawData[rawPos] = sel;
-        rawPos++;
-        filters[sel](pxData, pxPos, byteWidth, rawData, rawPos, bpp);
-        rawPos += byteWidth;
-        pxPos += byteWidth;
-      }
-      return rawData;
-    };
-  }
-});
-
-// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/packer.js
-var require_packer = __commonJS({
-  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/packer.js"(exports, module) {
-    "use strict";
-    var constants = require_constants();
-    var CrcStream = require_crc();
-    var bitPacker = require_bitpacker();
-    var filter = require_filter_pack();
-    var zlib = __require("zlib");
-    var Packer = module.exports = function(options) {
-      this._options = options;
-      options.deflateChunkSize = options.deflateChunkSize || 32 * 1024;
-      options.deflateLevel = options.deflateLevel != null ? options.deflateLevel : 9;
-      options.deflateStrategy = options.deflateStrategy != null ? options.deflateStrategy : 3;
-      options.inputHasAlpha = options.inputHasAlpha != null ? options.inputHasAlpha : true;
-      options.deflateFactory = options.deflateFactory || zlib.createDeflate;
-      options.bitDepth = options.bitDepth || 8;
-      options.colorType = typeof options.colorType === "number" ? options.colorType : constants.COLORTYPE_COLOR_ALPHA;
-      options.inputColorType = typeof options.inputColorType === "number" ? options.inputColorType : constants.COLORTYPE_COLOR_ALPHA;
-      if ([
-        constants.COLORTYPE_GRAYSCALE,
-        constants.COLORTYPE_COLOR,
-        constants.COLORTYPE_COLOR_ALPHA,
-        constants.COLORTYPE_ALPHA
-      ].indexOf(options.colorType) === -1) {
-        throw new Error(
-          "option color type:" + options.colorType + " is not supported at present"
-        );
-      }
-      if ([
-        constants.COLORTYPE_GRAYSCALE,
-        constants.COLORTYPE_COLOR,
-        constants.COLORTYPE_COLOR_ALPHA,
-        constants.COLORTYPE_ALPHA
-      ].indexOf(options.inputColorType) === -1) {
-        throw new Error(
-          "option input color type:" + options.inputColorType + " is not supported at present"
-        );
-      }
-      if (options.bitDepth !== 8 && options.bitDepth !== 16) {
-        throw new Error(
-          "option bit depth:" + options.bitDepth + " is not supported at present"
-        );
-      }
-    };
-    Packer.prototype.getDeflateOptions = function() {
-      return {
-        chunkSize: this._options.deflateChunkSize,
-        level: this._options.deflateLevel,
-        strategy: this._options.deflateStrategy
-      };
-    };
-    Packer.prototype.createDeflate = function() {
-      return this._options.deflateFactory(this.getDeflateOptions());
-    };
-    Packer.prototype.filterData = function(data, width, height) {
-      let packedData = bitPacker(data, width, height, this._options);
-      let bpp = constants.COLORTYPE_TO_BPP_MAP[this._options.colorType];
-      let filteredData = filter(packedData, width, height, this._options, bpp);
-      return filteredData;
-    };
-    Packer.prototype._packChunk = function(type, data) {
-      let len = data ? data.length : 0;
-      let buf = Buffer.alloc(len + 12);
-      buf.writeUInt32BE(len, 0);
-      buf.writeUInt32BE(type, 4);
-      if (data) {
-        data.copy(buf, 8);
-      }
-      buf.writeInt32BE(
-        CrcStream.crc32(buf.slice(4, buf.length - 4)),
-        buf.length - 4
-      );
-      return buf;
-    };
-    Packer.prototype.packGAMA = function(gamma) {
-      let buf = Buffer.alloc(4);
-      buf.writeUInt32BE(Math.floor(gamma * constants.GAMMA_DIVISION), 0);
-      return this._packChunk(constants.TYPE_gAMA, buf);
-    };
-    Packer.prototype.packIHDR = function(width, height) {
-      let buf = Buffer.alloc(13);
-      buf.writeUInt32BE(width, 0);
-      buf.writeUInt32BE(height, 4);
-      buf[8] = this._options.bitDepth;
-      buf[9] = this._options.colorType;
-      buf[10] = 0;
-      buf[11] = 0;
-      buf[12] = 0;
-      return this._packChunk(constants.TYPE_IHDR, buf);
-    };
-    Packer.prototype.packIDAT = function(data) {
-      return this._packChunk(constants.TYPE_IDAT, data);
-    };
-    Packer.prototype.packIEND = function() {
-      return this._packChunk(constants.TYPE_IEND, null);
-    };
-  }
-});
-
-// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/packer-async.js
-var require_packer_async = __commonJS({
-  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/packer-async.js"(exports, module) {
-    "use strict";
-    var util2 = __require("util");
-    var Stream = __require("stream");
-    var constants = require_constants();
-    var Packer = require_packer();
-    var PackerAsync = module.exports = function(opt) {
-      Stream.call(this);
-      let options = opt || {};
-      this._packer = new Packer(options);
-      this._deflate = this._packer.createDeflate();
-      this.readable = true;
-    };
-    util2.inherits(PackerAsync, Stream);
-    PackerAsync.prototype.pack = function(data, width, height, gamma) {
-      this.emit("data", Buffer.from(constants.PNG_SIGNATURE));
-      this.emit("data", this._packer.packIHDR(width, height));
-      if (gamma) {
-        this.emit("data", this._packer.packGAMA(gamma));
-      }
-      let filteredData = this._packer.filterData(data, width, height);
-      this._deflate.on("error", this.emit.bind(this, "error"));
-      this._deflate.on(
-        "data",
-        function(compressedData) {
-          this.emit("data", this._packer.packIDAT(compressedData));
-        }.bind(this)
-      );
-      this._deflate.on(
-        "end",
-        function() {
-          this.emit("data", this._packer.packIEND());
-          this.emit("end");
-        }.bind(this)
-      );
-      this._deflate.end(filteredData);
-    };
-  }
-});
-
-// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/sync-inflate.js
-var require_sync_inflate = __commonJS({
-  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/sync-inflate.js"(exports, module) {
-    "use strict";
-    var assert2 = __require("assert").ok;
-    var zlib = __require("zlib");
-    var util2 = __require("util");
-    var kMaxLength = __require("buffer").kMaxLength;
-    function Inflate(opts) {
-      if (!(this instanceof Inflate)) {
-        return new Inflate(opts);
-      }
-      if (opts && opts.chunkSize < zlib.Z_MIN_CHUNK) {
-        opts.chunkSize = zlib.Z_MIN_CHUNK;
-      }
-      zlib.Inflate.call(this, opts);
-      this._offset = this._offset === void 0 ? this._outOffset : this._offset;
-      this._buffer = this._buffer || this._outBuffer;
-      if (opts && opts.maxLength != null) {
-        this._maxLength = opts.maxLength;
-      }
-    }
-    function createInflate(opts) {
-      return new Inflate(opts);
-    }
-    function _close(engine, callback) {
-      if (callback) {
-        process.nextTick(callback);
-      }
-      if (!engine._handle) {
-        return;
-      }
-      engine._handle.close();
-      engine._handle = null;
-    }
-    Inflate.prototype._processChunk = function(chunk, flushFlag, asyncCb) {
-      if (typeof asyncCb === "function") {
-        return zlib.Inflate._processChunk.call(this, chunk, flushFlag, asyncCb);
-      }
-      let self = this;
-      let availInBefore = chunk && chunk.length;
-      let availOutBefore = this._chunkSize - this._offset;
-      let leftToInflate = this._maxLength;
-      let inOff = 0;
-      let buffers = [];
-      let nread = 0;
-      let error51;
-      this.on("error", function(err) {
-        error51 = err;
-      });
-      function handleChunk(availInAfter, availOutAfter) {
-        if (self._hadError) {
-          return;
-        }
-        let have = availOutBefore - availOutAfter;
-        assert2(have >= 0, "have should not go down");
-        if (have > 0) {
-          let out = self._buffer.slice(self._offset, self._offset + have);
-          self._offset += have;
-          if (out.length > leftToInflate) {
-            out = out.slice(0, leftToInflate);
-          }
-          buffers.push(out);
-          nread += out.length;
-          leftToInflate -= out.length;
-          if (leftToInflate === 0) {
-            return false;
-          }
-        }
-        if (availOutAfter === 0 || self._offset >= self._chunkSize) {
-          availOutBefore = self._chunkSize;
-          self._offset = 0;
-          self._buffer = Buffer.allocUnsafe(self._chunkSize);
-        }
-        if (availOutAfter === 0) {
-          inOff += availInBefore - availInAfter;
-          availInBefore = availInAfter;
-          return true;
-        }
-        return false;
-      }
-      assert2(this._handle, "zlib binding closed");
-      let res;
-      do {
-        res = this._handle.writeSync(
-          flushFlag,
-          chunk,
-          // in
-          inOff,
-          // in_off
-          availInBefore,
-          // in_len
-          this._buffer,
-          // out
-          this._offset,
-          //out_off
-          availOutBefore
-        );
-        res = res || this._writeState;
-      } while (!this._hadError && handleChunk(res[0], res[1]));
-      if (this._hadError) {
-        throw error51;
-      }
-      if (nread >= kMaxLength) {
-        _close(this);
-        throw new RangeError(
-          "Cannot create final Buffer. It would be larger than 0x" + kMaxLength.toString(16) + " bytes"
-        );
-      }
-      let buf = Buffer.concat(buffers, nread);
-      _close(this);
-      return buf;
-    };
-    util2.inherits(Inflate, zlib.Inflate);
-    function zlibBufferSync(engine, buffer) {
-      if (typeof buffer === "string") {
-        buffer = Buffer.from(buffer);
-      }
-      if (!(buffer instanceof Buffer)) {
-        throw new TypeError("Not a string or buffer");
-      }
-      let flushFlag = engine._finishFlushFlag;
-      if (flushFlag == null) {
-        flushFlag = zlib.Z_FINISH;
-      }
-      return engine._processChunk(buffer, flushFlag);
-    }
-    function inflateSync(buffer, opts) {
-      return zlibBufferSync(new Inflate(opts), buffer);
-    }
-    module.exports = exports = inflateSync;
-    exports.Inflate = Inflate;
-    exports.createInflate = createInflate;
-    exports.inflateSync = inflateSync;
-  }
-});
-
-// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/sync-reader.js
-var require_sync_reader = __commonJS({
-  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/sync-reader.js"(exports, module) {
-    "use strict";
-    var SyncReader = module.exports = function(buffer) {
-      this._buffer = buffer;
-      this._reads = [];
-    };
-    SyncReader.prototype.read = function(length, callback) {
-      this._reads.push({
-        length: Math.abs(length),
-        // if length < 0 then at most this length
-        allowLess: length < 0,
-        func: callback
-      });
-    };
-    SyncReader.prototype.process = function() {
-      while (this._reads.length > 0 && this._buffer.length) {
-        let read = this._reads[0];
-        if (this._buffer.length && (this._buffer.length >= read.length || read.allowLess)) {
-          this._reads.shift();
-          let buf = this._buffer;
-          this._buffer = buf.slice(read.length);
-          read.func.call(this, buf.slice(0, read.length));
-        } else {
-          break;
-        }
-      }
-      if (this._reads.length > 0) {
-        throw new Error("There are some read requests waitng on finished stream");
-      }
-      if (this._buffer.length > 0) {
-        throw new Error("unrecognised content at end of stream");
-      }
-    };
-  }
-});
-
-// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/filter-parse-sync.js
-var require_filter_parse_sync = __commonJS({
-  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/filter-parse-sync.js"(exports) {
-    "use strict";
-    var SyncReader = require_sync_reader();
-    var Filter = require_filter_parse();
-    exports.process = function(inBuffer, bitmapInfo) {
-      let outBuffers = [];
-      let reader = new SyncReader(inBuffer);
-      let filter = new Filter(bitmapInfo, {
-        read: reader.read.bind(reader),
-        write: function(bufferPart) {
-          outBuffers.push(bufferPart);
-        },
-        complete: function() {
-        }
-      });
-      filter.start();
-      reader.process();
-      return Buffer.concat(outBuffers);
-    };
-  }
-});
-
-// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/parser-sync.js
-var require_parser_sync = __commonJS({
-  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/parser-sync.js"(exports, module) {
-    "use strict";
-    var hasSyncZlib = true;
-    var zlib = __require("zlib");
-    var inflateSync = require_sync_inflate();
-    if (!zlib.deflateSync) {
-      hasSyncZlib = false;
-    }
-    var SyncReader = require_sync_reader();
-    var FilterSync = require_filter_parse_sync();
-    var Parser = require_parser();
-    var bitmapper = require_bitmapper();
-    var formatNormaliser = require_format_normaliser();
-    module.exports = function(buffer, options) {
-      if (!hasSyncZlib) {
-        throw new Error(
-          "To use the sync capability of this library in old node versions, please pin pngjs to v2.3.0"
-        );
-      }
-      let err;
-      function handleError(_err_) {
-        err = _err_;
-      }
-      let metaData;
-      function handleMetaData(_metaData_) {
-        metaData = _metaData_;
-      }
-      function handleTransColor(transColor) {
-        metaData.transColor = transColor;
-      }
-      function handlePalette(palette) {
-        metaData.palette = palette;
-      }
-      function handleSimpleTransparency() {
-        metaData.alpha = true;
-      }
-      let gamma;
-      function handleGamma(_gamma_) {
-        gamma = _gamma_;
-      }
-      let inflateDataList = [];
-      function handleInflateData(inflatedData2) {
-        inflateDataList.push(inflatedData2);
-      }
-      let reader = new SyncReader(buffer);
-      let parser = new Parser(options, {
-        read: reader.read.bind(reader),
-        error: handleError,
-        metadata: handleMetaData,
-        gamma: handleGamma,
-        palette: handlePalette,
-        transColor: handleTransColor,
-        inflateData: handleInflateData,
-        simpleTransparency: handleSimpleTransparency
-      });
-      parser.start();
-      reader.process();
-      if (err) {
-        throw err;
-      }
-      let inflateData = Buffer.concat(inflateDataList);
-      inflateDataList.length = 0;
-      let inflatedData;
-      if (metaData.interlace) {
-        inflatedData = zlib.inflateSync(inflateData);
-      } else {
-        let rowSize = (metaData.width * metaData.bpp * metaData.depth + 7 >> 3) + 1;
-        let imageSize = rowSize * metaData.height;
-        inflatedData = inflateSync(inflateData, {
-          chunkSize: imageSize,
-          maxLength: imageSize
-        });
-      }
-      inflateData = null;
-      if (!inflatedData || !inflatedData.length) {
-        throw new Error("bad png - invalid inflate data response");
-      }
-      let unfilteredData = FilterSync.process(inflatedData, metaData);
-      inflateData = null;
-      let bitmapData = bitmapper.dataToBitMap(unfilteredData, metaData);
-      unfilteredData = null;
-      let normalisedBitmapData = formatNormaliser(
-        bitmapData,
-        metaData,
-        options.skipRescale
-      );
-      metaData.data = normalisedBitmapData;
-      metaData.gamma = gamma || 0;
-      return metaData;
-    };
-  }
-});
-
-// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/packer-sync.js
-var require_packer_sync = __commonJS({
-  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/packer-sync.js"(exports, module) {
-    "use strict";
-    var hasSyncZlib = true;
-    var zlib = __require("zlib");
-    if (!zlib.deflateSync) {
-      hasSyncZlib = false;
-    }
-    var constants = require_constants();
-    var Packer = require_packer();
-    module.exports = function(metaData, opt) {
-      if (!hasSyncZlib) {
-        throw new Error(
-          "To use the sync capability of this library in old node versions, please pin pngjs to v2.3.0"
-        );
-      }
-      let options = opt || {};
-      let packer = new Packer(options);
-      let chunks = [];
-      chunks.push(Buffer.from(constants.PNG_SIGNATURE));
-      chunks.push(packer.packIHDR(metaData.width, metaData.height));
-      if (metaData.gamma) {
-        chunks.push(packer.packGAMA(metaData.gamma));
-      }
-      let filteredData = packer.filterData(
-        metaData.data,
-        metaData.width,
-        metaData.height
-      );
-      let compressedData = zlib.deflateSync(
-        filteredData,
-        packer.getDeflateOptions()
-      );
-      filteredData = null;
-      if (!compressedData || !compressedData.length) {
-        throw new Error("bad png - invalid compressed data response");
-      }
-      chunks.push(packer.packIDAT(compressedData));
-      chunks.push(packer.packIEND());
-      return Buffer.concat(chunks);
-    };
-  }
-});
-
-// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/png-sync.js
-var require_png_sync = __commonJS({
-  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/png-sync.js"(exports) {
-    "use strict";
-    var parse3 = require_parser_sync();
-    var pack = require_packer_sync();
-    exports.read = function(buffer, options) {
-      return parse3(buffer, options || {});
-    };
-    exports.write = function(png, options) {
-      return pack(png, options);
-    };
-  }
-});
-
-// node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/png.js
-var require_png = __commonJS({
-  "node_modules/.pnpm/pngjs@7.0.0/node_modules/pngjs/lib/png.js"(exports) {
-    "use strict";
-    var util2 = __require("util");
-    var Stream = __require("stream");
-    var Parser = require_parser_async();
-    var Packer = require_packer_async();
-    var PNGSync = require_png_sync();
-    var PNG2 = exports.PNG = function(options) {
-      Stream.call(this);
-      options = options || {};
-      this.width = options.width | 0;
-      this.height = options.height | 0;
-      this.data = this.width > 0 && this.height > 0 ? Buffer.alloc(4 * this.width * this.height) : null;
-      if (options.fill && this.data) {
-        this.data.fill(0);
-      }
-      this.gamma = 0;
-      this.readable = this.writable = true;
-      this._parser = new Parser(options);
-      this._parser.on("error", this.emit.bind(this, "error"));
-      this._parser.on("close", this._handleClose.bind(this));
-      this._parser.on("metadata", this._metadata.bind(this));
-      this._parser.on("gamma", this._gamma.bind(this));
-      this._parser.on(
-        "parsed",
-        function(data) {
-          this.data = data;
-          this.emit("parsed", data);
-        }.bind(this)
-      );
-      this._packer = new Packer(options);
-      this._packer.on("data", this.emit.bind(this, "data"));
-      this._packer.on("end", this.emit.bind(this, "end"));
-      this._parser.on("close", this._handleClose.bind(this));
-      this._packer.on("error", this.emit.bind(this, "error"));
-    };
-    util2.inherits(PNG2, Stream);
-    PNG2.sync = PNGSync;
-    PNG2.prototype.pack = function() {
-      if (!this.data || !this.data.length) {
-        this.emit("error", "No data provided");
-        return this;
-      }
-      process.nextTick(
-        function() {
-          this._packer.pack(this.data, this.width, this.height, this.gamma);
-        }.bind(this)
-      );
-      return this;
-    };
-    PNG2.prototype.parse = function(data, callback) {
-      if (callback) {
-        let onParsed, onError;
-        onParsed = function(parsedData) {
-          this.removeListener("error", onError);
-          this.data = parsedData;
-          callback(null, this);
-        }.bind(this);
-        onError = function(err) {
-          this.removeListener("parsed", onParsed);
-          callback(err, null);
-        }.bind(this);
-        this.once("parsed", onParsed);
-        this.once("error", onError);
-      }
-      this.end(data);
-      return this;
-    };
-    PNG2.prototype.write = function(data) {
-      this._parser.write(data);
-      return true;
-    };
-    PNG2.prototype.end = function(data) {
-      this._parser.end(data);
-    };
-    PNG2.prototype._metadata = function(metadata) {
-      this.width = metadata.width;
-      this.height = metadata.height;
-      this.emit("metadata", metadata);
-    };
-    PNG2.prototype._gamma = function(gamma) {
-      this.gamma = gamma;
-    };
-    PNG2.prototype._handleClose = function() {
-      if (!this._parser.writable && !this._packer.readable) {
-        this.emit("close");
-      }
-    };
-    PNG2.bitblt = function(src, dst, srcX, srcY, width, height, deltaX, deltaY) {
-      srcX |= 0;
-      srcY |= 0;
-      width |= 0;
-      height |= 0;
-      deltaX |= 0;
-      deltaY |= 0;
-      if (srcX > src.width || srcY > src.height || srcX + width > src.width || srcY + height > src.height) {
-        throw new Error("bitblt reading outside image");
-      }
-      if (deltaX > dst.width || deltaY > dst.height || deltaX + width > dst.width || deltaY + height > dst.height) {
-        throw new Error("bitblt writing outside image");
-      }
-      for (let y = 0; y < height; y++) {
-        src.data.copy(
-          dst.data,
-          (deltaY + y) * dst.width + deltaX << 2,
-          (srcY + y) * src.width + srcX << 2,
-          (srcY + y) * src.width + srcX + width << 2
-        );
-      }
-    };
-    PNG2.prototype.bitblt = function(dst, srcX, srcY, width, height, deltaX, deltaY) {
-      PNG2.bitblt(this, dst, srcX, srcY, width, height, deltaX, deltaY);
-      return this;
-    };
-    PNG2.adjustGamma = function(src) {
-      if (src.gamma) {
-        for (let y = 0; y < src.height; y++) {
-          for (let x = 0; x < src.width; x++) {
-            let idx = src.width * y + x << 2;
-            for (let i = 0; i < 3; i++) {
-              let sample = src.data[idx + i] / 255;
-              sample = Math.pow(sample, 1 / 2.2 / src.gamma);
-              src.data[idx + i] = Math.round(sample * 255);
-            }
-          }
-        }
-        src.gamma = 0;
-      }
-    };
-    PNG2.prototype.adjustGamma = function() {
-      PNG2.adjustGamma(this);
-    };
-  }
-});
-
-// src/visual/image-mask.ts
-var init_image_mask = __esm({
-  "src/visual/image-mask.ts"() {
-    "use strict";
-  }
-});
-
 // src/visual/visual-model.ts
 var VisualTargetStatusSchema, VisualMaskRegionSchema, VisualViewportSchema, VisualComparisonScopeSchema, VisualTargetSchema, VisualComparisonMetricsSchema, VisualComparisonStatusSchema, VisualBaselineModeSchema, VisualComparisonResultSchema, VisualReportSchema, VisualReviewFindingCategorySchema, VisualReviewFindingSeveritySchema, VisualReviewFindingSchema, VisualReviewResultSchema;
 var init_visual_model = __esm({
@@ -40586,94 +41240,6 @@ var init_visual_model = __esm({
   }
 });
 
-// src/visual/image-comparator.ts
-var import_pngjs;
-var init_image_comparator = __esm({
-  "src/visual/image-comparator.ts"() {
-    "use strict";
-    import_pngjs = __toESM(require_png(), 1);
-    init_image_mask();
-    init_visual_model();
-  }
-});
-
-// src/visual/visual-artifact-writer.ts
-var init_visual_artifact_writer = __esm({
-  "src/visual/visual-artifact-writer.ts"() {
-    "use strict";
-    init_artifact();
-    init_id_factory();
-  }
-});
-
-// src/visual/visual-policy.ts
-var VisualGatePolicySchema, DEFAULT_VISUAL_GATE_POLICY;
-var init_visual_policy = __esm({
-  "src/visual/visual-policy.ts"() {
-    "use strict";
-    init_zod();
-    VisualGatePolicySchema = external_exports.object({
-      exactPassThreshold: external_exports.number().min(0).max(1).default(0.95),
-      reviewPassThreshold: external_exports.number().min(0).max(1).default(0.8),
-      reviewDistanceThreshold: external_exports.number().int().min(0).max(441).default(64),
-      failBelowReviewThreshold: external_exports.boolean().default(true)
-    }).strict();
-    DEFAULT_VISUAL_GATE_POLICY = VisualGatePolicySchema.parse({});
-  }
-});
-
-// src/visual/visual-repair-policy.ts
-var VisualRepairScoreMetricSchema, VisualRepairPolicySchema, VisualRepairDecisionSchema, DEFAULT_VISUAL_REPAIR_POLICY;
-var init_visual_repair_policy = __esm({
-  "src/visual/visual-repair-policy.ts"() {
-    "use strict";
-    init_zod();
-    VisualRepairScoreMetricSchema = external_exports.enum(["reviewMatchRatio", "exactMatchRatio"]);
-    VisualRepairPolicySchema = external_exports.object({
-      minPassingScore: external_exports.number().min(0).max(1).default(0.98),
-      maxAttempts: external_exports.number().int().positive().max(20).default(3),
-      scoreMetric: VisualRepairScoreMetricSchema.default("reviewMatchRatio"),
-      retryOnReviewNeeded: external_exports.boolean().default(true)
-    }).strict();
-    VisualRepairDecisionSchema = external_exports.object({
-      status: external_exports.enum(["passed", "retry", "failed", "not-applicable"]),
-      score: external_exports.number().min(0).max(1),
-      threshold: external_exports.number().min(0).max(1),
-      attempt: external_exports.number().int().positive(),
-      maxAttempts: external_exports.number().int().positive(),
-      attemptsRemaining: external_exports.number().int().nonnegative(),
-      scoreMetric: VisualRepairScoreMetricSchema,
-      passingTargetIds: external_exports.array(external_exports.string().trim().min(1)),
-      failingTargetIds: external_exports.array(external_exports.string().trim().min(1)),
-      nextOwner: external_exports.enum(["design-ui", "human", "none"]),
-      reason: external_exports.string().trim().min(1)
-    }).strict();
-    DEFAULT_VISUAL_REPAIR_POLICY = VisualRepairPolicySchema.parse({});
-  }
-});
-
-// src/visual/visual-report-renderer.ts
-var init_visual_report_renderer = __esm({
-  "src/visual/visual-report-renderer.ts"() {
-    "use strict";
-  }
-});
-
-// src/visual/index.ts
-var init_visual = __esm({
-  "src/visual/index.ts"() {
-    "use strict";
-    init_browser_capture_runner();
-    init_image_comparator();
-    init_image_mask();
-    init_visual_artifact_writer();
-    init_visual_model();
-    init_visual_policy();
-    init_visual_repair_policy();
-    init_visual_report_renderer();
-  }
-});
-
 // src/application/publisher-service.ts
 import { execFile as execFile3 } from "child_process";
 import { promisify as promisify3 } from "util";
@@ -40739,6 +41305,23 @@ ${preview}
 ${preview}
 ${cleaned.slice(runMetadataIndex)}
 `;
+}
+function injectFeatureVideoEvidence(body, asset) {
+  const start = body.indexOf(FEATURE_VIDEO_START);
+  const end = body.indexOf(FEATURE_VIDEO_END);
+  const cleanBody = start === -1 || end === -1 || end < start ? body.trimEnd() : `${body.slice(0, start).trimEnd()}
+
+${body.slice(end + FEATURE_VIDEO_END.length).trimStart()}`.trimEnd();
+  return [
+    cleanBody,
+    "",
+    FEATURE_VIDEO_START,
+    "## Feature E2E Evidence",
+    "",
+    `[Open the targeted feature recording](${asset.url})`,
+    "",
+    FEATURE_VIDEO_END
+  ].join("\n");
 }
 function removeVisualEvidencePreview(body) {
   const start = body.indexOf(VISUAL_PREVIEW_START);
@@ -40837,6 +41420,8 @@ function failedPublishResult(input) {
     requestSynced: false,
     visualPreviewExpected: preparationDetails?.visualPreviewExpected ?? false,
     visualPreviewSynced: false,
+    featureVideoExpected: preparationDetails?.featureVideoExpected ?? false,
+    featureVideoSynced: false,
     fallbackMode: "none",
     partialReasons: preparationDetails?.partialReasons ?? [publishFailureReason(message)],
     errorCode: "PUBLISH_FAILED",
@@ -40860,9 +41445,6 @@ function buildPlanWarnings(input) {
   } else if (input.reportDecision !== "ready") {
     warnings.push(`Report decision is ${input.reportDecision}. Publish only as a draft.`);
   }
-  if (input.payload.mode !== "draft") {
-    warnings.push("Publish mode is ready, not draft. Ensure reviewer approval policy allows this.");
-  }
   if (input.payload.body.length > 6e4) {
     warnings.push("PR/MR body is very large. Host may truncate or reject it.");
   }
@@ -40881,6 +41463,8 @@ function blockedPublishResult(input) {
     requestSynced: false,
     visualPreviewExpected: false,
     visualPreviewSynced: false,
+    featureVideoExpected: false,
+    featureVideoSynced: false,
     fallbackMode: "none",
     partialReasons: ["Report decision is blocked. Publishing is disabled."],
     errorCode: "PUBLISH_BLOCKED",
@@ -40899,9 +41483,9 @@ function publishFailureReason(message) {
   return `body sync failed: ${message}`;
 }
 function publishResultIsFullySynced2(result) {
-  return result.status === "passed" && result.requestSynced && (!result.visualPreviewExpected || result.visualPreviewSynced) && result.partialReasons.length === 0;
+  return result.status === "passed" && result.requestSynced && result.request?.draft === true && (!result.visualPreviewExpected || result.visualPreviewSynced) && (!result.featureVideoExpected || result.featureVideoSynced) && result.partialReasons.length === 0;
 }
-var execFileAsync3, PUBLISHER_ADAPTER, PublishPreparationError, BasePublishInputShape, DetectPublishTargetInputSchema, DetectPublishTargetResultSchema, PlanReviewRequestPublishInputSchema, PublishReviewRequestInputSchema, PublishReviewRequestResultSchema, UpdateReviewRequestBodyInputSchema, GetPublishResultInputSchema, GetPublishResultResultSchema, RecordPublishReviewInputSchema, RecordPublishReviewResultSchema, PublisherService, VISUAL_PREVIEW_START, VISUAL_PREVIEW_END;
+var execFileAsync3, PUBLISHER_ADAPTER, PublishPreparationError, BasePublishInputShape, DetectPublishTargetInputSchema, DetectPublishTargetResultSchema, PlanReviewRequestPublishInputSchema, PublishReviewRequestInputSchema, PublishReviewRequestResultSchema, UpdateReviewRequestBodyInputSchema, GetPublishResultInputSchema, GetPublishResultResultSchema, RecordPublishReviewInputSchema, RecordPublishReviewResultSchema, PublisherService, VISUAL_PREVIEW_START, VISUAL_PREVIEW_END, FEATURE_VIDEO_START, FEATURE_VIDEO_END;
 var init_publisher_service = __esm({
   "src/application/publisher-service.ts"() {
     "use strict";
@@ -40915,7 +41499,7 @@ var init_publisher_service = __esm({
     init_id_factory();
     init_ids();
     init_scalars();
-    init_visual();
+    init_visual_model();
     execFileAsync3 = promisify3(execFile3);
     PUBLISHER_ADAPTER = "publisher-v1";
     PublishPreparationError = class extends Error {
@@ -40933,7 +41517,7 @@ var init_publisher_service = __esm({
       targetBranch: external_exports.string().trim().min(1).default("main"),
       title: external_exports.string().trim().min(1).optional(),
       host: ReviewHostSchema.optional(),
-      mode: external_exports.enum(["draft", "ready"]).default("draft"),
+      mode: external_exports.literal("draft").default("draft"),
       labels: external_exports.array(external_exports.string().trim().min(1)).default(["spec-to-pr"]),
       reviewers: external_exports.array(external_exports.string().trim().min(1)).default([]),
       assignees: external_exports.array(external_exports.string().trim().min(1)).default([]),
@@ -40954,11 +41538,17 @@ var init_publisher_service = __esm({
       remoteUrl: external_exports.string().trim().min(1),
       target: external_exports.unknown()
     }).strict();
-    PlanReviewRequestPublishInputSchema = external_exports.object(BasePublishInputShape).strict();
+    PlanReviewRequestPublishInputSchema = external_exports.object(BasePublishInputShape).strict().refine((input) => input.sourceBranch !== input.targetBranch, {
+      path: ["sourceBranch"],
+      message: "Draft publication requires a source branch different from the target branch"
+    });
     PublishReviewRequestInputSchema = external_exports.object({
       ...BasePublishInputShape,
       confirm: external_exports.literal(true)
-    }).strict();
+    }).strict().refine((input) => input.sourceBranch !== input.targetBranch, {
+      path: ["sourceBranch"],
+      message: "Draft publication requires a source branch different from the target branch"
+    });
     PublishReviewRequestResultSchema = external_exports.object({
       run: RunSummarySchema,
       result: PublishResultSchema,
@@ -40971,7 +41561,10 @@ var init_publisher_service = __esm({
       allowBlockedBody: external_exports.boolean().default(false),
       publishMode: external_exports.enum(["blocked-draft-update"]).optional(),
       confirm: external_exports.literal(true)
-    }).strict();
+    }).strict().refine((input) => input.sourceBranch !== input.targetBranch, {
+      path: ["sourceBranch"],
+      message: "Draft publication requires a source branch different from the target branch"
+    });
     GetPublishResultInputSchema = external_exports.object({
       runId: RunIdSchema,
       artifactId: ArtifactIdSchema.optional()
@@ -41090,11 +41683,17 @@ var init_publisher_service = __esm({
             addPublishingAgentResult: false
           });
         }
+        await this.assertPublishBranchReady({
+          projectRoot: run.projectRoot,
+          sourceBranch: input.sourceBranch,
+          targetBranch: input.targetBranch
+        });
         const result = await this.executePublish({
           run,
           plan,
           timestamp,
-          pushBranch: input.pushBranch
+          pushBranch: input.pushBranch,
+          remoteName: input.remoteName
         });
         return this.recordPublishResult({
           runId: run.id,
@@ -41156,6 +41755,25 @@ var init_publisher_service = __esm({
           result
         });
       }
+      async assertPublishBranchReady(input) {
+        const status = (await this.git(input.projectRoot, ["status", "--porcelain"])).stdout.trim();
+        if (status.length > 0) {
+          throw new Error(
+            "Draft publication requires a clean working tree; commit the intended implementation changes first"
+          );
+        }
+        const aheadText = (await this.git(input.projectRoot, [
+          "rev-list",
+          "--count",
+          `${input.targetBranch}..${input.sourceBranch}`
+        ])).stdout.trim();
+        const ahead = Number.parseInt(aheadText, 10);
+        if (!Number.isSafeInteger(ahead) || ahead < 1) {
+          throw new Error(
+            `Draft publication requires at least one committed change on ${input.sourceBranch} beyond ${input.targetBranch}`
+          );
+        }
+      }
       async recordReview(rawInput) {
         const input = RecordPublishReviewInputSchema.parse(rawInput);
         const run = await this.runStore.get(input.runId);
@@ -41189,7 +41807,7 @@ var init_publisher_service = __esm({
             await this.git(input.run.projectRoot, [
               "push",
               "--set-upstream",
-              "origin",
+              input.remoteName,
               input.plan.payload.sourceBranch
             ]);
           }
@@ -41205,6 +41823,9 @@ var init_publisher_service = __esm({
             payload: prepared.payload,
             token: token.token
           });
+          if (existing !== void 0 && !existing.draft) {
+            throw new Error(`Refusing to update non-draft review request ${existing.number}`);
+          }
           const request = existing === void 0 ? await publisher.create({
             target: input.plan.target,
             payload: prepared.payload,
@@ -41215,6 +41836,9 @@ var init_publisher_service = __esm({
             body: prepared.payload.body,
             token: token.token
           });
+          if (!request.draft) {
+            throw new Error(`Review request ${request.number} is not a draft after publication`);
+          }
           return PublishResultSchema.parse({
             runId: input.plan.runId,
             status: "passed",
@@ -41225,6 +41849,8 @@ var init_publisher_service = __esm({
             requestSynced: true,
             visualPreviewExpected: prepared.visualPreviewExpected,
             visualPreviewSynced: prepared.visualPreviewSynced,
+            featureVideoExpected: prepared.featureVideoExpected,
+            featureVideoSynced: prepared.featureVideoSynced,
             fallbackMode: "none",
             partialReasons: prepared.partialReasons,
             retryable: false,
@@ -41251,12 +41877,26 @@ var init_publisher_service = __esm({
             publisher,
             token: token.token
           });
+          const existing = await publisher.findExisting({
+            target: input.plan.target,
+            payload: prepared.payload,
+            token: token.token
+          });
+          if (existing === void 0 || existing.number !== input.requestNumber) {
+            throw new Error(`Draft review request ${input.requestNumber} could not be verified`);
+          }
+          if (!existing.draft) {
+            throw new Error(`Refusing to update non-draft review request ${existing.number}`);
+          }
           const request = await publisher.updateBody({
             target: input.plan.target,
             requestNumber: input.requestNumber,
             body: prepared.payload.body,
             token: token.token
           });
+          if (!request.draft) {
+            throw new Error(`Review request ${request.number} is not a draft after body update`);
+          }
           return PublishResultSchema.parse({
             runId: input.plan.runId,
             status: "passed",
@@ -41267,6 +41907,8 @@ var init_publisher_service = __esm({
             requestSynced: true,
             visualPreviewExpected: prepared.visualPreviewExpected,
             visualPreviewSynced: prepared.visualPreviewSynced,
+            featureVideoExpected: prepared.featureVideoExpected,
+            featureVideoSynced: prepared.featureVideoSynced,
             fallbackMode: "none",
             partialReasons: prepared.partialReasons,
             retryable: false,
@@ -41284,12 +41926,18 @@ var init_publisher_service = __esm({
       }
       async preparePayloadForPublish(input) {
         const visualPreview = await this.collectVisualPreviewAssets(input.run, input.plan.payload);
-        if (visualPreview.assets.length === 0 || visualPreview.report === void 0) {
+        const featureVideo = await this.collectFeatureVideoAsset(input.run, input.plan.payload);
+        const assets = [...visualPreview.assets, ...featureVideo === void 0 ? [] : [featureVideo]];
+        const visualPreviewExpected = visualPreview.assets.length > 0 && visualPreview.report !== void 0;
+        const featureVideoExpected = featureVideo !== void 0;
+        if (assets.length === 0) {
           return {
             payload: input.plan.payload,
             publishedAssets: [],
             visualPreviewExpected: false,
             visualPreviewSynced: false,
+            featureVideoExpected: false,
+            featureVideoSynced: false,
             partialReasons: []
           };
         }
@@ -41299,39 +41947,72 @@ var init_publisher_service = __esm({
             target: input.plan.target,
             payload: input.plan.payload,
             token: input.token,
-            assets: visualPreview.assets
+            assets
           });
         } catch (error51) {
           const message = error51 instanceof Error ? error51.message : String(error51);
-          throw new PublishPreparationError(`visual evidence upload failed: ${message}`, {
-            visualPreviewExpected: true,
-            partialReasons: [`visual evidence upload failed: ${redactSecrets(message)}`]
+          const label = visualPreviewExpected ? "visual evidence" : "feature video";
+          throw new PublishPreparationError(`${label} upload failed: ${message}`, {
+            visualPreviewExpected,
+            featureVideoExpected,
+            partialReasons: [`${label} upload failed: ${redactSecrets(message)}`]
           });
         }
-        if (publishedAssets.length !== visualPreview.assets.length) {
+        if (publishedAssets.length !== assets.length) {
           throw new PublishPreparationError(
-            `visual evidence upload incomplete: ${publishedAssets.length}/${visualPreview.assets.length} asset(s) uploaded`,
+            `review evidence upload incomplete: ${publishedAssets.length}/${assets.length} asset(s) uploaded`,
             {
-              visualPreviewExpected: true,
+              visualPreviewExpected,
+              featureVideoExpected,
               partialReasons: [
-                `visual evidence upload incomplete: ${publishedAssets.length}/${visualPreview.assets.length} asset(s) uploaded`
+                `review evidence upload incomplete: ${publishedAssets.length}/${assets.length} asset(s) uploaded`
               ]
             }
           );
         }
+        const visualAssets = publishedAssets.filter((asset) => asset.role !== "e2e-video");
+        const videoAsset = publishedAssets.find((asset) => asset.role === "e2e-video");
+        let body = input.plan.payload.body;
+        if (visualPreviewExpected && visualPreview.report !== void 0) {
+          body = injectVisualEvidencePreview({
+            body,
+            report: visualPreview.report,
+            assets: visualAssets
+          });
+        }
+        if (videoAsset !== void 0) {
+          body = injectFeatureVideoEvidence(body, videoAsset);
+        }
         return {
           payload: ReviewRequestPayloadSchema.parse({
             ...input.plan.payload,
-            body: injectVisualEvidencePreview({
-              body: input.plan.payload.body,
-              report: visualPreview.report,
-              assets: publishedAssets
-            })
+            body
           }),
           publishedAssets,
-          visualPreviewExpected: true,
-          visualPreviewSynced: true,
+          visualPreviewExpected,
+          visualPreviewSynced: visualPreviewExpected,
+          featureVideoExpected,
+          featureVideoSynced: featureVideoExpected,
           partialReasons: []
+        };
+      }
+      async collectFeatureVideoAsset(run, payload) {
+        const artifact = [...run.artifacts].reverse().find(
+          (item) => item.metadata["workflowSubmissionKind"] === "implementation" && item.metadata["featureEvidenceRole"] === "video"
+        );
+        if (artifact === void 0) return void 0;
+        if (artifact.mediaType !== "video/webm" && artifact.mediaType !== "video/mp4") {
+          throw new Error(`Feature E2E artifact is not a supported video: ${artifact.id}`);
+        }
+        const extension = artifact.mediaType === "video/mp4" ? ".mp4" : ".webm";
+        return {
+          artifactId: artifact.id,
+          targetId: "feature-e2e",
+          role: "e2e-video",
+          label: "Feature E2E video",
+          filename: `${safePathSegment2(payload.runId)}-feature-e2e-${artifact.id.replace(/^art_/, "").slice(0, 12)}${extension}`,
+          mediaType: artifact.mediaType,
+          content: await this.artifactStore.readContent(artifact.digest)
         };
       }
       async collectVisualPreviewAssets(run, payload) {
@@ -41435,7 +42116,13 @@ var init_publisher_service = __esm({
             reportKind: "publish-result",
             status: input.result.status,
             host: input.result.target?.host,
-            requestUrl: input.result.request?.url
+            requestUrl: input.result.request?.url,
+            requestDraft: input.result.request?.draft,
+            requestSynced: input.result.requestSynced,
+            visualPreviewExpected: input.result.visualPreviewExpected,
+            visualPreviewSynced: input.result.visualPreviewSynced,
+            featureVideoExpected: input.result.featureVideoExpected,
+            featureVideoSynced: input.result.featureVideoSynced
           }
         });
         const shouldAddPublishingAgentResult = input.addPublishingAgentResult && publishResultIsFullySynced2(input.result);
@@ -41506,6 +42193,8 @@ var init_publisher_service = __esm({
     };
     VISUAL_PREVIEW_START = "<!-- spec-to-pr:visual-evidence:start -->";
     VISUAL_PREVIEW_END = "<!-- spec-to-pr:visual-evidence:end -->";
+    FEATURE_VIDEO_START = "<!-- spec-to-pr:feature-video:start -->";
+    FEATURE_VIDEO_END = "<!-- spec-to-pr:feature-video:end -->";
   }
 });
 

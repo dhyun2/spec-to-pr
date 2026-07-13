@@ -12,10 +12,10 @@ type ParsedArgs = {
   openapi?: string;
   resume?: string;
   model?: string;
-  minVisualScore?: number;
-  maxRepairAttempts?: number;
+  mode?: SpecToPrCodexRunInput["deliveryMode"];
+  changeKind?: SpecToPrCodexRunInput["changeKind"];
+  publication?: SpecToPrCodexRunInput["publication"];
   noReviewAgents?: boolean;
-  noVisualRepairLoop?: boolean;
 };
 
 const args = parseArgs(process.argv.slice(2));
@@ -50,22 +50,18 @@ if (args.resume !== undefined) {
 if (args.model !== undefined) {
   input.model = args.model;
 }
+if (args.mode !== undefined) {
+  input.deliveryMode = args.mode;
+}
+if (args.changeKind !== undefined) {
+  input.changeKind = args.changeKind;
+}
+if (args.publication !== undefined) {
+  input.publication = args.publication;
+}
 if (args.noReviewAgents !== undefined) {
   input.enableReviewAgents = false;
 }
-if (args.noVisualRepairLoop !== undefined) {
-  input.enableVisualRepairLoop = false;
-}
-if (args.minVisualScore !== undefined || args.maxRepairAttempts !== undefined) {
-  input.visualRepairPolicy = {};
-  if (args.minVisualScore !== undefined) {
-    input.visualRepairPolicy.minPassingScore = args.minVisualScore;
-  }
-  if (args.maxRepairAttempts !== undefined) {
-    input.visualRepairPolicy.maxAttempts = args.maxRepairAttempts;
-  }
-}
-
 const result = await runSpecToPrWithCodex(input);
 
 console.log(
@@ -101,8 +97,12 @@ function parseArgs(argv: string[]): ParsedArgs {
         parsed.noReviewAgents = true;
         continue;
       }
-      if (arg === "--no-visual-repair-loop") {
-        parsed.noVisualRepairLoop = true;
+      if (arg === "--publish") {
+        parsed.publication = "draft";
+        continue;
+      }
+      if (arg === "--no-publish") {
+        parsed.publication = "none";
         continue;
       }
       throw new Error(`Invalid or missing value for argument: ${arg}`);
@@ -135,11 +135,19 @@ function parseArgs(argv: string[]): ParsedArgs {
       case "--model":
         parsed.model = value;
         break;
-      case "--min-visual-score":
-        parsed.minVisualScore = Number.parseFloat(value);
+      case "--mode":
+        if (!["auto", "brief", "legacy", "feature", "figma"].includes(value)) {
+          throw new Error(`Invalid delivery mode: ${value}`);
+        }
+        parsed.mode = value as NonNullable<SpecToPrCodexRunInput["deliveryMode"]>;
         break;
-      case "--max-repair-attempts":
-        parsed.maxRepairAttempts = Number.parseInt(value, 10);
+      case "--change-kind":
+        if (
+          !["auto", "feature", "fix", "refactor", "migration", "design", "docs"].includes(value)
+        ) {
+          throw new Error(`Invalid change kind: ${value}`);
+        }
+        parsed.changeKind = value as NonNullable<SpecToPrCodexRunInput["changeKind"]>;
         break;
       default:
         throw new Error(`Unknown argument: ${arg}`);
@@ -160,8 +168,9 @@ Options:
   --openapi <path>      OpenAPI file path
   --resume <thread-id>  Resume an existing Codex thread
   --model <model>       Optional Codex model override
-  --min-visual-score <n>        Visual repair pass threshold, default 0.98
-  --max-repair-attempts <n>     Visual repair attempt cap, default 3
-  --no-review-agents           Disable review subagent instructions
-  --no-visual-repair-loop      Disable visual repair loop instructions`);
+  --mode <mode>         auto, brief, legacy, feature, or figma
+  --change-kind <kind>  feature, fix, refactor, migration, design, docs, or auto
+  --publish             Publish a draft PR/MR when ready
+  --no-publish          Finish after evidence-backed implementation and review
+  --no-review-agents    Disable review subagent instructions`);
 }

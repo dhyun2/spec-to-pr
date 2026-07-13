@@ -5,86 +5,97 @@ title: 트러블슈팅
 
 # 트러블슈팅
 
-자주 겪는 문제와 해결 순서입니다. 어떤 문제든 첫 진단은 `/spec-to-pr:doctor`입니다.
+첫 진단은 `/spec-to-pr:doctor`입니다. `workflow_info`가 contract `2.0.0`, tool 7개, stage 8개, reviewer 2개를 반환해야 합니다.
 
-## 설치·기동
+## 설치와 기동
 
-### "MCP server failed to start" / kernel이 안 뜬다
+### MCP server가 시작되지 않는다
 
-1. `node --version` — **22 미만이면** kernel이 즉시 종료됩니다. `nvm install 22` 후 호스트 재시작.
-2. 로컬 설치라면 빌드 산출물 확인: `pnpm build` 후 `dist/mcp/server.js` 존재 확인.
-3. `/spec-to-pr:doctor`로 어느 단계(인식/기동/tool 호출)에서 끊기는지 확인.
+1. `node --version`이 22 이상인지 확인합니다.
+2. 로컬 소스 설치라면 `pnpm build` 뒤 `dist/mcp/server.js`가 있는지 확인합니다.
+3. 호스트를 재시작하거나 plugin을 reload합니다.
+4. plugin cache에서 `@modelcontextprotocol/sdk`를 직접 import해 진단하지 말고 실제 host tool인 `workflow_info`를 호출합니다.
 
-### 스킬이 목록에 안 보인다
+### v1 tool/skill 이름이 보인다
 
-- Claude Code: `/plugin install spec-to-pr@spec-to-pr`까지 했는지 확인 (marketplace add만으로는 설치 안 됨).
-- Codex: 설치 후 **재시작 필수**. `/plugins`에서 SpecToPR 마켓플레이스 확인.
+현재 public surface는 `workflow_*` tool 7개와 skill 9개뿐입니다. Marketplace를 갱신하고 plugin을 다시 설치한 뒤 새 task를 시작하세요. 오래된 task context에서 삭제된 microtool을 계속 호출하지 마세요.
+
+## Mode 입력
+
+### Brief mode가 시작되지 않는다
+
+`briefPath`가 빠졌거나 대상 저장소에서 읽을 수 없는 경우입니다. Project-relative path를 명시하고 실제 파일을 확인하세요.
+
+### Legacy mode가 너무 넓게 조사한다
+
+“레거시 개선” 대신 route/동작/오류 조건처럼 concrete delta를 적으세요. v2 policy는 요청 범위의 baseline과 affected checks만 요구하며 전체 inventory나 migration을 기본 실행하지 않습니다.
 
 ## Figma
 
-### "Figma URL parse failed" 또는 디자인 컨텍스트가 비어 있다
+### URL은 있는데 contracts가 blocked다
 
-- URL 형식 확인: `https://www.figma.com/file/{fileId}/...?node-id={nodeId}` — 브라우저 주소창에서 그대로 복사하세요.
-- `/spec-to-pr:figma-doctor`로 provider가 잡혀 있는지, 어떤 capability가 가능한지 확인.
-- Figma MCP 서버가 호스트에 연결 안 된 상태가 가장 흔한 원인입니다.
+URL 문자열만으로는 evidence가 아닙니다.
 
-### 특정 프레임만 분석하고 싶은데 파일 전체가 잡힌다
+1. 호스트에 Figma 기능이 연결되어 있고 파일 권한이 있는지 확인합니다.
+2. `node-id` 포함 URL로 대상 frame을 좁힙니다.
+3. 호스트 기능으로 실제 node/screenshot/variable/asset/component context를 수집합니다.
+4. `provider: host-connected-figma`, ISO `capturedAt`, profile과 일치하는 `fileUrl`, 비어 있지 않은 `nodeIds`, JSON `manifestPath`를 기록합니다.
+5. Strict manifest에 같은 출처 값과 PNG `visualPaths`를 기록하고, manifest와 실제 PNG 한 개 이상을 포함한 typed `figma-bundle`을 정확히 한 번 제출합니다.
 
-URL에 `?node-id=`가 빠진 경우입니다. Figma에서 해당 프레임을 선택한 상태로 URL을 복사하세요.
+같은 Run에 Figma bundle을 반복 제출하거나 SpecToPR에 Figma microtool을 추가하거나 provider 상태를 polling하는 방식으로 우회하지 않습니다. Host capability가 없다면 required evidence blocker를 해소할 때까지 Figma mode를 통과시킬 수 없습니다.
 
-## 발행
+## Feature E2E와 영상
 
-### "GitHub publish rejected" / 발행이 조용히 건너뛰어졌다
+### 전체 E2E를 실행하려고 한다
 
-토큰 해석 순서대로 점검: `GITHUB_TOKEN` → `GH_TOKEN` → `gh auth token`. 셋 다 없으면 publisher는 gap을 남기고 건너뜁니다.
+중단하고 변경 기능을 고르는 selector를 정하세요. Test file path, tag, browser-test project 중 하나를 사용하고 실행 command에 그 selector가 실제로 들어가야 합니다. Full-project E2E는 feature mode의 기본 요구가 아닙니다.
 
-```bash
-gh auth status        # 로그인·스코프 확인
-```
+### 영상이 있는데 기능 검토가 blocked다
 
-- 토큰 스코프: GitHub `repo`, GitLab `api` 필요.
-- 셀프호스트라면 `SPEC_TO_PR_GIT_HOST` 등 [환경변수](/reference/config) 설정 확인.
+다음을 모두 확인하세요.
 
-### PR이 생성 안 됐는데 리포트는 blocked라고 한다
+- delivery profile이 user-facing `feature`
+- `scope: targeted-feature`
+- selector가 단일 Playwright command의 실제 인자임
+- strict result JSON이 `status: passed`, 정확한 selector, implementation 제출과 같은 `implementationContextId`, 양수 `testCount`만 기록함
+- 재생 시간이 0보다 큰 구조적으로 유효한 WebM/MP4 컨테이너가 정확히 한 개이고 25 MB 이하
+- result path와 video path가 implementation artifact 목록에 포함됨
 
-정상 동작입니다 — 스코어카드가 `blocked`이면 **의도적으로 발행하지 않습니다.** 리포트의 `nextRepairTarget`과 gap 목록을 보고 원인을 해소한 뒤 재실행하세요.
+Video는 interaction evidence이며 Figma/legacy visual baseline이나 accessibility evidence를 대신하지 않습니다.
 
-## 점수·루프
+## API와 UI
 
-### "visual score 0.94인데 왜 통과가 안 되나요?"
+### UI implementation 제출이 거부된다
 
-기본 임계값이 **0.98**로 꽤 엄격합니다 (픽셀 수준 비교). 선택지:
+API-backed UI인데 명시적 `api-ready` checkpoint가 없거나 최종 `apiReady`가 false이거나 `implementationContextId`가 다른 경우입니다. 같은 context에서 물리적으로 서로 다른 비어 있지 않은 type, schema, wrapper/client, mock 파일과 `status: passed`인 contract-test JSON을 `apiArtifacts`로 먼저 제출하고 최종 구현에 같은 ID를 쓰세요. Path, symlink, hard link alias는 별도 증거가 아닙니다. Boolean만 true로 바꾸거나 별도 API agent를 나중에 통합하는 흐름은 v2 contract가 아닙니다.
 
-1. repair loop가 3회 안에 못 올렸다면 diff 이미지를 직접 확인 — 폰트 렌더링·애니메이션 타이밍 같은 노이즈일 수 있습니다.
-2. 의도된 디자인 차이라면 임계값을 낮추세요: "visual 최소 점수 0.95로 해줘".
-3. 특정 컴포넌트만 문제라면 해당 component contract의 임계값만 조정할 수도 있습니다.
+## Review와 gate
 
-### 같은 스테이지에서 계속 실패한다
+### Functional review만 있고 design review가 없다
 
-- 스테이지 재시도는 기본 3회 후 멈춥니다. 실패 로그의 마지막 에러를 보고 원인(누락 토큰, 테스트 실패 등)을 해소한 뒤 재실행하면 그 스테이지부터 재개됩니다.
-- "5분째 아무 진행이 없다" — 죽은 워커의 lease가 만료되기를 기다리는 중일 수 있습니다(TTL 5분). 만료 후 자동으로 인수됩니다.
+정상일 수 있습니다. Design review는 UI scope에만 적용됩니다. 반대로 UI가 실제로 바뀌었는데 scope 분류가 비-UI라면 implementation의 `uiChanged`와 intake evidence를 확인하세요.
 
-## 마이그레이션
+### 실행하지 않은 check가 blocker다
 
-### 레거시 기능이 인벤토리에 안 잡힌다
+필수 gate는 empty/skipped/not-run evidence로 통과하지 않습니다. Repository의 실제 command를 실행해 project-local 결과를 제출하거나, 그 gate가 scope에 적용되지 않는다는 근거가 있을 때만 not applicable로 분류하세요.
 
-인벤토리는 15개 카테고리의 **정적 시그널 스캔**입니다. 도메인 특화 패턴은 프롬프트에 명시하세요: "XX 유틸 호출도 기능으로 취급해줘". 런타임에서만 드러나는 동작은 잡히지 않으므로 제약으로 적어주는 것이 안전합니다.
+## Publication
 
-### legacy-coverage blocker가 계속 남는다
+### Draft PR/MR이 만들어지지 않는다
 
-Coverage Matrix의 빈 칸(기능 ↔ 시나리오/테스트 미연결)이 원인입니다. PR 리포트의 coverage 섹션에서 어느 기능이 비었는지 확인하고, 해당 기능을 스코프에서 제외할 거라면 waive 사유를 명시해 gap을 `waived`로 처리하세요.
+- delivery profile의 `publication`이 `draft`인지 확인
+- `workflow_status`가 publish-ready이고 required blocker가 없는지 확인
+- GitHub: `GITHUB_TOKEN` → `GH_TOKEN` → `gh auth token`
+- GitLab: `GITLAB_TOKEN` → `GITLAB_PRIVATE_TOKEN` → `glab auth token`
+- feature mode: 영상 sync가 성공했는지 확인
+- `sourceBranch`가 `targetBranch`와 다르고, working tree가 clean하며, 의도한 변경이 source에 commit되어 target보다 한 commit 이상 앞서는지 확인
 
-## 데이터·상태
+Publisher는 draft만 다룹니다. Merge, approve, ready 전환 실패를 publisher 문제로 취급하지 마세요. 그런 action은 애초에 수행하지 않습니다.
 
-### Run을 처음부터 다시 돌리고 싶다
+## 재개와 archive
 
-같은 요청을 보내면 기본적으로 **재개**됩니다. 완전히 새로 시작하려면 "새 run으로 처음부터 다시 시작해줘"라고 명시하세요.
+중단된 Run은 `workflow_status`로 blocker와 next action을 확인한 뒤 `workflow_advance`로 이어갑니다. 이미 승인된 stage를 다시 실행하지 않습니다.
 
-### 디스크가 부풀었다
+Archive는 review request의 authoritative merge evidence가 있어야 합니다. Branch push, closed 상태, 사용자 의도만으로 merge를 추측하지 않으며 runtime은 merge 상태를 polling하지 않습니다.
 
-- `SPEC_TO_PR_DATA_DIR`의 오래된 Run 데이터와 `<프로젝트>/.spec-to-pr/worktrees/` 정리: `git worktree prune`.
-- `.spec-to-pr/`는 `.gitignore`에 추가 권장.
-
----
-
-여기 없는 문제는 [GitHub Issues](https://github.com/dhyun2/spec-to-pr/issues)로 — `/spec-to-pr:doctor` 출력을 함께 첨부하면 빠릅니다.
+해결되지 않으면 [GitHub Issues](https://github.com/dhyun2/spec-to-pr/issues)에 Doctor 결과와 redacted blocker를 함께 남겨 주세요.

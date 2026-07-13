@@ -35,7 +35,7 @@ import { ArtifactIdSchema, RunIdSchema } from "../runtime/ids.js";
 import { GitObjectIdSchema, IsoDateTimeSchema } from "../runtime/scalars.js";
 import type { ArtifactRef } from "../runtime/index.js";
 import type { RunStore } from "../store/run-store.js";
-import { VisualReportSchema, type VisualReport } from "../visual/index.js";
+import { VisualReportSchema, type VisualReport } from "../visual/visual-model.js";
 
 const execFileAsync = promisify(execFile);
 const PUBLISHER_ADAPTER = "publisher-v1" as const;
@@ -51,6 +51,7 @@ class PublishPreparationError extends Error {
     message: string,
     public readonly details: {
       visualPreviewExpected: boolean;
+      featureVideoExpected: boolean;
       partialReasons: string[];
     },
   ) {
@@ -74,7 +75,7 @@ const BasePublishInputShape = {
   targetBranch: z.string().trim().min(1).default("main"),
   title: z.string().trim().min(1).optional(),
   host: ReviewHostSchema.optional(),
-  mode: z.enum(["draft", "ready"]).default("draft"),
+  mode: z.literal("draft").default("draft"),
   labels: z.array(z.string().trim().min(1)).default(["spec-to-pr"]),
   reviewers: z.array(z.string().trim().min(1)).default([]),
   assignees: z.array(z.string().trim().min(1)).default([]),
@@ -102,7 +103,13 @@ export const DetectPublishTargetResultSchema = z
   })
   .strict();
 
-export const PlanReviewRequestPublishInputSchema = z.object(BasePublishInputShape).strict();
+export const PlanReviewRequestPublishInputSchema = z
+  .object(BasePublishInputShape)
+  .strict()
+  .refine((input) => input.sourceBranch !== input.targetBranch, {
+    path: ["sourceBranch"],
+    message: "Draft publication requires a source branch different from the target branch",
+  });
 
 export const PlanReviewRequestPublishResultSchema = PublishPlanSchema;
 
@@ -111,7 +118,11 @@ export const PublishReviewRequestInputSchema = z
     ...BasePublishInputShape,
     confirm: z.literal(true),
   })
-  .strict();
+  .strict()
+  .refine((input) => input.sourceBranch !== input.targetBranch, {
+    path: ["sourceBranch"],
+    message: "Draft publication requires a source branch different from the target branch",
+  });
 
 export const PublishReviewRequestResultSchema = z
   .object({
@@ -130,7 +141,11 @@ export const UpdateReviewRequestBodyInputSchema = z
     publishMode: z.enum(["blocked-draft-update"]).optional(),
     confirm: z.literal(true),
   })
-  .strict();
+  .strict()
+  .refine((input) => input.sourceBranch !== input.targetBranch, {
+    path: ["sourceBranch"],
+    message: "Draft publication requires a source branch different from the target branch",
+  });
 
 export const GetPublishResultInputSchema = z
   .object({
@@ -271,11 +286,18 @@ export class PublisherService {
       });
     }
 
+    await this.assertPublishBranchReady({
+      projectRoot: run.projectRoot,
+      sourceBranch: input.sourceBranch,
+      targetBranch: input.targetBranch,
+    });
+
     const result = await this.executePublish({
       run,
       plan,
       timestamp,
       pushBranch: input.pushBranch,
+      remoteName: input.remoteName,
     });
 
     return this.recordPublishResult({
@@ -352,6 +374,33 @@ export class PublisherService {
     });
   }
 
+  private async assertPublishBranchReady(input: {
+    projectRoot: string;
+    sourceBranch: string;
+    targetBranch: string;
+  }): Promise<void> {
+    const status = (await this.git(input.projectRoot, ["status", "--porcelain"])).stdout.trim();
+    if (status.length > 0) {
+      throw new Error(
+        "Draft publication requires a clean working tree; commit the intended implementation changes first",
+      );
+    }
+
+    const aheadText = (
+      await this.git(input.projectRoot, [
+        "rev-list",
+        "--count",
+        `${input.targetBranch}..${input.sourceBranch}`,
+      ])
+    ).stdout.trim();
+    const ahead = Number.parseInt(aheadText, 10);
+    if (!Number.isSafeInteger(ahead) || ahead < 1) {
+      throw new Error(
+        `Draft publication requires at least one committed change on ${input.sourceBranch} beyond ${input.targetBranch}`,
+      );
+    }
+  }
+
   public async recordReview(rawInput: unknown) {
     const input = RecordPublishReviewInputSchema.parse(rawInput);
     const run = await this.runStore.get(input.runId);
@@ -388,6 +437,7 @@ export class PublisherService {
     plan: z.infer<typeof PublishPlanSchema>;
     timestamp: string;
     pushBranch: boolean;
+    remoteName: string;
   }): Promise<PublishResult> {
     try {
       const token = readPublisherToken(input.plan.target.host);
@@ -396,7 +446,7 @@ export class PublisherService {
         await this.git(input.run.projectRoot, [
           "push",
           "--set-upstream",
-          "origin",
+          input.remoteName,
           input.plan.payload.sourceBranch,
         ]);
       }
@@ -413,6 +463,9 @@ export class PublisherService {
         payload: prepared.payload,
         token: token.token,
       });
+      if (existing !== undefined && !existing.draft) {
+        throw new Error(`Refusing to update non-draft review request ${existing.number}`);
+      }
       const request =
         existing === undefined
           ? await publisher.create({
@@ -426,6 +479,9 @@ export class PublisherService {
               body: prepared.payload.body,
               token: token.token,
             });
+      if (!request.draft) {
+        throw new Error(`Review request ${request.number} is not a draft after publication`);
+      }
 
       return PublishResultSchema.parse({
         runId: input.plan.runId,
@@ -437,6 +493,8 @@ export class PublisherService {
         requestSynced: true,
         visualPreviewExpected: prepared.visualPreviewExpected,
         visualPreviewSynced: prepared.visualPreviewSynced,
+        featureVideoExpected: prepared.featureVideoExpected,
+        featureVideoSynced: prepared.featureVideoSynced,
         fallbackMode: "none",
         partialReasons: prepared.partialReasons,
         retryable: false,
@@ -468,12 +526,26 @@ export class PublisherService {
         publisher,
         token: token.token,
       });
+      const existing = await publisher.findExisting({
+        target: input.plan.target,
+        payload: prepared.payload,
+        token: token.token,
+      });
+      if (existing === undefined || existing.number !== input.requestNumber) {
+        throw new Error(`Draft review request ${input.requestNumber} could not be verified`);
+      }
+      if (!existing.draft) {
+        throw new Error(`Refusing to update non-draft review request ${existing.number}`);
+      }
       const request = await publisher.updateBody({
         target: input.plan.target,
         requestNumber: input.requestNumber,
         body: prepared.payload.body,
         token: token.token,
       });
+      if (!request.draft) {
+        throw new Error(`Review request ${request.number} is not a draft after body update`);
+      }
 
       return PublishResultSchema.parse({
         runId: input.plan.runId,
@@ -485,6 +557,8 @@ export class PublisherService {
         requestSynced: true,
         visualPreviewExpected: prepared.visualPreviewExpected,
         visualPreviewSynced: prepared.visualPreviewSynced,
+        featureVideoExpected: prepared.featureVideoExpected,
+        featureVideoSynced: prepared.featureVideoSynced,
         fallbackMode: "none",
         partialReasons: prepared.partialReasons,
         retryable: false,
@@ -511,16 +585,25 @@ export class PublisherService {
     publishedAssets: PublishedReviewAsset[];
     visualPreviewExpected: boolean;
     visualPreviewSynced: boolean;
+    featureVideoExpected: boolean;
+    featureVideoSynced: boolean;
     partialReasons: string[];
   }> {
     const visualPreview = await this.collectVisualPreviewAssets(input.run, input.plan.payload);
+    const featureVideo = await this.collectFeatureVideoAsset(input.run, input.plan.payload);
+    const assets = [...visualPreview.assets, ...(featureVideo === undefined ? [] : [featureVideo])];
+    const visualPreviewExpected =
+      visualPreview.assets.length > 0 && visualPreview.report !== undefined;
+    const featureVideoExpected = featureVideo !== undefined;
 
-    if (visualPreview.assets.length === 0 || visualPreview.report === undefined) {
+    if (assets.length === 0) {
       return {
         payload: input.plan.payload,
         publishedAssets: [],
         visualPreviewExpected: false,
         visualPreviewSynced: false,
+        featureVideoExpected: false,
+        featureVideoSynced: false,
         partialReasons: [],
       };
     }
@@ -531,41 +614,85 @@ export class PublisherService {
         target: input.plan.target,
         payload: input.plan.payload,
         token: input.token,
-        assets: visualPreview.assets,
+        assets,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      throw new PublishPreparationError(`visual evidence upload failed: ${message}`, {
-        visualPreviewExpected: true,
-        partialReasons: [`visual evidence upload failed: ${redactSecrets(message)}`],
+      const label = visualPreviewExpected ? "visual evidence" : "feature video";
+      throw new PublishPreparationError(`${label} upload failed: ${message}`, {
+        visualPreviewExpected,
+        featureVideoExpected,
+        partialReasons: [`${label} upload failed: ${redactSecrets(message)}`],
       });
     }
 
-    if (publishedAssets.length !== visualPreview.assets.length) {
+    if (publishedAssets.length !== assets.length) {
       throw new PublishPreparationError(
-        `visual evidence upload incomplete: ${publishedAssets.length}/${visualPreview.assets.length} asset(s) uploaded`,
+        `review evidence upload incomplete: ${publishedAssets.length}/${assets.length} asset(s) uploaded`,
         {
-          visualPreviewExpected: true,
+          visualPreviewExpected,
+          featureVideoExpected,
           partialReasons: [
-            `visual evidence upload incomplete: ${publishedAssets.length}/${visualPreview.assets.length} asset(s) uploaded`,
+            `review evidence upload incomplete: ${publishedAssets.length}/${assets.length} asset(s) uploaded`,
           ],
         },
       );
     }
 
+    const visualAssets = publishedAssets.filter((asset) => asset.role !== "e2e-video");
+    const videoAsset = publishedAssets.find((asset) => asset.role === "e2e-video");
+    let body = input.plan.payload.body;
+    if (visualPreviewExpected && visualPreview.report !== undefined) {
+      body = injectVisualEvidencePreview({
+        body,
+        report: visualPreview.report,
+        assets: visualAssets,
+      });
+    }
+    if (videoAsset !== undefined) {
+      body = injectFeatureVideoEvidence(body, videoAsset);
+    }
+
     return {
       payload: ReviewRequestPayloadSchema.parse({
         ...input.plan.payload,
-        body: injectVisualEvidencePreview({
-          body: input.plan.payload.body,
-          report: visualPreview.report,
-          assets: publishedAssets,
-        }),
+        body,
       }),
       publishedAssets,
-      visualPreviewExpected: true,
-      visualPreviewSynced: true,
+      visualPreviewExpected,
+      visualPreviewSynced: visualPreviewExpected,
+      featureVideoExpected,
+      featureVideoSynced: featureVideoExpected,
       partialReasons: [],
+    };
+  }
+
+  private async collectFeatureVideoAsset(
+    run: Awaited<ReturnType<RunStore["get"]>>,
+    payload: ReviewRequestPayload,
+  ): Promise<ReviewRequestAsset | undefined> {
+    const artifact = [...run.artifacts]
+      .reverse()
+      .find(
+        (item) =>
+          item.metadata["workflowSubmissionKind"] === "implementation" &&
+          item.metadata["featureEvidenceRole"] === "video",
+      );
+
+    if (artifact === undefined) return undefined;
+    if (artifact.mediaType !== "video/webm" && artifact.mediaType !== "video/mp4") {
+      throw new Error(`Feature E2E artifact is not a supported video: ${artifact.id}`);
+    }
+
+    const extension = artifact.mediaType === "video/mp4" ? ".mp4" : ".webm";
+    return {
+      artifactId: artifact.id,
+      targetId: "feature-e2e",
+      role: "e2e-video",
+      label: "Feature E2E video",
+      filename: `${safePathSegment(payload.runId)}-feature-e2e-${artifact.id.replace(/^art_/, "").slice(0, 12)}${extension}`,
+      mediaType: artifact.mediaType,
+      content: await this.artifactStore.readContent(artifact.digest),
     };
   }
 
@@ -710,6 +837,12 @@ export class PublisherService {
         status: input.result.status,
         host: input.result.target?.host,
         requestUrl: input.result.request?.url,
+        requestDraft: input.result.request?.draft,
+        requestSynced: input.result.requestSynced,
+        visualPreviewExpected: input.result.visualPreviewExpected,
+        visualPreviewSynced: input.result.visualPreviewSynced,
+        featureVideoExpected: input.result.featureVideoExpected,
+        featureVideoSynced: input.result.featureVideoSynced,
       },
     });
     const shouldAddPublishingAgentResult =
@@ -900,6 +1033,28 @@ function injectVisualEvidencePreview(input: {
 
 const VISUAL_PREVIEW_START = "<!-- spec-to-pr:visual-evidence:start -->";
 const VISUAL_PREVIEW_END = "<!-- spec-to-pr:visual-evidence:end -->";
+const FEATURE_VIDEO_START = "<!-- spec-to-pr:feature-video:start -->";
+const FEATURE_VIDEO_END = "<!-- spec-to-pr:feature-video:end -->";
+
+function injectFeatureVideoEvidence(body: string, asset: PublishedReviewAsset): string {
+  const start = body.indexOf(FEATURE_VIDEO_START);
+  const end = body.indexOf(FEATURE_VIDEO_END);
+  const cleanBody =
+    start === -1 || end === -1 || end < start
+      ? body.trimEnd()
+      : `${body.slice(0, start).trimEnd()}\n\n${body.slice(end + FEATURE_VIDEO_END.length).trimStart()}`.trimEnd();
+
+  return [
+    cleanBody,
+    "",
+    FEATURE_VIDEO_START,
+    "## Feature E2E Evidence",
+    "",
+    `[Open the targeted feature recording](${asset.url})`,
+    "",
+    FEATURE_VIDEO_END,
+  ].join("\n");
+}
 
 function removeVisualEvidencePreview(body: string): string {
   const start = body.indexOf(VISUAL_PREVIEW_START);
@@ -1049,6 +1204,8 @@ function failedPublishResult(input: {
     requestSynced: false,
     visualPreviewExpected: preparationDetails?.visualPreviewExpected ?? false,
     visualPreviewSynced: false,
+    featureVideoExpected: preparationDetails?.featureVideoExpected ?? false,
+    featureVideoSynced: false,
     fallbackMode: "none",
     partialReasons: preparationDetails?.partialReasons ?? [publishFailureReason(message)],
     errorCode: "PUBLISH_FAILED",
@@ -1080,10 +1237,6 @@ function buildPlanWarnings(input: {
     warnings.push(`Report decision is ${input.reportDecision}. Publish only as a draft.`);
   }
 
-  if (input.payload.mode !== "draft") {
-    warnings.push("Publish mode is ready, not draft. Ensure reviewer approval policy allows this.");
-  }
-
   if (input.payload.body.length > 60_000) {
     warnings.push("PR/MR body is very large. Host may truncate or reject it.");
   }
@@ -1111,6 +1264,8 @@ function blockedPublishResult(input: {
     requestSynced: false,
     visualPreviewExpected: false,
     visualPreviewSynced: false,
+    featureVideoExpected: false,
+    featureVideoSynced: false,
     fallbackMode: "none",
     partialReasons: ["Report decision is blocked. Publishing is disabled."],
     errorCode: "PUBLISH_BLOCKED",
@@ -1139,7 +1294,9 @@ function publishResultIsFullySynced(result: PublishResult): boolean {
   return (
     result.status === "passed" &&
     result.requestSynced &&
+    result.request?.draft === true &&
     (!result.visualPreviewExpected || result.visualPreviewSynced) &&
+    (!result.featureVideoExpected || result.featureVideoSynced) &&
     result.partialReasons.length === 0
   );
 }

@@ -8,114 +8,109 @@ import TabItem from "@theme/TabItem";
 
 # SpecToPR 설치
 
-SpecToPR은 Claude Code와 Codex를 모두 지원합니다. 사용하는 호스트의 탭을 선택하세요.
-
-**이름 표기** — 제품 표시명은 **SpecToPR**입니다. 설치 ID·저장소 이름·슬래시 명령에서는 소문자 식별자 `spec-to-pr`을 사용합니다.
+제품명은 **SpecToPR**, 저장소·설치 ID·명령 식별자는 `spec-to-pr`입니다.
 
 <Tabs groupId="host">
 <TabItem value="claude" label="Claude Code" default>
 
-## 마켓플레이스에서 설치 (권장)
+## Marketplace 설치
 
-Claude Code 세션 안에서:
+Claude Code session에서:
 
-```bash
+```text
 /plugin marketplace add dhyun2/spec-to-pr
 /plugin install spec-to-pr@spec-to-pr
 ```
 
-설치한 세션에서 바로 사용하려면 `/reload-plugins`를 실행하세요.
+설치 직후에는 `/reload-plugins`를 실행하거나 새 session을 시작합니다.
 
-## 업데이트
+업데이트:
 
-```bash
+```text
 /plugin marketplace update spec-to-pr
 /plugin update spec-to-pr@spec-to-pr
 /reload-plugins
 ```
 
-## 로컬 개발용 설치
-
-저장소를 클론해서 수정하며 쓰는 경우에는 캐시형 마켓플레이스 설치 대신 소스 디렉터리를 직접 로드합니다.
+## 로컬 소스 실행
 
 ```bash
 git clone https://github.com/dhyun2/spec-to-pr.git
 cd spec-to-pr
-corepack enable && pnpm install && pnpm build
-```
-
-```bash
+corepack enable
+pnpm install
+pnpm build
 claude --plugin-dir /absolute/path/to/spec-to-pr
 ```
-
-소스를 수정한 뒤 `pnpm build`하고, 실행 중인 Claude Code에서 `/reload-plugins`를 호출하면 변경분을 다시 읽습니다.
-
-## 설치 확인
-
-```bash
-/spec-to-pr:doctor
-```
-
-`doctor`는 플러그인 인식 → 로컬 MCP kernel 기동 → `kernel_info` / `kernel_ping` tool 호출까지의 실행 경로 전체를 점검합니다. 여기가 통과되면 나머지 26개 스킬도 같은 경로로 동작합니다.
 
 </TabItem>
 <TabItem value="codex" label="Codex">
 
-## Git 마켓플레이스에서 설치 (권장)
+## Git marketplace 설치
 
 ```bash
 codex plugin marketplace add https://github.com/dhyun2/spec-to-pr --ref main
 codex plugin add spec-to-pr@spec-to-pr
 ```
 
-## 업데이트
+업데이트:
 
 ```bash
 codex plugin marketplace upgrade spec-to-pr
 codex plugin add spec-to-pr@spec-to-pr
 ```
 
-## 로컬 테스트용 설치
+## 로컬 marketplace 설치
 
 ```bash
 git clone https://github.com/dhyun2/spec-to-pr.git
 cd spec-to-pr
-corepack enable && pnpm install && pnpm build
+corepack enable
+pnpm install
+pnpm build
 codex plugin marketplace add .
 codex plugin add spec-to-pr@spec-to-pr
 ```
 
-설치 후 **Codex를 다시 열고 새 작업을 시작**하세요. `/plugins`에서 `SpecToPR` 마켓플레이스의 `spec-to-pr`이 설치 상태인지 확인한 뒤:
+설치 후 Codex를 다시 열고 새 task를 시작합니다. `/plugins`에서 SpecToPR marketplace와 `spec-to-pr` 설치 상태를 확인하세요.
+
+## SDK runner
 
 ```bash
-/spec-to-pr:doctor
-```
-
-## CI 자동화 (Codex SDK Runner)
-
-대화형 UI 없이 CI에서 파이프라인을 돌리려면 SDK 러너를 사용합니다.
-
-```bash
-cd packages/codex-sdk
-pnpm install && pnpm build
-node dist/cli.js \
+pnpm --dir packages/codex-sdk install
+pnpm --dir packages/codex-sdk build
+node packages/codex-sdk/dist/cli.js \
   --cwd /path/to/app \
+  --mode brief \
   --brief docs/plan.md \
-  --figma "https://www.figma.com/file/..." \
-  --openapi docs/openapi.yaml \
-  --min-visual-score 0.98 \
-  --max-repair-attempts 3
+  --publish
 ```
+
+사용 가능한 mode와 option은 [설정](/reference/config)에 있습니다.
 
 </TabItem>
 </Tabs>
 
-## 설치되면 무엇이 생기나
+## 설치 확인
 
-- **스킬 27개** — `/spec-to-pr:<이름>` 형태의 슬래시 커맨드. 전체 목록은 [스킬 레퍼런스](/reference/skills)
-- **로컬 MCP kernel** — stdio로 통신하는 `spec-to-pr-kernel` 서버. Run 메타데이터는 SQLite에, 증거와 산출물은 로컬 아티팩트 저장소에 기록
-- **서브에이전트 정의** — 구현 lane 3개와 Review Council·통합·품질 검토 역할. 호스트별 파일 구성은 달라도 같은 판정 계약을 사용. [에이전트 레퍼런스](/reference/agents)
+```text
+/spec-to-pr:doctor
+```
 
-Claude Code와 Codex는 tool namespace와 에이전트 파일 형식은 다르지만 같은 MCP kernel·증거·gate·발행 판정 계약을 사용합니다. 코드나 설명 문장이 같아야 하는 것은 아닙니다. 자세한 범위는 [Claude Code · Codex 호스트 동등성](/concepts/host-parity)을 보세요.
+Doctor는 `workflow_info`를 호출해 contract version `2.0.0`과 다음 표면을 확인합니다.
 
-다음: [퀵스타트](/getting-started/quickstart)에서 첫 draft PR을 만들어 보세요.
+- tool 7개
+- durable stage 8개
+- reviewer role 2개
+- explicit API-ready-before-UI, independent reviews, conditional design review capability
+
+설치된 release package는 `node_modules`를 포함하지 않을 수 있습니다. plugin cache에서 SDK를 임의 import하는 방식 대신 host에 실제 노출된 `workflow_info`로 진단하세요.
+
+## 설치되는 구성
+
+- skill 9개
+- `node ./dist/mcp/server.js`로 실행되는 local stdio MCP server
+- `functional-reviewer`, `design-reviewer` 정의
+- evidence ledger, artifact storage, draft publisher, explicit archive runtime
+
+호스트별 tool namespace 표기는 다를 수 있지만 public contract는 같습니다. 다음은 [퀵스타트](/getting-started/quickstart)입니다.

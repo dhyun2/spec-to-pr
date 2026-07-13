@@ -7,6 +7,33 @@ use the plugin tag format, for example `spec-to-pr--v0.1.0`.
 
 ## Unreleased
 
+### Changed
+
+- Replaced the microtool-heavy v1 public workflow with the v2 facade: exactly seven MCP
+  tools, eight durable stages, nine skills, and two independent reviewer roles.
+- Consolidated API and UI implementation into one context with an explicit evidence-backed
+  `api-ready` submission before UI completion. API categories now require distinct physical
+  non-empty files, a passing contract-test JSON result, and a matching implementation context ID;
+  path, symlink, and hard-link aliases are rejected; removed separate
+  implementation lanes, integration worktree coordination, Review Council, and specialist cascades.
+- Added delivery profiles for brief, focused legacy change, user-facing feature, and Figma-driven
+  implementation without creating mode-specific pipelines.
+- Limited user-facing feature verification to one unchained Playwright invocation selected by path,
+  tag, or project, with a strict selector/context-bound passing JSON result and exactly one
+  structurally valid, non-zero-duration `.webm` or `.mp4` container linked from the draft review
+  request. Broad/full-project commands are rejected.
+- Moved Figma intake to the host's connected Figma capability followed by one typed `figma-bundle`
+  submission with matching provenance, a strict declared manifest, and real PNG visuals; removed
+  runtime Figma microtools and polling from the supported workflow.
+- Split review into functional validation for code scope and design validation only for applicable
+  UI scope. The orchestrator supplies immutable status/contracts/diff/evidence packets; reviewers do
+  not call workflow tools. Publication refuses non-draft requests and uses the selected Git remote.
+- Added draft publication preflight for a non-target source branch, a clean working tree, and at
+  least one committed source delta beyond the target so PRs cannot omit uncommitted implementation.
+- Rebuilt the README, SDK guide, and documentation site around the four delivery profiles and v2
+  contract; removed obsolete task specs, historical implementation plans, v1 ADRs, and stale docs
+  pages.
+
 ## 0.1.0 - 2026-07-10
 
 ### Added

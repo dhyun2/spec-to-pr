@@ -1,142 +1,106 @@
 ---
 sidebar_position: 1
-title: 사용 레시피 — 케이스별 프롬프트
+title: 사용 레시피
 ---
 
-# 사용 레시피 — 케이스별 프롬프트
+# 사용 레시피
 
-SpecToPR은 자연어 요청에서 URL · 파일경로 · 브랜치 · 정책을 자동으로 파싱합니다. 아래에서 내 상황과 가장 가까운 케이스를 찾아 복사한 뒤 경로와 URL만 바꿔 쓰세요.
+모드, 대상 저장소, 실제 source, 변경 범위, publication intent를 명시하면 가장 안정적입니다.
 
-:::tip 프롬프트 작성 원칙
-
-1. **입력 소스를 명시** — 기획서 경로, Figma URL, OpenAPI 경로/URL을 그대로 붙여넣기
-2. **브랜치 정책을 명시** — 생략하면 target은 `main`
-3. **제약은 자연어로** — "디자인 시스템 컴포넌트만 사용", "기존 API 래퍼 패턴 유지" 같은 제약도 파싱되어 에이전트에 전달됩니다
-   :::
-
-## 케이스 1 — 기획서 + Figma + OpenAPI (풀 세트)
-
-명세가 모두 준비된 신규 기능. 증거의 폭이 가장 넓고 시각 회귀까지 자동 검증됩니다.
+## 1. 기획서 → draft PR
 
 ```text
-/spec-to-pr ./apps/web docs/checkout-brief.md
-Figma: https://www.figma.com/file/AbCdEf123/checkout?node-id=12-345
+/spec-to-pr /absolute/path/to/app
+mode: brief
+briefPath: docs/checkout.md
+changeKind: feature
+기획서의 수용 조건만 구현하고 관련 검사로 검증해줘.
+준비되면 draft PR로 발행해줘.
+```
+
+`briefPath`가 없으면 brief 모드를 시작할 수 없습니다. 문서에 없는 endpoint나 UI 동작은 추측하지 않고 gap으로 남깁니다.
+
+## 2. 레거시 프로젝트의 특정 변경 → draft PR
+
+```text
+/spec-to-pr /absolute/path/to/legacy-app
+mode: legacy
+changeKind: fix
+결제 재시도에서 409를 받았을 때 중복 알림이 뜨는 문제만 고쳐줘.
+현재 동작을 focused baseline으로 남기고 영향받은 검사만 실행해.
+전체 프로젝트 inventory나 migration은 하지 말고 draft PR로 발행해줘.
+```
+
+Legacy 모드는 구체적인 delta가 필요합니다. baseline은 해당 동작의 테스트, 로그, screenshot 등 실제 파일이어야 하며 contracts evidence에 포함됩니다.
+
+## 3. 사용자 기능 → targeted E2E + 영상 + draft PR
+
+```text
+/spec-to-pr /absolute/path/to/app
+mode: feature
+changeKind: feature
+저장 주소 선택 기능을 구현해줘.
+이 기능을 고르는 test path/tag/project로 E2E 하나만 실행하고,
+.webm 또는 .mp4 영상은 정확히 하나만 기록해서 draft PR에 링크해줘.
+프로젝트 전체 E2E는 실행하지 마.
+```
+
+Feature evidence에는 selector를 실제 인자로 쓰고 `--list`/`--pass-with-no-tests`를 쓰지 않는 단일 Playwright command, `status: passed`·정확한 selector·같은 `implementationContextId`·양수 `testCount`만 담은 strict JSON 결과, 재생 시간이 0보다 큰 구조적으로 유효한 WebM/MP4 video path가 필요합니다. 명령 체이닝, 전체 E2E, 이름만 영상인 파일, 영상 0개/2개 이상은 거부됩니다.
+
+## 4. Figma URL → 디자인 구현
+
+```text
+/spec-to-pr /absolute/path/to/app
+mode: figma
+changeKind: design
+figmaUrl: https://www.figma.com/file/AbCdEf123/checkout?node-id=12-345
+호스트에 연결된 Figma 기능으로 실제 node, screenshot, variable,
+asset, component context를 가능한 범위에서 읽고 구현해줘.
+provider: host-connected-figma, capturedAt, fileUrl, nodeIds, manifestPath와
+strict manifest에 나열한 실제 PNG visualPaths를 project-local figma-bundle 한 번으로 제출해.
+URL만 근거로 주장하거나 Figma를 polling하지 마.
+```
+
+Figma 모드는 디자인 구현까지만 끝낼 수 있습니다. draft PR도 원하면 마지막에 `publication: draft` 또는 “draft PR로 발행”을 추가하세요.
+
+## 5. API가 있는 UI
+
+```text
+/spec-to-pr /absolute/path/to/app
+mode: brief
+briefPath: docs/profile.md
 OpenAPI: docs/openapi.yaml
-target 브랜치는 main, source는 feature/checkout 기준으로 시작해줘.
+물리적으로 서로 다른 비어 있지 않은 API type/schema/wrapper/mock 파일과 status: passed인
+contract-test JSON, 안정적인 implementationContextId를 먼저 api-ready로 제출하고,
+같은 구현 context에서 mock 기반 UI를 검증한 뒤 draft PR로 발행해줘.
 ```
 
-실행하면 이런 순서로 진행됩니다:
+API와 UI를 별도 구현 agent로 나누지 않습니다. `apiArtifacts`와 `implementationContextId`가 있는 `kind: api-ready` 제출이 UI 완료 증거보다 먼저이며 최종 구현은 같은 context ID를 반복합니다. Path, symlink, hard link alias는 별도 API 증거가 아니며 Boolean만으로 대체할 수 없습니다.
+
+## 6. 발행하지 않기
 
 ```text
-① 프롬프트 파싱 → 기획서/Figma/OpenAPI 3개 소스 등록, 스냅샷 고정
-② 세 소스에서 증거 추출 → 요구사항 ↔ API ↔ 디자인 연결 (빈 곳은 gap)
-③ OpenSpec·Gherkin·Design Contract 계약 확정
-④ 3개 에이전트가 격리 worktree에서 병렬 구현 → 교차 검토 → 통합
-⑤ 품질·시각·접근성·성능 게이트 → 스코어카드 판정
-⑥ 통과 시: 증거 첨부된 draft PR 생성 (여기서부터는 사람 몫)
+/spec-to-pr /absolute/path/to/app
+mode: legacy
+이 변경은 구현과 독립 리뷰 evidence까지만 만들고 publication은 none으로 해줘.
 ```
 
-→ 각 단계의 상세는 [모드 A 문서](/usage/mode-brief-figma-openapi), 프롬프트가 어떻게 구조화되는지는 [옵션과 정책의 파싱 예시](/usage/options-and-policies#prompt-parsing) 참고
+`publication: none`은 publish stage를 건너뜁니다. 어떤 경우에도 publish가 merge/approve/ready 전환까지 수행하지는 않습니다.
 
-## 케이스 2 — PDF 기획서만 있는 경우
-
-Figma·OpenAPI 없이도 동작합니다. 기획서에서 요구사항을 추출하고, API·디자인 근거가 없는 부분은 **gap으로 기록**되어 PR 본문에 "사람이 확인할 것"으로 표시됩니다.
+## 7. 중단된 Run 재개
 
 ```text
-/spec-to-pr ./my-service 기획서는 docs/주문개편_기획안_v2.pdf 야.
-API 명세랑 디자인은 아직 없어. 근거가 부족한 부분은 gap으로 남겨줘.
+이전에 받은 runId의 workflow_status를 읽고, blocker가 해소됐다면 이어서 진행해줘.
+이미 승인된 stage는 반복하지 마.
 ```
 
-## 케이스 3 — 기획서를 레거시 프로젝트로 대체 (마이그레이션)
+각 stage는 durable checkpoint와 lease를 사용합니다. 재개는 public `workflow_status`와 `workflow_advance`로 처리하며 내부 microtool을 호출하지 않습니다.
 
-신규 개발의 `기획서 + Figma + OpenAPI` 조합에서 **기획서만 레거시 프로젝트로 교체**하는 경우입니다. 레거시 저장소에서 기능 인벤토리(15개 카테고리)를 추출한 뒤, Figma·OpenAPI·계약 생성·구현·gate는 같은 흐름으로 진행합니다.
+## 8. 머지 후 명시적 archive
 
 ```text
-/spec-to-pr ./new-app
-레거시 프로젝트 ../legacy-app 을 기획서로 삼아서 주문 플로우를 이관해줘.
-Figma: https://www.figma.com/file/XyZ789/order-renewal
-OpenAPI: docs/openapi.yaml
-동작은 레거시 기준, UI는 Figma 기준으로 검증해줘.
+/spec-to-pr:archive-openspec
+draft PR #123이 실제로 merge된 것을 host evidence로 확인한 뒤 이 run을 archive해줘.
 ```
 
-→ 상세 동작·검증 방식은 [모드 B 문서](/usage/mode-legacy-migration) 참고
-
-## 케이스 4 — 레거시 + 새 디자인 (하이브리드)
-
-동작은 레거시에서, 화면은 새 Figma 디자인에서 가져오는 리뉴얼 케이스.
-
-```text
-/spec-to-pr ./new-app
-기능 명세는 레거시 ../legacy-app 의 예약 관련 화면들을 기준으로 하고,
-UI는 이 Figma를 따라줘: https://www.figma.com/file/XyZ789/reservation-renewal
-레거시의 native bridge 호출과 analytics 이벤트는 빠짐없이 커버돼야 해.
-```
-
-## 케이스 5 — 발행 없이 로컬 브랜치까지만
-
-PR을 만들지 않고 통합 브랜치와 리포트만 받는 경우 (보안망 내부, 토큰 없음 등).
-
-```text
-/spec-to-pr ./apps/web docs/brief.md
-PR은 발행하지 말고 통합 브랜치랑 리포트까지만 만들어줘.
-```
-
-## 케이스 6 — 게이트·검증 커맨드 커스터마이즈
-
-```text
-/spec-to-pr ./apps/web docs/brief.md
-접근성이랑 성능 게이트는 이번엔 스킵해줘.
-테스트는 pnpm test:unit 과 pnpm test:e2e 로 돌려줘.
-```
-
-게이트별 온/오프와 임계값 조정은 [옵션과 정책](/usage/options-and-policies)에 전체 목록이 있습니다.
-
-## 케이스 7 — 특정 단계만 따로 실행
-
-전체 파이프라인 대신 개별 스킬을 직접 호출할 수 있습니다. 예를 들어 Figma 분석만 미리 해보고 싶다면:
-
-```text
-/spec-to-pr:figma-intake https://www.figma.com/file/AbCdEf123/checkout?node-id=12-345
-```
-
-OpenAPI 분석만:
-
-```text
-/spec-to-pr:analyze-openapi docs/openapi.yaml
-```
-
-스킬 27개 전체 목록과 역할은 [스킬 레퍼런스](/reference/skills)에 있습니다.
-
-## 케이스 8 — 실패한 Run 재개
-
-Run은 SQLite에 체크포인트로 저장되므로, 실패하거나 중단돼도 처음부터 다시 하지 않습니다.
-
-```text
-/spec-to-pr ./apps/web 아까 돌리던 run 이어서 진행해줘.
-```
-
-실패한 스테이지부터 재시도합니다(스테이지당 기본 최대 3회). 자세한 내용은 [상태 저장 구조](/concepts/storage-and-mcp) 참고.
-
-## 케이스 9 — 머지 후 아카이브
-
-PR을 머지한 다음, 사람이 명시적으로 확인해 줄 때만 OpenSpec을 아카이브합니다.
-
-```text
-/spec-to-pr:archive-openspec 방금 PR #123 머지했어. 아카이브 진행해줘.
-```
-
----
-
-## 프롬프트에서 파싱되는 것들 (정리)
-
-| 항목             | 인식 방식                     | 예                                        |
-| ---------------- | ----------------------------- | ----------------------------------------- |
-| Figma URL        | `figma.com` URL 자동 인식     | `https://www.figma.com/file/...`          |
-| 기획서/문서 경로 | 파일 경로                     | `docs/brief.md`, `docs/기획안.pdf`        |
-| OpenAPI          | 경로 · URL · 인라인 YAML 블록 | `docs/openapi.yaml`                       |
-| 티켓 URL         | Linear · GitHub Issue 등      | `https://linear.app/...`                  |
-| 브랜치 정책      | "source는 X, target은 Y"      | 기본 target: `main`                       |
-| 발행 정책        | "PR 발행하지 마" / "draft로"  | 기본: draft 발행                          |
-| 게이트 정책      | "성능 게이트 스킵" 등         | openspec·security·a11y·perf·observability |
-| 검증 커맨드      | "테스트는 X로 돌려줘"         | `pnpm test:unit`                          |
-| 자유 제약        | 그 외 자연어 제약             | "디자인 시스템 컴포넌트만 사용"           |
+브랜치 push나 closed 상태만으로 merge를 추측하지 않습니다. Runtime은 PR 상태를 polling하지 않습니다.

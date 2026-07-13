@@ -26,6 +26,7 @@ let publisherService: PublisherService;
 let originalGithubToken: string | undefined;
 let githubPublisher: FakePublisher;
 let gitlabPublisher: FakePublisher;
+let gitCalls: string[][];
 
 beforeEach(async () => {
   directory = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-publisher-"));
@@ -48,6 +49,7 @@ beforeEach(async () => {
   prReportService = new PrReportService(store, artifactStore, () => "2026-06-23T00:00:01.000Z");
   githubPublisher = new FakePublisher("github");
   gitlabPublisher = new FakePublisher("gitlab");
+  gitCalls = [];
   publisherService = new PublisherService(
     store,
     artifactStore,
@@ -56,10 +58,19 @@ beforeEach(async () => {
       github: githubPublisher,
       gitlab: gitlabPublisher,
     },
-    async () => ({
-      stdout: "https://github.com/acme/spec-to-pr.git\n",
-      stderr: "",
-    }),
+    async (_cwd, args) => {
+      gitCalls.push(args);
+      if (args[0] === "status") {
+        return { stdout: "", stderr: "" };
+      }
+      if (args[0] === "rev-list") {
+        return { stdout: "1\n", stderr: "" };
+      }
+      return {
+        stdout: "https://github.com/acme/spec-to-pr.git\n",
+        stderr: "",
+      };
+    },
   );
 });
 
@@ -179,6 +190,117 @@ describe("PublisherService", () => {
     expect(loadedRun.agentResults.some((result) => result.kind === "publishing")).toBe(true);
   });
 
+  it("pushes the source branch through the selected remote", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+
+    const published = await publisherService.publish({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-upstream",
+      targetBranch: "main",
+      remoteName: "upstream",
+      pushBranch: true,
+      confirm: true,
+    });
+
+    expect(published.result.status).toBe("passed");
+    expect(gitCalls).toContainEqual([
+      "push",
+      "--set-upstream",
+      "upstream",
+      "spec-to-pr/run-upstream",
+    ]);
+  });
+
+  it("refuses publication without committed source-branch changes", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    const input = {
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "codex/checkout",
+      targetBranch: "main",
+      pushBranch: true,
+      confirm: true,
+    } as const;
+    const createService = (status: string, ahead: string) =>
+      new PublisherService(
+        store,
+        artifactStore,
+        () => "2026-06-23T00:00:02.000Z",
+        { github: githubPublisher, gitlab: gitlabPublisher },
+        async (_cwd, args) => ({
+          stdout:
+            args[0] === "status"
+              ? status
+              : args[0] === "rev-list"
+                ? ahead
+                : "https://github.com/acme/spec-to-pr.git\n",
+          stderr: "",
+        }),
+      );
+
+    await expect(createService(" M src/page.tsx\n", "1\n").publish(input)).rejects.toThrow(
+      /clean working tree/i,
+    );
+    await expect(createService("", "0\n").publish(input)).rejects.toThrow(
+      /at least one committed change/i,
+    );
+  });
+
+  it("refuses to update an existing non-draft review request", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    githubPublisher.existingRequest = {
+      host: "github",
+      url: "https://github.com/acme/spec-to-pr/pull/123",
+      number: "123",
+      id: "123",
+      draft: false,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      created: false,
+      updated: false,
+    };
+
+    const published = await publisherService.publish({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      pushBranch: false,
+      confirm: true,
+    });
+
+    expect(published.result.status).toBe("failed");
+    expect(published.result.errorMessage).toMatch(/non-draft/i);
+    expect(githubPublisher.updatedBodies).toHaveLength(0);
+  });
+
+  it("does not report success when the host returns a non-draft request", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    githubPublisher.forceNonDraftResult = true;
+
+    const published = await publisherService.publish({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      pushBranch: false,
+      confirm: true,
+    });
+
+    expect(published.result.status).toBe("failed");
+    expect(published.result.requestSynced).toBe(false);
+    expect(published.result.errorMessage).toMatch(/draft/i);
+  });
+
   it("refuses to publish a blocked report", async () => {
     const run = await runService.createRun({
       projectRoot,
@@ -221,6 +343,7 @@ describe("PublisherService", () => {
     });
 
     expect(report.decision).toBe("blocked");
+    githubPublisher.existingRequest = existingDraftRequest("474");
 
     const updated = await publisherService.updateBody({
       runId: run.id,
@@ -252,6 +375,7 @@ describe("PublisherService", () => {
     const report = await prReportService.generatePrReport({
       runId: run.id,
     });
+    githubPublisher.existingRequest = existingDraftRequest("475");
 
     const updated = await publisherService.updateBody({
       runId: run.id,
@@ -415,7 +539,73 @@ describe("PublisherService", () => {
 
     expect(loadedRun.agentResults.some((result) => result.kind === "publishing")).toBe(false);
   });
+
+  it("publishes one feature E2E video as a link without treating it as a visual preview", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    await addFeatureVideoEvidence(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+
+    const published = await publisherService.publish({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-feature",
+      targetBranch: "main",
+      pushBranch: false,
+      confirm: true,
+    });
+
+    expect(published.result).toMatchObject({
+      status: "passed",
+      visualPreviewExpected: false,
+      featureVideoExpected: true,
+      featureVideoSynced: true,
+    });
+    expect(githubPublisher.uploadedAssets[0]).toEqual([{ role: "e2e-video" }]);
+    expect(githubPublisher.createdPayloads[0]?.body).toContain("Feature E2E Evidence");
+    expect(githubPublisher.createdPayloads[0]?.body).toContain(
+      "https://github.example/assets/e2e-video.webm",
+    );
+    expect(githubPublisher.createdPayloads[0]?.body).not.toContain("<video");
+    const stored = await store.get(run.id);
+    const publishArtifact = stored.artifacts.find(
+      (artifact) => artifact.metadata["reportKind"] === "publish-result",
+    );
+    expect(publishArtifact?.metadata).toMatchObject({
+      featureVideoExpected: true,
+      featureVideoSynced: true,
+    });
+  });
 });
+
+async function addFeatureVideoEvidence(runId: string): Promise<void> {
+  const run = await store.get(runId);
+  const timestamp = "2026-06-23T00:00:00.950Z";
+  const video = await writeArtifact({
+    id: "art_77777777777777777777777777777777",
+    kind: "other",
+    label: "checkout.webm",
+    reportKind: "feature-e2e-video",
+    content: Buffer.from("bounded feature video"),
+    mediaType: "video/webm",
+    timestamp,
+    metadata: {
+      workflowSubmissionKind: "implementation",
+      featureEvidenceRole: "video",
+      projectRelativePath: "test-results/checkout.webm",
+    },
+  });
+
+  await store.save(
+    {
+      ...run,
+      revision: run.revision + 1,
+      updatedAt: timestamp,
+      artifacts: [...run.artifacts, video],
+    },
+    run.revision,
+  );
+}
 
 async function markRunReadyForPublish(runId: string): Promise<void> {
   const run = await store.get(runId);
@@ -767,7 +957,8 @@ async function writeArtifact(input: {
     | "visual-report"
     | "review-scorecard"
     | "telemetry-config"
-    | "parsed-intake-request";
+    | "parsed-intake-request"
+    | "other";
   label: string;
   reportKind: string;
   content: Buffer;
@@ -805,11 +996,13 @@ class FakePublisher implements ReviewRequestPublisher {
   public readonly uploadedAssets: Array<Array<{ role: string }>> = [];
   public failCreate = false;
   public failAssetUpload = false;
+  public existingRequest: PublishedReviewRequest | undefined;
+  public forceNonDraftResult = false;
 
   public constructor(private readonly host: "github" | "gitlab") {}
 
   public async findExisting(): Promise<PublishedReviewRequest | undefined> {
-    return undefined;
+    return this.existingRequest;
   }
 
   public async publishAssets(input: {
@@ -823,11 +1016,11 @@ class FakePublisher implements ReviewRequestPublisher {
 
     return input.assets.map((asset) => ({
       artifactId: asset.artifactId,
-      role: asset.role as "figma" | "browser" | "diff" | "overlay",
+      role: asset.role as "figma" | "browser" | "diff" | "overlay" | "e2e-video",
       targetId: asset.targetId,
       label: asset.label,
-      url: `https://github.example/assets/${asset.role}.png`,
-      embeddable: true,
+      url: `https://github.example/assets/${asset.role}${asset.role === "e2e-video" ? ".webm" : ".png"}`,
+      embeddable: asset.role !== "e2e-video",
     }));
   }
 
@@ -850,7 +1043,7 @@ class FakePublisher implements ReviewRequestPublisher {
           : "https://gitlab.com/acme/spec-to-pr/-/merge_requests/123",
       number: "123",
       id: "123",
-      draft: input.payload.mode === "draft",
+      draft: this.forceNonDraftResult ? false : input.payload.mode === "draft",
       sourceBranch: input.payload.sourceBranch,
       targetBranch: input.payload.targetBranch,
       created: true,
@@ -881,4 +1074,18 @@ class FakePublisher implements ReviewRequestPublisher {
       updated: true,
     };
   }
+}
+
+function existingDraftRequest(number: string): PublishedReviewRequest {
+  return {
+    host: "github",
+    url: `https://github.com/acme/spec-to-pr/pull/${number}`,
+    number,
+    id: number,
+    draft: true,
+    sourceBranch: "spec-to-pr/run-1",
+    targetBranch: "main",
+    created: false,
+    updated: false,
+  };
 }

@@ -6,7 +6,7 @@ import { GitObjectIdSchema, IsoDateTimeSchema } from "../runtime/scalars.js";
 
 export const ReviewHostSchema = z.enum(["github", "gitlab"]);
 
-export const PublishModeSchema = z.enum(["draft", "ready"]);
+export const PublishModeSchema = z.literal("draft");
 
 export const PublishTargetSchema = z
   .object({
@@ -57,7 +57,13 @@ export const ReviewRequestPayloadSchema = z
   })
   .strict();
 
-export const ReviewRequestAssetRoleSchema = z.enum(["figma", "browser", "diff", "overlay"]);
+export const ReviewRequestAssetRoleSchema = z.enum([
+  "figma",
+  "browser",
+  "diff",
+  "overlay",
+  "e2e-video",
+]);
 
 export const PublishedReviewAssetSchema = z
   .object({
@@ -113,6 +119,8 @@ export const PublishResultSchema = z
     requestSynced: z.boolean().default(false),
     visualPreviewExpected: z.boolean().default(false),
     visualPreviewSynced: z.boolean().default(false),
+    featureVideoExpected: z.boolean().default(false),
+    featureVideoSynced: z.boolean().default(false),
     fallbackMode: z.enum(["none", "gitlab-push-option"]).default("none"),
     partialReasons: z.array(z.string().trim().min(1)).default([]),
     errorCode: z.string().trim().min(1).optional(),

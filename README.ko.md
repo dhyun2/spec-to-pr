@@ -1,34 +1,68 @@
-# spec-to-pr
+# SpecToPR
 
-제품 기획서, 문서, Figma 디자인, OpenAPI 계약을 입력받아 검증 가능한 draft PR/MR까지 이어주는 증거 우선(evidence-first) Claude Code / Codex 플러그인입니다.
+기획서, 레거시 변경 요청, 사용자 기능, Figma 디자인을 검증된 구현과 draft PR/MR까지 연결하는 증거 기반 Claude Code / Codex 플러그인입니다.
 
 English version: [README.md](README.md)
 
-## 무엇을 하는 프로젝트인가
+## 네 가지 납품 모드
 
-`spec-to-pr`는 단순히 “코드를 써달라”는 프롬프트 묶음이 아닙니다. Claude Code 또는 Codex를 위한 7개 도구 MCP facade, 공유 skill, artifact 저장소, 두 개의 독립 reviewer role로 빠르고 증거 기반인 납품 workflow를 제공합니다.
+| 모드      | 입력                        | 검증                                                 | 결과                             |
+| --------- | --------------------------- | ---------------------------------------------------- | -------------------------------- |
+| `brief`   | 기획서/명세와 대상 저장소   | 수용 조건, 계약, 구현, 관련 검사                     | 증거가 포함된 draft PR/MR        |
+| `legacy`  | 저장소와 구체적인 변경 요청 | 요청 범위의 현재 동작 baseline과 영향받은 회귀 범위  | 증거가 포함된 draft PR/MR        |
+| `feature` | 사용자에게 보이는 기능 요청 | 변경 기능만 고른 E2E와 정확히 한 개의 `.webm`/`.mp4` | 영상 링크가 포함된 draft PR/MR   |
+| `figma`   | Figma URL과 대상 저장소     | 실제 Figma context, 구현, 시각·상호작용 증거         | 디자인 구현, 요청 시 draft PR/MR |
 
-대략적으로 다음 일을 합니다.
+모드별 추가 증거가 필요 없는 가벼운 요청은 `auto`를 사용할 수 있습니다.
 
-- 제품 brief, 문서, Figma URL, OpenAPI 파일, 저장소 컨텍스트를 source evidence로 기록합니다.
-- intake evidence에서 requirement, OpenSpec/Gherkin, API, mock, design contract를 생성합니다.
-- API와 UI 구현을 하나의 context에서 진행하며, UI 완료 evidence 전에 `api-ready` checkpoint를 완료합니다.
-- code scope에는 `functional-reviewer`를 실행하고 UI scope일 때만 독립적인 `design-reviewer`를 추가합니다.
-- 모든 변경에 전문 gate를 전부 실행하지 않고 scope에 맞는 빠른 gate를 선택합니다.
-- 필수 evidence가 승인되면 증거 기반 report를 만들고 draft GitHub PR 또는 GitLab MR로 발행합니다.
+`feature` 모드는 테스트 경로, 태그, 프로젝트 중 하나로 변경 기능을 고른 Playwright 명령 하나만 허용합니다. 명령 체이닝, 테스트 나열·0건 통과 옵션, 전체 프로젝트 E2E는 거부합니다. Strict JSON 결과에는 `status: passed`, 정확한 `selector`, 제출과 같은 `implementationContextId`, 양수 `testCount`만 있어야 합니다. 영상은 재생 시간이 0보다 큰 구조적으로 유효한 WebM/MP4 컨테이너 한 개이며 25 MB 이하여야 합니다. 다른 모드는 delivery profile이 명시적으로 요구하지 않는 한 기능 영상을 만들지 않습니다.
 
-발행은 리뷰 요청 본문을 생성하거나 갱신하는 작업입니다. PR/MR을 merge, approve, close, ready-for-review 전환하지 않습니다.
+`figma` 모드는 호스트에 이미 연결된 Figma 기능을 사용합니다. `provider: host-connected-figma`, ISO `capturedAt`, 같은 `fileUrl`, 비어 있지 않은 `nodeIds`, 명시적인 `manifestPath`, 실제 PNG 한 개 이상을 담은 `figma-bundle`을 정확히 한 번 제출합니다. Strict manifest는 동일한 출처 값과 PNG `visualPaths`를 반복합니다. Figma 전용 runtime microtool이나 polling은 추가하지 않습니다.
+
+## 경량화된 v2 표면
+
+- **MCP tool 7개:** `workflow_info`, `workflow_start`, `workflow_advance`, `workflow_submit`, `workflow_status`, `workflow_publish`, `workflow_archive`
+- **durable stage 8개:** intake, contracts, implementation, functional review, design review, report, publish, archive
+- **skill 9개:** `spec-to-pr`, `doctor`, `intake-contracts`, `implement`, `review-functional`, `review-design`, `publish`, `archive-openspec`, `prepare-release`
+- **독립 reviewer 2개:** `functional-reviewer`, UI 범위에만 적용되는 `design-reviewer`
+
+API와 UI 구현은 하나의 context에서 진행합니다. API 기반 UI라면 물리적으로 서로 다른 비어 있지 않은 type, schema, wrapper, mock 파일과 `status: passed`인 JSON contract-test 결과를 안정적인 `implementationContextId`와 함께 `api-ready`로 먼저 제출하고, 최종 구현에도 같은 ID를 냅니다. Path, symlink, hard link alias는 별도 증거로 인정하지 않습니다. `apiReady: true` 주장만으로는 통과하지 않습니다. API/UI 구현 에이전트와 통합 lane을 따로 두지 않습니다. 구현 뒤 orchestrator가 `workflow_status` snapshot, contracts, diff, evidence path를 고정해 독립 reviewer에게 넘기며 reviewer는 workflow tool을 직접 호출하지 않습니다.
+
+발행은 draft GitHub PR 또는 GitLab MR을 생성·갱신하는 데서 끝납니다. Draft 흐름은 target이 아닌 `codex/*` source branch에서 의도한 변경만 commit하며, runtime은 clean tree와 target보다 한 개 이상 앞선 source commit을 요구합니다. merge, approve, close, ready 전환은 하지 않습니다.
 
 ## 요구사항
 
 - Node.js `>=22`
-- `pnpm`
 - Git
-- 사용할 host에 따라 Claude Code 또는 Codex
-- 발행 시 선택 사항: 인증된 `gh` 또는 `glab`, 혹은 `GITHUB_TOKEN` / `GH_TOKEN` / `GITLAB_TOKEN` / `GITLAB_PRIVATE_TOKEN`
-- visual capture 시 선택 사항: 대상 프로젝트 환경에 Playwright Chromium 설치
+- Claude Code 또는 Codex
+- 소스에서 빌드할 때만 `pnpm`
+- 발행할 때 인증된 `gh`/`glab` 또는 지원 토큰
+- Figma 모드에서만 호스트에 연결된 Figma 기능
+- 사용자 기능 모드에서만 영상 녹화를 지원하는 브라우저 테스트 환경
 
-## 다운로드와 빌드
+## 설치
+
+Claude Code:
+
+```text
+/plugin marketplace add dhyun2/spec-to-pr
+/plugin install spec-to-pr@spec-to-pr
+```
+
+Codex:
+
+```bash
+codex plugin marketplace add https://github.com/dhyun2/spec-to-pr --ref main
+codex plugin add spec-to-pr@spec-to-pr
+```
+
+설치 후 호스트를 재시작하고 Doctor를 실행합니다.
+
+```text
+/spec-to-pr:doctor
+```
+
+로컬 개발:
 
 ```bash
 git clone https://github.com/dhyun2/spec-to-pr.git
@@ -36,9 +70,66 @@ cd spec-to-pr
 corepack enable
 pnpm install
 pnpm build
+pnpm plugin:validate
 ```
 
-플러그인을 개발할 때 유용한 체크 명령입니다.
+## 사용 예시
+
+기획서에서 draft PR까지:
+
+```text
+/spec-to-pr /path/to/app
+mode는 brief, 기획서는 docs/checkout.md야. 구현하고 검증해서 draft PR로 올려줘.
+```
+
+레거시 저장소의 특정 변경:
+
+```text
+/spec-to-pr /path/to/legacy-app
+mode는 legacy. 청구서 재시도 동작만 바꿔줘. 현재 동작을 먼저 증거로 남기고,
+영향받은 검사만 실행한 다음 draft PR로 올려줘. 제품 전체를 조사하거나 이관하지 마.
+```
+
+사용자 기능 + 제한된 E2E 증거:
+
+```text
+/spec-to-pr /path/to/app
+mode는 feature. 저장 주소 선택 기능을 추가해줘. 이 기능의 E2E만 실행하고
+영상은 정확히 하나만 녹화해서 draft PR에 링크해줘.
+```
+
+Figma 구현:
+
+```text
+/spec-to-pr /path/to/app
+mode는 figma. 연결된 Figma 기능으로 https://www.figma.com/file/... 를 구현해줘.
+URL만 근거로 삼거나 polling하지 말고 실제 Figma evidence를 제출해줘.
+```
+
+## Codex SDK runner
+
+CI와 내부 자동화에서는 SDK runner를 사용할 수 있습니다.
+
+```bash
+pnpm --dir packages/codex-sdk install
+pnpm --dir packages/codex-sdk build
+node packages/codex-sdk/dist/cli.js \
+  --cwd /path/to/app \
+  --mode feature \
+  --change-kind feature \
+  --prompt "저장 주소 선택 기능 추가" \
+  --publish
+```
+
+입력에는 `--brief`, `--figma`, `--openapi`, `--docs`를 사용할 수 있습니다. `--publish`는 draft 발행을 요청하고 `--no-publish`는 구현·리뷰 증거까지만 진행합니다.
+
+전체 계약은 [packages/codex-sdk/README.md](packages/codex-sdk/README.md)를 참고하세요.
+
+## 검증 정책
+
+일반 변경은 적용 가능한 format/lint, typecheck, build, 관련 기능 검사를 실행합니다. OpenSpec, architecture, targeted security, visual, accessibility, performance는 scope에 따라 적용하고 observability는 opt-in입니다. 선택 사항인 script가 없으면 not applicable이지만, 필수 증거가 없거나 비었거나 skip/실패했다면 blocked입니다.
+
+전체 test matrix, hardening, package verification, cross-host manifest 검증은 release 전용입니다. 모든 feature/fix에 붙이지 않습니다.
 
 ```bash
 pnpm format:check
@@ -47,160 +138,13 @@ pnpm test
 pnpm plugin:validate
 ```
 
-## Claude Code에 설치하기
+## 문서
 
-Claude Code는 marketplace를 통해 플러그인을 설치합니다. 이 저장소는 `.claude-plugin/marketplace.json`에 Claude marketplace manifest를 포함합니다.
-
-Claude Code에서 marketplace를 추가하고 플러그인을 설치합니다.
-
-```text
-/plugin marketplace add dhyun2/spec-to-pr
-/plugin install spec-to-pr@spec-to-pr
-```
-
-로컬 개발 중이라면 clone한 저장소 경로를 marketplace로 추가하면 됩니다.
-
-```text
-/plugin marketplace add /absolute/path/to/spec-to-pr
-/plugin install spec-to-pr@spec-to-pr
-```
-
-설치 후 플러그인과 로컬 MCP kernel이 보이는지 확인합니다.
-
-```text
-/spec-to-pr:doctor
-```
-
-## Codex에 설치하기
-
-Codex 지원은 두 가지 표면(surface)을 제공합니다.
-
-- `.codex-plugin/plugin.json` — 설치 가능한 Codex 플러그인을 노출합니다.
-- `packages/codex-sdk` — CI 및 내부 자동화를 위한 프로그래매틱 러너를 제공합니다.
-
-다른 컴퓨터나 새 Codex 환경에는 Git marketplace로 설치하는 방식을 권장합니다.
-
-```bash
-codex plugin marketplace add https://github.com/dhyun2/spec-to-pr --ref main
-codex plugin add spec-to-pr@spec-to-pr
-```
-
-업데이트할 때는 marketplace를 갱신한 뒤 플러그인을 다시 설치합니다.
-
-```bash
-codex plugin marketplace upgrade spec-to-pr
-codex plugin add spec-to-pr@spec-to-pr
-```
-
-로컬 플러그인 테스트는 clone한 저장소를 Codex marketplace source로 추가합니다.
-
-```bash
-codex plugin marketplace add .
-codex plugin add spec-to-pr@spec-to-pr
-```
-
-이후 Codex를 재시작하고, `/plugins`를 열어 `SpecToPR` marketplace를 선택한 뒤 `spec-to-pr`가 설치되어 있는지 확인합니다.
-
-Codex에서는 MCP tool이 정규화된 `mcp__spec_to_pr__*` 네임스페이스로 노출됩니다. public facade는 정확히 `workflow_info`, `workflow_start`, `workflow_advance`, `workflow_submit`, `workflow_status`, `workflow_publish`, `workflow_archive`입니다. task가 skill은 읽었는데 이 tool을 못 본다면 새 task를 시작하거나 Doctor 실행 전에 Codex에게 `spec-to-pr workflow_info workflow_start`를 검색해보라고 요청하세요.
-
-설치된 플러그인을 검증할 때 plugin cache 안에서 `pnpm exec node`로 `@modelcontextprotocol/sdk`를 직접 import하는 임시 스크립트는 사용하지 마세요. release package는 의도적으로 `node_modules`를 제외하므로, Doctor 검증은 번들된 `node ./dist/mcp/server.js` 프로세스와 host에 노출된 MCP tool을 통해 수행해야 합니다.
-
-### Codex SDK Runner
-
-다른 프로세스가 Codex를 시작하고 입력을 넘긴 뒤 최종 응답이나 thread ID를 수집해야 한다면 SDK runner를 사용합니다.
-
-```bash
-cd packages/codex-sdk
-pnpm install
-pnpm build
-node dist/cli.js \
-  --cwd /path/to/app \
-  --brief docs/plan.md \
-  --docs docs \
-  --figma https://figma.com/file/... \
-  --openapi docs/openapi.yaml \
-  --min-visual-score 0.98 \
-  --max-repair-attempts 3
-```
-
-Codex 전용 상세 내용은 [docs/codex/README.ko.md](docs/codex/README.ko.md)를 참고하세요.
-
-## 기본 플로우
-
-1. **Intake**가 요청을 기록하고 code, API, UI, release 적용 여부를 분류합니다.
-2. **Contracts**가 필요한 requirement, OpenSpec/Gherkin, API, mock, design evidence를 생성합니다.
-3. **Implementation**은 하나의 context에서 진행합니다. API type, schema, wrapper, mock, contract-test evidence가 `api-ready`에 도달해야 UI 완료 evidence를 제출할 수 있습니다.
-4. **Functional review**가 code scope의 requirement 충실도, contract, test, architecture, security, 미해결 functional gap을 확인합니다.
-5. **Design review**는 UI scope일 때만 visual fidelity, design-system 사용, interaction state, accessibility를 독립적으로 확인하며, 그 외에는 not applicable입니다.
-6. **Report**가 canonical gate와 reviewer 결정을 요약합니다.
-7. **Publish**가 필수 evidence 승인 후 draft PR/MR을 안전하게 생성하거나 갱신합니다.
-8. **Archive**는 merge evidence를 근거로 명시적으로 실행하는 post-merge 작업입니다.
-
-## 빠른 gate와 release gate
-
-기본 workflow는 빠르고 scope-aware하게 동작합니다. code 변경은 사용 가능한 lint/format, typecheck, build와 관련 functional test 하나를 실행합니다. OpenSpec validation, architecture boundary, targeted security, visual comparison, interaction accessibility, performance 검사는 분류된 scope에 해당할 때만 실행합니다. Observability는 opt-in입니다. 선택 사항인 script가 없으면 not applicable이고, 필수 evidence가 없거나 실패하면 blocked입니다.
-
-Release 검증은 별도입니다. 전체 test matrix, hardening suite, package verification, cross-host manifest validation은 release-only gate이며 명시적인 release workflow에서만 실행합니다. 일반 feature나 bug-fix run에는 자동으로 추가하지 않습니다.
-
-## 입력으로 줄 수 있는 것
-
-다음 중 하나 이상을 넘길 수 있습니다.
-
-- 제품 brief: `docs/plan.md`, Markdown, plain text
-- 문서 디렉터리: `docs/`
-- Figma URL
-- OpenAPI YAML/JSON
-- 대상 repository path
-- source/target branch
-- validation command 또는 quality-gate 요구사항
-
-설치 후 사용할 수 있는 예시 요청입니다.
-
-```text
-Run spec-to-pr for /path/to/app.
-Use docs/plan.md as the brief, docs/openapi.yaml as OpenAPI input,
-and this Figma URL: https://figma.com/file/...
-Generate an evidence-backed draft PR report and publish a draft review request only if it is not blocked.
-```
-
-## 문서 사이트
-
-설치 · 퀵스타트 · 프롬프트 레시피 · 파이프라인 개념 · 평가/루프 엔지니어링 · 태스크 명세(T01~T33) · 트러블슈팅 전체 문서:
-
-**https://dhyun2.github.io/spec-to-pr/**
-
-로컬에서 문서 사이트를 띄우려면:
+유지되는 전체 가이드는 **https://dhyun2.github.io/spec-to-pr/** 에 있습니다. 사전 준비, 설치, 네 가지 모드, v2 pipeline, skill, 설정, 트러블슈팅을 다룹니다.
 
 ```bash
 pnpm --dir website install
 pnpm --dir website start
 ```
 
-## 릴리즈와 로컬 marketplace 갱신
-
-릴리즈 검증:
-
-```bash
-pnpm release:verify
-```
-
-발행 계획 dry-run:
-
-```bash
-pnpm release:publish:dry-run
-```
-
-push/tag 없이 로컬 Claude/Codex marketplace 설치를 갱신:
-
-```bash
-pnpm release:update:local
-```
-
-host 하나만 갱신:
-
-```bash
-pnpm release:update:claude
-pnpm release:update:codex
-```
-
-릴리즈 스크립트는 플러그인 패키지를 준비하고 검증합니다. 다운스트림 PR/MR을 merge하지는 않습니다.
+현재 구조 결정은 [ADR 035](docs/adr/035-use-coarse-workflow-facade-and-split-reviews.md)와 [ADR 036](docs/adr/036-use-delivery-profiles-not-mode-specific-pipelines.md)에 정리되어 있습니다.

@@ -458,8 +458,11 @@ function hasFailedPublishSynchronization(artifacts: ArtifactRef[]): boolean {
   }
 
   return (
-    latestPublishResult.metadata["visualPreviewExpected"] === true &&
-    latestPublishResult.metadata["visualPreviewSynced"] !== true
+    latestPublishResult.metadata["requestDraft"] === false ||
+    (latestPublishResult.metadata["visualPreviewExpected"] === true &&
+      latestPublishResult.metadata["visualPreviewSynced"] !== true) ||
+    (latestPublishResult.metadata["featureVideoExpected"] === true &&
+      latestPublishResult.metadata["featureVideoSynced"] !== true)
   );
 }
 

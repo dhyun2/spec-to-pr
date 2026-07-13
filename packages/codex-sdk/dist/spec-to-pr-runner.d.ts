@@ -1,7 +1,9 @@
 import { type ApprovalMode, type ModelReasoningEffort, type RunResult, type SandboxMode } from "@openai/codex-sdk";
-import type { CodexVisualRepairPolicy } from "./workflow-policy.js";
 export type SpecToPrCodexRunInput = {
     workingDirectory: string;
+    deliveryMode?: "auto" | "brief" | "legacy" | "feature" | "figma";
+    changeKind?: "auto" | "feature" | "fix" | "refactor" | "migration" | "design" | "docs";
+    publication?: "draft" | "none";
     prompt?: string;
     briefPath?: string;
     docsPath?: string;
@@ -17,8 +19,6 @@ export type SpecToPrCodexRunInput = {
     env?: Record<string, string>;
     outputSchema?: unknown;
     enableReviewAgents?: boolean;
-    enableVisualRepairLoop?: boolean;
-    visualRepairPolicy?: Partial<CodexVisualRepairPolicy>;
 };
 export type SpecToPrCodexRunResult = {
     threadId: string | null;
@@ -28,3 +28,4 @@ export type SpecToPrCodexRunResult = {
 };
 export declare function runSpecToPrWithCodex(input: SpecToPrCodexRunInput): Promise<SpecToPrCodexRunResult>;
 export declare function buildSpecToPrPrompt(input: SpecToPrCodexRunInput): string;
+export declare function validateSpecToPrRunInput(input: SpecToPrCodexRunInput): void;

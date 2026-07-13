@@ -2,29 +2,56 @@
 
 - Status: Accepted
 - Date: 2026-07-13
-- Supersedes: ADR 019, ADR 021, ADR 022, ADR 023, ADR 024
 
 ## Context
 
-SpecToPR v1 exposes 111 MCP tools and asks the model to coordinate 27 stages, separate Spec/BDD, API, and Design/UI lanes, an integration lane, Review Council retries, and multiple specialist reviewers. The advertised tool schemas alone are about 411 KB. The repository's deterministic checks are fast; model context and protocol round trips dominate latency.
+The original architecture exposed implementation details as dozens of MCP tools, stages, skills, agent lanes, and task documents. Model context and protocol coordination dominated runtime even when the deterministic repository checks were fast. Separate API and UI agents also forced an integration step while UI validation still depended on API wrappers and mocks.
 
-The separate API and UI lanes also invert a useful dependency: API wrappers and mocks should be ready before UI states are implemented and visually verified.
+The durable evidence ledger, artifact storage, stage leases, safe publisher adapters, and explicit post-merge archive remain useful. The public workflow does not need to mirror each internal service.
 
 ## Decision
 
-Keep local stdio MCP as the host boundary, but expose only seven coarse workflow tools. Move deterministic sequencing and stage transitions into an application orchestrator.
+SpecToPR v2 keeps local stdio MCP and the durable evidence model, but exposes exactly seven workflow tools:
 
-Use one implementation context. Within it, complete API types, schemas, wrappers, mocks, and contract tests before feature and UI work. Do not create separate API and Design/UI implementation agents or an integration worktree lane.
+1. `workflow_info`
+2. `workflow_start`
+3. `workflow_advance`
+4. `workflow_submit`
+5. `workflow_status`
+6. `workflow_publish`
+7. `workflow_archive`
 
-After implementation, use two independent reviews:
+The orchestrator owns exactly eight durable stages:
 
-- functional review, always for code scope;
-- design review, only for applicable UI scope.
+1. `intake`
+2. `contracts`
+3. `implementation`
+4. `functional-review`
+5. `design-review`
+6. `report`
+7. `publish`
+8. `archive`
 
-Remove Review Council aggregation and specialist reviewer cascades. Derive scorecards and PR readiness from one canonical gate decision.
+The installed plugin exposes nine skills: `spec-to-pr`, `doctor`, `intake-contracts`, `implement`, `review-functional`, `review-design`, `publish`, `archive-openspec`, and `prepare-release`.
+
+Implementation uses one context. For API-backed UI, distinct physical non-empty types, schemas, wrappers, mocks, and a passing JSON contract-test result are submitted with a stable `implementationContextId` through the existing `workflow_submit` boundary as an explicit `api-ready` checkpoint. Path, symlink, and hard-link aliases are rejected. Final implementation must repeat the ID before UI completion evidence is accepted. A final boolean claim cannot replace that evidence. There are no separate API/UI implementation lanes and no integration worktree lane.
+
+Review is deliberately split into only two independent roles:
+
+- `functional-reviewer` for code scope and required functional gates;
+- `design-reviewer` only when UI scope applies.
+
+The orchestrator calls `workflow_status` and freezes its snapshot with accepted contracts, the diff, and evidence paths before dispatch. Reviewers consume that immutable packet and return literal schema-shaped verdicts; they do not call workflow tools or mutate implementation.
+
+The default gates are proportional to the change. Missing optional scripts are not applicable; missing or failed required evidence blocks. Full matrices, package verification, hardening, and cross-host checks are release-only.
+
+Publication only creates or updates a draft PR/MR. It never merges, approves, closes, or marks a review request ready. Archive is a separate, explicit post-merge action supported by authoritative merge evidence; the runtime does not poll for merge state.
 
 ## Consequences
 
-The public MCP surface and normal call count shrink by more than 90% and roughly 75%, respectively. Agent context becomes smaller, UI validation can rely on completed API mocks, and conditional work no longer blocks unrelated changes.
-
-This intentionally breaks v1 MCP, skill, agent, and incomplete-Run compatibility. Existing domain services and durable artifacts remain reusable behind the orchestrator.
+- Public tool schemas and normal round trips are much smaller.
+- API mocks are available before UI and design validation.
+- Non-UI work never waits for design review.
+- Internal services may evolve without expanding the public facade.
+- v1 microtools, task graphs, specialist lanes, Review Council, and their documentation are intentionally unsupported.
+- Existing evidence, persistence, lease, publisher, and archive foundations remain behind the facade.

@@ -142,7 +142,7 @@ export class GitLabPublisherAdapter implements ReviewRequestPublisher {
 
       if (!response.ok) {
         throw new Error(
-          `GitLab upload visual asset failed: ${response.status} ${await response.text()}`,
+          `GitLab upload review asset failed: ${response.status} ${await response.text()}`,
         );
       }
 
@@ -161,7 +161,7 @@ export class GitLabPublisherAdapter implements ReviewRequestPublisher {
           role: asset.role,
           label: asset.label,
           url: uploadPath,
-          embeddable: true,
+          embeddable: asset.role !== "e2e-video",
         }),
       );
     }
