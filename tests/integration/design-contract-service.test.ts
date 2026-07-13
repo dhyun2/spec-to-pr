@@ -99,7 +99,7 @@ describe("DesignContractService", () => {
       uri: blob.uri,
       mediaType: "application/json",
       digest: blob.digest,
-      producedBy: "evidence-verifier",
+      producedBy: "functional-reviewer",
       evidenceIds: [],
       createdAt: now,
       metadata: {},

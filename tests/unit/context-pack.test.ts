@@ -17,21 +17,22 @@ const sourceId = "src_11111111111111111111111111111111";
 const evidenceId = "ev_11111111111111111111111111111111";
 
 describe("agent context pack", () => {
-  it("scopes API agents to API artifacts, evidence, and gaps", () => {
+  it("builds one implementation context with all implementation evidence and gaps", () => {
     const run = buildRunFixture();
     const pack = buildAgentContextPack({
       run,
-      descriptor: getAgentDescriptor("api-contract"),
+      descriptor: getAgentDescriptor("implementation"),
       generatedAt: now,
       baseCommit: "abcdef1",
     });
 
-    expect(pack.agent.agent).toBe("api-contract");
+    expect(pack.agent.agent).toBe("implementation");
     expect(pack.baseCommit).toBe("abcdef1");
     expect(pack.artifacts.map((artifact) => artifact.kind)).toEqual([
       "openapi-intake-report",
       "api-contract-report",
       "test-matrix",
+      "figma-design-contract",
     ]);
     expect(pack.evidence.map((evidence) => evidence.id)).toEqual([evidenceId]);
     expect(pack.gaps.map((gap) => gap.category)).toEqual(["api"]);
@@ -41,15 +42,15 @@ describe("agent context pack", () => {
     const run = buildRunFixture();
     const pack = buildAgentContextPack({
       run,
-      descriptor: getAgentDescriptor("design-ui"),
+      descriptor: getAgentDescriptor("implementation"),
       generatedAt: now,
     });
 
     const markdown = renderAgentContextMarkdown(pack);
 
-    expect(markdown).toContain("# Design/UI Agent Context Pack");
+    expect(markdown).toContain("# Implementation Agent Context Pack");
     expect(markdown).toContain("## Write Policy");
-    expect(markdown).toContain("Use project design-system components");
+    expect(markdown).toContain("Complete API-ready work before UI implementation");
   });
 });
 

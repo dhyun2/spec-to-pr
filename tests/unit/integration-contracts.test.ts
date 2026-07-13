@@ -17,7 +17,7 @@ describe("integration contracts", () => {
       candidates: [
         {
           agentResultId: "ar_11111111111111111111111111111111",
-          agent: "api-contract",
+          agent: "implementation",
           commitSha: "1111111",
           baseSha: "abcdef1",
           order: 1,

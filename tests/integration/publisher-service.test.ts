@@ -551,7 +551,7 @@ async function markRunReadyForPublish(runId: string): Promise<void> {
           uri: "artifact://sha256/111",
           mediaType: "application/json",
           digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
-          producedBy: "evidence-verifier",
+          producedBy: "functional-reviewer",
           evidenceIds: [],
           createdAt: timestamp,
           metadata: {
@@ -564,11 +564,11 @@ async function markRunReadyForPublish(runId: string): Promise<void> {
       agentResults: [
         ...run.agentResults,
         {
-          schemaVersion: "0.1.0",
+          schemaVersion: "2.0.0",
           id: "ar_11111111111111111111111111111111",
           runId: run.id,
           kind: "verification",
-          agent: "evidence-verifier",
+          agent: "functional-reviewer",
           status: "passed",
           baseSha: "0000000",
           changedFiles: [],

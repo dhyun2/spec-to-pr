@@ -269,7 +269,7 @@ export class FigmaDesignInventoryService {
       uri: blob.uri,
       mediaType: "application/json",
       digest: blob.digest,
-      producedBy: "evidence-verifier",
+      producedBy: "functional-reviewer",
       evidenceIds: [],
       createdAt: input.timestamp,
       metadata: compactMetadata(input.metadata),
@@ -319,7 +319,7 @@ function createMissingArtifactGap(kind: string, sourceId: string, timestamp: str
     impact:
       "Design inventory may be incomplete and downstream UI implementation needs manual review or fallback.",
     sourceEvidenceIds: [],
-    owner: "evidence-verifier",
+    owner: "functional-reviewer",
     createdAt: timestamp,
     updatedAt: timestamp,
   });
@@ -338,7 +338,7 @@ function createUnmappedComponentGap(name: string, nodeId: string, timestamp: str
     impact:
       "UI Agent may choose a less accurate component or create custom UI instead of reusing the design system.",
     sourceEvidenceIds: [],
-    owner: "design-ui",
+    owner: "implementation",
     createdAt: timestamp,
     updatedAt: timestamp,
   });
@@ -356,7 +356,7 @@ function createProviderMismatchGap(timestamp: string): Gap {
     observed: "Multiple metadata artifacts for this Figma source have different digests.",
     impact: "Design inventory may depend on provider-specific output and requires manual review.",
     sourceEvidenceIds: [],
-    owner: "evidence-verifier",
+    owner: "functional-reviewer",
     createdAt: timestamp,
     updatedAt: timestamp,
   });

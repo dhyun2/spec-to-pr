@@ -67,7 +67,7 @@ export function detectTraceabilityGaps(input: {
           "No API operation candidate was linked by the deterministic traceability builder.",
         impact: "API Agent may not know which backend contract supports this requirement.",
         sourceEvidenceIds: requirement.evidenceIds,
-        owner: "api-contract",
+        owner: "implementation",
         createdAt: input.now,
         updatedAt: input.now,
         metadata: {
@@ -91,7 +91,7 @@ export function detectTraceabilityGaps(input: {
         observed: "No Figma node candidate was linked by the deterministic traceability builder.",
         impact: "UI Agent may need to guess layout, component, state, or token decisions.",
         sourceEvidenceIds: requirement.evidenceIds,
-        owner: "design-ui",
+        owner: "implementation",
         createdAt: input.now,
         updatedAt: input.now,
         metadata: {

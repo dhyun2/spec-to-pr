@@ -64,7 +64,7 @@ describe("ReviewCouncilService", () => {
       result: {
         schemaVersion: "review-council-v1",
         runId: run.id,
-        agent: "review-council",
+        agent: "functional-reviewer",
         generatedAt: "2026-06-23T00:00:01.000Z",
         summary: "One API evidence gap was found.",
         findings: [
@@ -111,6 +111,6 @@ describe("ReviewCouncilService", () => {
     const loaded = await store.get(run.id);
 
     expect(loaded.gaps).toHaveLength(1);
-    expect(loaded.agentResults.some((result) => result.agent === "review-council")).toBe(true);
+    expect(loaded.agentResults.some((result) => result.agent === "functional-reviewer")).toBe(true);
   });
 });

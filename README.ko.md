@@ -6,21 +6,16 @@ English version: [README.md](README.md)
 
 ## 무엇을 하는 프로젝트인가
 
-`spec-to-pr`는 단순히 “코드를 써달라”는 프롬프트 묶음이 아닙니다. Claude Code 또는 Codex가 일정한 납품 파이프라인을 따라 움직이도록 로컬 MCP kernel, 공유 skill, 리뷰 agent, artifact 저장소, quality gate를 함께 제공합니다.
+`spec-to-pr`는 단순히 “코드를 써달라”는 프롬프트 묶음이 아닙니다. Claude Code 또는 Codex를 위한 7개 도구 MCP facade, 공유 skill, artifact 저장소, 두 개의 독립 reviewer role로 빠르고 증거 기반인 납품 workflow를 제공합니다.
 
 대략적으로 다음 일을 합니다.
 
 - 제품 brief, 문서, Figma URL, OpenAPI 파일, 저장소 컨텍스트를 source evidence로 기록합니다.
-- 요구사항과 구현/검증 산출물을 traceability graph로 연결합니다.
-- OpenSpec proposal, Gherkin scenario, API pipeline artifact, design contract를 생성합니다.
-- Spec/BDD, API Contract, Design/UI 구현 lane을 실행합니다.
-- 아키텍처, quality gate, visual regression, 접근성, 성능, observability, PR report, 발행, 릴리즈 준비 리뷰 lane을 실행합니다.
-- Figma/browser 또는 legacy/target 스크린샷을 비교하고 제한된 visual repair loop를 돌립니다.
-- brief fidelity, legacy coverage, Gherkin completeness, TDD evidence, design-system usage, visual parity, resource contract, API contract, publish sync를 0-10점으로 채점하는 review scorecard를 생성합니다.
-- Figma node별 component contract와 component-level visual gate를 만들어 화면 일부 차이가 전체 점수에 묻히지 않게 합니다.
-- legacy 마이그레이션에서는 route/component/API/native event/URL/analytics/root/global CSS/query param을 기능 원장으로 뽑고 coverage matrix로 누락을 차단합니다.
-- 증거 기반 PR report를 생성하며, 리뷰어용 MR body와 내부 audit report를 분리합니다.
-- blocker가 없으면 draft GitHub PR 또는 GitLab MR로 report를 발행하고, blocked라도 기존 draft에는 실패 report body 갱신을 허용할 수 있습니다.
+- intake evidence에서 requirement, OpenSpec/Gherkin, API, mock, design contract를 생성합니다.
+- API와 UI 구현을 하나의 context에서 진행하며, UI 완료 evidence 전에 `api-ready` checkpoint를 완료합니다.
+- code scope에는 `functional-reviewer`를 실행하고 UI scope일 때만 독립적인 `design-reviewer`를 추가합니다.
+- 모든 변경에 전문 gate를 전부 실행하지 않고 scope에 맞는 빠른 gate를 선택합니다.
+- 필수 evidence가 승인되면 증거 기반 report를 만들고 draft GitHub PR 또는 GitLab MR로 발행합니다.
 
 발행은 리뷰 요청 본문을 생성하거나 갱신하는 작업입니다. PR/MR을 merge, approve, close, ready-for-review 전환하지 않습니다.
 
@@ -106,7 +101,7 @@ codex plugin add spec-to-pr@spec-to-pr
 
 이후 Codex를 재시작하고, `/plugins`를 열어 `SpecToPR` marketplace를 선택한 뒤 `spec-to-pr`가 설치되어 있는지 확인합니다.
 
-Codex에서는 MCP tool이 정규화된 `mcp__spec_to_pr__*` 네임스페이스로 노출됩니다. thread가 skill은 읽었는데 tool을 못 본다면, 새 thread를 시작하거나 Doctor 실행 전에 Codex에게 `spec-to-pr kernel_info create_run` tool을 검색해보라고 요청하세요.
+Codex에서는 MCP tool이 정규화된 `mcp__spec_to_pr__*` 네임스페이스로 노출됩니다. public facade는 정확히 `workflow_info`, `workflow_start`, `workflow_advance`, `workflow_submit`, `workflow_status`, `workflow_publish`, `workflow_archive`입니다. task가 skill은 읽었는데 이 tool을 못 본다면 새 task를 시작하거나 Doctor 실행 전에 Codex에게 `spec-to-pr workflow_info workflow_start`를 검색해보라고 요청하세요.
 
 설치된 플러그인을 검증할 때 plugin cache 안에서 `pnpm exec node`로 `@modelcontextprotocol/sdk`를 직접 import하는 임시 스크립트는 사용하지 마세요. release package는 의도적으로 `node_modules`를 제외하므로, Doctor 검증은 번들된 `node ./dist/mcp/server.js` 프로세스와 host에 노출된 MCP tool을 통해 수행해야 합니다.
 
@@ -132,20 +127,20 @@ Codex 전용 상세 내용은 [docs/codex/README.ko.md](docs/codex/README.ko.md)
 
 ## 기본 플로우
 
-1. **Doctor**가 플러그인, MCP 서버, 런타임, tool 목록이 정상인지 확인합니다.
-2. **Intake**가 원 요청과 brief/docs/Figma/OpenAPI/repository 입력을 evidence로 기록합니다.
-3. **Profiling**이 대상 프로젝트의 package manager, framework, script, workspace boundary를 확인합니다.
-4. **Legacy inventory**가 마이그레이션 대상의 route, component, store, API, native bridge, URL, analytics, root/global CSS selector, query/hash param을 기능 원장으로 기록할 수 있습니다.
-5. **Traceability**가 요구사항과 source evidence를 연결하고 gap을 찾습니다. Legacy coverage matrix를 다시 만들 때는 같은 legacy feature의 기존 open gap을 재사용해 blocker gap을 중복 생성하지 않습니다.
-6. **Contracts**가 OpenSpec, Gherkin, API, design-system mapping, component contract artifact를 생성합니다. 같은 요구사항을 가리키는 반복 traceability row는 OpenSpec 렌더링 전에 병합됩니다.
-7. **Agent lanes**가 Spec/BDD, API Contract, Design/UI 작업을 준비하고 실행합니다.
-8. **Review council**이 lane 결과, legacy feature coverage, component contract coverage를 모아 위험하거나 불완전한 작업을 차단합니다.
-9. **Integration**이 승인된 변경을 정해진 순서로 적용합니다.
-10. **Gates**가 quality, architecture, visual, accessibility, performance, observability 검증을 실행합니다.
-11. **Review scorecard**가 brief fidelity, legacy coverage, Gherkin completeness, TDD evidence, design-system usage, visual parity, resource contract, API contract, publish sync를 채점합니다. scorecard가 없거나 어느 항목이든 정규화된 최소 기준, 보통 8/10 미만이면 publish 가능한 report가 blocked됩니다. `minimumScore: 0.85` 같은 비율 입력은 `8.5/10`으로 정규화됩니다.
-12. **PR report**가 evidence, scorecard row, diff, risk, grouped gap, decision을 요약하고 내부 audit report와 MR body를 분리합니다.
-13. **Publish**가 report decision이 blocked가 아니고 생성된 body와 필수 visual preview가 동기화될 때 draft PR/MR을 생성하거나 갱신합니다. 기존 draft가 있으면 blocked 실패 report body update만 허용하는 경로를 쓸 수 있습니다.
-14. **Archive/release**는 merge evidence를 기록하고 release-readiness artifact를 준비할 수 있습니다.
+1. **Intake**가 요청을 기록하고 code, API, UI, release 적용 여부를 분류합니다.
+2. **Contracts**가 필요한 requirement, OpenSpec/Gherkin, API, mock, design evidence를 생성합니다.
+3. **Implementation**은 하나의 context에서 진행합니다. API type, schema, wrapper, mock, contract-test evidence가 `api-ready`에 도달해야 UI 완료 evidence를 제출할 수 있습니다.
+4. **Functional review**가 code scope의 requirement 충실도, contract, test, architecture, security, 미해결 functional gap을 확인합니다.
+5. **Design review**는 UI scope일 때만 visual fidelity, design-system 사용, interaction state, accessibility를 독립적으로 확인하며, 그 외에는 not applicable입니다.
+6. **Report**가 canonical gate와 reviewer 결정을 요약합니다.
+7. **Publish**가 필수 evidence 승인 후 draft PR/MR을 안전하게 생성하거나 갱신합니다.
+8. **Archive**는 merge evidence를 근거로 명시적으로 실행하는 post-merge 작업입니다.
+
+## 빠른 gate와 release gate
+
+기본 workflow는 빠르고 scope-aware하게 동작합니다. code 변경은 사용 가능한 lint/format, typecheck, build와 관련 functional test 하나를 실행합니다. OpenSpec validation, architecture boundary, targeted security, visual comparison, interaction accessibility, performance 검사는 분류된 scope에 해당할 때만 실행합니다. Observability는 opt-in입니다. 선택 사항인 script가 없으면 not applicable이고, 필수 evidence가 없거나 실패하면 blocked입니다.
+
+Release 검증은 별도입니다. 전체 test matrix, hardening suite, package verification, cross-host manifest validation은 release-only gate이며 명시적인 release workflow에서만 실행합니다. 일반 feature나 bug-fix run에는 자동으로 추가하지 않습니다.
 
 ## 입력으로 줄 수 있는 것
 

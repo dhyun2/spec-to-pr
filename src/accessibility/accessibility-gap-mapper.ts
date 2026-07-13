@@ -22,7 +22,7 @@ export function mapAccessibilityChecksToGaps(input: {
           observed: describeViolation(violation),
           impact: impactDescription(violation),
           sourceEvidenceIds: check.evidenceIds,
-          owner: "evidence-verifier",
+          owner: "functional-reviewer",
           createdAt: input.createdAt,
           updatedAt: input.createdAt,
           metadata: {

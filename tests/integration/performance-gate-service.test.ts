@@ -130,7 +130,7 @@ describe("PerformanceGateService", () => {
             metric: "LCP",
             observed: "4000ms",
             likelyCause: "Large above-the-fold payload",
-            owner: "design-ui",
+            owner: "implementation",
             recommendedAction: "Audit hero/media loading.",
           },
         ],

@@ -50,10 +50,10 @@ export async function validateDesignUiAgentResult(input: {
     };
   }
 
-  if (result.agent !== "design-ui") {
+  if (result.agent !== "implementation") {
     issues.push({
       path: "agent",
-      message: "Design/UI Agent result must use agent=design-ui.",
+      message: "Design/UI validation requires agent=implementation.",
     });
   }
 

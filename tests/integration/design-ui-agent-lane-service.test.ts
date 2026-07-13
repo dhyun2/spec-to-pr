@@ -31,7 +31,7 @@ afterEach(async () => {
 });
 
 describe("DesignUiAgentLaneService", () => {
-  it("prepares context and records design-ui result", async () => {
+  it("prepares design context and records the shared implementation result", async () => {
     const run = await buildRun();
     await store.create(run);
 
@@ -43,7 +43,7 @@ describe("DesignUiAgentLaneService", () => {
       designContractArtifactId: "art_11111111111111111111111111111111",
     });
 
-    expect(prepared.context.agent).toBe("design-ui");
+    expect(prepared.context.agent).toBe("implementation");
 
     const context = await service.getContext({
       runId: run.id,
@@ -70,7 +70,7 @@ describe("DesignUiAgentLaneService", () => {
         id: "ar_11111111111111111111111111111111",
         runId: run.id,
         kind: "implementation",
-        agent: "design-ui",
+        agent: "implementation",
         status: "passed",
         baseSha: "abcdef1",
         commitSha: "1234567",
@@ -85,7 +85,7 @@ describe("DesignUiAgentLaneService", () => {
       },
     });
 
-    expect(recorded.result.agent).toBe("design-ui");
+    expect(recorded.result.agent).toBe("implementation");
     expect(recorded.run.agentResultCount).toBe(1);
   });
 
@@ -110,7 +110,7 @@ describe("DesignUiAgentLaneService", () => {
           id: "ar_11111111111111111111111111111111",
           runId: run.id,
           kind: "implementation",
-          agent: "design-ui",
+          agent: "implementation",
           status: "passed",
           baseSha: "abcdef1",
           commitSha: "1234567",

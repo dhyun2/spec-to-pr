@@ -173,7 +173,7 @@ export class OpenApiIntakeService {
         observed: candidate.observed,
         impact: candidate.impact,
         sourceEvidenceIds: matchingEvidence === undefined ? [] : [matchingEvidence.id],
-        owner: candidate.category === "security" ? "evidence-verifier" : "api-contract",
+        owner: candidate.category === "security" ? "functional-reviewer" : "implementation",
         createdAt: timestamp,
         updatedAt: timestamp,
         metadata: {

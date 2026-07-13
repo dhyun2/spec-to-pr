@@ -1,24 +1,16 @@
-export const RUNTIME_CONTRACT_VERSION = "0.1.0" as const;
+export const RUNTIME_CONTRACT_VERSION = "2.0.0" as const;
 
 export const AGENT_ROLES = [
   "orchestrator",
-  "spec-bdd",
-  "api-contract",
-  "design-ui",
-  "integrator",
-  "review-council",
-  "evidence-verifier",
+  "implementation",
+  "functional-reviewer",
+  "design-reviewer",
   "pr-publisher",
 ] as const;
 
-export const IMPLEMENTATION_AGENT_ROLES = [
-  "spec-bdd",
-  "api-contract",
-  "design-ui",
-  "integrator",
-] as const;
+export const IMPLEMENTATION_AGENT_ROLES = ["implementation"] as const;
 
-export const VERIFICATION_AGENT_ROLES = ["review-council", "evidence-verifier"] as const;
+export const VERIFICATION_AGENT_ROLES = ["functional-reviewer", "design-reviewer"] as const;
 
 export const PUBLISHING_AGENT_ROLES = ["pr-publisher"] as const;
 

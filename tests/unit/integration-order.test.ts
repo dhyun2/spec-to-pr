@@ -6,39 +6,18 @@ import { RUNTIME_CONTRACT_VERSION } from "../../src/runtime/index.js";
 describe("integration order", () => {
   it("orders approved implementation results deterministically", () => {
     const candidates = buildIntegrationCandidates({
-      approvedAgentResultIds: [
-        "ar_22222222222222222222222222222222",
-        "ar_11111111111111111111111111111111",
-      ],
+      approvedAgentResultIds: ["ar_11111111111111111111111111111111"],
       agentResults: [
-        {
-          schemaVersion: RUNTIME_CONTRACT_VERSION,
-          id: "ar_22222222222222222222222222222222",
-          runId: "run_11111111111111111111111111111111",
-          kind: "implementation",
-          agent: "design-ui",
-          status: "passed",
-          baseSha: "abcdef1",
-          commitSha: "2222222",
-          changedFiles: ["src/ui.tsx"],
-          evidenceIds: [],
-          artifactIds: [],
-          gapIds: [],
-          checks: [],
-          decisions: [],
-          startedAt: "2026-06-23T00:00:00.000Z",
-          completedAt: "2026-06-23T00:00:01.000Z",
-        },
         {
           schemaVersion: RUNTIME_CONTRACT_VERSION,
           id: "ar_11111111111111111111111111111111",
           runId: "run_11111111111111111111111111111111",
           kind: "implementation",
-          agent: "api-contract",
+          agent: "implementation",
           status: "passed",
           baseSha: "abcdef1",
           commitSha: "1111111",
-          changedFiles: ["src/api.ts"],
+          changedFiles: ["src/api.ts", "src/ui.tsx"],
           evidenceIds: [],
           artifactIds: [],
           gapIds: [],
@@ -50,6 +29,6 @@ describe("integration order", () => {
       ],
     });
 
-    expect(candidates.map((candidate) => candidate.agent)).toEqual(["api-contract", "design-ui"]);
+    expect(candidates.map((candidate) => candidate.agent)).toEqual(["implementation"]);
   });
 });

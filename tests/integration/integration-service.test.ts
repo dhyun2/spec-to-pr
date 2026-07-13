@@ -41,38 +41,27 @@ describe("IntegrationService", () => {
   it("prepares, applies, and finalizes approved agent commits", async () => {
     const repo = await createRepo();
     const baseSha = await git(repo, ["rev-parse", "HEAD"]);
-    const apiCommit = await createAgentCommit(
+    const implementationCommit = await createAgentCommit(
       repo,
-      "api-agent",
+      "implementation",
       "src/api.ts",
       "export const api = true;\n",
-    );
-    const uiCommit = await createAgentCommit(
-      repo,
-      "ui-agent",
-      "src/ui.tsx",
-      "export const ui = true;\n",
     );
     const run = buildRun({
       projectRoot: repo,
       baseSha,
-      apiCommit,
-      uiCommit,
+      implementationCommit,
     });
 
     await store.create(run);
 
     const prepared = await service.prepareIntegration({
       runId: run.id,
-      approvedAgentResultIds: [
-        "ar_11111111111111111111111111111111",
-        "ar_22222222222222222222222222222222",
-      ],
+      approvedAgentResultIds: ["ar_11111111111111111111111111111111"],
     });
 
     expect(prepared.plan.candidates.map((candidate) => candidate.agent)).toEqual([
-      "api-contract",
-      "design-ui",
+      "implementation",
     ]);
 
     const loadedPlan = await service.getIntegrationPlan({
@@ -98,7 +87,9 @@ describe("IntegrationService", () => {
 
     const loaded = await store.get(run.id);
 
-    expect(loaded.agentResults.some((result) => result.agent === "integrator")).toBe(true);
+    expect(loaded.agentResults.filter((result) => result.agent === "implementation")).toHaveLength(
+      2,
+    );
   });
 });
 
@@ -145,12 +136,7 @@ async function git(cwd: string, args: string[]): Promise<string> {
   return stdout.trim();
 }
 
-function buildRun(input: {
-  projectRoot: string;
-  baseSha: string;
-  apiCommit: string;
-  uiCommit: string;
-}) {
+function buildRun(input: { projectRoot: string; baseSha: string; implementationCommit: string }) {
   return RunManifestSchema.parse({
     ...createInitialRun(
       { sources: [], baseCommit: input.baseSha },
@@ -165,10 +151,10 @@ function buildRun(input: {
       {
         id: "art_11111111111111111111111111111111",
         kind: "log",
-        uri: "artifact://review-council-report",
+        uri: "artifact://functional-review-report",
         mediaType: "text/markdown",
         digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        producedBy: "review-council",
+        producedBy: "functional-reviewer",
         evidenceIds: [],
         createdAt: "2026-06-23T00:00:00.000Z",
       },
@@ -179,7 +165,7 @@ function buildRun(input: {
         id: "ar_99999999999999999999999999999999",
         runId: "run_11111111111111111111111111111111",
         kind: "verification",
-        agent: "review-council",
+        agent: "functional-reviewer",
         status: "passed",
         baseSha: input.baseSha,
         changedFiles: [],
@@ -196,29 +182,11 @@ function buildRun(input: {
         id: "ar_11111111111111111111111111111111",
         runId: "run_11111111111111111111111111111111",
         kind: "implementation",
-        agent: "api-contract",
+        agent: "implementation",
         status: "passed",
         baseSha: input.baseSha,
-        commitSha: input.apiCommit,
+        commitSha: input.implementationCommit,
         changedFiles: ["src/api.ts"],
-        evidenceIds: [],
-        artifactIds: [],
-        gapIds: [],
-        checks: [],
-        decisions: [],
-        startedAt: "2026-06-23T00:00:00.000Z",
-        completedAt: "2026-06-23T00:00:01.000Z",
-      },
-      {
-        schemaVersion: RUNTIME_CONTRACT_VERSION,
-        id: "ar_22222222222222222222222222222222",
-        runId: "run_11111111111111111111111111111111",
-        kind: "implementation",
-        agent: "design-ui",
-        status: "passed",
-        baseSha: input.baseSha,
-        commitSha: input.uiCommit,
-        changedFiles: ["src/ui.tsx"],
         evidenceIds: [],
         artifactIds: [],
         gapIds: [],

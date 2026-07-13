@@ -102,7 +102,7 @@ export class ArchitectureGuardService {
           impact:
             "Architecture violation can make generated code difficult to maintain and unsafe to extend.",
           sourceEvidenceIds: [],
-          owner: "integrator",
+          owner: "implementation",
           createdAt: timestamp,
           updatedAt: timestamp,
           metadata: {

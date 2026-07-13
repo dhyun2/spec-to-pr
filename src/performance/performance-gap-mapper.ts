@@ -102,7 +102,7 @@ function createPerformanceGap(input: {
     observed: input.observed,
     impact: input.impact,
     sourceEvidenceIds: [],
-    owner: "evidence-verifier",
+    owner: "functional-reviewer",
     createdAt: input.timestamp,
     updatedAt: input.timestamp,
   });

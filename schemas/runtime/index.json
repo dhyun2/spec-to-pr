@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "0.1.0",
+  "schemaVersion": "2.0.0",
   "dialect": "https://json-schema.org/draft/2020-12/schema",
   "files": [
     "agent-result.schema.json",

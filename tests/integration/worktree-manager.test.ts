@@ -30,11 +30,11 @@ describe("GitWorktreeManager", () => {
     const manager = new GitWorktreeManager();
     const worktree = await manager.createAgentWorktree({
       runId,
-      agent: "spec-bdd",
+      agent: "implementation",
       projectRoot,
     });
 
-    expect(worktree.branchName).toBe("spec-to-pr/222222222222/spec-bdd");
+    expect(worktree.branchName).toBe("spec-to-pr/222222222222/implementation");
     await expect(stat(path.join(worktree.worktreePath, "README.md"))).resolves.toBeDefined();
 
     const listed = await manager.listWorktrees(projectRoot);

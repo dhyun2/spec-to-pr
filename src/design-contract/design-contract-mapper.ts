@@ -534,7 +534,7 @@ function createDesignGap(input: {
     observed: input.observed,
     impact: input.impact,
     sourceEvidenceIds: input.evidenceIds,
-    owner: "design-ui",
+    owner: "implementation",
     createdAt: input.generatedAt,
     updatedAt: input.generatedAt,
     metadata: {

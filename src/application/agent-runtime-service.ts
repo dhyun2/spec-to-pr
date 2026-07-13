@@ -31,7 +31,7 @@ import { GitObjectIdSchema, IsoDateTimeSchema } from "../runtime/scalars.js";
 import { sha256Digest } from "../source-registry/content-hash.js";
 import type { RunStore } from "../store/run-store.js";
 
-const DEFAULT_AGENT_SELECTION = ["spec-bdd", "api-contract", "design-ui", "integrator"] as const;
+const DEFAULT_AGENT_SELECTION = ["implementation"] as const;
 
 export const PrepareAgentRuntimeInputSchema = z
   .object({

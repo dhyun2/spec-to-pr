@@ -7,24 +7,24 @@ import {
 } from "../../src/agent-runtime/agent-descriptor.js";
 
 describe("agent descriptors", () => {
-  it("lists all implementation agents", () => {
+  it("lists one shared implementation agent", () => {
     expect(listAgentDescriptors().map((descriptor) => descriptor.agent)).toEqual([
-      "spec-bdd",
-      "api-contract",
-      "design-ui",
-      "integrator",
+      "implementation",
     ]);
   });
 
-  it("describes design-ui with Figma contract requirements", () => {
-    const descriptor = getAgentDescriptor("design-ui");
+  it("describes implementation with API and Figma contract requirements", () => {
+    const descriptor = getAgentDescriptor("implementation");
 
-    expect(descriptor.displayName).toBe("Design/UI Agent");
+    expect(descriptor.displayName).toBe("Implementation Agent");
+    expect(descriptor.requiredArtifacts).toContain("api-contract-report");
     expect(descriptor.requiredArtifacts).toContain("figma-design-contract");
     expect(descriptor.expectedOutputs).toContain("Fixture route or story");
   });
 
   it("rejects non-implementation runtime agents", () => {
+    expect(RuntimeAgentKindSchema.safeParse("api-contract").success).toBe(false);
+    expect(RuntimeAgentKindSchema.safeParse("design-ui").success).toBe(false);
     expect(RuntimeAgentKindSchema.safeParse("review-council").success).toBe(false);
   });
 });

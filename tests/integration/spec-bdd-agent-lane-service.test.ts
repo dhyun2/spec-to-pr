@@ -101,7 +101,7 @@ describe("SpecBddAgentLaneService", () => {
     expect(report).toContain("Spec/BDD Review");
 
     expect(loaded.agentResults).toHaveLength(1);
-    expect(loaded.agentResults[0]?.agent).toBe("spec-bdd");
+    expect(loaded.agentResults[0]?.agent).toBe("implementation");
 
     await expect(
       access(path.join(projectRoot, "tests", "acceptance", "generated")),

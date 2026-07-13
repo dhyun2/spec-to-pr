@@ -3,80 +3,19 @@ import path from "node:path";
 
 import packageJson from "../../package.json" with { type: "json" };
 import { ArtifactBlobStore } from "../artifact-registry/artifact-blob-store.js";
-import { AccessibilityGateService } from "../application/accessibility-gate-service.js";
-import { AgentRuntimeService } from "../application/agent-runtime-service.js";
-import { ApiContractAgentService } from "../application/api-contract-agent-service.js";
-import { ApiPipelineService } from "../application/api-pipeline-service.js";
-import { ArchitectureGuardService } from "../application/architecture-guard-service.js";
-import { BriefAdapterService } from "../application/brief-adapter-service.js";
-import { DesignContractService } from "../application/design-contract-service.js";
-import { DesignUiAgentLaneService } from "../application/design-ui-agent-lane-service.js";
-import { EvidenceGraphService } from "../application/evidence-graph-service.js";
-import { FigmaCapabilityService } from "../application/figma-capability-service.js";
-import { FigmaDesignInventoryService } from "../application/figma-design-inventory-service.js";
-import { FigmaIntakeService } from "../application/figma-intake-service.js";
-import { GherkinTestMatrixService } from "../application/gherkin-test-matrix-service.js";
 import { IntakeRequestService } from "../application/intake-request-service.js";
-import { IntegrationService } from "../application/integration-service.js";
-import { LegacyCoverageService } from "../application/legacy-coverage-service.js";
-import { OpenApiIntakeService } from "../application/openapi-intake-service.js";
-import { ObservabilityService } from "../application/observability-service.js";
 import { OpenSpecArchiveService } from "../application/openspec-archive-service.js";
-import { OpenSpecChangeService } from "../application/openspec-change-service.js";
-import { PerformanceGateService } from "../application/performance-gate-service.js";
-import { PolicyService } from "../application/policy-service.js";
-import { PrReportService } from "../application/pr-report-service.js";
 import { ProjectProfileService } from "../application/profile-service.js";
 import { PublisherService } from "../application/publisher-service.js";
-import { QualityGateService } from "../application/quality-gate-service.js";
-import { ReleaseService } from "../application/release-service.js";
-import { ReviewCouncilService } from "../application/review-council-service.js";
-import { ReviewScorecardService } from "../application/review-scorecard-service.js";
 import { RunService } from "../application/run-service.js";
-import { SourceRegistryService } from "../application/source-registry-service.js";
-import { SpecBddAgentLaneService } from "../application/spec-bdd-agent-lane-service.js";
 import { StageService } from "../application/stage-service.js";
-import { VisualRegressionService } from "../application/visual-regression-service.js";
+import { WorkflowService } from "../application/workflow-service.js";
 import { JsonProfileStore } from "../profile/profile-store.js";
 import { SourceSnapshotStore } from "../source-registry/snapshot-store.js";
-
-import type { RunStore } from "../store/run-store.js";
+import { SqliteRunStore } from "../store/sqlite-run-store.js";
 
 export type Services = {
-  runService: RunService;
-  accessibilityGateService: AccessibilityGateService;
-  performanceGateService: PerformanceGateService;
-  prReportService: PrReportService;
-  publisherService: PublisherService;
-  stageService: StageService;
-  policyService: PolicyService;
-  architectureGuardService: ArchitectureGuardService;
-  qualityGateService: QualityGateService;
-  profileService: ProjectProfileService;
-  intakeRequestService: IntakeRequestService;
-  sourceRegistryService: SourceRegistryService;
-  briefAdapterService: BriefAdapterService;
-  evidenceGraphService: EvidenceGraphService;
-  figmaCapabilityService: FigmaCapabilityService;
-  figmaDesignInventoryService: FigmaDesignInventoryService;
-  figmaIntakeService: FigmaIntakeService;
-  openApiIntakeService: OpenApiIntakeService;
-  observabilityService: ObservabilityService;
-  openSpecArchiveService: OpenSpecArchiveService;
-  openSpecChangeService: OpenSpecChangeService;
-  gherkinTestMatrixService: GherkinTestMatrixService;
-  integrationService: IntegrationService;
-  legacyCoverageService: LegacyCoverageService;
-  apiPipelineService: ApiPipelineService;
-  apiContractAgentService: ApiContractAgentService;
-  designContractService: DesignContractService;
-  designUiAgentLaneService: DesignUiAgentLaneService;
-  reviewCouncilService: ReviewCouncilService;
-  reviewScorecardService: ReviewScorecardService;
-  agentRuntimeService: AgentRuntimeService;
-  specBddAgentLaneService: SpecBddAgentLaneService;
-  visualRegressionService: VisualRegressionService;
-  releaseService: ReleaseService;
+  workflowService: WorkflowService;
 };
 
 export type ServicesProvider = () => Promise<Services>;
@@ -89,52 +28,33 @@ export function createLazyServicesProvider(): ServicesProvider {
       return services;
     }
 
-    const { SqliteRunStore } = await import("../store/sqlite-run-store.js");
-
     const dataDirectory = resolveDataDirectory();
-    const store: RunStore = new SqliteRunStore(path.join(dataDirectory, "runs.sqlite3"));
-    const snapshotStore = new SourceSnapshotStore(path.join(dataDirectory, "source-snapshots"));
+    const runStore = new SqliteRunStore(path.join(dataDirectory, "runs.sqlite3"));
     const artifactStore = new ArtifactBlobStore(path.join(dataDirectory, "artifacts"));
+    const runService = new RunService(runStore, { pluginVersion: packageJson.version });
+    const intakeRequestService = new IntakeRequestService(
+      runStore,
+      new SourceSnapshotStore(path.join(dataDirectory, "source-snapshots")),
+      artifactStore,
+    );
+    const profileService = new ProjectProfileService(
+      new JsonProfileStore(path.join(dataDirectory, "profiles")),
+    );
+    const stageService = new StageService(runStore);
+    const publisherService = new PublisherService(runStore, artifactStore);
+    const archiveService = new OpenSpecArchiveService(runStore, artifactStore);
 
     services = {
-      runService: new RunService(store, {
-        pluginVersion: packageJson.version,
+      workflowService: new WorkflowService({
+        runStore,
+        artifactStore,
+        runService,
+        intakeRequestService,
+        profileService,
+        stageService,
+        publisherService,
+        archiveService,
       }),
-      accessibilityGateService: new AccessibilityGateService(store, artifactStore),
-      performanceGateService: new PerformanceGateService(store, artifactStore),
-      prReportService: new PrReportService(store, artifactStore),
-      publisherService: new PublisherService(store, artifactStore),
-      stageService: new StageService(store),
-      policyService: new PolicyService(),
-      architectureGuardService: new ArchitectureGuardService(store, artifactStore),
-      qualityGateService: new QualityGateService(store, artifactStore),
-      profileService: new ProjectProfileService(
-        new JsonProfileStore(path.join(dataDirectory, "profiles")),
-      ),
-      intakeRequestService: new IntakeRequestService(store, snapshotStore, artifactStore),
-      sourceRegistryService: new SourceRegistryService(store, snapshotStore),
-      briefAdapterService: new BriefAdapterService(store, snapshotStore),
-      evidenceGraphService: new EvidenceGraphService(store, artifactStore),
-      figmaCapabilityService: new FigmaCapabilityService(store, artifactStore),
-      figmaDesignInventoryService: new FigmaDesignInventoryService(store, artifactStore),
-      figmaIntakeService: new FigmaIntakeService(store, artifactStore),
-      openApiIntakeService: new OpenApiIntakeService(store, snapshotStore, artifactStore),
-      observabilityService: new ObservabilityService(store, artifactStore),
-      openSpecArchiveService: new OpenSpecArchiveService(store, artifactStore),
-      openSpecChangeService: new OpenSpecChangeService(store, artifactStore),
-      gherkinTestMatrixService: new GherkinTestMatrixService(store, artifactStore),
-      integrationService: new IntegrationService(store, artifactStore, dataDirectory),
-      legacyCoverageService: new LegacyCoverageService(store, artifactStore),
-      apiPipelineService: new ApiPipelineService(store, artifactStore),
-      apiContractAgentService: new ApiContractAgentService(store, dataDirectory),
-      designContractService: new DesignContractService(store, artifactStore),
-      designUiAgentLaneService: new DesignUiAgentLaneService(store, dataDirectory),
-      reviewCouncilService: new ReviewCouncilService(store, artifactStore, dataDirectory),
-      reviewScorecardService: new ReviewScorecardService(store, artifactStore),
-      agentRuntimeService: new AgentRuntimeService(store),
-      specBddAgentLaneService: new SpecBddAgentLaneService(store, artifactStore),
-      visualRegressionService: new VisualRegressionService(store, artifactStore),
-      releaseService: new ReleaseService(process.cwd()),
     };
 
     return services;

@@ -90,7 +90,7 @@ export class ApiContractAgentService {
       evidenceIds: built.context.evidenceIds,
       createdAt: timestamp,
       metadata: {
-        agent: "api-contract",
+        agent: "implementation",
         artifactRole: "agent-context-pack",
         contextPackPath: built.context.contextPackPath,
       },

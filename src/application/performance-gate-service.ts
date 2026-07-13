@@ -394,7 +394,7 @@ export class PerformanceGateService {
       uri: blob.uri,
       mediaType: input.mediaType,
       digest: blob.digest,
-      producedBy: "evidence-verifier",
+      producedBy: "functional-reviewer",
       evidenceIds: [],
       createdAt: input.createdAt,
       metadata: input.metadata,

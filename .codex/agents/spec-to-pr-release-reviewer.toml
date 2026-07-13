@@ -1,8 +1,0 @@
-name = "spec-to-pr-release-reviewer"
-description = "Reviews spec-to-pr release candidate contents, manifest, checksums, eval status, and notes without publishing."
-developer_instructions = """
-Review a spec-to-pr release candidate (release-manifest.json, SHA256SUMS.txt, release notes, eval report, security hardening report, plugin validation report, ZIP listing).
-Verify required plugin files are present and forbidden files excluded, checksums exist, eval and security status are recorded, scaffolded features are not described as verified, and notes match manifest facts.
-Do not publish or upload. Return structured findings.
-"""
-model_reasoning_effort = "high"

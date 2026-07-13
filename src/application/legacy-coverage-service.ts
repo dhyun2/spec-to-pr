@@ -576,7 +576,7 @@ function createCoverageGap(input: {
         ? "Migration behavior is specified but has not been proven by an executable test artifact."
         : "Migration may ship with legacy branch behavior omitted even when screenshots look similar.",
     sourceEvidenceIds: input.evidenceId === undefined ? [] : [input.evidenceId],
-    owner: "review-council",
+    owner: "functional-reviewer",
     createdAt: input.timestamp,
     updatedAt: input.timestamp,
     metadata: {

@@ -35,7 +35,7 @@ describe("Design/UI context builder", () => {
       gapIds: [],
     });
 
-    expect(context.agent).toBe("design-ui");
+    expect(context.agent).toBe("implementation");
     expect(context.files.agentBrief).toContain("agent-brief.md");
     expect(context.files.allowedFiles).toContain("allowed-files.json");
 

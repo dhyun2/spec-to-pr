@@ -48,11 +48,11 @@ describe("PR report collector", () => {
       ],
       agentResults: [
         {
-          schemaVersion: "0.1.0",
+          schemaVersion: "2.0.0",
           id: "ar_11111111111111111111111111111111",
           runId: "run_11111111111111111111111111111111",
           kind: "verification",
-          agent: "evidence-verifier",
+          agent: "functional-reviewer",
           status: "passed",
           baseSha: "0000000",
           changedFiles: [],
@@ -123,7 +123,7 @@ describe("PR report collector", () => {
           uri: "artifact://sha256/222",
           mediaType: "application/json",
           digest: "sha256:2222222222222222222222222222222222222222222222222222222222222222",
-          producedBy: "evidence-verifier",
+          producedBy: "functional-reviewer",
           evidenceIds: [],
           createdAt: "2026-06-23T00:00:00.000Z",
           metadata: {
@@ -133,11 +133,11 @@ describe("PR report collector", () => {
       ],
       agentResults: [
         {
-          schemaVersion: "0.1.0",
+          schemaVersion: "2.0.0",
           id: "ar_22222222222222222222222222222222",
           runId: "run_22222222222222222222222222222222",
           kind: "verification",
-          agent: "evidence-verifier",
+          agent: "functional-reviewer",
           status: "passed",
           baseSha: "0000000",
           changedFiles: [],
@@ -326,7 +326,7 @@ describe("PR report collector", () => {
           uri: "artifact://sha256/666",
           mediaType: "application/json",
           digest: "sha256:6666666666666666666666666666666666666666666666666666666666666666",
-          producedBy: "evidence-verifier",
+          producedBy: "functional-reviewer",
           evidenceIds: [],
           createdAt: "2026-06-23T00:05:00.000Z",
           metadata: {
@@ -339,7 +339,7 @@ describe("PR report collector", () => {
           uri: "artifact://sha256/888",
           mediaType: "application/json",
           digest: "sha256:8888888888888888888888888888888888888888888888888888888888888888",
-          producedBy: "review-council",
+          producedBy: "functional-reviewer",
           evidenceIds: [],
           createdAt: "2026-06-23T00:05:01.000Z",
           metadata: {
@@ -371,7 +371,7 @@ describe("PR report collector", () => {
           observed: "Command exited with code 2.",
           impact: "Failed quality gates block reliable verification and publishing.",
           sourceEvidenceIds: [],
-          owner: "integrator",
+          owner: "implementation",
           createdAt: "2026-06-23T00:00:00.000Z",
           updatedAt: "2026-06-23T00:00:00.000Z",
           metadata: {
@@ -383,11 +383,11 @@ describe("PR report collector", () => {
       ],
       agentResults: [
         {
-          schemaVersion: "0.1.0",
+          schemaVersion: "2.0.0",
           id: "ar_33333333333333333333333333333333",
           runId: "run_55555555555555555555555555555555",
           kind: "verification",
-          agent: "evidence-verifier",
+          agent: "functional-reviewer",
           status: "failed",
           baseSha: "0000000",
           changedFiles: [],
@@ -410,11 +410,11 @@ describe("PR report collector", () => {
           completedAt: "2026-06-23T00:00:01.000Z",
         },
         {
-          schemaVersion: "0.1.0",
+          schemaVersion: "2.0.0",
           id: "ar_44444444444444444444444444444444",
           runId: "run_55555555555555555555555555555555",
           kind: "verification",
-          agent: "evidence-verifier",
+          agent: "functional-reviewer",
           status: "passed",
           baseSha: "0000000",
           changedFiles: [],
@@ -488,7 +488,7 @@ describe("PR report collector", () => {
           uri: "artifact://sha256/777",
           mediaType: "application/json",
           digest: "sha256:7777777777777777777777777777777777777777777777777777777777777777",
-          producedBy: "review-council",
+          producedBy: "functional-reviewer",
           evidenceIds: [],
           createdAt: "2026-06-23T00:06:00.000Z",
           metadata: {
@@ -520,11 +520,11 @@ describe("PR report collector", () => {
       ],
       agentResults: [
         {
-          schemaVersion: "0.1.0",
+          schemaVersion: "2.0.0",
           id: "ar_55555555555555555555555555555555",
           runId: "run_66666666666666666666666666666666",
           kind: "verification",
-          agent: "evidence-verifier",
+          agent: "functional-reviewer",
           status: "passed",
           baseSha: "0000000",
           changedFiles: [],

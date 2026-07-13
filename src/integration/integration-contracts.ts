@@ -15,12 +15,7 @@ export const IntegrationStatusSchema = z.enum([
   "blocked",
 ]);
 
-export const IntegratedAgentKindSchema = z.enum([
-  "spec-bdd",
-  "api-contract",
-  "design-ui",
-  "integrator",
-]);
+export const IntegratedAgentKindSchema = z.literal("implementation");
 
 export const IntegrationCandidateSchema = z
   .object({

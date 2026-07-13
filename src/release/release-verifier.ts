@@ -8,7 +8,6 @@ import { z } from "zod";
 import { RELEASE_FORBIDDEN_PATTERNS } from "./release-manifest.js";
 
 const DEFAULT_RUNTIME_SMOKE_TIMEOUT_MS = 10_000;
-const RUNTIME_SMOKE_ECHO = "release-smoke";
 
 export const ReleaseVerificationResultSchema = z
   .object({
@@ -19,8 +18,7 @@ export const ReleaseVerificationResultSchema = z
       .object({
         status: z.enum(["passed", "failed"]),
         failures: z.array(z.string()).default([]),
-        kernelInfo: z.record(z.string(), z.unknown()).optional(),
-        kernelPing: z.record(z.string(), z.unknown()).optional(),
+        workflowInfo: z.record(z.string(), z.unknown()).optional(),
       })
       .strict()
       .optional(),
@@ -33,8 +31,7 @@ export const ReleaseRuntimeVerificationResultSchema = z
   .object({
     status: z.enum(["passed", "failed"]),
     failures: z.array(z.string()).default([]),
-    kernelInfo: z.record(z.string(), z.unknown()).optional(),
-    kernelPing: z.record(z.string(), z.unknown()).optional(),
+    workflowInfo: z.record(z.string(), z.unknown()).optional(),
   })
   .strict();
 
@@ -46,9 +43,8 @@ export const REQUIRED_RELEASE_FILES = [
   ".agents/plugins/marketplace.json",
   ".claude-plugin/marketplace.json",
   ".claude-plugin/plugin.json",
-  ".codex/agents/spec-to-pr-design-ui-repair.toml",
-  ".codex/agents/spec-to-pr-review-council.toml",
-  ".codex/agents/spec-to-pr-visual-regression-reviewer.toml",
+  ".codex/agents/spec-to-pr-design-reviewer.toml",
+  ".codex/agents/spec-to-pr-functional-reviewer.toml",
   ".codex-plugin/plugin.json",
   ".mcp.json",
   "CHANGELOG.md",
@@ -117,8 +113,7 @@ export async function verifyReleasePackageRuntime(input: {
     return ReleaseRuntimeVerificationResultSchema.parse({
       status: "passed",
       failures: [],
-      kernelInfo: smoke.kernelInfo,
-      kernelPing: smoke.kernelPing,
+      workflowInfo: smoke.workflowInfo,
     });
   } catch (error: unknown) {
     return ReleaseRuntimeVerificationResultSchema.parse({
@@ -184,8 +179,7 @@ async function runMcpKernelSmoke(input: {
   nodePath?: string;
   timeoutMs?: number;
 }): Promise<{
-  kernelInfo: Record<string, unknown>;
-  kernelPing: Record<string, unknown>;
+  workflowInfo: Record<string, unknown>;
 }> {
   await mkdir(input.dataDirectory, {
     recursive: true,
@@ -216,20 +210,13 @@ async function runMcpKernelSmoke(input: {
     });
     client.notify("notifications/initialized", {});
 
-    const kernelInfoResult = await client.request("tools/call", {
-      name: "kernel_info",
+    const workflowInfoResult = await client.request("tools/call", {
+      name: "workflow_info",
       arguments: {},
-    });
-    const kernelPingResult = await client.request("tools/call", {
-      name: "kernel_ping",
-      arguments: {
-        echo: RUNTIME_SMOKE_ECHO,
-      },
     });
 
     return {
-      kernelInfo: extractStructuredContent(kernelInfoResult, "kernel_info"),
-      kernelPing: extractStructuredContent(kernelPingResult, "kernel_ping"),
+      workflowInfo: extractStructuredContent(workflowInfoResult, "workflow_info"),
     };
   } finally {
     await client.close();

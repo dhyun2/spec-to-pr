@@ -100,7 +100,7 @@ export async function buildDesignUiContextPack(
   return DesignUiContextPackSchema.parse({
     runId: input.runId,
     changeName: input.changeName,
-    agent: "design-ui",
+    agent: "implementation",
     worktreePath: input.worktreePath,
     contextRoot: root,
     designContractArtifactId: input.designContractArtifactId,

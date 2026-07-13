@@ -65,11 +65,11 @@ describe("ReviewScorecardService", () => {
       ],
       agentResults: [
         {
-          schemaVersion: "0.1.0",
+          schemaVersion: "2.0.0",
           id: "ar_11111111111111111111111111111111",
           runId: "run_11111111111111111111111111111111",
           kind: "verification",
-          agent: "evidence-verifier",
+          agent: "functional-reviewer",
           status: "passed",
           baseSha: "0000000",
           changedFiles: [],

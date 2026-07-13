@@ -101,8 +101,8 @@ export const ReviewCouncilResultSchema = z
   .object({
     schemaVersion: z.literal("review-council-v1"),
     runId: RunIdSchema,
-    agent: z.literal("review-council"),
-    reviewer: AgentRoleSchema.default("review-council"),
+    agent: z.literal("functional-reviewer"),
+    reviewer: AgentRoleSchema.default("functional-reviewer"),
     generatedAt: IsoDateTimeSchema,
     summary: z.string().trim().min(1).max(4_000),
     findings: z.array(ReviewFindingSchema).default([]),

@@ -99,7 +99,7 @@ describe("QualityGateService", () => {
     expect(loaded.agentResults).toHaveLength(1);
     expect(loaded.agentResults[0]).toMatchObject({
       kind: "verification",
-      agent: "evidence-verifier",
+      agent: "functional-reviewer",
       status: "failed",
     });
     expect(loaded.agentResults[0]?.checks.map((check) => check.status)).toEqual([

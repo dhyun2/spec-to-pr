@@ -44,20 +44,20 @@ describe("AgentRuntimeService", () => {
     const run = await runService.createRun({ projectRoot });
     const result = await agentRuntimeService.prepare({
       runId: run.id,
-      agents: ["spec-bdd"],
+      agents: ["implementation"],
     });
 
     expect(result.runId).toBe(run.id);
     expect(result.worktrees).toHaveLength(1);
-    expect(result.worktrees[0]?.agent).toBe("spec-bdd");
+    expect(result.worktrees[0]?.agent).toBe("implementation");
 
     const contextPack = await agentRuntimeService.getContextPack({
       runId: run.id,
-      agent: "spec-bdd",
+      agent: "implementation",
     });
 
-    expect(contextPack.pack.agent.agent).toBe("spec-bdd");
-    expect(contextPack.markdown).toContain("# Spec/BDD Agent Context Pack");
+    expect(contextPack.pack.agent.agent).toBe("implementation");
+    expect(contextPack.markdown).toContain("# Implementation Agent Context Pack");
     await expect(readFile(contextPack.jsonPath, "utf8")).resolves.toContain(run.id);
 
     const listed = await agentRuntimeService.listWorktrees({ runId: run.id });
@@ -76,7 +76,7 @@ describe("AgentRuntimeService", () => {
 
     const cleanup = await agentRuntimeService.cleanupWorktree({
       runId: run.id,
-      agent: "spec-bdd",
+      agent: "implementation",
     });
 
     expect(cleanup.removed).toBe(true);

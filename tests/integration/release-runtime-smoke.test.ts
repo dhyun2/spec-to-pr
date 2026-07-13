@@ -40,12 +40,10 @@ describe("release runtime smoke", () => {
     });
 
     expect(verification.status).toBe("passed");
-    expect(verification.kernelInfo).toMatchObject({
+    expect(verification.workflowInfo).toMatchObject({
       pluginName: "spec-to-pr",
       transport: "stdio",
-    });
-    expect(verification.kernelPing).toMatchObject({
-      echo: "release-smoke",
+      contractVersion: "2.0.0",
     });
   });
 });

@@ -146,7 +146,7 @@ export class ReviewScorecardService {
       uri: blob.uri,
       mediaType: "application/json",
       digest: blob.digest,
-      producedBy: "review-council",
+      producedBy: "functional-reviewer",
       evidenceIds: [],
       createdAt: input.timestamp,
       metadata: {

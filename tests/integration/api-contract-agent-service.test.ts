@@ -67,7 +67,7 @@ describe("ApiContractAgentService", () => {
         id: "ar_11111111111111111111111111111111",
         runId: run.id,
         kind: "implementation",
-        agent: "api-contract",
+        agent: "implementation",
         status: "passed",
         baseSha: "abcdef1",
         commitSha: "1234567",
@@ -86,6 +86,6 @@ describe("ApiContractAgentService", () => {
 
     const loaded = await store.get(run.id);
     expect(loaded.agentResults).toHaveLength(1);
-    expect(loaded.agentResults[0]?.agent).toBe("api-contract");
+    expect(loaded.agentResults[0]?.agent).toBe("implementation");
   });
 });

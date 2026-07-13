@@ -239,7 +239,7 @@ export class VisualRegressionService {
             title: `Browser screenshot capture failed: ${target.name}`,
             observed: error instanceof Error ? error.message : "Unknown capture error.",
             severity: "blocker",
-            owner: "integrator",
+            owner: "implementation",
           }),
         );
       }
@@ -337,7 +337,7 @@ export class VisualRegressionService {
           title: `Visual mismatch for ${target.name}`,
           observed: `Review match was ${(comparison.metrics.reviewMatchRatio * 100).toFixed(2)}%.`,
           severity: status === "failed" ? "major" : "minor",
-          owner: "design-ui",
+          owner: "implementation",
         });
 
         gapsToAdd.push(gap);
@@ -746,7 +746,7 @@ function createVisualGap(input: {
   title: string;
   observed: string;
   severity: "blocker" | "major" | "minor";
-  owner: "integrator" | "design-ui";
+  owner: "implementation" | "design-ui";
 }): Gap {
   return GapSchema.parse({
     id: createGapId(),
@@ -786,7 +786,7 @@ function createLegacyVisualGap(input: {
     observed: input.observed,
     impact: "The migrated UI may not preserve the accepted legacy visual baseline.",
     sourceEvidenceIds: input.baselineArtifact.evidenceIds,
-    owner: "design-ui",
+    owner: "implementation",
     createdAt: input.timestamp,
     updatedAt: input.timestamp,
     metadata: {

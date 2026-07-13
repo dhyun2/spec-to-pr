@@ -128,7 +128,7 @@ export class DesignUiAgentLaneService {
     }
 
     const worktreePath =
-      input.worktreePath ?? worktreePathFor(run.projectRoot, run.id, "design-ui");
+      input.worktreePath ?? worktreePathFor(run.projectRoot, run.id, "implementation");
     const contextRoot = input.contextRoot ?? path.join(this.dataDirectory, "agent-contexts");
     const artifactStore = new ArtifactBlobStore(path.join(this.dataDirectory, "artifacts"));
     const context = await buildDesignUiContextPack({
@@ -179,7 +179,7 @@ export class DesignUiAgentLaneService {
       evidenceIds: context.evidenceIds,
       createdAt: timestamp,
       metadata: {
-        agent: "design-ui",
+        agent: "implementation",
         changeName: input.changeName,
         artifactRole: "agent-context-pack",
         contextPackPath: context.contextRoot,
@@ -206,7 +206,7 @@ export class DesignUiAgentLaneService {
     const input = GetDesignUiAgentContextInputSchema.parse(rawInput);
     const run = await this.runStore.get(input.runId);
     const artifact = findContextArtifact(run.artifacts, {
-      agent: "design-ui",
+      agent: "implementation",
       ...(input.contextArtifactId === undefined
         ? {}
         : { contextArtifactId: input.contextArtifactId }),
@@ -239,8 +239,8 @@ export class DesignUiAgentLaneService {
     });
     const result = AgentResultSchema.parse(input.result);
 
-    if (result.kind !== "implementation" || result.agent !== "design-ui") {
-      throw new Error("Expected implementation result from design-ui agent");
+    if (result.kind !== "implementation" || result.agent !== "implementation") {
+      throw new Error("Expected result from the shared implementation agent");
     }
 
     const validation = await validateDesignUiAgentResult({

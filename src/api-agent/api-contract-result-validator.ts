@@ -45,10 +45,10 @@ export function validateApiContractAgentResult(input: {
     };
   }
 
-  if (result.agent !== "api-contract") {
+  if (result.agent !== "implementation") {
     issues.push({
       path: "agent",
-      message: "API Contract Agent result must use agent=api-contract.",
+      message: "API Contract validation requires agent=implementation.",
     });
   }
 

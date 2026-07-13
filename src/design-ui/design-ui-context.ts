@@ -6,7 +6,7 @@ export const DesignUiContextPackSchema = z
   .object({
     runId: RunIdSchema,
     changeName: z.string().trim().min(1),
-    agent: z.literal("design-ui"),
+    agent: z.literal("implementation"),
     worktreePath: z.string().trim().min(1),
     contextRoot: z.string().trim().min(1),
     designContractArtifactId: ArtifactIdSchema,

@@ -185,7 +185,7 @@ function createCapabilityGaps(capabilities: string[], timestamp: string): Gap[] 
       impact:
         "Figma intake may be incomplete, and later UI implementation may need a fallback or manual review.",
       sourceEvidenceIds: [],
-      owner: "evidence-verifier",
+      owner: "functional-reviewer",
       createdAt: timestamp,
       updatedAt: timestamp,
     }),

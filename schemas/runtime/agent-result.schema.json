@@ -6,7 +6,7 @@
       "properties": {
         "schemaVersion": {
           "type": "string",
-          "const": "0.1.0"
+          "const": "2.0.0"
         },
         "id": {
           "type": "string",
@@ -231,10 +231,7 @@
         "agent": {
           "type": "string",
           "enum": [
-            "spec-bdd",
-            "api-contract",
-            "design-ui",
-            "integrator"
+            "implementation"
           ]
         },
         "commitSha": {
@@ -274,7 +271,7 @@
       "properties": {
         "schemaVersion": {
           "type": "string",
-          "const": "0.1.0"
+          "const": "2.0.0"
         },
         "id": {
           "type": "string",
@@ -499,8 +496,8 @@
         "agent": {
           "type": "string",
           "enum": [
-            "review-council",
-            "evidence-verifier"
+            "functional-reviewer",
+            "design-reviewer"
           ]
         },
         "changedFiles": {
@@ -536,7 +533,7 @@
       "properties": {
         "schemaVersion": {
           "type": "string",
-          "const": "0.1.0"
+          "const": "2.0.0"
         },
         "id": {
           "type": "string",

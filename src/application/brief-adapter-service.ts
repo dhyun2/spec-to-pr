@@ -138,7 +138,7 @@ export class BriefAdapterService {
           impact:
             "The implementation could diverge because the statement does not provide a precise acceptance condition.",
           sourceEvidenceIds: [evidence.id],
-          owner: "spec-bdd",
+          owner: "implementation",
           createdAt: timestamp,
           updatedAt: timestamp,
         });
@@ -160,7 +160,7 @@ export class BriefAdapterService {
           impact:
             "The content resembles an instruction aimed at the automation system rather than a product requirement.",
           sourceEvidenceIds: [evidence.id],
-          owner: "evidence-verifier",
+          owner: "functional-reviewer",
           createdAt: timestamp,
           updatedAt: timestamp,
         });
@@ -395,7 +395,7 @@ function createUnsupportedGap(input: {
     impact:
       "The brief could contain requirements, but this source format cannot be extracted deterministically yet.",
     sourceEvidenceIds: [input.evidence.id],
-    owner: "spec-bdd",
+    owner: "implementation",
     createdAt: input.timestamp,
     updatedAt: input.timestamp,
   });

@@ -7,7 +7,7 @@ describe("review model", () => {
     const result = ReviewCouncilResultSchema.parse({
       schemaVersion: "review-council-v1",
       runId: "run_11111111111111111111111111111111",
-      agent: "review-council",
+      agent: "functional-reviewer",
       generatedAt: "2026-06-23T00:00:00.000Z",
       summary: "Review found one API evidence gap.",
       findings: [
@@ -63,14 +63,14 @@ describe("review model", () => {
       sourceArtifactIds: [],
     });
 
-    expect(result.reviewer).toBe("review-council");
+    expect(result.reviewer).toBe("functional-reviewer");
   });
 
   it("rejects verdicts that reference unknown findings", () => {
     const result = ReviewCouncilResultSchema.safeParse({
       schemaVersion: "review-council-v1",
       runId: "run_11111111111111111111111111111111",
-      agent: "review-council",
+      agent: "functional-reviewer",
       generatedAt: "2026-06-23T00:00:00.000Z",
       summary: "Invalid finding reference.",
       findings: [],

@@ -21,47 +21,18 @@ export type RuntimeAgentKind = z.infer<typeof RuntimeAgentKindSchema>;
 export type AgentDescriptor = z.infer<typeof AgentDescriptorSchema>;
 
 export const AGENT_DESCRIPTORS: Record<RuntimeAgentKind, AgentDescriptor> = {
-  "spec-bdd": AgentDescriptorSchema.parse({
-    agent: "spec-bdd",
-    displayName: "Spec/BDD Agent",
+  implementation: AgentDescriptorSchema.parse({
+    agent: "implementation",
+    displayName: "Implementation Agent",
     purpose:
-      "Refine OpenSpec, Gherkin, test matrix, and acceptance-test planning from evidence-backed requirements.",
-    stageName: "spec-bdd",
-    requiredArtifacts: ["openspec", "gherkin", "test-matrix", "requirement-graph"],
-    expectedOutputs: [
-      "OpenSpec refinement",
-      "Gherkin refinement",
-      "Acceptance test plan",
-      "Spec gaps",
-      "Implementation-independent validation",
-    ],
-    defaultBranchPrefix: "spec-bdd",
-  }),
-
-  "api-contract": AgentDescriptorSchema.parse({
-    agent: "api-contract",
-    displayName: "API Contract Agent",
-    purpose:
-      "Implement or refine API generated outputs, feature wrappers, mocks, and contract tests using OpenAPI evidence.",
-    stageName: "api-agent",
-    requiredArtifacts: ["openapi-intake-report", "api-contract-report", "test-matrix"],
-    expectedOutputs: [
-      "API wrapper changes",
-      "Generated client verification",
-      "Mock skeletons",
-      "Contract test skeletons",
-      "API gaps",
-    ],
-    defaultBranchPrefix: "api-contract",
-  }),
-
-  "design-ui": AgentDescriptorSchema.parse({
-    agent: "design-ui",
-    displayName: "Design/UI Agent",
-    purpose:
-      "Implement Figma-backed UI using the project design system and the generated design contract.",
-    stageName: "design-ui",
+      "Implement the complete change in one context, including contracts, API code, UI, tests, and application wiring.",
+    stageName: "implementation",
     requiredArtifacts: [
+      "openspec",
+      "gherkin",
+      "requirement-graph",
+      "openapi-intake-report",
+      "api-contract-report",
       "figma-design-context",
       "figma-screenshot",
       "figma-variable-defs",
@@ -69,30 +40,17 @@ export const AGENT_DESCRIPTORS: Record<RuntimeAgentKind, AgentDescriptor> = {
       "test-matrix",
     ],
     expectedOutputs: [
+      "API wrapper changes",
+      "Generated client verification",
       "FSD UI code",
       "Component states",
       "Fixture route or story",
-      "Component tests",
-      "Browser screenshot plan",
-      "Design gaps",
-    ],
-    defaultBranchPrefix: "design-ui",
-  }),
-
-  integrator: AgentDescriptorSchema.parse({
-    agent: "integrator",
-    displayName: "Integrator",
-    purpose:
-      "Integrate isolated agent outputs into application wiring, route/provider composition, and public API exports.",
-    stageName: "integration",
-    requiredArtifacts: ["openspec", "test-matrix", "api-contract-report", "figma-design-contract"],
-    expectedOutputs: [
-      "Integration commit plan",
-      "Conflict report",
+      "Contract and component tests",
       "Application wiring changes",
-      "Integration gaps",
+      "Browser screenshot plan",
+      "Evidence-backed implementation gaps",
     ],
-    defaultBranchPrefix: "integrator",
+    defaultBranchPrefix: "implementation",
   }),
 };
 

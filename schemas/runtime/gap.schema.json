@@ -73,12 +73,9 @@
       "type": "string",
       "enum": [
         "orchestrator",
-        "spec-bdd",
-        "api-contract",
-        "design-ui",
-        "integrator",
-        "review-council",
-        "evidence-verifier",
+        "implementation",
+        "functional-reviewer",
+        "design-reviewer",
         "pr-publisher"
       ]
     },

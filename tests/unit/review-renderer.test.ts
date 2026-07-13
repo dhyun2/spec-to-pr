@@ -7,8 +7,8 @@ describe("review renderer", () => {
     const report = renderReviewCouncilReport({
       schemaVersion: "review-council-v1",
       runId: "run_11111111111111111111111111111111",
-      agent: "review-council",
-      reviewer: "review-council",
+      agent: "functional-reviewer",
+      reviewer: "functional-reviewer",
       generatedAt: "2026-06-23T00:00:00.000Z",
       summary: "One issue found.",
       findings: [

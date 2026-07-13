@@ -45,7 +45,7 @@ describe("CherryPickIntegrationRunner", () => {
       worktreePath,
       candidate: {
         agentResultId: "ar_11111111111111111111111111111111",
-        agent: "api-contract",
+        agent: "implementation",
         commitSha,
         baseSha,
         order: 1,
@@ -84,7 +84,7 @@ describe("CherryPickIntegrationRunner", () => {
       worktreePath,
       candidate: {
         agentResultId: "ar_11111111111111111111111111111111",
-        agent: "api-contract",
+        agent: "implementation",
         commitSha,
         baseSha,
         order: 1,

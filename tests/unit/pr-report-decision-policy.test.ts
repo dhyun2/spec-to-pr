@@ -652,7 +652,7 @@ function reviewScorecardArtifact(input: {
     uri: "artifact://sha256/f44",
     mediaType: "application/json",
     digest: "sha256:f444444444444444444444444444444444444444444444444444444444444444",
-    producedBy: "review-council",
+    producedBy: "functional-reviewer",
     evidenceIds: [],
     createdAt: "2026-06-23T00:00:03.000Z",
     metadata: {
@@ -682,7 +682,7 @@ function passedReviewScorecardArtifact(): ArtifactRef {
     uri: "artifact://sha256/f55",
     mediaType: "application/json",
     digest: "sha256:f555555555555555555555555555555555555555555555555555555555555555",
-    producedBy: "review-council",
+    producedBy: "functional-reviewer",
     evidenceIds: [],
     createdAt: "2026-06-23T00:00:04.000Z",
     metadata: {

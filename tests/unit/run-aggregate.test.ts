@@ -46,7 +46,7 @@ describe("Run aggregate", () => {
 
     expect(run.status).toBe("created");
     expect(run.revision).toBe(0);
-    expect(run.stages.length).toBeGreaterThan(10);
+    expect(run.stages).toHaveLength(8);
   });
 
   it("rejects missing stages", () => {
@@ -93,7 +93,7 @@ describe("Run aggregate", () => {
       uri: "artifact://screenshot.png",
       mediaType: "image/png",
       digest,
-      producedBy: "design-ui",
+      producedBy: "implementation",
       evidenceIds: [evidenceId],
       createdAt: now,
       metadata: {},
@@ -126,7 +126,7 @@ describe("Run aggregate", () => {
       uri: "artifact://test-report.json",
       mediaType: "application/json",
       digest,
-      producedBy: "design-ui",
+      producedBy: "implementation",
       evidenceIds: [evidenceId],
       createdAt: now,
       metadata: {},
@@ -154,7 +154,7 @@ describe("Run aggregate", () => {
       id: agentResultId,
       runId,
       kind: "implementation",
-      agent: "design-ui",
+      agent: "implementation",
       status: "passed",
       baseSha: "abcdef1",
       commitSha: "1234567",

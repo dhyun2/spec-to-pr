@@ -1,12 +1,7 @@
 import type { AgentResult } from "../runtime/agent-result.js";
 import { IntegrationCandidateSchema, type IntegrationCandidate } from "./integration-contracts.js";
 
-const AGENT_ORDER = new Map<string, number>([
-  ["spec-bdd", 0],
-  ["api-contract", 1],
-  ["design-ui", 2],
-  ["integrator", 3],
-]);
+const AGENT_ORDER = new Map<string, number>([["implementation", 0]]);
 
 export function buildIntegrationCandidates(input: {
   agentResults: AgentResult[];

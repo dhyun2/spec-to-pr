@@ -4,7 +4,7 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "const": "0.1.0"
+      "const": "2.0.0"
     },
     "id": {
       "type": "string",
@@ -651,12 +651,9 @@
             "type": "string",
             "enum": [
               "orchestrator",
-              "spec-bdd",
-              "api-contract",
-              "design-ui",
-              "integrator",
-              "review-council",
-              "evidence-verifier",
+              "implementation",
+              "functional-reviewer",
+              "design-reviewer",
               "pr-publisher"
             ]
           },
@@ -773,12 +770,9 @@
             "type": "string",
             "enum": [
               "orchestrator",
-              "spec-bdd",
-              "api-contract",
-              "design-ui",
-              "integrator",
-              "review-council",
-              "evidence-verifier",
+              "implementation",
+              "functional-reviewer",
+              "design-reviewer",
               "pr-publisher"
             ]
           },
@@ -891,7 +885,7 @@
             "properties": {
               "schemaVersion": {
                 "type": "string",
-                "const": "0.1.0"
+                "const": "2.0.0"
               },
               "id": {
                 "type": "string",
@@ -1116,10 +1110,7 @@
               "agent": {
                 "type": "string",
                 "enum": [
-                  "spec-bdd",
-                  "api-contract",
-                  "design-ui",
-                  "integrator"
+                  "implementation"
                 ]
               },
               "commitSha": {
@@ -1159,7 +1150,7 @@
             "properties": {
               "schemaVersion": {
                 "type": "string",
-                "const": "0.1.0"
+                "const": "2.0.0"
               },
               "id": {
                 "type": "string",
@@ -1384,8 +1375,8 @@
               "agent": {
                 "type": "string",
                 "enum": [
-                  "review-council",
-                  "evidence-verifier"
+                  "functional-reviewer",
+                  "design-reviewer"
                 ]
               },
               "changedFiles": {
@@ -1421,7 +1412,7 @@
             "properties": {
               "schemaVersion": {
                 "type": "string",
-                "const": "0.1.0"
+                "const": "2.0.0"
               },
               "id": {
                 "type": "string",
@@ -1704,31 +1695,13 @@
             "type": "string",
             "enum": [
               "intake",
-              "project-profile",
-              "source-registry",
-              "brief-adapter",
-              "figma-adapter",
-              "openapi-adapter",
-              "evidence-graph",
-              "openspec",
-              "gherkin-test-matrix",
-              "api-contract",
-              "design-contract",
-              "agent-runtime",
-              "spec-bdd",
-              "api-agent",
-              "design-ui",
-              "review-council",
-              "integration",
-              "fsd-guard",
-              "quality-gates",
-              "visual-regression",
-              "accessibility",
-              "performance",
-              "observability",
-              "pr-report",
-              "publisher",
-              "openspec-archive"
+              "contracts",
+              "implementation",
+              "functional-review",
+              "design-review",
+              "report",
+              "publish",
+              "archive"
             ]
           },
           "status": {
@@ -1758,12 +1731,9 @@
             "type": "string",
             "enum": [
               "orchestrator",
-              "spec-bdd",
-              "api-contract",
-              "design-ui",
-              "integrator",
-              "review-council",
-              "evidence-verifier",
+              "implementation",
+              "functional-reviewer",
+              "design-reviewer",
               "pr-publisher"
             ]
           },

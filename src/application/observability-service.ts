@@ -327,7 +327,7 @@ function createObservabilityGap(
     observed: gap.observed,
     impact: gap.impact,
     sourceEvidenceIds: [],
-    owner: "evidence-verifier",
+    owner: "functional-reviewer",
     createdAt: timestamp,
     updatedAt: timestamp,
   });

@@ -6,21 +6,16 @@ Korean version: [README.ko.md](README.ko.md)
 
 ## What It Does
 
-`SpecToPR` is not just a code-writing prompt pack. It gives Claude Code or Codex a structured delivery pipeline with a local MCP kernel, shared skills, review agents, artifact storage, and quality gates.
+`SpecToPR` is not just a code-writing prompt pack. It gives Claude Code or Codex a fast, evidence-backed delivery workflow with a seven-tool MCP facade, shared skills, artifact storage, and two independent reviewer roles.
 
 At a high level, it can:
 
 - capture a product brief, documentation, Figma URL, OpenAPI file, and repository context as source evidence;
-- build a traceability graph from requirements to implementation and verification artifacts;
-- generate OpenSpec proposals, Gherkin scenarios, API pipeline artifacts, and design contracts;
-- run implementation lanes for Spec/BDD, API Contract, and Design/UI work;
-- run review lanes for architecture, quality gates, visual regression, accessibility, performance, observability, PR reporting, publishing, and release readiness;
-- compare Figma/browser or legacy/target screenshots and run a bounded visual repair loop;
-- generate a review scorecard across brief fidelity, legacy coverage, Gherkin completeness, TDD evidence, design-system usage, visual parity, resource contracts, API contracts, and publish sync;
-- turn Figma nodes into component contracts and require component-level visual evidence so local UI drift is not hidden inside a whole-page score;
-- create a legacy feature inventory for migrations and block on a feature coverage matrix when routes, components, APIs, native bridges, URLs, analytics, root/global CSS effects, or query/hash behavior are missing;
-- generate an evidence-backed PR report while separating reviewer-facing PR/MR body content from internal audit details;
-- publish the report as a draft GitHub PR or GitLab MR when blockers are clear, and optionally update an existing draft with a blocked failure report body.
+- generate requirements, OpenSpec/Gherkin, API, mock, and design contracts from the intake evidence;
+- keep API and UI implementation in one context, with the `api-ready` checkpoint completed before UI completion evidence is accepted;
+- run a `functional-reviewer` for code scope and add an independent `design-reviewer` only when UI scope applies;
+- select fast, scope-aware gates instead of running every specialist gate on every change;
+- generate an evidence-backed report and publish it as a draft GitHub PR or GitLab MR when required evidence is approved.
 
 Publishing creates or updates the review request body. It does not merge, approve, close, or mark a PR/MR ready for review.
 
@@ -106,7 +101,7 @@ codex plugin add spec-to-pr@spec-to-pr
 
 Then restart Codex, open `/plugins`, select the `SpecToPR` marketplace, and confirm `spec-to-pr` is installed.
 
-In Codex, MCP tools are exposed under the normalized `mcp__spec_to_pr__*` namespace. If a thread loads the skills but cannot see the tools, start a new thread or ask Codex to search for `spec-to-pr kernel_info create_run` tools before running Doctor.
+In Codex, MCP tools are exposed under the normalized `mcp__spec_to_pr__*` namespace. The public facade is exactly `workflow_info`, `workflow_start`, `workflow_advance`, `workflow_submit`, `workflow_status`, `workflow_publish`, and `workflow_archive`. If a task loads the skills but cannot see these tools, start a new task or ask Codex to search for `spec-to-pr workflow_info workflow_start` before running Doctor.
 
 Do not validate an installed plugin by importing `@modelcontextprotocol/sdk` from the plugin cache with `pnpm exec node`. Installed release packages intentionally exclude `node_modules`; Doctor should exercise the bundled `node ./dist/mcp/server.js` through the host-exposed MCP tools.
 
@@ -132,20 +127,20 @@ See [docs/codex/README.md](docs/codex/README.md) for Codex-specific details.
 
 ## Basic Workflow
 
-1. **Doctor** checks that the plugin, MCP server, runtime, and tool list are reachable.
-2. **Intake** captures the original request and records brief/docs/Figma/OpenAPI/repository inputs as evidence.
-3. **Profiling** inspects the target project, package manager, framework, scripts, and workspace boundaries.
-4. **Legacy inventory** can extract migration feature coverage from routes, components, stores, APIs, native bridges, URLs, analytics, root/global CSS selectors, and query/hash parameters.
-5. **Traceability** connects requirements to source evidence and identifies gaps. Legacy coverage rebuilds reuse existing open gaps for the same legacy feature instead of duplicating blockers.
-6. **Contracts** generate OpenSpec, Gherkin, API, design-system mapping, and component-contract artifacts. Repeated traceability rows for the same requirement are merged before OpenSpec rendering.
-7. **Agent lanes** prepare and run Spec/BDD, API Contract, and Design/UI work.
-8. **Review council** aggregates lane results, legacy feature coverage, and component contract coverage to block unsafe or incomplete work.
-9. **Integration** applies approved changes in a controlled order.
-10. **Gates** run quality, architecture, visual, accessibility, performance, and observability checks.
-11. **Review scorecard** scores the run across brief fidelity, legacy coverage, Gherkin completeness, TDD evidence, design-system usage, visual parity, resource contracts, API contracts, and publish sync. Missing scorecards or any dimension below the normalized minimum, usually 8/10, block publishable reports; ratio-style inputs such as `0.85` are normalized to `8.5/10`.
-12. **PR report** summarizes evidence, scorecard rows, diffs, risks, grouped gaps, and decisions while separating internal audit detail from the PR/MR body.
-13. **Publish** creates or updates a draft PR/MR when the report decision is not blocked and the generated body plus required visual previews are synchronized. Existing drafts may still receive a blocked failure report body update.
-14. **Archive/release** can record merge evidence and prepare release-readiness artifacts.
+1. **Intake** captures the request and classifies code, API, UI, and release applicability.
+2. **Contracts** generate the required requirements, OpenSpec/Gherkin, API, mock, and design evidence.
+3. **Implementation** stays in one context. API types, schemas, wrappers, mocks, and contract-test evidence must reach `api-ready` before UI completion.
+4. **Functional review** checks requirement fidelity, contracts, tests, architecture, security, and unresolved functional gaps for code scope.
+5. **Design review** independently checks visual fidelity, design-system use, interaction states, and accessibility only for applicable UI scope; otherwise it is not applicable.
+6. **Report** summarizes the canonical gate and reviewer decisions.
+7. **Publish** safely creates or updates a draft PR/MR when required evidence is approved.
+8. **Archive** remains an explicit post-merge action backed by merge evidence.
+
+## Fast Gates And Release Gates
+
+The default workflow is intentionally fast and scope-aware. Code changes run available lint/format, typecheck, build, and one relevant functional test. OpenSpec validation, architecture boundaries, targeted security checks, visual comparison, interaction accessibility, and performance checks run only when the classified scope makes them applicable. Observability is opt-in. A missing optional script is not applicable; missing or failed required evidence blocks.
+
+Release verification is separate. Full test matrices, hardening suites, package verification, and cross-host manifest validation are release-only gates and run only for an explicit release workflow. They are not added to every feature or bug-fix run.
 
 ## Typical Inputs
 

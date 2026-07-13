@@ -139,7 +139,7 @@ export class IntegrationService {
     const run = await this.runStore.get(input.runId);
     const timestamp = IsoDateTimeSchema.parse(this.now());
 
-    assertReviewCouncilAllowsIntegration(run);
+    assertFunctionalReviewerAllowsIntegration(run);
 
     const worktree = await this.worktreeManager.ensureIntegrationWorktree(run);
     const candidates = buildIntegrationCandidates({
@@ -179,7 +179,7 @@ export class IntegrationService {
       approvedAgentResults: run.agentResults.filter((result) =>
         input.approvedAgentResultIds.includes(result.id),
       ),
-      reviewCouncilResult: await this.latestReviewCouncilStructuredResult(run),
+      functionalReviewResult: await this.latestFunctionalReviewStructuredResult(run),
     });
     const nextRun = RunManifestSchema.parse({
       ...run,
@@ -335,7 +335,7 @@ export class IntegrationService {
       artifactRole: "repair-history",
       value: repairHistory,
       createdAt: timestamp,
-      producedBy: "integrator",
+      producedBy: "implementation",
     });
     const nextResult = IntegrationResultSchema.parse({
       ...result,
@@ -348,7 +348,7 @@ export class IntegrationService {
       artifactRole: "integration-result",
       value: nextResult,
       createdAt: timestamp,
-      producedBy: "integrator",
+      producedBy: "implementation",
     });
     const nextRun = RunManifestSchema.parse({
       ...run,
@@ -395,14 +395,14 @@ export class IntegrationService {
       artifactRole: "integration-result",
       value: finalResult,
       createdAt: timestamp,
-      producedBy: "integrator",
+      producedBy: "implementation",
     });
     const agentResult = AgentResultSchema.parse({
       schemaVersion: RUNTIME_CONTRACT_VERSION,
       id: createAgentResultId(),
       runId: run.id,
       kind: "implementation",
-      agent: "integrator",
+      agent: "implementation",
       status: finalStatus === "passed" ? "passed" : "failed",
       baseSha: await this.baseShaForResult(run, finalResult),
       ...(finalStatus === "passed" ? { commitSha: headSha } : {}),
@@ -467,14 +467,14 @@ export class IntegrationService {
     return this.readJsonArtifact(planArtifactId, run, IntegrationPlanSchema);
   }
 
-  private async latestReviewCouncilStructuredResult(
+  private async latestFunctionalReviewStructuredResult(
     run: Awaited<ReturnType<RunStore["get"]>>,
   ): Promise<unknown> {
     const artifact = [...run.artifacts]
       .reverse()
       .find(
         (item) =>
-          item.metadata["adapter"] === "review-council-v1" &&
+          item.producedBy === "functional-reviewer" &&
           item.metadata["artifactRole"] === "structured-result",
       );
 
@@ -534,18 +534,20 @@ export class IntegrationService {
   }
 }
 
-function assertReviewCouncilAllowsIntegration(run: Awaited<ReturnType<RunStore["get"]>>): void {
+function assertFunctionalReviewerAllowsIntegration(
+  run: Awaited<ReturnType<RunStore["get"]>>,
+): void {
   const reviewResult = [...run.agentResults]
     .reverse()
-    .find((result) => result.agent === "review-council");
+    .find((result) => result.agent === "functional-reviewer");
 
   if (reviewResult === undefined) {
-    throw new Error("Review Council result is required before integration");
+    throw new Error("Functional reviewer result is required before integration");
   }
 
   if (reviewResult.status !== "passed") {
     throw new Error(
-      `Review Council result must be passed before integration: ${reviewResult.status}`,
+      `Functional reviewer result must be passed before integration: ${reviewResult.status}`,
     );
   }
 
@@ -601,7 +603,7 @@ async function writeIntegrationContextPack(input: {
   plan: IntegrationPlan;
   repairPolicy: unknown;
   approvedAgentResults: unknown[];
-  reviewCouncilResult: unknown;
+  functionalReviewResult: unknown;
 }): Promise<string> {
   const contextDirectory = path.join(
     input.dataDirectory,
@@ -617,8 +619,8 @@ async function writeIntegrationContextPack(input: {
   await Promise.all([
     writeJsonFile(path.join(contextDirectory, "integration-plan.json"), input.plan),
     writeJsonFile(
-      path.join(contextDirectory, "review-council-result.json"),
-      input.reviewCouncilResult,
+      path.join(contextDirectory, "functional-review-result.json"),
+      input.functionalReviewResult,
     ),
     writeJsonFile(
       path.join(contextDirectory, "approved-agent-results.json"),

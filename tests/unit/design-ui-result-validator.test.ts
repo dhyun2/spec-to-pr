@@ -25,7 +25,7 @@ afterEach(async () => {
 });
 
 describe("Design/UI result validator", () => {
-  it("accepts design-ui implementation changes inside writable globs", async () => {
+  it("accepts shared implementation changes inside writable UI globs", async () => {
     const result = await validateDesignUiAgentResult({
       result: baseResult({
         changedFiles: ["src/features/reservation/ui/reservation-list.tsx"],
@@ -77,7 +77,7 @@ function baseResult(input: { changedFiles: string[] }) {
     id: "ar_11111111111111111111111111111111",
     runId: "run_11111111111111111111111111111111",
     kind: "implementation",
-    agent: "design-ui",
+    agent: "implementation",
     status: "passed",
     baseSha: "abcdef1",
     commitSha: "1234567",

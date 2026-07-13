@@ -240,7 +240,7 @@ export class ReviewCouncilService {
       uri: reportBlob.uri,
       mediaType: "text/markdown",
       digest: reportBlob.digest,
-      producedBy: "review-council",
+      producedBy: "functional-reviewer",
       evidenceIds: [],
       createdAt: timestamp,
       metadata: {
@@ -255,7 +255,7 @@ export class ReviewCouncilService {
       uri: resultBlob.uri,
       mediaType: "application/json",
       digest: resultBlob.digest,
-      producedBy: "review-council",
+      producedBy: "functional-reviewer",
       evidenceIds: [],
       createdAt: timestamp,
       metadata: {
@@ -302,7 +302,7 @@ export class ReviewCouncilService {
       id: createAgentResultId(),
       runId: run.id,
       kind: "verification",
-      agent: "review-council",
+      agent: "functional-reviewer",
       status: verificationStatus,
       baseSha: run.baseCommit ?? "0000000",
       changedFiles: [],

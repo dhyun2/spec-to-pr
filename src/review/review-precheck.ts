@@ -14,8 +14,6 @@ export function runReviewPrechecks(input: {
   findings.push(...findOpenBlockerGaps(input));
   findings.push(...findPassedAgentResultsWithOpenGaps(input));
   findings.push(...findImplementationResultsWithoutArtifacts(input));
-  findings.push(...findApiClaimsWithoutOpenApiEvidence(input));
-  findings.push(...findDesignClaimsWithoutFigmaEvidence(input));
   findings.push(...findMissingLegacyCoverageMatrix(input));
   findings.push(...findIncompleteLegacyCoverageMatrix(input));
 
@@ -102,82 +100,6 @@ function findImplementationResultsWithoutArtifacts(input: {
         observed: `Agent ${result.agent} passed without artifacts or checks.`,
         recommendation: "Attach test report, source artifact, or check result evidence.",
         agentResultIds: [result.id],
-        createdAt: input.generatedAt,
-      }),
-    ];
-  });
-}
-
-function findApiClaimsWithoutOpenApiEvidence(input: {
-  run: RunManifest;
-  generatedAt: string;
-}): ReviewFinding[] {
-  return input.run.agentResults.flatMap((result) => {
-    if (result.agent !== "api-contract" || result.status !== "passed") {
-      return [];
-    }
-
-    const hasOpenApiEvidence = result.evidenceIds.some((evidenceId) => {
-      const evidence = input.run.evidence.find((item) => item.id === evidenceId);
-      return evidence?.metadata["openapiEvidenceKind"] !== undefined;
-    });
-
-    if (hasOpenApiEvidence) {
-      return [];
-    }
-
-    return [
-      ReviewFindingSchema.parse({
-        id: createReviewFindingId(),
-        category: "api-contract",
-        severity: "major",
-        status: "open",
-        title: "API Contract result lacks OpenAPI evidence",
-        expected:
-          "API Contract Agent results should cite OpenAPI operation/schema/security evidence.",
-        observed: "No OpenAPI evidence IDs were attached to the passed API Contract result.",
-        recommendation: "Attach OpenAPI intake evidence or keep undocumented work as API gap.",
-        agentResultIds: [result.id],
-        evidenceIds: result.evidenceIds,
-        artifactIds: result.artifactIds,
-        createdAt: input.generatedAt,
-      }),
-    ];
-  });
-}
-
-function findDesignClaimsWithoutFigmaEvidence(input: {
-  run: RunManifest;
-  generatedAt: string;
-}): ReviewFinding[] {
-  return input.run.agentResults.flatMap((result) => {
-    if (result.agent !== "design-ui" || result.status !== "passed") {
-      return [];
-    }
-
-    const hasFigmaEvidence = result.evidenceIds.some((evidenceId) => {
-      const evidence = input.run.evidence.find((item) => item.id === evidenceId);
-      return evidence?.location.type === "figma-node";
-    });
-
-    if (hasFigmaEvidence) {
-      return [];
-    }
-
-    return [
-      ReviewFindingSchema.parse({
-        id: createReviewFindingId(),
-        category: "design-contract",
-        severity: "major",
-        status: "open",
-        title: "Design/UI result lacks Figma evidence",
-        expected:
-          "Design/UI Agent results should cite Figma node evidence or design contract artifacts.",
-        observed: "No Figma evidence IDs were attached to the passed Design/UI result.",
-        recommendation: "Attach Figma evidence or keep unsupported UI states as design gaps.",
-        agentResultIds: [result.id],
-        evidenceIds: result.evidenceIds,
-        artifactIds: result.artifactIds,
         createdAt: input.generatedAt,
       }),
     ];

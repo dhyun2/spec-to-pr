@@ -164,116 +164,98 @@ describe("plugin layout", () => {
     }
   });
 
-  it("contains the doctor skill", () => {
-    expect(existsSync(path.join(root, "skills", "doctor", "SKILL.md"))).toBe(true);
-  });
-
-  it("contains the visual repair loop skill and Codex custom agents", () => {
-    expect(existsSync(path.join(root, "skills", "run-visual-repair-loop", "SKILL.md"))).toBe(true);
-    expect(
-      existsSync(path.join(root, ".codex", "agents", "spec-to-pr-visual-regression-reviewer.toml")),
-    ).toBe(true);
-    expect(existsSync(path.join(root, ".codex", "agents", "spec-to-pr-review-council.toml"))).toBe(
-      true,
-    );
-    expect(
-      existsSync(path.join(root, ".codex", "agents", "spec-to-pr-design-ui-repair.toml")),
-    ).toBe(true);
-  });
-
-  it("keeps shared skills compatible with Codex ingestion", () => {
-    const skillsRoot = path.join(root, "skills");
-    const skillNames = readFileSync(path.join(skillsRoot, "doctor", "SKILL.md"), "utf8");
-
-    expect(skillNames).toContain("disable-model-invocation: false");
-
-    for (const skill of [
+  it("ships exactly the nine v2 skills and two canonical reviewer roles", () => {
+    const expectedSkills = [
+      "archive-openspec",
       "doctor",
+      "implement",
+      "intake-contracts",
+      "prepare-release",
+      "publish",
+      "review-design",
+      "review-functional",
       "spec-to-pr",
-      "generate-pr-report",
-      "publish-review-request",
-      "run-visual-repair-loop",
-    ]) {
-      const skillPath = path.join(skillsRoot, skill, "SKILL.md");
+    ];
+    const expectedClaudeAgents = ["design-reviewer.md", "functional-reviewer.md"];
+    const expectedCodexAgents = [
+      "spec-to-pr-design-reviewer.toml",
+      "spec-to-pr-functional-reviewer.toml",
+    ];
+
+    expect(
+      readdirSync(path.join(root, "skills"), { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name)
+        .sort(),
+    ).toEqual(expectedSkills);
+    expect(readdirSync(path.join(root, "agents")).sort()).toEqual(expectedClaudeAgents);
+    expect(readdirSync(path.join(root, ".codex", "agents")).sort()).toEqual(expectedCodexAgents);
+
+    for (const skill of expectedSkills) {
+      const skillPath = path.join(root, "skills", skill, "SKILL.md");
       const contents = readFileSync(skillPath, "utf8");
+      const frontmatter = contents.match(/^---\n([\s\S]*?)\n---/);
 
-      expect(contents).not.toContain("disable-model-invocation: true");
-      expect(contents).toMatch(/^---\n/);
-      expect(contents).toContain("description:");
-      expect(contents).toContain("Codex: `mcp__spec_to_pr__<tool>`");
-    }
-  });
-
-  it("provides an end-to-end skill that publishes a draft review request but never merges", () => {
-    const skillPath = path.join(root, "skills", "spec-to-pr", "SKILL.md");
-    const contents = readFileSync(skillPath, "utf8");
-
-    expect(contents).toContain("mcp__spec-to-pr__publish_review_request");
-    expect(contents).toContain("mcp__spec_to_pr__publish_review_request");
-    expect(contents).toContain("confirm: true");
-    expect(contents).toContain("requestSynced: true");
-    expect(contents).toContain("visualPreviewSynced: true");
-    expect(contents).toContain("generate_review_scorecard");
-    expect(contents).toContain("minimumScore: 8");
-    expect(contents).toContain("@frontend/ui");
-    expect(contents).toContain("uncoveredCount > 0");
-    expect(contents).toContain("draft PR/MR");
-    expect(contents).toContain("Do not merge");
-    expect(contents).not.toContain("merge the PR");
-  });
-
-  it("keeps the main workflow aligned across Claude and Codex host surfaces", () => {
-    const skillPath = path.join(root, "skills", "spec-to-pr", "SKILL.md");
-    const contents = readFileSync(skillPath, "utf8");
-
-    for (const toolName of ["analyze_architecture_boundaries", "generate_source_guard_tests"]) {
-      expect(contents).toContain(`mcp__spec-to-pr__${toolName}`);
-      expect(contents).toContain(`mcp__spec_to_pr__${toolName}`);
+      expect(existsSync(skillPath)).toBe(true);
+      expect(frontmatter?.[1]?.split("\n").map((line) => line.split(":", 1)[0])).toEqual([
+        "name",
+        "description",
+      ]);
+      expect(frontmatter?.[1]).toContain(`name: ${skill}`);
+      expect(frontmatter?.[1]).toMatch(/description: Use when /);
     }
 
-    expect(contents).toContain("Run the architecture gate after integration");
+    const implement = readFileSync(path.join(root, "skills", "implement", "SKILL.md"), "utf8");
+    expect(implement).toContain("one implementation context");
+    expect(implement).toContain("api-ready");
+    expect(implement.indexOf("api-ready")).toBeLessThan(
+      implement.indexOf("UI evidence submission"),
+    );
   });
 
-  it("ships Codex counterparts for Claude agents with contract-critical instructions", () => {
-    const claudeAgents = readdirSync(path.join(root, "agents"))
-      .filter((file) => file.endsWith(".md"))
-      .map((file) => file.replace(/\.md$/, ""));
+  it("keeps v2 definitions host-neutral and limited to the seven workflow tools", () => {
+    const allowedTools = new Set([
+      "workflow_advance",
+      "workflow_archive",
+      "workflow_info",
+      "workflow_publish",
+      "workflow_start",
+      "workflow_status",
+      "workflow_submit",
+    ]);
+    const legacyTools = [
+      "capture_browser_screenshots",
+      "compare_visual_snapshots",
+      "create_run",
+      "generate_pr_report",
+      "kernel_info",
+      "publish_review_request",
+      "run_quality_gates",
+    ];
+    const definitionPaths = [
+      ...readdirSync(path.join(root, "skills"), { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => path.join(root, "skills", entry.name, "SKILL.md")),
+      ...readdirSync(path.join(root, "agents")).map((file) => path.join(root, "agents", file)),
+      ...readdirSync(path.join(root, ".codex", "agents")).map((file) =>
+        path.join(root, ".codex", "agents", file),
+      ),
+    ];
 
-    for (const agent of claudeAgents) {
-      expect(existsSync(path.join(root, ".codex", "agents", `spec-to-pr-${agent}.toml`))).toBe(
-        true,
-      );
-    }
+    for (const definitionPath of definitionPaths) {
+      const contents = readFileSync(definitionPath, "utf8");
+      const referencedTools = contents.match(/\bworkflow_[a-z_]+\b/g) ?? [];
 
-    const codexAgentInvariants = {
-      "api-contract": [
-        "documented API evidence",
-        "Do not invent endpoints",
-        "structured AgentResult",
-      ],
-      "design-ui": [
-        "Modify only allowed files",
-        "Do not call raw fetch",
-        "CheckResult evidence",
-        "structured AgentResult",
-      ],
-      "review-council": [
-        "Do not approve missing evidence",
-        "skipped checks described as passed",
-        "structured findings",
-      ],
-    } as const;
-
-    for (const [agent, requiredInstructions] of Object.entries(codexAgentInvariants)) {
-      const contents = readFileSync(
-        path.join(root, ".codex", "agents", `spec-to-pr-${agent}.toml`),
-        "utf8",
-      );
-
-      for (const instruction of requiredInstructions) {
-        expect(contents).toContain(instruction);
+      expect(contents).not.toMatch(/mcp__spec(?:-to-pr|_to_pr)__/);
+      expect(contents).not.toContain("## MCP Tool Namespace");
+      expect(referencedTools.every((tool) => allowedTools.has(tool))).toBe(true);
+      for (const legacyTool of legacyTools) {
+        expect(contents).not.toContain(legacyTool);
       }
     }
+
+    const mainSkill = readFileSync(path.join(root, "skills", "spec-to-pr", "SKILL.md"), "utf8");
+    expect(new Set(mainSkill.match(/\bworkflow_[a-z_]+\b/g) ?? [])).toEqual(allowedTools);
   });
 
   it("ships the Codex SDK runner scaffold", () => {

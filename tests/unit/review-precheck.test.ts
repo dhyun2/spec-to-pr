@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { createInitialRun, RunManifestSchema } from "../../src/run/index.js";
 import { runReviewPrechecks } from "../../src/review/review-precheck.js";
+import { RUNTIME_CONTRACT_VERSION } from "../../src/runtime/constants.js";
 
 describe("review prechecks", () => {
   it("flags open blocker gaps", () => {
@@ -40,7 +41,7 @@ describe("review prechecks", () => {
     expect(findings.some((finding) => finding.severity === "blocker")).toBe(true);
   });
 
-  it("flags passed API and Design/UI results without required evidence", () => {
+  it("checks shared implementation evidence without inferring API or design agent identity", () => {
     const run = RunManifestSchema.parse({
       ...createInitialRun(
         { sources: [], baseCommit: "abcdef1" },
@@ -53,33 +54,15 @@ describe("review prechecks", () => {
       ),
       agentResults: [
         {
-          schemaVersion: "0.1.0",
+          schemaVersion: RUNTIME_CONTRACT_VERSION,
           id: "ar_11111111111111111111111111111111",
           runId: "run_11111111111111111111111111111111",
           kind: "implementation",
-          agent: "api-contract",
+          agent: "implementation",
           status: "passed",
           baseSha: "abcdef1",
           commitSha: "abcdef1",
           changedFiles: ["src/features/reservation/api/fetch-reservations.ts"],
-          evidenceIds: [],
-          artifactIds: [],
-          gapIds: [],
-          checks: [],
-          decisions: [],
-          startedAt: "2026-06-23T00:00:00.000Z",
-          completedAt: "2026-06-23T00:00:01.000Z",
-        },
-        {
-          schemaVersion: "0.1.0",
-          id: "ar_22222222222222222222222222222222",
-          runId: "run_11111111111111111111111111111111",
-          kind: "implementation",
-          agent: "design-ui",
-          status: "passed",
-          baseSha: "abcdef1",
-          commitSha: "abcdef1",
-          changedFiles: ["src/features/reservation/ui/reservation-list.tsx"],
           evidenceIds: [],
           artifactIds: [],
           gapIds: [],
@@ -96,9 +79,7 @@ describe("review prechecks", () => {
       generatedAt: "2026-06-23T00:00:02.000Z",
     });
 
-    expect(findings.map((finding) => finding.category)).toEqual(
-      expect.arrayContaining(["implementation-claim", "api-contract", "design-contract"]),
-    );
+    expect(findings.map((finding) => finding.category)).toEqual(["implementation-claim"]);
   });
 
   it("flags legacy inventory without a feature coverage matrix", () => {

@@ -240,7 +240,7 @@ export class SpecBddAgentLaneService {
       uri: reportJsonBlob?.uri ?? `repo://${reportJsonArtifactPath}`,
       mediaType: "application/json",
       digest: reportJsonBlob?.digest ?? sha256Digest(Buffer.from(reportJson, "utf8")),
-      producedBy: "spec-bdd",
+      producedBy: "implementation",
       evidenceIds: [],
       createdAt: timestamp,
       metadata: {
@@ -258,7 +258,7 @@ export class SpecBddAgentLaneService {
       uri: reportMdBlob?.uri ?? `repo://${reportMdArtifactPath}`,
       mediaType: "text/markdown",
       digest: reportMdBlob?.digest ?? sha256Digest(Buffer.from(reportMd, "utf8")),
-      producedBy: "spec-bdd",
+      producedBy: "implementation",
       evidenceIds: [],
       createdAt: timestamp,
       metadata: {
@@ -294,7 +294,7 @@ export class SpecBddAgentLaneService {
       id: createAgentResultId(),
       runId: run.id,
       kind: "implementation",
-      agent: "spec-bdd",
+      agent: "implementation",
       status: input.status,
       baseSha,
       ...(input.status === "passed" ? { commitSha: input.commitSha ?? baseSha } : {}),

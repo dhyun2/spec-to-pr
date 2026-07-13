@@ -37,28 +37,35 @@ The runner prints a JSON payload with the Codex thread ID, final response, and
 token usage. Store the thread ID when you want to resume the same automation
 conversation later.
 
-## Review And Repair Defaults
+## Workflow v2 Defaults
 
-The runner asks Codex to spawn review subagents for visual regression,
-accessibility, performance, security, observability, and PR-report consistency
-when subagent workflows are available. If subagents are unavailable, the same
-lanes are run sequentially.
+Runner prompts use only the seven public facade tools: `workflow_info`,
+`workflow_start`, `workflow_advance`, `workflow_submit`, `workflow_status`,
+`workflow_publish`, and `workflow_archive`. The workflow service handles
+sequencing, retries, compact status, report generation, and safe publication.
 
-When Figma evidence exists, the runner requires a bounded visual repair loop:
-Design/UI repair, visual capture, comparison, and `evaluate_visual_repair_loop`.
-The default threshold is `0.98` and the default cap is `3` attempts.
+Implementation stays in one Codex context. For API-backed UI work, API types,
+schemas, wrappers, mocks, and contract-test evidence must be submitted at the
+`api-ready` checkpoint before UI completion evidence. API and UI work are not
+split into separate agents or worktrees.
 
-Before PR reporting, the runner requires lint, typecheck, build, functional,
-OpenSpec, accessibility, performance/Web Vitals, security, observability, and
-Figma visual comparison evidence when applicable. `generate_pr_report` is called
-with Korean output by default unless the user explicitly requests English.
+Code scope requests a `functional-reviewer`. UI scope adds an independent
+`design-reviewer`; non-UI scope does not invoke or wait for design review. When
+a Figma or legacy visual baseline exists, the UI context uses a bounded repair
+loop with a default score of `0.98` and a default cap of `3` attempts.
 
-When the run reaches PR reporting and the report decision is not blocked, the
-runner instructs Codex to call `publish_review_request` with `confirm: true`.
-That creates or updates a draft PR/MR with the generated report artifact as the
-base body. It never merges, approves, closes, or marks the request ready for
-review.
+## Fast Default And Release-Only Gates
 
-If visual PNG evidence exists, publishing uploads Figma, browser, and diff
-images to the review host and injects a localized visual evidence preview
-section so the PR/MR body renders the comparison directly.
+The normal workflow runs available lint/format, typecheck, build, and one
+relevant functional test for code changes. OpenSpec, architecture, targeted
+security, visual, accessibility, and performance gates are conditional on the
+classified scope. Observability is opt-in. Missing optional scripts are not
+applicable; missing or failed required evidence blocks.
+
+Full test matrices, hardening suites, package verification, and cross-host
+manifest validation are release-only gates. They run only for an explicit
+release workflow, not for every feature run.
+
+`workflow_publish` creates or updates a draft PR/MR only after the workflow is
+ready. It never merges, approves, closes, or marks the request ready for review.
+`workflow_archive` remains an explicit post-merge action.
