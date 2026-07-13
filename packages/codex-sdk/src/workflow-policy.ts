@@ -64,7 +64,7 @@ export function buildCodexReviewAgentInstructions(
   return [
     "Request only the reviewers applicable to the classified scope.",
     "Functional and design reviews are independent and may run in parallel after implementation.",
-    "Submit each verdict through workflow_submit and do not treat missing or empty evidence as approval.",
+    "Submit each verdict through workflow_submit with structured gateResults and real project-local artifact paths; missing or empty evidence cannot approve a gate.",
     "",
     "Applicable reviewers:",
     ...profiles.map(

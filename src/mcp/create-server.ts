@@ -24,6 +24,17 @@ const TOOL_NAMES = [
   "workflow_status",
   "workflow_submit",
 ] as const;
+const DURABLE_STAGES = [
+  "intake",
+  "contracts",
+  "implementation",
+  "functional-review",
+  "design-review",
+  "report",
+  "publish",
+  "archive",
+] as const;
+const REVIEWER_ROLES = ["functional-reviewer", "design-reviewer"] as const;
 
 const EmptyInputSchema = z.object({}).strict();
 const WorkflowInfoSchema = z
@@ -33,6 +44,15 @@ const WorkflowInfoSchema = z
     contractVersion: z.literal(CONTRACT_VERSION),
     transport: z.literal("stdio"),
     tools: z.tuple(TOOL_NAMES.map((name) => z.literal(name)) as ToolTuple),
+    durableStages: z.tuple(DURABLE_STAGES.map((name) => z.literal(name)) as StageTuple),
+    reviewerRoles: z.tuple(REVIEWER_ROLES.map((name) => z.literal(name)) as ReviewerTuple),
+    capabilities: z
+      .object({
+        apiReadyBeforeUi: z.literal(true),
+        independentReviews: z.literal(true),
+        conditionalDesignReview: z.literal(true),
+      })
+      .strict(),
   })
   .strict();
 
@@ -44,6 +64,20 @@ type ToolTuple = [
   z.ZodLiteral<(typeof TOOL_NAMES)[4]>,
   z.ZodLiteral<(typeof TOOL_NAMES)[5]>,
   z.ZodLiteral<(typeof TOOL_NAMES)[6]>,
+];
+type StageTuple = [
+  z.ZodLiteral<(typeof DURABLE_STAGES)[0]>,
+  z.ZodLiteral<(typeof DURABLE_STAGES)[1]>,
+  z.ZodLiteral<(typeof DURABLE_STAGES)[2]>,
+  z.ZodLiteral<(typeof DURABLE_STAGES)[3]>,
+  z.ZodLiteral<(typeof DURABLE_STAGES)[4]>,
+  z.ZodLiteral<(typeof DURABLE_STAGES)[5]>,
+  z.ZodLiteral<(typeof DURABLE_STAGES)[6]>,
+  z.ZodLiteral<(typeof DURABLE_STAGES)[7]>,
+];
+type ReviewerTuple = [
+  z.ZodLiteral<(typeof REVIEWER_ROLES)[0]>,
+  z.ZodLiteral<(typeof REVIEWER_ROLES)[1]>,
 ];
 
 type StructuredResult = Record<string, unknown>;
@@ -67,6 +101,13 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
         contractVersion: CONTRACT_VERSION,
         transport: "stdio",
         tools: TOOL_NAMES,
+        durableStages: DURABLE_STAGES,
+        reviewerRoles: REVIEWER_ROLES,
+        capabilities: {
+          apiReadyBeforeUi: true,
+          independentReviews: true,
+          conditionalDesignReview: true,
+        },
       }),
   );
 

@@ -1,6 +1,10 @@
 import { z } from "zod";
 
-import { WorkflowScopeSchema, type WorkflowScope } from "./workflow-contracts.js";
+import {
+  WorkflowGateIdSchema,
+  WorkflowScopeSchema,
+  type WorkflowScope,
+} from "./workflow-contracts.js";
 
 export const GateApplicabilitySchema = z.enum([
   "required",
@@ -8,18 +12,6 @@ export const GateApplicabilitySchema = z.enum([
   "opt-in",
   "release-only",
   "not-applicable",
-]);
-
-export const WorkflowGateIdSchema = z.enum([
-  "functional",
-  "openspec",
-  "architecture",
-  "security",
-  "visual",
-  "accessibility",
-  "performance",
-  "observability",
-  "release",
 ]);
 
 export const WorkflowGateSchema = z
@@ -41,23 +33,29 @@ export function classifyWorkflowScope(input: {
   const figmaUrls = input.figmaUrls ?? [];
   const explicit = input.explicitScope ?? "auto";
   const hasUiTerms =
-    /\b(ui|ux|screen|page|component|frontend|figma|visual|css|react|vue|화면|디자인)\b/i.test(text);
+    /\b(ui|ux|screen|page|component|frontend|figma|visual|design|css|react|vue)\b/i.test(text) ||
+    /(화면|디자인|프론트엔드|컴포넌트)/.test(text);
   const ui = explicit === "ui" || (explicit === "auto" && (figmaUrls.length > 0 || hasUiTerms));
   const code = explicit !== "docs";
 
   return WorkflowScopeSchema.parse({
     code,
     ui,
-    api: /\b(api|openapi|swagger|endpoint|contract|mock|스키마)\b/i.test(text),
-    specification: /\b(spec|brief|requirement|openspec|gherkin|기획|요구사항)\b/i.test(text),
+    api:
+      /\b(api|openapi|swagger|endpoint|contract|mock|schema)\b/i.test(text) ||
+      /(스키마|엔드포인트|계약|목업)/.test(text),
+    specification:
+      /\b(spec|brief|requirement|openspec|gherkin)\b/i.test(text) || /(기획|요구사항)/.test(text),
     hasVisualBaseline:
       figmaUrls.length > 0 || /\b(visual baseline|legacy screenshot)\b/i.test(text),
-    securitySensitive: /\b(auth|secret|token|storage|navigation|network|dependency|보안)\b/i.test(
-      text,
-    ),
-    performanceSensitive: /\b(performance|lighthouse|web vitals|bundle|latency|성능)\b/i.test(text),
+    securitySensitive:
+      /\b(auth|secret|token|storage|navigation|network|dependency)\b/i.test(text) ||
+      /보안/.test(text),
+    performanceSensitive:
+      /\b(performance|lighthouse|web vitals|bundle|latency)\b/i.test(text) || /성능/.test(text),
     observabilityRequested:
-      /\b(observability|telemetry|trace|tracing|log correlation|관측)\b/i.test(text),
+      /\b(observability|telemetry|trace|tracing|log correlation)\b/i.test(text) ||
+      /(관측|텔레메트리|추적)/.test(text),
   });
 }
 

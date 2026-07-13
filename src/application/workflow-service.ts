@@ -1,3 +1,6 @@
+import { readFile, realpath, stat } from "node:fs/promises";
+import path from "node:path";
+
 import { z } from "zod";
 
 import type { ArtifactBlobStore } from "../artifact-registry/artifact-blob-store.js";
@@ -27,6 +30,8 @@ import type { RunService } from "./run-service.js";
 import type { StageService } from "./stage-service.js";
 
 const WORKER_ID = "workflow-orchestrator" as const;
+const DEFAULT_EXTERNAL_LEASE_TTL_MS = 15 * 60 * 1000;
+const DEFAULT_EXTERNAL_HEARTBEAT_MS = 60 * 1000;
 
 export const WorkflowStartInputSchema = z
   .object({
@@ -116,13 +121,27 @@ export type WorkflowServiceDependencies = {
   publisherService?: PublisherService;
   archiveService?: OpenSpecArchiveService;
   now?: () => string;
+  externalLeaseTtlMs?: number;
+  externalHeartbeatMs?: number;
 };
 
 export class WorkflowService {
   private readonly now: () => string;
+  private readonly externalLeaseTtlMs: number;
+  private readonly externalHeartbeatMs: number;
 
   public constructor(private readonly dependencies: WorkflowServiceDependencies) {
     this.now = dependencies.now ?? (() => new Date().toISOString());
+    this.externalLeaseTtlMs = dependencies.externalLeaseTtlMs ?? DEFAULT_EXTERNAL_LEASE_TTL_MS;
+    this.externalHeartbeatMs = dependencies.externalHeartbeatMs ?? DEFAULT_EXTERNAL_HEARTBEAT_MS;
+
+    if (
+      this.externalHeartbeatMs <= 0 ||
+      this.externalLeaseTtlMs <= this.externalHeartbeatMs ||
+      this.externalLeaseTtlMs > 60 * 60 * 1000
+    ) {
+      throw new Error("External stage lease settings require 0 < heartbeat < TTL <= 1 hour");
+    }
   }
 
   public async start(rawInput: unknown): Promise<WorkflowStatus> {
@@ -204,14 +223,15 @@ export class WorkflowService {
     const input = WorkflowSubmitInputSchema.parse(rawInput);
     const run = await this.dependencies.runStore.get(input.runId);
     const submission = input.submission;
+    assertSubmissionPrerequisites(run, submission);
+    const evidenceArtifacts = await this.ingestSubmissionEvidence(run, submission);
 
     if (submission.kind === "figma-bundle") {
-      await this.recordSubmissionArtifact(run, submission);
+      await this.recordSubmissionArtifact(run, submission, evidenceArtifacts);
       return this.status({ runId: run.id });
     }
 
     const stageName = stageForSubmission(submission);
-    assertSubmissionPrerequisites(run, submission);
     const started = await this.dependencies.stageService.start({
       runId: run.id,
       stageName,
@@ -220,7 +240,9 @@ export class WorkflowService {
     const artifact = await this.recordSubmissionArtifact(
       await this.dependencies.runStore.get(run.id),
       submission,
+      evidenceArtifacts,
     );
+    const artifactIds = [...evidenceArtifacts.map((item) => item.id), artifact.id];
     const outcome = submissionOutcome(submission);
 
     if (outcome === "passed") {
@@ -229,7 +251,7 @@ export class WorkflowService {
         stageName,
         workerId: WORKER_ID,
         leaseId: started.stage.lease!.id,
-        artifactIds: [artifact.id],
+        artifactIds,
         ...(submission.kind === "implementation"
           ? {
               checkpoint: {
@@ -248,7 +270,7 @@ export class WorkflowService {
         stageName,
         workerId: WORKER_ID,
         leaseId: started.stage.lease!.id,
-        artifactIds: [artifact.id],
+        artifactIds,
         error: {
           code: outcome === "blocked" ? "WORKFLOW_BLOCKED" : "CHANGES_REQUESTED",
           message: submission.summary,
@@ -275,10 +297,10 @@ export class WorkflowService {
     const publishPassed = stage(run, "publish").status === "passed";
     const status = publishPassed
       ? "completed"
-      : reportPassed
-        ? "publish-ready"
-        : blockers.length > 0
-          ? "blocked"
+      : blockers.length > 0
+        ? "blocked"
+        : reportPassed
+          ? "publish-ready"
           : nextActions.length > 0
             ? "needs-external-action"
             : "running";
@@ -327,16 +349,49 @@ export class WorkflowService {
       runId: run.id,
       stageName: "publish",
       workerId: WORKER_ID,
+      leaseTtlMs: this.externalLeaseTtlMs,
     });
-    const result = await publisher.publish({ ...baseInput, confirm: true });
-    await this.dependencies.stageService.complete({
-      runId: run.id,
-      stageName: "publish",
-      workerId: WORKER_ID,
-      leaseId: started.stage.lease!.id,
-      artifactIds: [result.publishResultArtifactId],
-    });
-    await this.skipStage(run.id, "archive", "Archive is an explicit post-merge action.");
+    let result: Awaited<ReturnType<PublisherService["publish"]>>;
+
+    try {
+      result = await this.withLeaseHeartbeat(run.id, "publish", started.stage.lease!.id, () =>
+        publisher.publish({ ...baseInput, confirm: true }),
+      );
+    } catch (error: unknown) {
+      await this.dependencies.stageService.fail({
+        runId: run.id,
+        stageName: "publish",
+        workerId: WORKER_ID,
+        leaseId: started.stage.lease!.id,
+        error: {
+          code: "PUBLISH_UNEXPECTED_ERROR",
+          message: "Publisher threw unexpectedly after publication started.",
+          retryable: true,
+        },
+      });
+      throw error;
+    }
+
+    if (publishResultIsFullySynced(result.result)) {
+      await this.dependencies.stageService.complete({
+        runId: run.id,
+        stageName: "publish",
+        workerId: WORKER_ID,
+        leaseId: started.stage.lease!.id,
+        artifactIds: [result.publishResultArtifactId],
+      });
+      await this.skipStage(run.id, "archive", "Archive is an explicit post-merge action.");
+    } else {
+      const error = publishStageError(result.result);
+      await this.dependencies.stageService.fail({
+        runId: run.id,
+        stageName: "publish",
+        workerId: WORKER_ID,
+        leaseId: started.stage.lease!.id,
+        artifactIds: [result.publishResultArtifactId],
+        error,
+      });
+    }
 
     return { result, status: await this.status({ runId: run.id }) };
   }
@@ -367,13 +422,33 @@ export class WorkflowService {
       runId,
       stageName: "archive",
       workerId: WORKER_ID,
+      leaseTtlMs: this.externalLeaseTtlMs,
     });
-    const result = await archiveService.runArchive({
-      runId,
-      changeName: input.changeName!,
-      mergeEvidenceId: input.mergeEvidenceId!,
-      yes: true,
-    });
+    let result: Awaited<ReturnType<OpenSpecArchiveService["runArchive"]>>;
+
+    try {
+      result = await this.withLeaseHeartbeat(runId, "archive", started.stage.lease!.id, () =>
+        archiveService.runArchive({
+          runId,
+          changeName: input.changeName!,
+          mergeEvidenceId: input.mergeEvidenceId!,
+          yes: true,
+        }),
+      );
+    } catch (error: unknown) {
+      await this.dependencies.stageService.fail({
+        runId,
+        stageName: "archive",
+        workerId: WORKER_ID,
+        leaseId: started.stage.lease!.id,
+        error: {
+          code: "ARCHIVE_UNEXPECTED_ERROR",
+          message: "OpenSpec archive threw unexpectedly after archiving started.",
+          retryable: true,
+        },
+      });
+      throw error;
+    }
 
     if (result.status === "passed") {
       await this.dependencies.stageService.complete({
@@ -404,6 +479,7 @@ export class WorkflowService {
   private async recordSubmissionArtifact(
     run: RunManifest,
     submission: WorkflowSubmission,
+    evidenceArtifacts: ArtifactRef[],
   ): Promise<ArtifactRef> {
     const timestamp = this.now();
     const content = `${JSON.stringify(submission, null, 2)}\n`;
@@ -428,6 +504,7 @@ export class WorkflowService {
         ...(submission.kind === "figma-bundle" ? {} : { summary: submission.summary }),
         ...("verdict" in submission ? { verdict: submission.verdict } : {}),
         ...("status" in submission ? { status: submission.status } : {}),
+        evidenceArtifactIds: evidenceArtifacts.map((item) => item.id),
       },
     });
     const current = await this.dependencies.runStore.get(run.id);
@@ -437,12 +514,111 @@ export class WorkflowService {
         ...current,
         revision: current.revision + 1,
         updatedAt: timestamp,
-        artifacts: [...current.artifacts, artifact],
+        artifacts: [...current.artifacts, ...evidenceArtifacts, artifact],
       },
       current.revision,
     );
 
     return artifact;
+  }
+
+  private async withLeaseHeartbeat<T>(
+    runId: string,
+    stageName: RunStageName,
+    leaseId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    let heartbeatFailure: unknown;
+    let heartbeatChain = Promise.resolve();
+    const timer = setInterval(() => {
+      heartbeatChain = heartbeatChain
+        .then(async () => {
+          if (heartbeatFailure !== undefined) return;
+          await this.dependencies.stageService.heartbeat({
+            runId,
+            stageName,
+            leaseId,
+            workerId: WORKER_ID,
+            leaseTtlMs: this.externalLeaseTtlMs,
+          });
+        })
+        .catch((error: unknown) => {
+          heartbeatFailure ??= error;
+        });
+    }, this.externalHeartbeatMs);
+    timer.unref();
+
+    try {
+      const result = await operation();
+      clearInterval(timer);
+      await heartbeatChain;
+      if (heartbeatFailure !== undefined) throw heartbeatFailure;
+      return result;
+    } catch (error: unknown) {
+      clearInterval(timer);
+      await heartbeatChain;
+      throw error;
+    }
+  }
+
+  private async ingestSubmissionEvidence(
+    run: RunManifest,
+    submission: WorkflowSubmission,
+  ): Promise<ArtifactRef[]> {
+    const root = await realpath(run.projectRoot);
+    const timestamp = this.now();
+    const artifacts: ArtifactRef[] = [];
+
+    for (const evidencePath of submission.artifactPaths) {
+      const requestedPath = path.isAbsolute(evidencePath)
+        ? path.normalize(evidencePath)
+        : path.resolve(root, evidencePath);
+      assertWithinProjectRoot(root, requestedPath, evidencePath);
+
+      let resolvedPath: string;
+      try {
+        resolvedPath = await realpath(requestedPath);
+      } catch {
+        throw new Error(`Evidence file does not exist: ${evidencePath}`);
+      }
+      assertWithinProjectRoot(root, resolvedPath, evidencePath);
+
+      const details = await stat(resolvedPath);
+      if (!details.isFile()) {
+        throw new Error(`Evidence path must reference a file: ${evidencePath}`);
+      }
+      if (details.size > 50 * 1024 * 1024) {
+        throw new Error(`Evidence file exceeds the 50 MB limit: ${evidencePath}`);
+      }
+
+      const mediaType = mediaTypeForPath(resolvedPath);
+      const blob = await this.dependencies.artifactStore.writeBlob({
+        content: await readFile(resolvedPath),
+        mediaType,
+        storedAt: timestamp,
+        label: path.basename(resolvedPath),
+      });
+      artifacts.push(
+        ArtifactRefSchema.parse({
+          id: createArtifactId(),
+          kind: "other",
+          uri: blob.uri,
+          mediaType,
+          digest: blob.digest,
+          producedBy: producerForSubmission(submission),
+          evidenceIds: [],
+          createdAt: timestamp,
+          metadata: {
+            adapter: "workflow-v2-evidence",
+            projectRelativePath: path.relative(root, resolvedPath),
+            byteLength: details.size,
+            workflowSubmissionKind: submission.kind,
+          },
+        }),
+      );
+    }
+
+    return artifacts;
   }
 
   private async generateReport(runId: string): Promise<void> {
@@ -536,6 +712,30 @@ export class WorkflowService {
   }
 }
 
+type PublisherResult = Awaited<ReturnType<PublisherService["publish"]>>["result"];
+
+function publishResultIsFullySynced(result: PublisherResult): boolean {
+  return (
+    result.status === "passed" &&
+    result.requestSynced &&
+    (!result.visualPreviewExpected || result.visualPreviewSynced) &&
+    result.partialReasons.length === 0
+  );
+}
+
+function publishStageError(result: PublisherResult) {
+  const partial = result.status === "passed";
+  const fallbackMessage = partial
+    ? "Publication completed only partially and requires another synchronization attempt."
+    : `Publication ${result.status}.`;
+
+  return {
+    code: partial ? "PUBLISH_PARTIAL" : (result.errorCode ?? "PUBLISH_FAILED"),
+    message: result.errorMessage ?? (result.partialReasons.join("; ") || fallbackMessage),
+    retryable: partial || (result.status === "failed" && result.retryable),
+  };
+}
+
 function scopeFromRun(run: RunManifest): WorkflowScope {
   const rawScope = stage(run, "intake").checkpoint?.data["scope"];
   const parsed = WorkflowScopeSchema.safeParse(rawScope);
@@ -563,7 +763,11 @@ function actionsForRun(run: RunManifest, scope: WorkflowScope) {
   }
   if (stage(run, "contracts").status === "passed" && isActionable(stage(run, "implementation"))) {
     return [
-      WorkflowActionSchema.parse({ kind: "implement", runId: run.id, requireApiReady: true }),
+      WorkflowActionSchema.parse({
+        kind: "implement",
+        runId: run.id,
+        requireApiReady: scope.ui || scope.api,
+      }),
     ];
   }
   if (stage(run, "implementation").status !== "passed") {
@@ -585,7 +789,10 @@ function actionsForRun(run: RunManifest, scope: WorkflowScope) {
 }
 
 function isActionable(value: StageState): boolean {
-  return ["pending", "failed", "blocked"].includes(value.status);
+  return (
+    ["pending", "failed", "blocked"].includes(value.status) &&
+    (value.error === undefined || value.error.retryable)
+  );
 }
 
 function stageForSubmission(
@@ -609,6 +816,71 @@ function assertSubmissionPrerequisites(run: RunManifest, submission: WorkflowSub
   if (submission.kind === "design-review" && !scopeFromRun(run).ui) {
     throw new Error("Design review is not applicable to non-UI scope");
   }
+  if (
+    submission.kind === "implementation" &&
+    submission.status === "passed" &&
+    submission.uiChanged &&
+    !scopeFromRun(run).ui
+  ) {
+    throw new Error("UI changes contradict the classified non-UI scope; restart with UI scope");
+  }
+  if (
+    (submission.kind === "functional-review" || submission.kind === "design-review") &&
+    submission.verdict === "approved"
+  ) {
+    assertRequiredGateResults(run, submission);
+  }
+}
+
+function assertRequiredGateResults(
+  run: RunManifest,
+  submission: z.infer<typeof ReviewSubmissionSchema>,
+): void {
+  const designGateIds = new Set(["visual", "accessibility"]);
+  const requiredGateIds = buildGatePlan(scopeFromRun(run))
+    .filter((gate) => gate.applicability === "required")
+    .filter((gate) =>
+      submission.kind === "design-review"
+        ? designGateIds.has(gate.id)
+        : !designGateIds.has(gate.id) && gate.id !== "release",
+    )
+    .map((gate) => gate.id);
+  const passedGateIds = new Set(
+    submission.gateResults.filter((gate) => gate.status === "passed").map((gate) => gate.id),
+  );
+  const missing = requiredGateIds.filter((gateId) => !passedGateIds.has(gateId));
+
+  if (missing.length > 0) {
+    throw new Error(
+      `Approved ${submission.kind} is missing required gate results: ${missing.join(", ")}`,
+    );
+  }
+}
+
+function assertWithinProjectRoot(root: string, candidate: string, originalPath: string): void {
+  const relative = path.relative(root, candidate);
+
+  if (
+    relative === "" ||
+    (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative))
+  ) {
+    return;
+  }
+
+  throw new Error(`Evidence path must stay within the project root: ${originalPath}`);
+}
+
+function mediaTypeForPath(filePath: string): string {
+  const extension = path.extname(filePath).toLowerCase();
+  if (extension === ".json") return "application/json";
+  if (extension === ".png") return "image/png";
+  if (extension === ".jpg" || extension === ".jpeg") return "image/jpeg";
+  if (extension === ".svg") return "image/svg+xml";
+  if (extension === ".md") return "text/markdown";
+  if ([".ts", ".tsx", ".js", ".jsx", ".css", ".txt", ".log"].includes(extension)) {
+    return "text/plain";
+  }
+  return "application/octet-stream";
 }
 
 function submissionOutcome(submission: Exclude<WorkflowSubmission, { kind: "figma-bundle" }>) {

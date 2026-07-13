@@ -22,7 +22,11 @@
     "release:update:local": "tsx scripts/publish-release.ts --skip-verify --skip-push --skip-tag",
     "release:update:claude": "tsx scripts/publish-release.ts --skip-verify --skip-push --skip-tag --local-target claude",
     "release:update:codex": "tsx scripts/publish-release.ts --skip-verify --skip-push --skip-tag --local-target codex",
-    "check": "pnpm format:check && pnpm typecheck && pnpm schemas:build && pnpm build && pnpm test",
+    "sdk:typecheck": "pnpm --dir packages/codex-sdk typecheck",
+    "sdk:build": "pnpm --dir packages/codex-sdk build",
+    "sdk:check-dist": "git diff --exit-code -- packages/codex-sdk/dist",
+    "bundle:check-dist": "git diff --exit-code -- dist/mcp/server.js",
+    "check": "pnpm sdk:typecheck && pnpm sdk:build && pnpm sdk:check-dist && pnpm format:check && pnpm typecheck && pnpm schemas:build && pnpm build && pnpm bundle:check-dist && pnpm test",
     "plugin:validate": "pnpm plugin:validate:claude && pnpm plugin:validate:codex",
     "plugin:validate:claude": "claude plugin validate . --strict",
     "plugin:validate:codex": "tsx scripts/validate-codex-plugin.ts"

@@ -60,6 +60,22 @@ describe("spec-to-pr MCP workflow facade", () => {
       pluginName: "spec-to-pr",
       contractVersion: "2.0.0",
       tools: EXPECTED_TOOLS,
+      durableStages: [
+        "intake",
+        "contracts",
+        "implementation",
+        "functional-review",
+        "design-review",
+        "report",
+        "publish",
+        "archive",
+      ],
+      reviewerRoles: ["functional-reviewer", "design-reviewer"],
+      capabilities: {
+        apiReadyBeforeUi: true,
+        independentReviews: true,
+        conditionalDesignReview: true,
+      },
     });
 
     const started = await client.callTool({

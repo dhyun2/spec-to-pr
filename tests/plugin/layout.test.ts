@@ -271,6 +271,53 @@ describe("plugin layout", () => {
     ).toBe(true);
   });
 
+  it("ships Codex SDK dist built for only the v2 workflow facade", () => {
+    const rootPackage = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")) as {
+      scripts: Record<string, string>;
+    };
+    const distDirectory = path.join(root, "packages", "codex-sdk", "dist");
+    const shippedFiles = ["workflow-policy.js", "spec-to-pr-runner.js", "cli.js"];
+    const shipped = shippedFiles
+      .map((file) => readFileSync(path.join(distDirectory, file), "utf8"))
+      .join("\n");
+    const expectedTools = [
+      "workflow_info",
+      "workflow_start",
+      "workflow_advance",
+      "workflow_submit",
+      "workflow_status",
+      "workflow_publish",
+      "workflow_archive",
+    ];
+    const removedV1Names = [
+      "capture_browser_screenshots",
+      "compare_visual_snapshots",
+      "evaluate_visual_repair_loop",
+      "generate_pr_report",
+      "plan_visual_regression",
+      "publish_review_request",
+      "run_quality_gates",
+    ];
+
+    for (const tool of expectedTools) {
+      expect(shipped).toContain(tool);
+    }
+    for (const removedName of removedV1Names) {
+      expect(shipped).not.toContain(removedName);
+    }
+    expect(shipped).toContain("functional-reviewer");
+    expect(shipped).toContain("design-reviewer");
+    expect(shipped).not.toContain("visual-regression-reviewer");
+    expect(rootPackage.scripts["sdk:check-dist"]).toBe(
+      "git diff --exit-code -- packages/codex-sdk/dist",
+    );
+    expect(rootPackage.scripts["check"]).toContain("pnpm sdk:build && pnpm sdk:check-dist");
+    expect(rootPackage.scripts["bundle:check-dist"]).toBe(
+      "git diff --exit-code -- dist/mcp/server.js",
+    );
+    expect(rootPackage.scripts["check"]).toContain("pnpm build && pnpm bundle:check-dist");
+  });
+
   it("keeps the MDX installation page free of raw container directives", () => {
     const installation = readFileSync(
       path.join(root, "website", "docs", "getting-started", "installation.mdx"),

@@ -18,6 +18,17 @@ export const WorkflowScopeSchema = z
 export const ReviewVerdictSchema = z.enum(["approved", "changes-requested", "blocked"]);
 export const ReviewFindingSeveritySchema = z.enum(["minor", "major", "blocker"]);
 export const RequirementVerdictSchema = z.enum(["accepted", "rejected", "blocked"]);
+export const WorkflowGateIdSchema = z.enum([
+  "functional",
+  "openspec",
+  "architecture",
+  "security",
+  "visual",
+  "accessibility",
+  "performance",
+  "observability",
+  "release",
+]);
 
 const ReviewFindingSchema = z
   .object({
@@ -34,6 +45,14 @@ const ReviewRequirementSchema = z
   })
   .strict();
 
+const ReviewGateResultSchema = z
+  .object({
+    id: WorkflowGateIdSchema,
+    status: z.enum(["passed", "failed", "blocked"]),
+    evidencePaths: z.array(z.string().trim().min(1)).min(1),
+  })
+  .strict();
+
 export const ReviewSubmissionSchema = z
   .object({
     kind: z.enum(["functional-review", "design-review"]),
@@ -42,6 +61,7 @@ export const ReviewSubmissionSchema = z
     findings: z.array(ReviewFindingSchema).default([]),
     requirements: z.array(ReviewRequirementSchema).default([]),
     artifactPaths: z.array(z.string().trim().min(1)).default([]),
+    gateResults: z.array(ReviewGateResultSchema).default([]),
   })
   .strict()
   .superRefine((review, context) => {
@@ -56,6 +76,52 @@ export const ReviewSubmissionSchema = z
         message: "Approved reviews require concrete evidence artifacts",
       });
     }
+
+    if (review.requirements.length === 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["requirements"],
+        message: "Approved reviews require at least one reviewed requirement",
+      });
+    }
+
+    if (review.gateResults.length === 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["gateResults"],
+        message: "Approved reviews require structured gate results",
+      });
+    }
+
+    const seenGateIds = new Set<string>();
+    review.gateResults.forEach((gate, index) => {
+      if (seenGateIds.has(gate.id)) {
+        context.addIssue({
+          code: "custom",
+          path: ["gateResults", index, "id"],
+          message: `Duplicate gate result ${gate.id}`,
+        });
+      }
+      seenGateIds.add(gate.id);
+
+      if (gate.status !== "passed") {
+        context.addIssue({
+          code: "custom",
+          path: ["gateResults", index, "status"],
+          message: "Approved reviews require every reported gate to pass",
+        });
+      }
+
+      gate.evidencePaths.forEach((evidencePath, evidenceIndex) => {
+        if (!review.artifactPaths.includes(evidencePath)) {
+          context.addIssue({
+            code: "custom",
+            path: ["gateResults", index, "evidencePaths", evidenceIndex],
+            message: "Gate evidence must be included in artifactPaths",
+          });
+        }
+      });
+    });
 
     review.findings.forEach((finding, index) => {
       if (finding.severity === "major" || finding.severity === "blocker") {
@@ -147,7 +213,7 @@ export const WorkflowActionSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("implement"),
       runId: RunIdSchema,
-      requireApiReady: z.literal(true),
+      requireApiReady: z.boolean(),
     })
     .strict(),
   z.object({ kind: z.literal("review-functional"), runId: RunIdSchema }).strict(),

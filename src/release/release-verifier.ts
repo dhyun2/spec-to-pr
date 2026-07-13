@@ -8,6 +8,16 @@ import { z } from "zod";
 import { RELEASE_FORBIDDEN_PATTERNS } from "./release-manifest.js";
 
 const DEFAULT_RUNTIME_SMOKE_TIMEOUT_MS = 10_000;
+const EXPECTED_WORKFLOW_TOOLS = [
+  "workflow_advance",
+  "workflow_archive",
+  "workflow_info",
+  "workflow_publish",
+  "workflow_start",
+  "workflow_status",
+  "workflow_submit",
+] as const;
+const MAX_TOOL_SCHEMA_BYTES = 40_000;
 
 export const ReleaseVerificationResultSchema = z
   .object({
@@ -19,6 +29,9 @@ export const ReleaseVerificationResultSchema = z
         status: z.enum(["passed", "failed"]),
         failures: z.array(z.string()).default([]),
         workflowInfo: z.record(z.string(), z.unknown()).optional(),
+        toolNames: z.array(z.string()).optional(),
+        toolSchemaBytes: z.number().int().nonnegative().optional(),
+        workflowStatus: z.record(z.string(), z.unknown()).optional(),
       })
       .strict()
       .optional(),
@@ -32,6 +45,9 @@ export const ReleaseRuntimeVerificationResultSchema = z
     status: z.enum(["passed", "failed"]),
     failures: z.array(z.string()).default([]),
     workflowInfo: z.record(z.string(), z.unknown()).optional(),
+    toolNames: z.array(z.string()).optional(),
+    toolSchemaBytes: z.number().int().nonnegative().optional(),
+    workflowStatus: z.record(z.string(), z.unknown()).optional(),
   })
   .strict();
 
@@ -114,6 +130,9 @@ export async function verifyReleasePackageRuntime(input: {
       status: "passed",
       failures: [],
       workflowInfo: smoke.workflowInfo,
+      toolNames: smoke.toolNames,
+      toolSchemaBytes: smoke.toolSchemaBytes,
+      workflowStatus: smoke.workflowStatus,
     });
   } catch (error: unknown) {
     return ReleaseRuntimeVerificationResultSchema.parse({
@@ -180,6 +199,9 @@ async function runMcpKernelSmoke(input: {
   timeoutMs?: number;
 }): Promise<{
   workflowInfo: Record<string, unknown>;
+  toolNames: string[];
+  toolSchemaBytes: number;
+  workflowStatus: Record<string, unknown>;
 }> {
   await mkdir(input.dataDirectory, {
     recursive: true,
@@ -210,17 +232,82 @@ async function runMcpKernelSmoke(input: {
     });
     client.notify("notifications/initialized", {});
 
+    const toolsResult = await client.request("tools/list", {});
+    const tools = extractTools(toolsResult);
+    const toolNames = tools
+      .map((tool) => tool["name"])
+      .filter((name): name is string => typeof name === "string")
+      .sort();
+    const toolSchemaBytes = Buffer.byteLength(JSON.stringify(tools), "utf8");
+
+    if (JSON.stringify(toolNames) !== JSON.stringify(EXPECTED_WORKFLOW_TOOLS)) {
+      throw new Error(
+        `MCP runtime smoke expected exactly ${EXPECTED_WORKFLOW_TOOLS.join(", ")}; received ${toolNames.join(", ")}.`,
+      );
+    }
+    if (toolSchemaBytes >= MAX_TOOL_SCHEMA_BYTES) {
+      throw new Error(
+        `MCP runtime smoke tool schemas use ${toolSchemaBytes} bytes; budget is below ${MAX_TOOL_SCHEMA_BYTES}.`,
+      );
+    }
+
     const workflowInfoResult = await client.request("tools/call", {
       name: "workflow_info",
       arguments: {},
     });
+    const workflowInfo = extractStructuredContent(workflowInfoResult, "workflow_info");
+    const workflowStartResult = await client.request("tools/call", {
+      name: "workflow_start",
+      arguments: {
+        projectRoot: input.cwd,
+        requestText: "Release runtime smoke: verify the non-UI workflow facade.",
+        scope: "non-ui",
+      },
+    });
+    const started = extractStructuredContent(workflowStartResult, "workflow_start");
+    const runId = started["runId"];
+
+    if (typeof runId !== "string") {
+      throw new Error("MCP runtime smoke workflow_start result did not include a runId.");
+    }
+
+    const workflowStatusResult = await client.request("tools/call", {
+      name: "workflow_status",
+      arguments: { runId },
+    });
+    const workflowStatus = extractStructuredContent(workflowStatusResult, "workflow_status");
+
+    if (
+      workflowStatus["runId"] !== runId ||
+      workflowStatus["status"] !== "needs-external-action" ||
+      workflowStatus["currentStage"] !== "contracts"
+    ) {
+      throw new Error(
+        "MCP runtime smoke workflow_status did not return the started Run at the contracts boundary.",
+      );
+    }
 
     return {
-      workflowInfo: extractStructuredContent(workflowInfoResult, "workflow_info"),
+      workflowInfo,
+      toolNames,
+      toolSchemaBytes,
+      workflowStatus,
     };
   } finally {
     await client.close();
   }
+}
+
+function extractTools(result: unknown): Record<string, unknown>[] {
+  if (
+    isRecord(result) &&
+    Array.isArray(result["tools"]) &&
+    result["tools"].every((tool) => isRecord(tool))
+  ) {
+    return result["tools"];
+  }
+
+  throw new Error("MCP runtime smoke tools/list result did not include a valid tools array.");
 }
 
 class RawMcpStdioClient {

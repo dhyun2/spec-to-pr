@@ -42,4 +42,20 @@ describe("workflow gate policy", () => {
 
     expect(plan.find((gate) => gate.id === "observability")?.applicability).toBe("required");
   });
+
+  it("classifies Korean and plain design requests without relying on ASCII word boundaries", () => {
+    expect(
+      classifyWorkflowScope({
+        requestText: "결제 화면 디자인과 API 스키마를 개선해줘",
+        explicitScope: "auto",
+      }),
+    ).toMatchObject({ ui: true, api: true });
+
+    expect(
+      classifyWorkflowScope({
+        requestText: "Improve the checkout design",
+        explicitScope: "auto",
+      }).ui,
+    ).toBe(true);
+  });
 });

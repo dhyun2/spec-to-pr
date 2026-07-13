@@ -81,7 +81,11 @@ var init_package = __esm({
         "release:update:local": "tsx scripts/publish-release.ts --skip-verify --skip-push --skip-tag",
         "release:update:claude": "tsx scripts/publish-release.ts --skip-verify --skip-push --skip-tag --local-target claude",
         "release:update:codex": "tsx scripts/publish-release.ts --skip-verify --skip-push --skip-tag --local-target codex",
-        check: "pnpm format:check && pnpm typecheck && pnpm schemas:build && pnpm build && pnpm test",
+        "sdk:typecheck": "pnpm --dir packages/codex-sdk typecheck",
+        "sdk:build": "pnpm --dir packages/codex-sdk build",
+        "sdk:check-dist": "git diff --exit-code -- packages/codex-sdk/dist",
+        "bundle:check-dist": "git diff --exit-code -- dist/mcp/server.js",
+        check: "pnpm sdk:typecheck && pnpm sdk:build && pnpm sdk:check-dist && pnpm format:check && pnpm typecheck && pnpm schemas:build && pnpm build && pnpm bundle:check-dist && pnpm test",
         "plugin:validate": "pnpm plugin:validate:claude && pnpm plugin:validate:codex",
         "plugin:validate:claude": "claude plugin validate . --strict",
         "plugin:validate:codex": "tsx scripts/validate-codex-plugin.ts"
@@ -360,10 +364,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path11) {
-  if (!path11)
+function getElementAtPath(obj, path12) {
+  if (!path12)
     return obj;
-  return path11.reduce((acc, key) => acc?.[key], obj);
+  return path12.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -691,11 +695,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path11, issues) {
+function prefixIssues(path12, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path11);
+    iss.path.unshift(path12);
     return iss;
   });
 }
@@ -913,16 +917,16 @@ function flattenError(error51, mapper = (issue2) => issue2.message) {
 }
 function formatError(error51, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error52, path11 = []) => {
+  const processError = (error52, path12 = []) => {
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path11, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path12, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path11, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path12, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path11, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path12, ...issue2.path]);
       } else {
-        const fullpath = [...path11, ...issue2.path];
+        const fullpath = [...path12, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -949,17 +953,17 @@ function formatError(error51, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error51, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error52, path11 = []) => {
+  const processError = (error52, path12 = []) => {
     var _a3, _b;
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path11, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path12, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path11, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path12, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path11, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path12, ...issue2.path]);
       } else {
-        const fullpath = [...path11, ...issue2.path];
+        const fullpath = [...path12, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -991,8 +995,8 @@ function treeifyError(error51, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path11 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path11) {
+  const path12 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path12) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -14495,13 +14499,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path11 = ref.slice(1).split("/").filter(Boolean);
-  if (path11.length === 0) {
+  const path12 = ref.slice(1).split("/").filter(Boolean);
+  if (path12.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path11[0] === defsKey) {
-    const key = path11[1];
+  if (path12[0] === defsKey) {
+    const key = path12[1];
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -17343,8 +17347,8 @@ var init_parseUtil = __esm({
     init_errors3();
     init_en2();
     makeIssue = (params) => {
-      const { data, path: path11, errorMaps, issueData } = params;
-      const fullPath = [...path11, ...issueData.path || []];
+      const { data, path: path12, errorMaps, issueData } = params;
+      const fullPath = [...path12, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -17627,11 +17631,11 @@ var init_types2 = __esm({
     init_parseUtil();
     init_util2();
     ParseInputLazyPath = class {
-      constructor(parent, value, path11, key) {
+      constructor(parent, value, path12, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path11;
+        this._path = path12;
         this._key = key;
       }
       get path() {
@@ -26975,8 +26979,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path11) {
-      let input = path11;
+    function removeDotSegments(path12) {
+      let input = path12;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -27228,8 +27232,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path11, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path11 && path11 !== "/" ? path11 : void 0;
+        const [path12, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path12 && path12 !== "/" ? path12 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -32449,7 +32453,7 @@ var init_id_factory = __esm({
 });
 
 // src/workflow/workflow-contracts.ts
-var WorkflowScopeSchema, ReviewVerdictSchema, ReviewFindingSeveritySchema, RequirementVerdictSchema, ReviewFindingSchema, ReviewRequirementSchema, ReviewSubmissionSchema, ContractsSubmissionSchema, ImplementationSubmissionSchema, FigmaBundleSubmissionSchema, WorkflowSubmissionSchema, WorkflowActionSchema, WorkflowStageSummarySchema, WorkflowStatusSchema;
+var WorkflowScopeSchema, ReviewVerdictSchema, ReviewFindingSeveritySchema, RequirementVerdictSchema, WorkflowGateIdSchema, ReviewFindingSchema, ReviewRequirementSchema, ReviewGateResultSchema, ReviewSubmissionSchema, ContractsSubmissionSchema, ImplementationSubmissionSchema, FigmaBundleSubmissionSchema, WorkflowSubmissionSchema, WorkflowActionSchema, WorkflowStageSummarySchema, WorkflowStatusSchema;
 var init_workflow_contracts = __esm({
   "src/workflow/workflow-contracts.ts"() {
     "use strict";
@@ -32468,6 +32472,17 @@ var init_workflow_contracts = __esm({
     ReviewVerdictSchema = external_exports.enum(["approved", "changes-requested", "blocked"]);
     ReviewFindingSeveritySchema = external_exports.enum(["minor", "major", "blocker"]);
     RequirementVerdictSchema = external_exports.enum(["accepted", "rejected", "blocked"]);
+    WorkflowGateIdSchema = external_exports.enum([
+      "functional",
+      "openspec",
+      "architecture",
+      "security",
+      "visual",
+      "accessibility",
+      "performance",
+      "observability",
+      "release"
+    ]);
     ReviewFindingSchema = external_exports.object({
       severity: ReviewFindingSeveritySchema,
       title: external_exports.string().trim().min(1).max(500),
@@ -32477,13 +32492,19 @@ var init_workflow_contracts = __esm({
       id: external_exports.string().trim().min(1).max(200),
       verdict: RequirementVerdictSchema
     }).strict();
+    ReviewGateResultSchema = external_exports.object({
+      id: WorkflowGateIdSchema,
+      status: external_exports.enum(["passed", "failed", "blocked"]),
+      evidencePaths: external_exports.array(external_exports.string().trim().min(1)).min(1)
+    }).strict();
     ReviewSubmissionSchema = external_exports.object({
       kind: external_exports.enum(["functional-review", "design-review"]),
       verdict: ReviewVerdictSchema,
       summary: external_exports.string().trim().min(1).max(4e3),
       findings: external_exports.array(ReviewFindingSchema).default([]),
       requirements: external_exports.array(ReviewRequirementSchema).default([]),
-      artifactPaths: external_exports.array(external_exports.string().trim().min(1)).default([])
+      artifactPaths: external_exports.array(external_exports.string().trim().min(1)).default([]),
+      gateResults: external_exports.array(ReviewGateResultSchema).default([])
     }).strict().superRefine((review, context) => {
       if (review.verdict !== "approved") {
         return;
@@ -32495,6 +32516,47 @@ var init_workflow_contracts = __esm({
           message: "Approved reviews require concrete evidence artifacts"
         });
       }
+      if (review.requirements.length === 0) {
+        context.addIssue({
+          code: "custom",
+          path: ["requirements"],
+          message: "Approved reviews require at least one reviewed requirement"
+        });
+      }
+      if (review.gateResults.length === 0) {
+        context.addIssue({
+          code: "custom",
+          path: ["gateResults"],
+          message: "Approved reviews require structured gate results"
+        });
+      }
+      const seenGateIds = /* @__PURE__ */ new Set();
+      review.gateResults.forEach((gate2, index) => {
+        if (seenGateIds.has(gate2.id)) {
+          context.addIssue({
+            code: "custom",
+            path: ["gateResults", index, "id"],
+            message: `Duplicate gate result ${gate2.id}`
+          });
+        }
+        seenGateIds.add(gate2.id);
+        if (gate2.status !== "passed") {
+          context.addIssue({
+            code: "custom",
+            path: ["gateResults", index, "status"],
+            message: "Approved reviews require every reported gate to pass"
+          });
+        }
+        gate2.evidencePaths.forEach((evidencePath, evidenceIndex) => {
+          if (!review.artifactPaths.includes(evidencePath)) {
+            context.addIssue({
+              code: "custom",
+              path: ["gateResults", index, "evidencePaths", evidenceIndex],
+              message: "Gate evidence must be included in artifactPaths"
+            });
+          }
+        });
+      });
       review.findings.forEach((finding, index) => {
         if (finding.severity === "major" || finding.severity === "blocker") {
           context.addIssue({
@@ -32569,7 +32631,7 @@ var init_workflow_contracts = __esm({
       external_exports.object({
         kind: external_exports.literal("implement"),
         runId: RunIdSchema,
-        requireApiReady: external_exports.literal(true)
+        requireApiReady: external_exports.boolean()
       }).strict(),
       external_exports.object({ kind: external_exports.literal("review-functional"), runId: RunIdSchema }).strict(),
       external_exports.object({ kind: external_exports.literal("review-design"), runId: RunIdSchema }).strict(),
@@ -32598,20 +32660,18 @@ function classifyWorkflowScope(input) {
   const text = input.requestText.toLowerCase();
   const figmaUrls = input.figmaUrls ?? [];
   const explicit = input.explicitScope ?? "auto";
-  const hasUiTerms = /\b(ui|ux|screen|page|component|frontend|figma|visual|css|react|vue|화면|디자인)\b/i.test(text);
+  const hasUiTerms = /\b(ui|ux|screen|page|component|frontend|figma|visual|design|css|react|vue)\b/i.test(text) || /(화면|디자인|프론트엔드|컴포넌트)/.test(text);
   const ui = explicit === "ui" || explicit === "auto" && (figmaUrls.length > 0 || hasUiTerms);
   const code = explicit !== "docs";
   return WorkflowScopeSchema.parse({
     code,
     ui,
-    api: /\b(api|openapi|swagger|endpoint|contract|mock|스키마)\b/i.test(text),
-    specification: /\b(spec|brief|requirement|openspec|gherkin|기획|요구사항)\b/i.test(text),
+    api: /\b(api|openapi|swagger|endpoint|contract|mock|schema)\b/i.test(text) || /(스키마|엔드포인트|계약|목업)/.test(text),
+    specification: /\b(spec|brief|requirement|openspec|gherkin)\b/i.test(text) || /(기획|요구사항)/.test(text),
     hasVisualBaseline: figmaUrls.length > 0 || /\b(visual baseline|legacy screenshot)\b/i.test(text),
-    securitySensitive: /\b(auth|secret|token|storage|navigation|network|dependency|보안)\b/i.test(
-      text
-    ),
-    performanceSensitive: /\b(performance|lighthouse|web vitals|bundle|latency|성능)\b/i.test(text),
-    observabilityRequested: /\b(observability|telemetry|trace|tracing|log correlation|관측)\b/i.test(text)
+    securitySensitive: /\b(auth|secret|token|storage|navigation|network|dependency)\b/i.test(text) || /보안/.test(text),
+    performanceSensitive: /\b(performance|lighthouse|web vitals|bundle|latency)\b/i.test(text) || /성능/.test(text),
+    observabilityRequested: /\b(observability|telemetry|trace|tracing|log correlation)\b/i.test(text) || /(관측|텔레메트리|추적)/.test(text)
   });
 }
 function buildGatePlan(scope) {
@@ -32662,7 +32722,7 @@ function buildGatePlan(scope) {
 function gate(id, applicability, reason) {
   return WorkflowGateSchema.parse({ id, applicability, reason });
 }
-var GateApplicabilitySchema, WorkflowGateIdSchema, WorkflowGateSchema;
+var GateApplicabilitySchema, WorkflowGateSchema;
 var init_gate_policy = __esm({
   "src/workflow/gate-policy.ts"() {
     "use strict";
@@ -32674,17 +32734,6 @@ var init_gate_policy = __esm({
       "opt-in",
       "release-only",
       "not-applicable"
-    ]);
-    WorkflowGateIdSchema = external_exports.enum([
-      "functional",
-      "openspec",
-      "architecture",
-      "security",
-      "visual",
-      "accessibility",
-      "performance",
-      "observability",
-      "release"
     ]);
     WorkflowGateSchema = external_exports.object({
       id: WorkflowGateIdSchema,
@@ -32704,6 +32753,20 @@ var init_workflow = __esm({
 });
 
 // src/application/workflow-service.ts
+import { readFile, realpath, stat } from "fs/promises";
+import path from "path";
+function publishResultIsFullySynced(result) {
+  return result.status === "passed" && result.requestSynced && (!result.visualPreviewExpected || result.visualPreviewSynced) && result.partialReasons.length === 0;
+}
+function publishStageError(result) {
+  const partial2 = result.status === "passed";
+  const fallbackMessage = partial2 ? "Publication completed only partially and requires another synchronization attempt." : `Publication ${result.status}.`;
+  return {
+    code: partial2 ? "PUBLISH_PARTIAL" : result.errorCode ?? "PUBLISH_FAILED",
+    message: result.errorMessage ?? (result.partialReasons.join("; ") || fallbackMessage),
+    retryable: partial2 || result.status === "failed" && result.retryable
+  };
+}
 function scopeFromRun(run) {
   const rawScope = stage(run, "intake").checkpoint?.data["scope"];
   const parsed = WorkflowScopeSchema.safeParse(rawScope);
@@ -32725,7 +32788,11 @@ function actionsForRun(run, scope) {
   }
   if (stage(run, "contracts").status === "passed" && isActionable(stage(run, "implementation"))) {
     return [
-      WorkflowActionSchema.parse({ kind: "implement", runId: run.id, requireApiReady: true })
+      WorkflowActionSchema.parse({
+        kind: "implement",
+        runId: run.id,
+        requireApiReady: scope.ui || scope.api
+      })
     ];
   }
   if (stage(run, "implementation").status !== "passed") {
@@ -32744,7 +32811,7 @@ function actionsForRun(run, scope) {
   return actions;
 }
 function isActionable(value) {
-  return ["pending", "failed", "blocked"].includes(value.status);
+  return ["pending", "failed", "blocked"].includes(value.status) && (value.error === void 0 || value.error.retryable);
 }
 function stageForSubmission(submission) {
   if (submission.kind === "contracts") return "contracts";
@@ -32761,6 +32828,46 @@ function assertSubmissionPrerequisites(run, submission) {
   if (submission.kind === "design-review" && !scopeFromRun(run).ui) {
     throw new Error("Design review is not applicable to non-UI scope");
   }
+  if (submission.kind === "implementation" && submission.status === "passed" && submission.uiChanged && !scopeFromRun(run).ui) {
+    throw new Error("UI changes contradict the classified non-UI scope; restart with UI scope");
+  }
+  if ((submission.kind === "functional-review" || submission.kind === "design-review") && submission.verdict === "approved") {
+    assertRequiredGateResults(run, submission);
+  }
+}
+function assertRequiredGateResults(run, submission) {
+  const designGateIds = /* @__PURE__ */ new Set(["visual", "accessibility"]);
+  const requiredGateIds = buildGatePlan(scopeFromRun(run)).filter((gate2) => gate2.applicability === "required").filter(
+    (gate2) => submission.kind === "design-review" ? designGateIds.has(gate2.id) : !designGateIds.has(gate2.id) && gate2.id !== "release"
+  ).map((gate2) => gate2.id);
+  const passedGateIds = new Set(
+    submission.gateResults.filter((gate2) => gate2.status === "passed").map((gate2) => gate2.id)
+  );
+  const missing = requiredGateIds.filter((gateId) => !passedGateIds.has(gateId));
+  if (missing.length > 0) {
+    throw new Error(
+      `Approved ${submission.kind} is missing required gate results: ${missing.join(", ")}`
+    );
+  }
+}
+function assertWithinProjectRoot(root, candidate, originalPath) {
+  const relative = path.relative(root, candidate);
+  if (relative === "" || !relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative)) {
+    return;
+  }
+  throw new Error(`Evidence path must stay within the project root: ${originalPath}`);
+}
+function mediaTypeForPath(filePath) {
+  const extension = path.extname(filePath).toLowerCase();
+  if (extension === ".json") return "application/json";
+  if (extension === ".png") return "image/png";
+  if (extension === ".jpg" || extension === ".jpeg") return "image/jpeg";
+  if (extension === ".svg") return "image/svg+xml";
+  if (extension === ".md") return "text/markdown";
+  if ([".ts", ".tsx", ".js", ".jsx", ".css", ".txt", ".log"].includes(extension)) {
+    return "text/plain";
+  }
+  return "application/octet-stream";
 }
 function submissionOutcome(submission) {
   if ("verdict" in submission) {
@@ -32781,7 +32888,7 @@ function latestArtifact(run, kind, reportKind) {
   }
   return artifact;
 }
-var WORKER_ID, WorkflowStartInputSchema, WorkflowAdvanceInputSchema, WorkflowSubmitInputSchema, WorkflowStatusInputSchema, WorkflowPublishInputSchema, WorkflowArchiveInputSchema, WorkflowService;
+var WORKER_ID, DEFAULT_EXTERNAL_LEASE_TTL_MS, DEFAULT_EXTERNAL_HEARTBEAT_MS, WorkflowStartInputSchema, WorkflowAdvanceInputSchema, WorkflowSubmitInputSchema, WorkflowStatusInputSchema, WorkflowPublishInputSchema, WorkflowArchiveInputSchema, WorkflowService;
 var init_workflow_service = __esm({
   "src/application/workflow-service.ts"() {
     "use strict";
@@ -32791,6 +32898,8 @@ var init_workflow_service = __esm({
     init_ids();
     init_workflow();
     WORKER_ID = "workflow-orchestrator";
+    DEFAULT_EXTERNAL_LEASE_TTL_MS = 15 * 60 * 1e3;
+    DEFAULT_EXTERNAL_HEARTBEAT_MS = 60 * 1e3;
     WorkflowStartInputSchema = external_exports.object({
       projectRoot: external_exports.string().trim().min(1),
       requestText: external_exports.string().trim().min(1).max(2e5),
@@ -32851,9 +32960,16 @@ var init_workflow_service = __esm({
       constructor(dependencies) {
         this.dependencies = dependencies;
         this.now = dependencies.now ?? (() => (/* @__PURE__ */ new Date()).toISOString());
+        this.externalLeaseTtlMs = dependencies.externalLeaseTtlMs ?? DEFAULT_EXTERNAL_LEASE_TTL_MS;
+        this.externalHeartbeatMs = dependencies.externalHeartbeatMs ?? DEFAULT_EXTERNAL_HEARTBEAT_MS;
+        if (this.externalHeartbeatMs <= 0 || this.externalLeaseTtlMs <= this.externalHeartbeatMs || this.externalLeaseTtlMs > 60 * 60 * 1e3) {
+          throw new Error("External stage lease settings require 0 < heartbeat < TTL <= 1 hour");
+        }
       }
       dependencies;
       now;
+      externalLeaseTtlMs;
+      externalHeartbeatMs;
       async start(rawInput) {
         const input = WorkflowStartInputSchema.parse(rawInput);
         const created = await this.dependencies.runService.createRun({
@@ -32919,12 +33035,13 @@ var init_workflow_service = __esm({
         const input = WorkflowSubmitInputSchema.parse(rawInput);
         const run = await this.dependencies.runStore.get(input.runId);
         const submission = input.submission;
+        assertSubmissionPrerequisites(run, submission);
+        const evidenceArtifacts = await this.ingestSubmissionEvidence(run, submission);
         if (submission.kind === "figma-bundle") {
-          await this.recordSubmissionArtifact(run, submission);
+          await this.recordSubmissionArtifact(run, submission, evidenceArtifacts);
           return this.status({ runId: run.id });
         }
         const stageName = stageForSubmission(submission);
-        assertSubmissionPrerequisites(run, submission);
         const started = await this.dependencies.stageService.start({
           runId: run.id,
           stageName,
@@ -32932,8 +33049,10 @@ var init_workflow_service = __esm({
         });
         const artifact = await this.recordSubmissionArtifact(
           await this.dependencies.runStore.get(run.id),
-          submission
+          submission,
+          evidenceArtifacts
         );
+        const artifactIds = [...evidenceArtifacts.map((item) => item.id), artifact.id];
         const outcome = submissionOutcome(submission);
         if (outcome === "passed") {
           await this.dependencies.stageService.complete({
@@ -32941,7 +33060,7 @@ var init_workflow_service = __esm({
             stageName,
             workerId: WORKER_ID,
             leaseId: started.stage.lease.id,
-            artifactIds: [artifact.id],
+            artifactIds,
             ...submission.kind === "implementation" ? {
               checkpoint: {
                 name: "api-ready",
@@ -32958,7 +33077,7 @@ var init_workflow_service = __esm({
             stageName,
             workerId: WORKER_ID,
             leaseId: started.stage.lease.id,
-            artifactIds: [artifact.id],
+            artifactIds,
             error: {
               code: outcome === "blocked" ? "WORKFLOW_BLOCKED" : "CHANGES_REQUESTED",
               message: submission.summary,
@@ -32981,7 +33100,7 @@ var init_workflow_service = __esm({
         );
         const reportPassed = stage(run, "report").status === "passed";
         const publishPassed = stage(run, "publish").status === "passed";
-        const status = publishPassed ? "completed" : reportPassed ? "publish-ready" : blockers.length > 0 ? "blocked" : nextActions.length > 0 ? "needs-external-action" : "running";
+        const status = publishPassed ? "completed" : blockers.length > 0 ? "blocked" : reportPassed ? "publish-ready" : nextActions.length > 0 ? "needs-external-action" : "running";
         return WorkflowStatusSchema.parse({
           runId: run.id,
           status,
@@ -33020,17 +33139,51 @@ var init_workflow_service = __esm({
         const started = await this.dependencies.stageService.start({
           runId: run.id,
           stageName: "publish",
-          workerId: WORKER_ID
-        });
-        const result = await publisher.publish({ ...baseInput, confirm: true });
-        await this.dependencies.stageService.complete({
-          runId: run.id,
-          stageName: "publish",
           workerId: WORKER_ID,
-          leaseId: started.stage.lease.id,
-          artifactIds: [result.publishResultArtifactId]
+          leaseTtlMs: this.externalLeaseTtlMs
         });
-        await this.skipStage(run.id, "archive", "Archive is an explicit post-merge action.");
+        let result;
+        try {
+          result = await this.withLeaseHeartbeat(
+            run.id,
+            "publish",
+            started.stage.lease.id,
+            () => publisher.publish({ ...baseInput, confirm: true })
+          );
+        } catch (error51) {
+          await this.dependencies.stageService.fail({
+            runId: run.id,
+            stageName: "publish",
+            workerId: WORKER_ID,
+            leaseId: started.stage.lease.id,
+            error: {
+              code: "PUBLISH_UNEXPECTED_ERROR",
+              message: "Publisher threw unexpectedly after publication started.",
+              retryable: true
+            }
+          });
+          throw error51;
+        }
+        if (publishResultIsFullySynced(result.result)) {
+          await this.dependencies.stageService.complete({
+            runId: run.id,
+            stageName: "publish",
+            workerId: WORKER_ID,
+            leaseId: started.stage.lease.id,
+            artifactIds: [result.publishResultArtifactId]
+          });
+          await this.skipStage(run.id, "archive", "Archive is an explicit post-merge action.");
+        } else {
+          const error51 = publishStageError(result.result);
+          await this.dependencies.stageService.fail({
+            runId: run.id,
+            stageName: "publish",
+            workerId: WORKER_ID,
+            leaseId: started.stage.lease.id,
+            artifactIds: [result.publishResultArtifactId],
+            error: error51
+          });
+        }
         return { result, status: await this.status({ runId: run.id }) };
       }
       async archive(rawInput) {
@@ -33053,14 +33206,36 @@ var init_workflow_service = __esm({
         const started = await this.dependencies.stageService.start({
           runId,
           stageName: "archive",
-          workerId: WORKER_ID
+          workerId: WORKER_ID,
+          leaseTtlMs: this.externalLeaseTtlMs
         });
-        const result = await archiveService.runArchive({
-          runId,
-          changeName: input.changeName,
-          mergeEvidenceId: input.mergeEvidenceId,
-          yes: true
-        });
+        let result;
+        try {
+          result = await this.withLeaseHeartbeat(
+            runId,
+            "archive",
+            started.stage.lease.id,
+            () => archiveService.runArchive({
+              runId,
+              changeName: input.changeName,
+              mergeEvidenceId: input.mergeEvidenceId,
+              yes: true
+            })
+          );
+        } catch (error51) {
+          await this.dependencies.stageService.fail({
+            runId,
+            stageName: "archive",
+            workerId: WORKER_ID,
+            leaseId: started.stage.lease.id,
+            error: {
+              code: "ARCHIVE_UNEXPECTED_ERROR",
+              message: "OpenSpec archive threw unexpectedly after archiving started.",
+              retryable: true
+            }
+          });
+          throw error51;
+        }
         if (result.status === "passed") {
           await this.dependencies.stageService.complete({
             runId,
@@ -33085,7 +33260,7 @@ var init_workflow_service = __esm({
         }
         return { result, status: await this.status({ runId }) };
       }
-      async recordSubmissionArtifact(run, submission) {
+      async recordSubmissionArtifact(run, submission, evidenceArtifacts) {
         const timestamp = this.now();
         const content = `${JSON.stringify(submission, null, 2)}
 `;
@@ -33109,7 +33284,8 @@ var init_workflow_service = __esm({
             workflowSubmissionKind: submission.kind,
             ...submission.kind === "figma-bundle" ? {} : { summary: submission.summary },
             ..."verdict" in submission ? { verdict: submission.verdict } : {},
-            ..."status" in submission ? { status: submission.status } : {}
+            ..."status" in submission ? { status: submission.status } : {},
+            evidenceArtifactIds: evidenceArtifacts.map((item) => item.id)
           }
         });
         const current = await this.dependencies.runStore.get(run.id);
@@ -33118,11 +33294,90 @@ var init_workflow_service = __esm({
             ...current,
             revision: current.revision + 1,
             updatedAt: timestamp,
-            artifacts: [...current.artifacts, artifact]
+            artifacts: [...current.artifacts, ...evidenceArtifacts, artifact]
           },
           current.revision
         );
         return artifact;
+      }
+      async withLeaseHeartbeat(runId, stageName, leaseId, operation) {
+        let heartbeatFailure;
+        let heartbeatChain = Promise.resolve();
+        const timer = setInterval(() => {
+          heartbeatChain = heartbeatChain.then(async () => {
+            if (heartbeatFailure !== void 0) return;
+            await this.dependencies.stageService.heartbeat({
+              runId,
+              stageName,
+              leaseId,
+              workerId: WORKER_ID,
+              leaseTtlMs: this.externalLeaseTtlMs
+            });
+          }).catch((error51) => {
+            heartbeatFailure ??= error51;
+          });
+        }, this.externalHeartbeatMs);
+        timer.unref();
+        try {
+          const result = await operation();
+          clearInterval(timer);
+          await heartbeatChain;
+          if (heartbeatFailure !== void 0) throw heartbeatFailure;
+          return result;
+        } catch (error51) {
+          clearInterval(timer);
+          await heartbeatChain;
+          throw error51;
+        }
+      }
+      async ingestSubmissionEvidence(run, submission) {
+        const root = await realpath(run.projectRoot);
+        const timestamp = this.now();
+        const artifacts = [];
+        for (const evidencePath of submission.artifactPaths) {
+          const requestedPath = path.isAbsolute(evidencePath) ? path.normalize(evidencePath) : path.resolve(root, evidencePath);
+          assertWithinProjectRoot(root, requestedPath, evidencePath);
+          let resolvedPath;
+          try {
+            resolvedPath = await realpath(requestedPath);
+          } catch {
+            throw new Error(`Evidence file does not exist: ${evidencePath}`);
+          }
+          assertWithinProjectRoot(root, resolvedPath, evidencePath);
+          const details = await stat(resolvedPath);
+          if (!details.isFile()) {
+            throw new Error(`Evidence path must reference a file: ${evidencePath}`);
+          }
+          if (details.size > 50 * 1024 * 1024) {
+            throw new Error(`Evidence file exceeds the 50 MB limit: ${evidencePath}`);
+          }
+          const mediaType = mediaTypeForPath(resolvedPath);
+          const blob = await this.dependencies.artifactStore.writeBlob({
+            content: await readFile(resolvedPath),
+            mediaType,
+            storedAt: timestamp,
+            label: path.basename(resolvedPath)
+          });
+          artifacts.push(
+            ArtifactRefSchema.parse({
+              id: createArtifactId(),
+              kind: "other",
+              uri: blob.uri,
+              mediaType,
+              digest: blob.digest,
+              producedBy: producerForSubmission(submission),
+              evidenceIds: [],
+              createdAt: timestamp,
+              metadata: {
+                adapter: "workflow-v2-evidence",
+                projectRelativePath: path.relative(root, resolvedPath),
+                byteLength: details.size,
+                workflowSubmissionKind: submission.kind
+              }
+            })
+          );
+        }
+        return artifacts;
       }
       async generateReport(runId) {
         const run = await this.dependencies.runStore.get(RunIdSchema.parse(runId));
@@ -33228,7 +33483,14 @@ function createKernelServer(servicesProvider) {
       pluginVersion: package_default.version,
       contractVersion: CONTRACT_VERSION,
       transport: "stdio",
-      tools: TOOL_NAMES
+      tools: TOOL_NAMES,
+      durableStages: DURABLE_STAGES,
+      reviewerRoles: REVIEWER_ROLES,
+      capabilities: {
+        apiReadyBeforeUi: true,
+        independentReviews: true,
+        conditionalDesignReview: true
+      }
     })
   );
   server.registerTool(
@@ -33305,7 +33567,7 @@ function asStructuredContent(value) {
   }
   return { result: value };
 }
-var CONTRACT_VERSION, SERVER_NAME, TOOL_NAMES, EmptyInputSchema, WorkflowInfoSchema;
+var CONTRACT_VERSION, SERVER_NAME, TOOL_NAMES, DURABLE_STAGES, REVIEWER_ROLES, EmptyInputSchema, WorkflowInfoSchema;
 var init_create_server = __esm({
   "src/mcp/create-server.ts"() {
     "use strict";
@@ -33325,13 +33587,31 @@ var init_create_server = __esm({
       "workflow_status",
       "workflow_submit"
     ];
+    DURABLE_STAGES = [
+      "intake",
+      "contracts",
+      "implementation",
+      "functional-review",
+      "design-review",
+      "report",
+      "publish",
+      "archive"
+    ];
+    REVIEWER_ROLES = ["functional-reviewer", "design-reviewer"];
     EmptyInputSchema = external_exports.object({}).strict();
     WorkflowInfoSchema = external_exports.object({
       pluginName: external_exports.literal("spec-to-pr"),
       pluginVersion: external_exports.string().min(1),
       contractVersion: external_exports.literal(CONTRACT_VERSION),
       transport: external_exports.literal("stdio"),
-      tools: external_exports.tuple(TOOL_NAMES.map((name) => external_exports.literal(name)))
+      tools: external_exports.tuple(TOOL_NAMES.map((name) => external_exports.literal(name))),
+      durableStages: external_exports.tuple(DURABLE_STAGES.map((name) => external_exports.literal(name))),
+      reviewerRoles: external_exports.tuple(REVIEWER_ROLES.map((name) => external_exports.literal(name))),
+      capabilities: external_exports.object({
+        apiReadyBeforeUi: external_exports.literal(true),
+        independentReviews: external_exports.literal(true),
+        conditionalDesignReview: external_exports.literal(true)
+      }).strict()
     }).strict();
   }
 });
@@ -33360,8 +33640,8 @@ var init_content_hash = __esm({
 });
 
 // src/artifact-registry/artifact-blob-store.ts
-import { mkdir, readFile, writeFile } from "fs/promises";
-import path from "path";
+import { mkdir, readFile as readFile2, writeFile } from "fs/promises";
+import path2 from "path";
 async function writeIfMissing(filePath, content) {
   try {
     await writeFile(filePath, content, {
@@ -33392,9 +33672,9 @@ var init_artifact_blob_store = __esm({
       async writeBlob(input) {
         const digest = sha256Digest(input.content);
         const { prefix, hex: hex3 } = digestPathSegments(digest);
-        const directory = path.join(this.rootDirectory, "sha256", prefix, hex3);
-        const contentPath = path.join(directory, "content");
-        const metadataPath = path.join(directory, "metadata.json");
+        const directory = path2.join(this.rootDirectory, "sha256", prefix, hex3);
+        const contentPath = path2.join(directory, "content");
+        const metadataPath = path2.join(directory, "metadata.json");
         await mkdir(directory, {
           recursive: true,
           mode: 448
@@ -33423,14 +33703,14 @@ var init_artifact_blob_store = __esm({
       async readMetadata(rawDigest) {
         const digest = Sha256DigestSchema.parse(rawDigest);
         const { prefix, hex: hex3 } = digestPathSegments(digest);
-        const metadataPath = path.join(this.rootDirectory, "sha256", prefix, hex3, "metadata.json");
-        return JSON.parse(await readFile(metadataPath, "utf8"));
+        const metadataPath = path2.join(this.rootDirectory, "sha256", prefix, hex3, "metadata.json");
+        return JSON.parse(await readFile2(metadataPath, "utf8"));
       }
       async readContent(rawDigest) {
         const digest = Sha256DigestSchema.parse(rawDigest);
         const { prefix, hex: hex3 } = digestPathSegments(digest);
-        const contentPath = path.join(this.rootDirectory, "sha256", prefix, hex3, "content");
-        return readFile(contentPath);
+        const contentPath = path2.join(this.rootDirectory, "sha256", prefix, hex3, "content");
+        return readFile2(contentPath);
       }
     };
   }
@@ -34178,11 +34458,11 @@ function addUniqueValueIssues(collectionName, values, context) {
     seen.add(value);
   });
 }
-function addReferenceIssue(context, path11, reference) {
+function addReferenceIssue(context, path12, reference) {
   context.addIssue({
     code: "custom",
     message: `Unknown ${reference.kind} reference ${reference.id}`,
-    path: path11
+    path: path12
   });
 }
 var RunStatusSchema, RunManifestSchema, RunSummarySchema, CreateInitialRunInputSchema;
@@ -34503,8 +34783,8 @@ var init_canonical_content = __esm({
 });
 
 // src/source-registry/path-scope.ts
-import { realpath, stat } from "fs/promises";
-import path2 from "path";
+import { realpath as realpath2, stat as stat2 } from "fs/promises";
+import path3 from "path";
 var init_path_scope = __esm({
   "src/source-registry/path-scope.ts"() {
     "use strict";
@@ -34513,8 +34793,8 @@ var init_path_scope = __esm({
 });
 
 // src/source-registry/snapshot-store.ts
-import { mkdir as mkdir2, readFile as readFile2, writeFile as writeFile2 } from "fs/promises";
-import path3 from "path";
+import { mkdir as mkdir2, readFile as readFile3, writeFile as writeFile2 } from "fs/promises";
+import path4 from "path";
 async function writeIfMissing2(filePath, content) {
   try {
     await writeFile2(filePath, content, {
@@ -34557,9 +34837,9 @@ var init_snapshot_store = __esm({
       async writeSnapshot(input) {
         const digest = input.canonical.canonicalDigest;
         const { prefix, hex: hex3 } = digestPathSegments(digest);
-        const directory = path3.join(this.rootDirectory, "sha256", prefix, hex3);
-        const contentPath = path3.join(directory, "content");
-        const metadataPath = path3.join(directory, "metadata.json");
+        const directory = path4.join(this.rootDirectory, "sha256", prefix, hex3);
+        const contentPath = path4.join(directory, "content");
+        const metadataPath = path4.join(directory, "metadata.json");
         await mkdir2(directory, {
           recursive: true,
           mode: 448
@@ -34590,14 +34870,14 @@ var init_snapshot_store = __esm({
       async readMetadata(rawDigest) {
         const digest = Sha256DigestSchema.parse(rawDigest);
         const { prefix, hex: hex3 } = digestPathSegments(digest);
-        const metadataPath = path3.join(this.rootDirectory, "sha256", prefix, hex3, "metadata.json");
-        return SourceSnapshotMetadataSchema.parse(JSON.parse(await readFile2(metadataPath, "utf8")));
+        const metadataPath = path4.join(this.rootDirectory, "sha256", prefix, hex3, "metadata.json");
+        return SourceSnapshotMetadataSchema.parse(JSON.parse(await readFile3(metadataPath, "utf8")));
       }
       async readContent(rawDigest) {
         const digest = Sha256DigestSchema.parse(rawDigest);
         const { prefix, hex: hex3 } = digestPathSegments(digest);
-        const contentPath = path3.join(this.rootDirectory, "sha256", prefix, hex3, "content");
-        return readFile2(contentPath);
+        const contentPath = path4.join(this.rootDirectory, "sha256", prefix, hex3, "content");
+        return readFile3(contentPath);
       }
     };
   }
@@ -35406,26 +35686,26 @@ var init_intake_request_service = __esm({
 });
 
 // src/openspec/openspec-paths.ts
-import path4 from "path";
+import path5 from "path";
 function resolveOpenSpecChangePaths(input) {
-  const openspecRoot = path4.join(input.projectRoot, "openspec");
-  const changesRoot = path4.join(openspecRoot, "changes");
-  const changeRoot = path4.join(changesRoot, input.changeName);
-  const specsRoot = path4.join(changeRoot, "specs");
-  const artifactsRoot = path4.join(changeRoot, "artifacts");
+  const openspecRoot = path5.join(input.projectRoot, "openspec");
+  const changesRoot = path5.join(openspecRoot, "changes");
+  const changeRoot = path5.join(changesRoot, input.changeName);
+  const specsRoot = path5.join(changeRoot, "specs");
+  const artifactsRoot = path5.join(changeRoot, "artifacts");
   return {
     openspecRoot,
     changesRoot,
     changeRoot,
-    proposalPath: path4.join(changeRoot, "proposal.md"),
-    designPath: path4.join(changeRoot, "design.md"),
-    tasksPath: path4.join(changeRoot, "tasks.md"),
+    proposalPath: path5.join(changeRoot, "proposal.md"),
+    designPath: path5.join(changeRoot, "design.md"),
+    tasksPath: path5.join(changeRoot, "tasks.md"),
     specsRoot,
     artifactsRoot,
-    evidenceSummaryPath: path4.join(artifactsRoot, "evidence-summary.md"),
-    traceabilityMatrixPath: path4.join(artifactsRoot, "traceability-matrix.md"),
-    gapSummaryPath: path4.join(artifactsRoot, "gap-summary.md"),
-    manifestPath: path4.join(artifactsRoot, "change-manifest.json")
+    evidenceSummaryPath: path5.join(artifactsRoot, "evidence-summary.md"),
+    traceabilityMatrixPath: path5.join(artifactsRoot, "traceability-matrix.md"),
+    gapSummaryPath: path5.join(artifactsRoot, "gap-summary.md"),
+    manifestPath: path5.join(artifactsRoot, "change-manifest.json")
   };
 }
 var OpenSpecChangeNameSchema, OpenSpecSpecAreaSchema;
@@ -35446,7 +35726,7 @@ var init_openspec_paths = __esm({
 
 // src/archive/archive-plan.ts
 import { access } from "fs/promises";
-import path5 from "path";
+import path6 from "path";
 async function createOpenSpecArchivePlan(input) {
   const changeName = OpenSpecChangeNameSchema.parse(input.changeName);
   const paths = resolveOpenSpecChangePaths({
@@ -35456,7 +35736,7 @@ async function createOpenSpecArchivePlan(input) {
   const expectedChangeRoot = repoRelative(input.run.projectRoot, paths.changeRoot);
   const expectedArchiveRoot = repoRelative(
     input.run.projectRoot,
-    path5.join(paths.changesRoot, "archive", `${input.generatedAt.slice(0, 10)}-${changeName}`)
+    path6.join(paths.changesRoot, "archive", `${input.generatedAt.slice(0, 10)}-${changeName}`)
   );
   const blockingReasons = [];
   const blockingGapIds = input.run.gaps.filter((gap) => gap.status === "open" && gap.severity === "blocker").map((gap) => gap.id);
@@ -35514,7 +35794,7 @@ async function exists(filePath) {
   }
 }
 function repoRelative(projectRoot, filePath) {
-  return path5.relative(projectRoot, filePath).split(path5.sep).join("/");
+  return path6.relative(projectRoot, filePath).split(path6.sep).join("/");
 }
 var OpenSpecArchivePlanStatusSchema, OpenSpecArchivePlanSchema;
 var init_archive_plan = __esm({
@@ -36140,8 +36420,8 @@ function normalizeGitHubPr(pr, created, updated, payload) {
     updated
   });
 }
-function encodePath(path11) {
-  return path11.split("/").map(encodeURIComponent).join("/");
+function encodePath(path12) {
+  return path12.split("/").map(encodeURIComponent).join("/");
 }
 function safePathSegment(value) {
   const safe = value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
@@ -37539,17 +37819,17 @@ var init_package_manager_detector = __esm({
 
 // src/profile/probe.ts
 import { execFile as execFile2 } from "child_process";
-import { access as access2, readdir as readdir2, readFile as readFile3, realpath as realpath2, stat as stat2 } from "fs/promises";
-import path6 from "path";
+import { access as access2, readdir as readdir2, readFile as readFile4, realpath as realpath3, stat as stat3 } from "fs/promises";
+import path7 from "path";
 import { promisify as promisify2 } from "util";
 async function createProjectProbe(projectRoot) {
-  const realRoot = await realpath2(projectRoot);
-  const metadata = await stat2(realRoot);
+  const realRoot = await realpath3(projectRoot);
+  const metadata = await stat3(realRoot);
   if (!metadata.isDirectory()) {
     throw new Error(`Project root is not a directory: ${realRoot}`);
   }
   async function resolveInside(relativePath) {
-    const candidate = path6.resolve(realRoot, relativePath);
+    const candidate = path7.resolve(realRoot, relativePath);
     const realCandidate = await realpathOrParent(candidate);
     if (!isInside(realRoot, realCandidate)) {
       throw new Error(`Path escapes project root: ${relativePath}`);
@@ -37571,11 +37851,11 @@ async function createProjectProbe(projectRoot) {
     async readText(relativePath, maxBytes = 1024 * 1024) {
       const absolute = await resolveInside(relativePath);
       try {
-        const metadata2 = await stat2(absolute);
+        const metadata2 = await stat3(absolute);
         if (!metadata2.isFile() || metadata2.size > maxBytes) {
           return void 0;
         }
-        return await readFile3(absolute, "utf8");
+        return await readFile4(absolute, "utf8");
       } catch {
         return void 0;
       }
@@ -37623,30 +37903,30 @@ async function createProjectProbe(projectRoot) {
       }
     },
     toRelative(absolutePath) {
-      return normalizeRelative(path6.relative(realRoot, absolutePath));
+      return normalizeRelative(path7.relative(realRoot, absolutePath));
     },
     resolveInside
   };
   return probe;
 }
 function normalizeRelative(value) {
-  return value.split(path6.sep).join("/");
+  return value.split(path7.sep).join("/");
 }
 function isInside(root, candidate) {
-  const relative = path6.relative(root, candidate);
-  return relative === "" || !relative.startsWith("..") && !path6.isAbsolute(relative);
+  const relative = path7.relative(root, candidate);
+  return relative === "" || !relative.startsWith("..") && !path7.isAbsolute(relative);
 }
 async function realpathOrParent(candidate) {
   let current = candidate;
-  while (current !== path6.dirname(current)) {
+  while (current !== path7.dirname(current)) {
     try {
-      return await realpath2(current);
+      return await realpath3(current);
     } catch {
-      current = path6.dirname(current);
+      current = path7.dirname(current);
     }
   }
   try {
-    return await realpath2(current);
+    return await realpath3(current);
   } catch {
     return current;
   }
@@ -37959,8 +38239,8 @@ var init_project_profiler = __esm({
 });
 
 // src/profile/profile-store.ts
-import { mkdir as mkdir3, readdir as readdir3, readFile as readFile4, writeFile as writeFile3 } from "fs/promises";
-import path7 from "path";
+import { mkdir as mkdir3, readdir as readdir3, readFile as readFile5, writeFile as writeFile3 } from "fs/promises";
+import path8 from "path";
 var JsonProfileStore;
 var init_profile_store = __esm({
   "src/profile/profile-store.ts"() {
@@ -37977,7 +38257,7 @@ var init_profile_store = __esm({
           mode: 448
         });
         await writeFile3(
-          path7.join(this.directory, `${manifest.runId}.intake.json`),
+          path8.join(this.directory, `${manifest.runId}.intake.json`),
           `${JSON.stringify(IntakeManifestSchema.parse(manifest), null, 2)}
 `,
           {
@@ -37987,7 +38267,7 @@ var init_profile_store = __esm({
         );
       }
       async getManifest(runId) {
-        const text = await readFile4(path7.join(this.directory, `${runId}.intake.json`), "utf8");
+        const text = await readFile5(path8.join(this.directory, `${runId}.intake.json`), "utf8");
         return IntakeManifestSchema.parse(JSON.parse(text));
       }
       async saveProfile(profile) {
@@ -37996,7 +38276,7 @@ var init_profile_store = __esm({
           mode: 448
         });
         await writeFile3(
-          path7.join(this.directory, `${profile.runId}.profile.json`),
+          path8.join(this.directory, `${profile.runId}.profile.json`),
           `${JSON.stringify(ProjectProfileSchema.parse(profile), null, 2)}
 `,
           {
@@ -38006,7 +38286,7 @@ var init_profile_store = __esm({
         );
       }
       async getProfile(runId) {
-        const text = await readFile4(path7.join(this.directory, `${runId}.profile.json`), "utf8");
+        const text = await readFile5(path8.join(this.directory, `${runId}.profile.json`), "utf8");
         return ProjectProfileSchema.parse(JSON.parse(text));
       }
       async listProfiles() {
@@ -38018,7 +38298,7 @@ var init_profile_store = __esm({
         const profileFiles = files.filter((file2) => file2.endsWith(".profile.json"));
         const profiles = await Promise.all(
           profileFiles.map(async (file2) => {
-            const text = await readFile4(path7.join(this.directory, file2), "utf8");
+            const text = await readFile5(path8.join(this.directory, file2), "utf8");
             return ProjectProfileSchema.parse(JSON.parse(text));
           })
         );
@@ -40618,7 +40898,7 @@ function publishFailureReason(message) {
   }
   return `body sync failed: ${message}`;
 }
-function publishResultIsFullySynced(result) {
+function publishResultIsFullySynced2(result) {
   return result.status === "passed" && result.requestSynced && (!result.visualPreviewExpected || result.visualPreviewSynced) && result.partialReasons.length === 0;
 }
 var execFileAsync3, PUBLISHER_ADAPTER, PublishPreparationError, BasePublishInputShape, DetectPublishTargetInputSchema, DetectPublishTargetResultSchema, PlanReviewRequestPublishInputSchema, PublishReviewRequestInputSchema, PublishReviewRequestResultSchema, UpdateReviewRequestBodyInputSchema, GetPublishResultInputSchema, GetPublishResultResultSchema, RecordPublishReviewInputSchema, RecordPublishReviewResultSchema, PublisherService, VISUAL_PREVIEW_START, VISUAL_PREVIEW_END;
@@ -41158,7 +41438,7 @@ var init_publisher_service = __esm({
             requestUrl: input.result.request?.url
           }
         });
-        const shouldAddPublishingAgentResult = input.addPublishingAgentResult && publishResultIsFullySynced(input.result);
+        const shouldAddPublishingAgentResult = input.addPublishingAgentResult && publishResultIsFullySynced2(input.result);
         const agentResults = shouldAddPublishingAgentResult ? [
           ...run.agentResults,
           AgentResultSchema.parse({
@@ -41231,15 +41511,15 @@ var init_publisher_service = __esm({
 
 // src/application/run-service.ts
 import { randomUUID as randomUUID2 } from "crypto";
-import { realpath as realpath3, stat as stat3 } from "fs/promises";
-import path8 from "path";
+import { realpath as realpath4, stat as stat4 } from "fs/promises";
+import path9 from "path";
 function createRunId() {
   return RunIdSchema.parse(`run_${randomUUID2().replaceAll("-", "")}`);
 }
 async function canonicalDirectory(rawPath) {
-  const absolute = path8.resolve(rawPath);
-  const canonical = await realpath3(absolute);
-  const metadata = await stat3(canonical);
+  const absolute = path9.resolve(rawPath);
+  const canonical = await realpath4(absolute);
+  const metadata = await stat4(canonical);
   if (!metadata.isDirectory()) {
     throw new Error(`Project root is not a directory: ${canonical}`);
   }
@@ -41853,7 +42133,7 @@ var init_errors5 = __esm({
 
 // src/store/sqlite-run-store.ts
 import { mkdirSync } from "fs";
-import path9 from "path";
+import path10 from "path";
 import { createRequire } from "module";
 function loadSqliteModule() {
   return require2("node:sqlite");
@@ -41895,7 +42175,7 @@ var init_sqlite_run_store = __esm({
     SqliteRunStore = class {
       database;
       constructor(databasePath) {
-        mkdirSync(path9.dirname(databasePath), {
+        mkdirSync(path10.dirname(databasePath), {
           recursive: true,
           mode: 448
         });
@@ -42131,7 +42411,7 @@ __export(run_service_provider_exports, {
   createLazyServicesProvider: () => createLazyServicesProvider
 });
 import os from "os";
-import path10 from "path";
+import path11 from "path";
 function createLazyServicesProvider() {
   let services;
   return async () => {
@@ -42139,16 +42419,16 @@ function createLazyServicesProvider() {
       return services;
     }
     const dataDirectory = resolveDataDirectory();
-    const runStore = new SqliteRunStore(path10.join(dataDirectory, "runs.sqlite3"));
-    const artifactStore = new ArtifactBlobStore(path10.join(dataDirectory, "artifacts"));
+    const runStore = new SqliteRunStore(path11.join(dataDirectory, "runs.sqlite3"));
+    const artifactStore = new ArtifactBlobStore(path11.join(dataDirectory, "artifacts"));
     const runService = new RunService(runStore, { pluginVersion: package_default.version });
     const intakeRequestService = new IntakeRequestService(
       runStore,
-      new SourceSnapshotStore(path10.join(dataDirectory, "source-snapshots")),
+      new SourceSnapshotStore(path11.join(dataDirectory, "source-snapshots")),
       artifactStore
     );
     const profileService = new ProjectProfileService(
-      new JsonProfileStore(path10.join(dataDirectory, "profiles"))
+      new JsonProfileStore(path11.join(dataDirectory, "profiles"))
     );
     const stageService = new StageService(runStore);
     const publisherService = new PublisherService(runStore, artifactStore);
@@ -42169,7 +42449,7 @@ function createLazyServicesProvider() {
   };
 }
 function resolveDataDirectory() {
-  return process.env.SPEC_TO_PR_DATA_DIR ?? path10.join(os.tmpdir(), "spec-to-pr-plugin-data");
+  return process.env.SPEC_TO_PR_DATA_DIR ?? path11.join(os.tmpdir(), "spec-to-pr-plugin-data");
 }
 var init_run_service_provider = __esm({
   "src/mcp/run-service-provider.ts"() {

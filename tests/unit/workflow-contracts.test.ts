@@ -78,6 +78,44 @@ describe("workflow v2 contracts", () => {
     expect(result.success).toBe(false);
   });
 
+  it("requires structured passing gate results for approved reviews", () => {
+    expect(
+      ReviewSubmissionSchema.safeParse({
+        kind: "functional-review",
+        verdict: "approved",
+        summary: "Functional checks passed.",
+        findings: [],
+        requirements: [{ id: "parser", verdict: "accepted" }],
+        artifactPaths: ["test-results/unit.json"],
+        gateResults: [
+          {
+            id: "functional",
+            status: "failed",
+            evidencePaths: ["test-results/unit.json"],
+          },
+        ],
+      }).success,
+    ).toBe(false);
+
+    expect(
+      ReviewSubmissionSchema.safeParse({
+        kind: "functional-review",
+        verdict: "approved",
+        summary: "Functional checks passed.",
+        findings: [],
+        requirements: [],
+        artifactPaths: ["test-results/unit.json"],
+        gateResults: [
+          {
+            id: "functional",
+            status: "passed",
+            evidencePaths: ["test-results/unit.json"],
+          },
+        ],
+      }).success,
+    ).toBe(false);
+  });
+
   it("requires concrete artifacts for passed submissions", () => {
     expect(
       WorkflowSubmissionSchema.safeParse({

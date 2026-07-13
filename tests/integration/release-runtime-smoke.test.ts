@@ -6,6 +6,16 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { ReleasePackageBuilder, verifyReleasePackageRuntime } from "../../src/release/index.js";
 
+const EXPECTED_TOOLS = [
+  "workflow_advance",
+  "workflow_archive",
+  "workflow_info",
+  "workflow_publish",
+  "workflow_start",
+  "workflow_status",
+  "workflow_submit",
+] as const;
+
 let directory: string;
 
 beforeEach(async () => {
@@ -44,6 +54,12 @@ describe("release runtime smoke", () => {
       pluginName: "spec-to-pr",
       transport: "stdio",
       contractVersion: "2.0.0",
+    });
+    expect(verification.toolNames).toEqual(EXPECTED_TOOLS);
+    expect(verification.toolSchemaBytes).toBeLessThan(40_000);
+    expect(verification.workflowStatus).toMatchObject({
+      status: "needs-external-action",
+      currentStage: "contracts",
     });
   });
 });
