@@ -4,6 +4,17 @@
 
 SpecToPR v2 replaces model-driven micro-orchestration with a small workflow facade. The default path must be fast, evidence-backed, and conditional: API contracts and mocks are completed before UI work, then functional and design reviews run independently.
 
+The facade has four supported delivery modes. They share the same stages, tools, implementation context, and reviewers; a mode changes intake requirements and evidence policy, not the workflow topology.
+
+| Mode | Required input | Default evidence | Draft review request |
+| --- | --- | --- | --- |
+| `brief` | brief/spec plus target repository | changed-scope quality checks and functional review | supported |
+| `legacy` | existing repository plus a concrete change request | focused baseline plus changed-scope checks | supported |
+| `feature` | user-facing feature request plus target repository | targeted feature E2E and one bounded video, never full-project E2E by default | supported |
+| `figma` | Figma URL plus target repository | Figma bundle, design review, and visual evidence | supported |
+
+`auto` remains available for backward-compatible classification, but explicit mode selection is preferred at CLI and SDK boundaries. Publication is always an explicit draft-only intent.
+
 ## Evidence and success criteria
 
 The v1 surface advertises 111 MCP tools (about 411 KB of tool schemas), exposes 27 Run stages, ships 27 skills, and maintains 16 registered agent roles across 31 role-definition files. A typical run needs roughly 45–70 MCP calls even though the repository's 354 tests finish in about eight seconds.
@@ -95,6 +106,13 @@ Intake produces one typed applicability plan. Each gate is `required`, `conditio
 - Observability: opt-in only.
 - Release-only: full matrices, hardening suites, package verification, and cross-host manifest validation.
 
+Mode-specific rules stay conditional:
+
+- `brief` adds no blanket gates. The brief is evidence for contracts and traceability.
+- `legacy` requires a focused baseline relevant to the requested change. It does not imply a full regression suite.
+- A user-facing `feature` requires a changed-feature E2E selection and exactly one `.webm` or `.mp4` recording. The selected test must be identified by path, tag, or Playwright project so a whole-application suite cannot satisfy this requirement accidentally.
+- `figma` requires real Figma intake before contracts complete. The active host uses its connected Figma capability and submits one `figma-bundle`; the runtime does not expose Figma micro-tools or RUM-style polling.
+
 Missing optional scripts are not applicable. Missing required scripts are blockers. Placeholder or empty reports never count as passing evidence. The latest completed run of a gate supersedes stale failures.
 
 ## Review model
@@ -124,6 +142,8 @@ The runtime skill set is reduced to:
 
 Only the two reviewer roles are registered as reusable agents. Implementation stays with the active agent; a host may delegate the complete implementation stage as one unit, but it must not split API and UI into independent lanes. Host-specific registrations are generated from canonical role definitions to prevent drift.
 
+The existing `intake-contracts` skill owns conditional Figma intake, so no tenth workflow skill is added. The `implement` skill owns targeted feature E2E capture. `review-functional` validates feature behavior and recording provenance; `review-design` validates Figma or legacy visual fidelity. This keeps API and UI sequencing local while still allowing the two independent reviews to run in parallel.
+
 ## Correctness rules
 
 - A workflow never publishes without approved functional review.
@@ -132,6 +152,9 @@ Only the two reviewer roles are registered as reusable agents. Implementation st
 - Failed or not-run evidence cannot satisfy a required gate.
 - Publication remains draft-only and never merges, approves, closes, or marks ready.
 - Archival remains an explicit post-merge action.
+- A feature video is published only for a user-facing `feature` run, is size-bounded, and is linked as evidence rather than treated as a visual baseline.
+- A `figma` run cannot complete contracts from a URL string alone; it requires submitted Figma artifacts.
+- A mode never expands changed-scope verification into a full-project E2E or release matrix unless explicitly requested.
 
 ## Testing
 

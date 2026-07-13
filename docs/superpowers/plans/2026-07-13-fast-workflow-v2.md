@@ -4,6 +4,8 @@
 
 **Goal:** Replace the 111-tool, 27-stage, multi-lane workflow with a seven-tool facade, eight-stage orchestrator, conditional gates, and two independent reviewer roles.
 
+**Delivery modes:** Complete the facade with `brief`, `legacy`, `feature`, and `figma` entry modes. These modes reuse the existing topology. Only user-facing feature work requires a targeted feature E2E plus one bounded video; only Figma mode requires host Figma intake.
+
 **Architecture:** A `WorkflowService` owns sequencing and compact status. The stdio MCP server is only a seven-tool adapter. Existing domain services remain internal while the legacy public tools, skills, and agent registrations are removed.
 
 **Tech Stack:** TypeScript, Zod, MCP SDK, SQLite RunStore, Vitest.
@@ -21,6 +23,8 @@
 - Empty, failed, review-needed, skipped, or not-run evidence never satisfies a required gate.
 - The latest completed gate evidence supersedes older attempts.
 - Publishing remains draft-only; archive remains explicit and post-merge.
+- Delivery mode must not add public MCP tools, durable stages, implementation lanes, or reviewer roles.
+- Full-project E2E is never selected by default for feature delivery.
 
 ---
 
@@ -173,3 +177,56 @@
 - [ ] Update SDK prompts, docs, manifest descriptions, and release expectations.
 - [ ] Run `pnpm format`, then `pnpm check`, `pnpm plugin:validate:codex`, and skill/plugin validators.
 - [ ] Measure final tool count/schema bytes, stage count, skill count, agent count, and static word reduction against the design budgets.
+
+### Task 7: Four-mode delivery policy
+
+**Files:**
+
+- Create: `src/workflow/delivery-policy.ts`
+- Modify: `src/workflow/workflow-contracts.ts`
+- Modify: `src/application/workflow-service.ts`
+- Modify: `src/mcp/create-server.ts`
+- Test: `tests/unit/delivery-policy.test.ts`
+- Test: `tests/integration/workflow-service.test.ts`
+
+**Interfaces:**
+
+- `DeliveryMode` is `auto | brief | legacy | feature | figma`.
+- `ChangeKind` separates feature work from fixes, refactors, migrations, design-only work, and docs.
+- Intake derives one immutable delivery profile that controls brief, legacy-baseline, targeted-E2E, feature-video, and Figma-bundle requirements.
+
+- [ ] Add failing classification and enforcement tests for all four modes.
+- [ ] Implement the delivery profile without adding stages or public tools.
+- [ ] Prove only user-facing feature mode requires targeted E2E and video.
+- [ ] Prove Figma mode blocks contracts until a real bundle is submitted.
+
+### Task 8: Feature evidence publication
+
+**Files:**
+
+- Modify: `src/publisher/publish-contracts.ts`
+- Modify: `src/application/publisher-service.ts`
+- Modify: GitHub and GitLab publisher adapters
+- Test: publisher unit and integration tests
+
+- [ ] Add failing tests for one `.webm`/`.mp4` artifact, size limits, draft report links, and partial upload failure.
+- [ ] Store and publish the video only when the delivery profile requires it.
+- [ ] Keep visual baseline synchronization and feature-video synchronization as separate readiness facts.
+
+### Task 9: SDK, skills, and documentation synchronization
+
+**Files:**
+
+- Modify: `packages/codex-sdk/src/cli.ts`
+- Modify: `packages/codex-sdk/src/spec-to-pr-runner.ts`
+- Modify: `skills/intake-contracts/SKILL.md`
+- Modify: `skills/implement/SKILL.md`
+- Modify: both review skills and `skills/spec-to-pr/SKILL.md`
+- Rewrite: root READMEs and retained website docs
+- Delete: superseded v1 task logs, website pages, and navigation
+
+- [ ] Add failing SDK prompt and skill behavior checks for the four modes.
+- [ ] Add `--mode`, `--change-kind`, and draft publication intent without introducing another orchestrator.
+- [ ] Keep exactly nine workflow skills and two reviewer registrations.
+- [ ] Make the website navigation expose only the current v2 workflow and four recipes.
+- [ ] Run link checks, website build/typecheck, plugin validation, skill validation, and the full test suite.
