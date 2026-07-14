@@ -375,7 +375,9 @@ function buildThreadOptions(input) {
     return options;
 }
 function formatSource(label, value) {
-    return value === undefined || value.trim() === "" ? undefined : `- ${label}: ${value}`;
+    return value === undefined || value.trim() === ""
+        ? undefined
+        : `- ${label}: ${JSON.stringify(value)}`;
 }
 const MAX_COMPOSABLE_SOURCE_PATHS = 20;
 const MAX_SOURCE_PATH_LENGTH = 1_000;
@@ -429,6 +431,22 @@ function validateComposableSources(input) {
             throw new Error(`${field} legacy and plural inputs cannot contain more than ${MAX_COMPOSABLE_SOURCE_PATHS} distinct paths`);
         }
     }
+    const roles = new Map();
+    for (const [role, values] of [
+        ["briefPath", input.briefPath === undefined ? [] : [input.briefPath]],
+        ["docsPaths", [input.docsPath, ...(input.docsPaths ?? [])].filter(isDefined)],
+        ["openApiPaths", [input.openApiPath, ...(input.openApiPaths ?? [])].filter(isDefined)],
+        ["guidancePaths", input.guidancePaths ?? []],
+    ]) {
+        for (const sourcePath of values) {
+            const key = normalizedInputPathKey(sourcePath);
+            const previous = roles.get(key);
+            if (previous !== undefined && previous !== role) {
+                throw new Error(`Source path conflicts with ${previous}: ${sourcePath}`);
+            }
+            roles.set(key, role);
+        }
+    }
 }
 function validateSourcePath(value, field) {
     const normalized = value.trim();
@@ -440,11 +458,17 @@ function uniqueInputValues(values) {
     const unique = new Map();
     values.forEach((value) => {
         const trimmed = value.trim();
-        const key = path.normalize(trimmed).split(path.sep).join("/");
+        const key = normalizedInputPathKey(trimmed);
         if (!unique.has(key))
             unique.set(key, trimmed);
     });
     return [...unique.values()];
+}
+function normalizedInputPathKey(value) {
+    return path.normalize(value.trim()).split(path.sep).join("/");
+}
+function isDefined(value) {
+    return value !== undefined;
 }
 function isUiScope(input, prompt) {
     if (input.deliveryMode === "feature" || input.deliveryMode === "figma") {

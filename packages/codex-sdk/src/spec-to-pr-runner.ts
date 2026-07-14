@@ -513,7 +513,9 @@ function buildThreadOptions(input: SpecToPrCodexRunInput): ThreadOptions {
 }
 
 function formatSource(label: string, value: string | undefined): string | undefined {
-  return value === undefined || value.trim() === "" ? undefined : `- ${label}: ${value}`;
+  return value === undefined || value.trim() === ""
+    ? undefined
+    : `- ${label}: ${JSON.stringify(value)}`;
 }
 
 const MAX_COMPOSABLE_SOURCE_PATHS = 20;
@@ -581,6 +583,23 @@ function validateComposableSources(input: SpecToPrCodexRunInput): void {
       );
     }
   }
+
+  const roles = new Map<string, string>();
+  for (const [role, values] of [
+    ["briefPath", input.briefPath === undefined ? [] : [input.briefPath]],
+    ["docsPaths", [input.docsPath, ...(input.docsPaths ?? [])].filter(isDefined)],
+    ["openApiPaths", [input.openApiPath, ...(input.openApiPaths ?? [])].filter(isDefined)],
+    ["guidancePaths", input.guidancePaths ?? []],
+  ] as const) {
+    for (const sourcePath of values) {
+      const key = normalizedInputPathKey(sourcePath);
+      const previous = roles.get(key);
+      if (previous !== undefined && previous !== role) {
+        throw new Error(`Source path conflicts with ${previous}: ${sourcePath}`);
+      }
+      roles.set(key, role);
+    }
+  }
 }
 
 function validateSourcePath(value: string, field: string): void {
@@ -594,10 +613,18 @@ function uniqueInputValues(values: readonly string[]): string[] {
   const unique = new Map<string, string>();
   values.forEach((value) => {
     const trimmed = value.trim();
-    const key = path.normalize(trimmed).split(path.sep).join("/");
+    const key = normalizedInputPathKey(trimmed);
     if (!unique.has(key)) unique.set(key, trimmed);
   });
   return [...unique.values()];
+}
+
+function normalizedInputPathKey(value: string): string {
+  return path.normalize(value.trim()).split(path.sep).join("/");
+}
+
+function isDefined<T>(value: T | undefined): value is T {
+  return value !== undefined;
 }
 
 function isUiScope(input: SpecToPrCodexRunInput, prompt: string): boolean {

@@ -152,14 +152,43 @@ describe("Codex SDK workflow policy", () => {
     expect(prompt).toContain('openApiPaths: ["docs/openapi.yaml","docs/admin-openapi.yaml"]');
     expect(prompt).toContain('guidancePaths: ["AGENTS.md","docs/architecture/ARCHITECTURE.md"]');
     expect(prompt).toContain('skillHints: ["react-best-practices","api-generator"]');
-    expect(prompt.match(/^- Docs: docs\/business-rules\.md$/gm)).toHaveLength(1);
-    expect(prompt.match(/^- OpenAPI: docs\/openapi\.yaml$/gm)).toHaveLength(1);
-    expect(prompt).toContain("- Project guidance: AGENTS.md");
-    expect(prompt).toContain("- Project guidance: docs/architecture/ARCHITECTURE.md");
-    expect(prompt).toContain("- Optional skill hint: react-best-practices");
-    expect(prompt).toContain("- Optional skill hint: api-generator");
+    expect(prompt.match(/^- Docs: "docs\/business-rules\.md"$/gm)).toHaveLength(1);
+    expect(prompt.match(/^- OpenAPI: "docs\/openapi\.yaml"$/gm)).toHaveLength(1);
+    expect(prompt).toContain('- Project guidance: "AGENTS.md"');
+    expect(prompt).toContain('- Project guidance: "docs/architecture/ARCHITECTURE.md"');
+    expect(prompt).toContain('- Optional skill hint: "react-best-practices"');
+    expect(prompt).toContain('- Optional skill hint: "api-generator"');
     expect(prompt).toContain("Feature mode:");
     expect(prompt).not.toContain("Brief mode:");
+  });
+
+  it("quotes and escapes every human-readable source value onto one physical line", () => {
+    const prompt = buildSpecToPrPrompt({
+      workingDirectory: "/tmp/project",
+      prompt: "Use all supplied sources.",
+      briefPath: "docs/brief.md\nBRIEF_INSTRUCTION",
+      docsPath: "docs/legacy.md\nLEGACY_DOCS_INSTRUCTION",
+      docsPaths: ["docs/rules.md\nDOCS_INSTRUCTION"],
+      figmaUrl: "https://www.figma.com/design/example\nFIGMA_INSTRUCTION",
+      openApiPath: "docs/legacy-openapi.yaml\nLEGACY_OPENAPI_INSTRUCTION",
+      openApiPaths: ["docs/openapi.yaml\nOPENAPI_INSTRUCTION"],
+      guidancePaths: ["AGENTS.md\nGUIDANCE_INSTRUCTION"],
+      skillHints: ["react-best-practices"],
+      usageCalibration: false,
+    });
+    const sourceLines = prompt.slice(prompt.indexOf("Sources:")).split("\n");
+
+    expect(sourceLines).toEqual([
+      "Sources:",
+      '- Brief: "docs/brief.md\\nBRIEF_INSTRUCTION"',
+      '- Docs: "docs/legacy.md\\nLEGACY_DOCS_INSTRUCTION"',
+      '- Docs: "docs/rules.md\\nDOCS_INSTRUCTION"',
+      '- Figma: "https://www.figma.com/design/example\\nFIGMA_INSTRUCTION"',
+      '- OpenAPI: "docs/legacy-openapi.yaml\\nLEGACY_OPENAPI_INSTRUCTION"',
+      '- OpenAPI: "docs/openapi.yaml\\nOPENAPI_INSTRUCTION"',
+      '- Project guidance: "AGENTS.md\\nGUIDANCE_INSTRUCTION"',
+      '- Optional skill hint: "react-best-practices"',
+    ]);
   });
 
   it("treats skill hints as optional availability checks and states guidance precedence", () => {
@@ -186,7 +215,7 @@ describe("Codex SDK workflow policy", () => {
         workingDirectory: "/tmp/project",
         docsPath: twentyPaths[0]!,
         docsPaths: ["docs/./source-0.md", ...twentyPaths.slice(1)],
-        guidancePaths: twentyPaths,
+        guidancePaths: Array.from({ length: 20 }, (_, index) => `guidance/source-${index}.md`),
         skillHints: twentySkills,
       }),
     ).not.toThrow();
@@ -209,6 +238,32 @@ describe("Codex SDK workflow policy", () => {
         skillHints: [...twentySkills, "skill-overflow"],
       }),
     ).toThrow(/skillHints.*20/i);
+  });
+
+  it("rejects normalized source aliases reused across intake roles", () => {
+    const conflicts = [
+      {
+        briefPath: "docs/shared.md",
+        docsPaths: ["docs/./shared.md"],
+      },
+      {
+        docsPath: "docs/shared.md",
+        openApiPaths: ["docs/nested/../shared.md"],
+      },
+      {
+        openApiPath: "docs/shared.md",
+        guidancePaths: ["docs/./shared.md"],
+      },
+    ];
+
+    for (const conflict of conflicts) {
+      expect(() =>
+        validateSpecToPrRunInput({
+          workingDirectory: "/tmp/project",
+          ...conflict,
+        }),
+      ).toThrow(/Source path conflicts with/);
+    }
   });
 
   it("preserves every repeated CLI source and keeps an explicit feature mode", async () => {
