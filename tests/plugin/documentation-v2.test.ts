@@ -113,10 +113,11 @@ describe("v2 documentation", () => {
       ),
     };
 
-    expect(redirects.ko).toContain('<Redirect to="/usage/brief" />');
-    expect(redirects.en).toContain('<Redirect to="/en/usage/brief" />');
+    expect(redirects.ko).toContain('<Redirect to={useBaseUrl("/usage/brief")} />');
+    expect(redirects.en).toContain('<Redirect to={useBaseUrl("/usage/brief")} />');
     for (const redirect of Object.values(redirects)) {
       expect(redirect).toContain('import { Redirect } from "@docusaurus/router"');
+      expect(redirect).toContain('import useBaseUrl from "@docusaurus/useBaseUrl"');
       expect(redirect).not.toContain("## Required inputs");
       expect(redirect).not.toContain("<Tabs");
     }

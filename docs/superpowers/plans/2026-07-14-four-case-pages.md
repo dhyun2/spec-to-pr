@@ -112,10 +112,11 @@ it("keeps recipes as redirect-only compatibility documents", () => {
     ),
   };
 
-  expect(redirects.ko).toContain('<Redirect to="/usage/brief" />');
-  expect(redirects.en).toContain('<Redirect to="/en/usage/brief" />');
+  expect(redirects.ko).toContain('<Redirect to={useBaseUrl("/usage/brief")} />');
+  expect(redirects.en).toContain('<Redirect to={useBaseUrl("/usage/brief")} />');
   for (const redirect of Object.values(redirects)) {
     expect(redirect).toContain('import { Redirect } from "@docusaurus/router"');
+    expect(redirect).toContain('import useBaseUrl from "@docusaurus/useBaseUrl"');
     expect(redirect).not.toContain("## Required inputs");
     expect(redirect).not.toContain("<Tabs");
   }
@@ -272,8 +273,9 @@ pagination_prev: null
 ---
 
 import { Redirect } from "@docusaurus/router";
+import useBaseUrl from "@docusaurus/useBaseUrl";
 
-<Redirect to="/usage/brief" />
+<Redirect to={useBaseUrl("/usage/brief")} />
 ```
 
 Use this complete English file:
@@ -286,8 +288,9 @@ pagination_prev: null
 ---
 
 import { Redirect } from "@docusaurus/router";
+import useBaseUrl from "@docusaurus/useBaseUrl";
 
-<Redirect to="/en/usage/brief" />
+<Redirect to={useBaseUrl("/usage/brief")} />
 ```
 
 - [ ] **Step 6: Run the focused documentation tests and builds**
