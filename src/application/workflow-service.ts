@@ -2010,10 +2010,18 @@ async function ingestProjectTextSource(input: {
 
 export function buildParserSafeChunks(text: string): string[] {
   const chunks: string[] = [];
+  const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text);
   let end = text.length;
   while (end > 0) {
-    let start = Math.max(0, end - MAX_INTAKE_SOURCE_CHARS);
-    start = advancePastUnsafeTextBoundary(text, start, end);
+    const target = Math.max(0, end - MAX_INTAKE_SOURCE_CHARS);
+    const containing = target === 0 ? undefined : graphemes.containing(target);
+    const start =
+      containing === undefined || containing.index === target
+        ? target
+        : containing.index + containing.segment.length;
+    if (start >= end) {
+      throw new Error("Project text source contains a grapheme that exceeds the parser limit");
+    }
     const chunk = text.slice(start, end);
     if (chunk.trim() === "") {
       throw new Error("Project text source cannot form non-whitespace parser-safe chunks");
@@ -2026,25 +2034,6 @@ export function buildParserSafeChunks(text: string): string[] {
     throw new Error("Project text source cannot form parser-safe chunks without content loss");
   }
   return chunks;
-}
-
-function advancePastUnsafeTextBoundary(text: string, start: number, end: number): number {
-  while (start > 0 && start < end) {
-    const codeUnit = text.charCodeAt(start);
-    const codePoint = text.codePointAt(start);
-    const previousCodePoint = text.codePointAt(start - 1);
-    const splitsCrLf = text[start - 1] === "\r" && text[start] === "\n";
-    const splitsSurrogate = codeUnit >= 0xdc00 && codeUnit <= 0xdfff;
-    const continuesGrapheme =
-      codePoint !== undefined &&
-      (/\p{Mark}/u.test(String.fromCodePoint(codePoint)) ||
-        (codePoint >= 0xfe00 && codePoint <= 0xfe0f) ||
-        (codePoint >= 0x1f3fb && codePoint <= 0x1f3ff) ||
-        previousCodePoint === 0x200d);
-    if (!splitsCrLf && !splitsSurrogate && !continuesGrapheme) break;
-    start += codePoint !== undefined && codePoint > 0xffff ? 2 : 1;
-  }
-  return start;
 }
 
 function intakeSourceLabel(

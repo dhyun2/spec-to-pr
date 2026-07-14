@@ -77,6 +77,51 @@ describe("workflow v2 contracts", () => {
     }
   });
 
+  it("uses complete Unicode grapheme boundaries for parser chunks", () => {
+    const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+    const cases = [
+      { name: "decomposed Hangul Jamo", sequence: "\u1100\u1161", tail: 199_999 },
+      { name: "ZWJ emoji", sequence: "👩‍💻", tail: 199_997 },
+      { name: "regional-indicator flag", sequence: "🇰🇷", tail: 199_998 },
+    ];
+    const supplementaryVariationSequence = `漢\u{e0100}`;
+    if ([...segmenter.segment(supplementaryVariationSequence)].length === 1) {
+      cases.push({
+        name: "supplementary variation selector",
+        sequence: supplementaryVariationSequence,
+        tail: 199_998,
+      });
+    }
+    const canonicalize = (text: string) =>
+      canonicalizeFileContent({
+        path: "source.txt",
+        mediaType: "text/plain; charset=utf-8",
+        rawContent: Buffer.from(text, "utf8"),
+      }).canonicalContent.toString("utf8");
+    const splitCases: string[] = [];
+    const changedCanonicalContent: string[] = [];
+
+    for (const item of cases) {
+      const content = `${"x".repeat(10)}${item.sequence}${"y".repeat(item.tail)}`;
+      const chunks = buildParserSafeChunks(content);
+      const boundaries = new Set<number>([0]);
+      for (const grapheme of segmenter.segment(content)) {
+        boundaries.add(grapheme.index + grapheme.segment.length);
+      }
+      let offset = 0;
+      for (const chunk of chunks.slice(0, -1)) {
+        offset += chunk.length;
+        if (!boundaries.has(offset)) splitCases.push(item.name);
+      }
+      if (chunks.map(canonicalize).join("") !== canonicalize(content)) {
+        changedCanonicalContent.push(item.name);
+      }
+    }
+
+    expect(splitCases).toEqual([]);
+    expect(changedCanonicalContent).toEqual([]);
+  });
+
   it("stores unique normalized source and guidance trace fields", () => {
     const profile = {
       mode: "feature",
