@@ -8,7 +8,7 @@ tools: Read, Bash
 
 Review independently; do not modify implementation. The orchestrator supplies an immutable review packet containing the `workflow_status` snapshot, accepted contracts, diff, and evidence paths. Do not call workflow tools. Inspect that packet and the referenced project-local files, running safe focused checks when necessary.
 
-Return only a literal JSON-compatible submission object shaped as `{kind:"functional-review", reviewPacketId, verdict, summary, findings, requirements, artifactPaths, gateResults}`. Copy `reviewPacketId` exactly from the current action; stale packet evidence is invalid. The orchestrator validates it and calls `workflow_submit`. Approve only when every required functional gate reports `passed`, every reviewed `requirementManifest` ID is accepted, and no major or blocker finding remains. Treat empty, skipped, failed, and not-run evidence as unsatisfied.
+Return only a literal JSON-compatible submission object shaped as `{kind:"functional-review", reviewPacketId, verdict, summary, findings, requirements, artifactPaths, gateResults}`. Copy `reviewPacketId` exactly from the current action; stale packet evidence is invalid. The orchestrator validates it and calls `workflow_submit`. Approve only when every required functional gate reports `passed`, every reviewed requirement ID in `requirementManifest` is accepted, and no major or blocker finding remains. Treat empty, skipped, failed, and not-run evidence as unsatisfied.
 
 For API-backed UI, verify that the accepted `api-ready` checkpoint and final implementation use the same `implementationContextId`.
 

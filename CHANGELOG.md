@@ -7,6 +7,21 @@ use the plugin tag format, for example `spec-to-pr--v0.1.0`.
 
 ## Unreleased
 
+## 0.2.0 - 2026-07-14
+
+### Added
+
+- Added four lightweight delivery profiles: brief-to-PR, focused legacy change-to-PR,
+  user-facing feature-to-PR, and Figma-driven design implementation-to-PR.
+- Added automatic `XS`-`XL` workload estimates, compact 80% checkpoints, fixed per-class safety
+  limits, and bounded numeric-only usage history for display calibration. Historical samples cannot
+  raise the automatic hard limit or retain prompts, source, diffs, paths, or tool output.
+- Added immutable implementation review packets bound to the Run, revision, base/head commits,
+  evidence, binary Git diff, and authoritative changed-file set. Reviews and report generation
+  reject stale packets after any code change.
+- Added exact release archive inventory, checksum, CRC, commit-byte, version/profile parity, and
+  extracted MCP runtime verification, plus generated-output and source-reachability guards.
+
 ### Changed
 
 - Replaced the microtool-heavy v1 public workflow with the v2 facade: exactly seven MCP
@@ -33,13 +48,38 @@ use the plugin tag format, for example `spec-to-pr--v0.1.0`.
 - Rebuilt the README, SDK guide, and documentation site around the four delivery profiles and v2
   contract; removed obsolete task specs, historical implementation plans, v1 ADRs, and stale docs
   pages.
-- Added intake and contract-refined `XS`–`XL` workload estimates with token ranges and confidence,
-  plus SDK action-boundary usage aggregation, compact fresh-thread checkpointing at 80%, mandatory
-  scope-split/approval decisions at the hard limit, and numeric-only historical calibration that
-  never stores prompt, source, code, diff, path, tool output, or final-response content.
-- Added bounded `workflow_status.resumeContext` recovery and a resume-only SDK prompt so budget
-  approvals and fresh-thread checkpoints continue the existing Run without repeating intake;
-  resumed tails are excluded from calibration.
+- Changed hard-limit handling to preserve required validation and return a scope split instead of
+  accepting a larger user-selected token budget.
+- Changed release publication to require a clean version-bound commit, create an annotated plugin
+  tag, and atomically push the release branch and tag after the full archive verification succeeds.
+
+### Removed
+
+- Removed the public `tokenBudget` input, `--token-budget` CLI flag, budget-lock state, and numeric
+  approval flow. Release and workflow safety are no longer configurable through large token values.
+- Removed unreachable v1 microtools, specialist agent cascades, integration worktree coordination,
+  full-project feature recording, project-wide profiling, constant-pass release gates, and their
+  dedicated tests and documentation.
+
+### Fixed
+
+- Fixed stale review acceptance by revalidating Git HEAD, binary diff, and changed files at both
+  review submission and PR report generation.
+- Fixed implementation reports trusting agent-declared file lists; passed submissions must now
+  exactly match the Git-derived changed-file set.
+- Fixed changed-request repair so implementation reopens and previous functional/design reviews,
+  reports, publish results, and archive state are invalidated together.
+- Fixed workspace sizing for bounded `package.json` and `pnpm-workspace.yaml` package roots and
+  escaped requirement content in generated Markdown traceability tables.
+- Fixed concurrent usage-history updates with serialized atomic writes and rejected symlink,
+  hard-link, oversized, stale, and malformed calibration data.
+
+### Verified
+
+- `pnpm check`
+- `pnpm plugin:validate`
+- `pnpm --dir website typecheck && pnpm --dir website build`
+- `pnpm release:build 0.2.0 --full`
 
 ## 0.1.0 - 2026-07-10
 

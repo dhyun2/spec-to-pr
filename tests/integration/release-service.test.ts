@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import packageJson from "../../package.json" with { type: "json" };
 import { ReleaseService } from "../../src/application/release-service.js";
 
 let directory: string;
@@ -25,7 +26,7 @@ describe("ReleaseService", () => {
   it("builds, verifies the actual archive, and generates notes", async () => {
     const outputDirectory = path.join(directory, "release");
     const build = await service.buildReleasePackage({
-      version: "0.1.0",
+      version: packageJson.version,
       outputDirectory,
       allowDirty: true,
     });
@@ -40,7 +41,7 @@ describe("ReleaseService", () => {
     expect(build.verification.status).toBe("passed");
     expect(build.build.includedFiles).toContain("dist/mcp/server.js");
     expect(verification.verification.status).toBe("passed");
-    expect(notes.content).toContain("# spec-to-pr 0.1.0");
+    expect(notes.content).toContain(`# spec-to-pr ${packageJson.version}`);
 
     await writeFile(build.checksumPath, "sha256:bad  tampered.zip\n", "utf8");
     const tamperedChecksum = await service.verifyReleasePackage({

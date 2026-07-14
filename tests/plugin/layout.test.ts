@@ -3,6 +3,8 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 
+import { verifyReviewerProfileParity } from "../../src/release/release-verifier.js";
+
 const packageVersion = (
   JSON.parse(readFileSync(path.join(process.cwd(), "package.json"), "utf8")) as {
     version: string;
@@ -496,5 +498,18 @@ describe("plugin layout", () => {
     const license = readFileSync(licensePath, "utf8");
 
     expect(license).toContain("MIT License");
+  });
+
+  it("keeps the shipped Markdown and Codex reviewer safety markers in parity", () => {
+    const reviewerFiles = new Map<string, Buffer>(
+      [
+        "agents/design-reviewer.md",
+        "agents/functional-reviewer.md",
+        ".codex/agents/spec-to-pr-design-reviewer.toml",
+        ".codex/agents/spec-to-pr-functional-reviewer.toml",
+      ].map((file) => [file, readFileSync(path.join(root, file))]),
+    );
+
+    expect(verifyReviewerProfileParity(reviewerFiles)).toEqual([]);
   });
 });

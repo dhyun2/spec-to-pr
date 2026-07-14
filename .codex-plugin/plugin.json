@@ -1,7 +1,7 @@
 {
   "name": "spec-to-pr",
-  "version": "0.1.0",
-  "description": "Fast, evidence-backed Codex workflow for turning briefs, Figma designs, and OpenAPI contracts into verified draft pull requests.",
+  "version": "0.2.0",
+  "description": "Fast, evidence-backed Codex workflow for turning briefs, legacy changes, Figma designs, and API contracts into verified draft pull requests.",
   "author": {
     "name": "SpecToPR Team",
     "email": "dhp94d@gmail.com",
@@ -10,16 +10,7 @@
   "homepage": "https://github.com/dhyun2/spec-to-pr",
   "repository": "https://github.com/dhyun2/spec-to-pr",
   "license": "MIT",
-  "keywords": [
-    "codex",
-    "mcp",
-    "openspec",
-    "figma",
-    "openapi",
-    "gherkin",
-    "quality-gates",
-    "pull-requests"
-  ],
+  "keywords": ["codex", "mcp", "figma", "openapi", "legacy", "testing", "pull-requests"],
   "skills": "./skills/",
   "mcpServers": {
     "spec_to_pr": {
@@ -32,7 +23,7 @@
   },
   "interface": {
     "displayName": "SpecToPR",
-    "shortDescription": "Turn specs, Figma, and APIs into verified draft PRs.",
+    "shortDescription": "Turn specs, legacy changes, Figma, and APIs into verified draft PRs.",
     "longDescription": "SpecToPR gives Codex a fast seven-tool workflow with one API-first implementation context, conditional functional and design review, scope-aware default gates, separate release-only verification, evidence-backed reporting, and safe draft PR/MR publishing.",
     "developerName": "SpecToPR Team",
     "category": "Developer Tools",
