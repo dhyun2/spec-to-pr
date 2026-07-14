@@ -73,6 +73,7 @@ var init_package = __esm({
         build: "tsup",
         typecheck: "tsc --noEmit",
         test: "vitest run",
+        "guide:check": "node tests/browser/four-case-guide.mjs",
         "schemas:build": "tsx scripts/export-runtime-schemas.ts",
         "schemas:check": "node scripts/check-generated-files.mjs schemas/runtime",
         "release:build": "tsx scripts/build-release.ts",
