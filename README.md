@@ -157,7 +157,9 @@ pnpm plugin:validate
 
 ## Documentation
 
-The maintained Korean guide is at **https://dhyun2.github.io/spec-to-pr/**. It covers prerequisites, installation, the four modes, the v2 pipeline, skills, configuration, and troubleshooting.
+The maintained guide is at **https://dhyun2.github.io/spec-to-pr/**. It covers prerequisites, installation, the four cases, the v2 pipeline, skills, configuration, and troubleshooting.
+
+[Read the detailed four-case guide](https://dhyun2.github.io/spec-to-pr/en/usage/recipes) for required inputs, copyable prompts, execution phases, blockers, evidence, and illustrative draft PRs.
 
 Run it locally with:
 

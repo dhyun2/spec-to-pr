@@ -20,6 +20,69 @@ describe("v2 documentation", () => {
     expect(navbar["item.label.4개 케이스"]?.message).toBe("4 Cases");
   });
 
+  it("documents exactly four detailed cases in Korean and English", () => {
+    const guides = {
+      ko: readFileSync(path.join(root, "website/docs/usage/recipes.mdx"), "utf8"),
+      en: readFileSync(
+        path.join(root, "website/i18n/en/docusaurus-plugin-content-docs/current/usage/recipes.mdx"),
+        "utf8",
+      ),
+    };
+
+    for (const [locale, guide] of Object.entries(guides)) {
+      expect(guide, locale).toContain('import Tabs from "@theme/Tabs"');
+      expect(guide, locale).toContain('import TabItem from "@theme/TabItem"');
+      expect(guide.match(/<TabItem value="(?:brief|legacy|feature|figma)"/g)).toHaveLength(4);
+      for (const value of ["brief", "legacy", "feature", "figma"]) {
+        expect(guide, `${locale}:${value}`).toContain(`data-case-panel="${value}"`);
+        for (const headingId of [
+          "use-this-case",
+          "required-inputs",
+          "optional-inputs",
+          "minimal-prompt",
+          "full-prompt",
+          "process",
+          "evidence",
+          "branch-and-commits",
+          "expected-pr",
+          "blockers",
+          "exclusions",
+        ]) {
+          expect(guide, `${locale}:${headingId}:${value}`).toContain(`id="${headingId}-${value}"`);
+        }
+      }
+      for (const field of [
+        "mode:",
+        "scope:",
+        "changeKind:",
+        "publication:",
+        "briefPath",
+        "figmaUrl",
+        "docsPaths",
+        "openApiPaths",
+        "guidancePaths",
+        "skillHints",
+      ]) {
+        expect(guide, `${locale}:${field}`).toContain(field);
+      }
+      expect(guide).toContain("requiredValidations");
+      expect(guide).toContain("implementationContextId");
+      expect(guide).toContain("figma-bundle");
+    }
+
+    expect(guides.ko).toContain("예상 예시");
+    expect(guides.en).toContain("Illustrative expectation");
+    for (const guide of Object.values(guides)) {
+      const feature = tabSection(guide, "feature");
+      expect(feature).toContain("targeted-feature");
+      expect(feature).toContain("featureVideo");
+      expect(feature).toContain("full-project E2E");
+      for (const value of ["brief", "legacy", "figma"]) {
+        expect(tabSection(guide, value)).not.toContain("featureVideo: required");
+      }
+    }
+  });
+
   it("keeps only the current ADRs and compact website pages", () => {
     expect(readdirSync(path.join(root, "docs", "adr")).sort()).toEqual([
       "035-use-coarse-workflow-facade-and-split-reviews.md",
@@ -35,7 +98,7 @@ describe("v2 documentation", () => {
       "reference/config.md",
       "reference/skills.md",
       "troubleshooting.md",
-      "usage/recipes.md",
+      "usage/recipes.mdx",
     ]);
   });
 
@@ -115,7 +178,7 @@ describe("v2 documentation", () => {
     const readmes = ["README.md", "README.ko.md", "packages/codex-sdk/README.md"].map((file) =>
       readFileSync(path.join(root, file), "utf8"),
     );
-    const recipe = readFileSync(path.join(root, "website/docs/usage/recipes.md"), "utf8");
+    const recipe = readFileSync(path.join(root, "website/docs/usage/recipes.mdx"), "utf8");
     const config = readFileSync(path.join(root, "website/docs/reference/config.md"), "utf8");
     const skills = readFileSync(path.join(root, "website/docs/reference/skills.md"), "utf8");
     const pipeline = readFileSync(path.join(root, "website/docs/concepts/pipeline.md"), "utf8");
@@ -153,10 +216,7 @@ describe("v2 documentation", () => {
     expect(recipe).toContain("design-system");
     expect(recipe).toContain("react-best-practices");
     expect(recipe).toContain("next-best-practices");
-    const apiBackedUiRecipe = recipe.slice(
-      recipe.indexOf("## 5. API가 있는 UI"),
-      recipe.indexOf("## 6. 발행하지 않기"),
-    );
+    const apiBackedUiRecipe = tabSection(recipe, "feature");
     expect(apiBackedUiRecipe).toContain("openApiPaths: [docs/openapi.yaml]");
     expect(apiBackedUiRecipe).not.toContain("OpenAPI: docs/openapi.yaml");
 
@@ -203,4 +263,12 @@ function relativeFiles(directory: string, prefix = ""): string[] {
         : [relative];
     })
     .sort();
+}
+
+function tabSection(contents: string, value: string): string {
+  const start = contents.indexOf(`<TabItem value="${value}"`);
+  if (start < 0) throw new Error(`Missing tab ${value}`);
+  const end = contents.indexOf("</TabItem>", start);
+  if (end < 0) throw new Error(`Unclosed tab ${value}`);
+  return contents.slice(start, end);
 }

@@ -153,7 +153,9 @@ pnpm plugin:validate
 
 ## 문서
 
-유지되는 전체 가이드는 **https://dhyun2.github.io/spec-to-pr/** 에 있습니다. 사전 준비, 설치, 네 가지 모드, v2 pipeline, skill, 설정, 트러블슈팅을 다룹니다.
+유지되는 전체 가이드는 **https://dhyun2.github.io/spec-to-pr/** 에 있습니다. 사전 준비, 설치, 네 가지 케이스, v2 pipeline, skill, 설정, 트러블슈팅을 다룹니다.
+
+[4가지 케이스 상세 가이드](https://dhyun2.github.io/spec-to-pr/usage/recipes)에서 필수 입력, 복사 가능한 프롬프트, 진행 단계, blocker, 증거와 예상 draft PR을 확인할 수 있습니다.
 
 ```bash
 pnpm --dir website install
