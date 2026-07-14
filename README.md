@@ -159,7 +159,7 @@ pnpm plugin:validate
 
 The maintained guide is at **https://dhyun2.github.io/spec-to-pr/**. It covers prerequisites, installation, the four cases, the v2 pipeline, skills, configuration, and troubleshooting.
 
-[Read the detailed four-case guide](https://dhyun2.github.io/spec-to-pr/en/usage/recipes) for required inputs, copyable prompts, execution phases, blockers, evidence, and illustrative draft PRs.
+[Start with the brief-to-PR guide](https://dhyun2.github.io/spec-to-pr/en/usage/brief) for required inputs, copyable prompts, execution phases, blockers, evidence, and illustrative draft PRs. The Usage sidebar links the other three cases separately.
 
 Run it locally with:
 

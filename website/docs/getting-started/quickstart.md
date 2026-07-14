@@ -74,4 +74,4 @@ Draft 발행을 요청했다면 구현 전에 target이 아닌 `codex/*` source 
 - 사용자 기능: `mode: feature`, 변경 기능 E2E 하나, 영상 정확히 하나
 - Figma 구현: `mode: figma`, `figmaUrl`, host-connected Figma capability
 
-복사 가능한 예시와 예상 PR은 [4가지 케이스 상세 가이드](/usage/recipes)에 있습니다.
+복사 가능한 예시와 예상 PR은 [기획서 → draft PR 사용법](/usage/brief)에서 시작해 케이스별 페이지에서 확인할 수 있습니다.

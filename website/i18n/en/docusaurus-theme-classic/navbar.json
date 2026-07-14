@@ -7,9 +7,9 @@
     "message": "Guide",
     "description": "Navbar item with label 가이드"
   },
-  "item.label.4개 케이스": {
-    "message": "4 Cases",
-    "description": "Navbar item with label 4개 케이스"
+  "item.label.사용법": {
+    "message": "Usage",
+    "description": "Navbar item with label 사용법"
   },
   "item.label.v2 구조": {
     "message": "v2 Architecture",

@@ -70,7 +70,7 @@ const config: Config = {
       title: "SpecToPR",
       items: [
         { type: "docSidebar", sidebarId: "guideSidebar", position: "left", label: "가이드" },
-        { to: "/usage/recipes", position: "left", label: "4개 케이스" },
+        { to: "/usage/brief", position: "left", label: "사용법" },
         { to: "/concepts/pipeline", position: "left", label: "v2 구조" },
         { type: "localeDropdown", position: "right" },
         { href: "https://github.com/dhyun2/spec-to-pr", label: "GitHub", position: "right" },
@@ -84,7 +84,7 @@ const config: Config = {
           items: [
             { label: "설치", to: "/getting-started/installation" },
             { label: "퀵스타트", to: "/getting-started/quickstart" },
-            { label: "사용 레시피", to: "/usage/recipes" },
+            { label: "사용법", to: "/usage/brief" },
           ],
         },
         {

@@ -321,6 +321,7 @@ git commit -m "docs: split usage cases into separate pages"
 - Modify: `website/i18n/en/docusaurus-theme-classic/navbar.json`
 - Modify: `README.md`
 - Modify: `README.ko.md`
+- Modify: `website/docs/intro.md`
 - Modify: `website/docs/getting-started/quickstart.md`
 - Test: `tests/plugin/documentation-v2.test.ts`
 
@@ -343,6 +344,7 @@ it("links directly to four separate usage pages", () => {
   const maintained = [
     readFileSync(path.join(root, "README.md"), "utf8"),
     readFileSync(path.join(root, "README.ko.md"), "utf8"),
+    readFileSync(path.join(root, "website/docs/intro.md"), "utf8"),
     readFileSync(path.join(root, "website/docs/getting-started/quickstart.md"), "utf8"),
     config,
   ].join("\n");
@@ -428,6 +430,10 @@ https://dhyun2.github.io/spec-to-pr/usage/recipes
 website/docs/getting-started/quickstart.md:
 [4가지 케이스 상세 가이드](/usage/recipes)
 → [기획서 → draft PR 사용법](/usage/brief)
+
+website/docs/intro.md:
+[사용 레시피](/usage/recipes)
+→ [기획서 → draft PR 사용법](/usage/brief)
 ```
 
 - [ ] **Step 5: Run navigation tests and both locale builds**
@@ -445,7 +451,7 @@ Expected: 8 documentation tests pass; the sidebar IDs resolve in both locales; b
 - [ ] **Step 6: Commit navigation synchronization**
 
 ```bash
-git add README.md README.ko.md website/sidebars.ts website/docusaurus.config.ts website/i18n/en/docusaurus-theme-classic/navbar.json website/docs/getting-started/quickstart.md tests/plugin/documentation-v2.test.ts
+git add README.md README.ko.md website/sidebars.ts website/docusaurus.config.ts website/i18n/en/docusaurus-theme-classic/navbar.json website/docs/intro.md website/docs/getting-started/quickstart.md tests/plugin/documentation-v2.test.ts
 git commit -m "docs: expose four usage pages"
 ```
 

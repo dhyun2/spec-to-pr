@@ -56,6 +56,6 @@ SpecToPR은 target이 아닌 `codex/*` source branch에 의도한 변경을 comm
 1. [사전 준비물](/getting-started/prerequisites)
 2. [설치](/getting-started/installation)
 3. [퀵스타트](/getting-started/quickstart)
-4. [사용 레시피](/usage/recipes)
+4. [기획서 → draft PR 사용법](/usage/brief)
 
 내부 계약은 [파이프라인](/concepts/pipeline), 전체 skill은 [스킬 레퍼런스](/reference/skills)에서 확인할 수 있습니다.

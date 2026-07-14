@@ -17,7 +17,7 @@ const sidebars: SidebarsConfig = {
       type: "category",
       label: "사용법",
       collapsed: false,
-      items: ["usage/recipes"],
+      items: ["usage/brief", "usage/legacy", "usage/feature", "usage/figma"],
     },
     {
       type: "category",

@@ -17,7 +17,37 @@ describe("v2 documentation", () => {
     expect(config).toContain('type: "localeDropdown"');
     expect(config).toContain('ko: { label: "한국어"');
     expect(config).toContain('en: { label: "English"');
-    expect(navbar["item.label.4개 케이스"]?.message).toBe("4 Cases");
+    expect(navbar["item.label.사용법"]?.message).toBe("Usage");
+  });
+
+  it("links directly to four separate usage pages", () => {
+    const sidebar = readFileSync(path.join(root, "website/sidebars.ts"), "utf8");
+    const config = readFileSync(path.join(root, "website/docusaurus.config.ts"), "utf8");
+    const navbar = JSON.parse(
+      readFileSync(path.join(root, "website/i18n/en/docusaurus-theme-classic/navbar.json"), "utf8"),
+    ) as Record<string, { message: string }>;
+    const maintained = [
+      readFileSync(path.join(root, "README.md"), "utf8"),
+      readFileSync(path.join(root, "README.ko.md"), "utf8"),
+      readFileSync(path.join(root, "website/docs/intro.md"), "utf8"),
+      readFileSync(path.join(root, "website/docs/getting-started/quickstart.md"), "utf8"),
+      config,
+    ].join("\n");
+
+    expect(sidebar).toContain(
+      'items: ["usage/brief", "usage/legacy", "usage/feature", "usage/figma"]',
+    );
+    expect(sidebar).not.toContain('items: ["usage/recipes"]');
+    expect(config).toContain('{ to: "/usage/brief", position: "left", label: "사용법" }');
+    expect(config).toContain('{ label: "사용법", to: "/usage/brief" }');
+    expect(navbar["item.label.사용법"]?.message).toBe("Usage");
+    expect(maintained).not.toContain("/usage/recipes");
+    expect(readFileSync(path.join(root, "README.md"), "utf8")).toContain(
+      "https://dhyun2.github.io/spec-to-pr/en/usage/brief",
+    );
+    expect(readFileSync(path.join(root, "README.ko.md"), "utf8")).toContain(
+      "https://dhyun2.github.io/spec-to-pr/usage/brief",
+    );
   });
 
   it("documents four separate usage cases in Korean and English", () => {
