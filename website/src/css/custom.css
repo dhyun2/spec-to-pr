@@ -31,8 +31,9 @@
 
 /* 표가 본문 폭을 넘으면 표 안에서만 가로 스크롤 */
 .markdown table {
-  display: table;
+  display: block;
   width: 100%;
+  overflow-x: auto;
 }
 
 /* 한국어 제목 줄바꿈 품질 */
