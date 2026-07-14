@@ -55,6 +55,19 @@ describe("workflow v2 contracts", () => {
         skillHints: ["../skills/react-best-practices"],
       }).success,
     ).toBe(false);
+
+    expect(
+      WorkflowStartInputSchema.safeParse({
+        ...base,
+        briefPath: "b".repeat(1_000),
+      }).success,
+    ).toBe(true);
+    expect(
+      WorkflowStartInputSchema.safeParse({
+        ...base,
+        briefPath: "b".repeat(1_001),
+      }).success,
+    ).toBe(false);
   });
 
   it("keeps CRLF and Unicode graphemes intact across parser chunks", () => {

@@ -240,6 +240,25 @@ describe("Codex SDK workflow policy", () => {
     ).toThrow(/skillHints.*20/i);
   });
 
+  it("matches the runtime brief path length boundary", () => {
+    expect(() =>
+      validateSpecToPrRunInput({
+        workingDirectory: "/tmp/project",
+        deliveryMode: "brief",
+        briefPath: "b".repeat(1_000),
+        usageCalibration: false,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateSpecToPrRunInput({
+        workingDirectory: "/tmp/project",
+        deliveryMode: "brief",
+        briefPath: "b".repeat(1_001),
+        usageCalibration: false,
+      }),
+    ).toThrow(/briefPath.*1000/i);
+  });
+
   it("rejects normalized source aliases reused across intake roles", () => {
     const conflicts = [
       {

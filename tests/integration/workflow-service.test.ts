@@ -452,6 +452,47 @@ describe("WorkflowService", () => {
     });
   });
 
+  it("rejects an overlong project-local brief path before creating a run", async () => {
+    const briefPath = `briefs//${"./".repeat(491)}checkout.md`;
+    expect(briefPath).toHaveLength(1_001);
+
+    await expect(
+      service.start({
+        projectRoot: directory,
+        requestText: "Implement the supplied product brief",
+        mode: "brief",
+        briefPath,
+      }),
+    ).rejects.toThrow(/briefPath|1,000|too_big/i);
+
+    await expect(store.list()).resolves.toHaveLength(0);
+  });
+
+  it("rejects a short brief alias whose canonical project path is overlong before creating a run", async () => {
+    const compactProjectRoot = await mkdtemp("/tmp/s");
+    const canonicalBriefPath = projectRelativePathOfLength(1_001);
+    const canonicalBrief = path.join(compactProjectRoot, canonicalBriefPath);
+
+    try {
+      await mkdir(path.dirname(canonicalBrief), { recursive: true });
+      await writeFile(canonicalBrief, "Implement the supplied product brief.\n", "utf8");
+      await symlink(canonicalBriefPath, path.join(compactProjectRoot, "brief.md"));
+
+      await expect(
+        service.start({
+          projectRoot: compactProjectRoot,
+          requestText: "Implement the supplied product brief",
+          mode: "brief",
+          briefPath: "brief.md",
+        }),
+      ).rejects.toThrow(/briefPath|Source path|1,000|too_big/i);
+
+      await expect(store.list()).resolves.toHaveLength(0);
+    } finally {
+      await rm(compactProjectRoot, { recursive: true, force: true });
+    }
+  });
+
   it("records an explicit delivery profile without adding stages", async () => {
     const status = await service.start({
       projectRoot: directory,
@@ -2090,6 +2131,19 @@ function requirements(...ids: string[]) {
     title: id.replaceAll("-", " "),
     acceptanceCriteria: [`${id} satisfies the declared behavior.`],
   }));
+}
+
+function projectRelativePathOfLength(length: number): string {
+  const segments: string[] = [];
+  let remaining = length;
+  while (remaining > 200) {
+    segments.push("p".repeat(200));
+    remaining -= 201;
+  }
+  segments.push("p".repeat(remaining));
+  const result = segments.join(path.sep);
+  if (result.length !== length) throw new Error(`Could not build a ${length}-character path`);
+  return result;
 }
 
 async function changeSource(

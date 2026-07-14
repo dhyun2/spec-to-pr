@@ -44875,7 +44875,7 @@ function latestArtifact(run, kind, reportKind) {
   }
   return artifact;
 }
-var import_pngjs, import_yaml, WORKER_ID, execFileAsync, DEFAULT_EXTERNAL_LEASE_TTL_MS, DEFAULT_EXTERNAL_HEARTBEAT_MS, MAX_COMPOSABLE_SOURCE_PATHS, MAX_INTAKE_SOURCE_CHARS, MAX_OPENAPI_OPERATIONS, GUIDANCE_CANDIDATES, ComposableSourcePathsSchema, SkillHintsSchema, FigmaManifestSchema, FeatureResultSchema, WorkflowStartInputSchema, WorkflowAdvanceInputSchema, WorkflowSubmitInputSchema, WorkflowStatusInputSchema, WorkflowPublishInputSchema, WorkflowArchiveInputSchema, WorkflowService, MARKDOWN_LIST_CONTROL_CHARACTERS;
+var import_pngjs, import_yaml, WORKER_ID, execFileAsync, DEFAULT_EXTERNAL_LEASE_TTL_MS, DEFAULT_EXTERNAL_HEARTBEAT_MS, MAX_COMPOSABLE_SOURCE_PATHS, MAX_INTAKE_SOURCE_CHARS, MAX_OPENAPI_OPERATIONS, GUIDANCE_CANDIDATES, ComposableSourcePathsSchema, NormalizedDeliveryProfilePathsSchema, SkillHintsSchema, FigmaManifestSchema, FeatureResultSchema, WorkflowStartInputSchema, WorkflowAdvanceInputSchema, WorkflowSubmitInputSchema, WorkflowStatusInputSchema, WorkflowPublishInputSchema, WorkflowArchiveInputSchema, WorkflowService, MARKDOWN_LIST_CONTROL_CHARACTERS;
 var init_workflow_service = __esm({
   "src/application/workflow-service.ts"() {
     "use strict";
@@ -44902,6 +44902,13 @@ var init_workflow_service = __esm({
       "docs/etc/folder-structure.md"
     ];
     ComposableSourcePathsSchema = external_exports.array(WorkflowSourcePathSchema).max(MAX_COMPOSABLE_SOURCE_PATHS).default([]);
+    NormalizedDeliveryProfilePathsSchema = external_exports.object({
+      briefPath: WorkflowSourcePathSchema.optional(),
+      docsPaths: ComposableSourcePathsSchema,
+      openApiPaths: ComposableSourcePathsSchema,
+      guidancePaths: ComposableSourcePathsSchema,
+      discoveredGuidancePaths: ComposableSourcePathsSchema
+    }).strict();
     SkillHintsSchema = external_exports.array(SkillHintSchema).max(20).default([]);
     FigmaManifestSchema = external_exports.object({
       provider: external_exports.literal("host-connected-figma"),
@@ -44925,7 +44932,7 @@ var init_workflow_service = __esm({
       mode: DeliveryModeSchema.default("auto"),
       changeKind: ChangeKindSchema.default("auto"),
       publication: PublicationIntentSchema.optional(),
-      briefPath: external_exports.string().trim().min(1).optional(),
+      briefPath: WorkflowSourcePathSchema.optional(),
       figmaUrl: FigmaFileUrlSchema.optional(),
       docsPath: WorkflowSourcePathSchema.optional(),
       docsPaths: ComposableSourcePathsSchema,
@@ -45067,6 +45074,13 @@ var init_workflow_service = __esm({
       async start(rawInput) {
         const input = WorkflowStartInputSchema.parse(rawInput);
         const sources = await prepareComposableSources(input);
+        const normalizedProfilePaths = NormalizedDeliveryProfilePathsSchema.parse({
+          ...sources.brief === void 0 ? {} : { briefPath: sources.brief.path },
+          docsPaths: sources.docs.map((file2) => file2.path),
+          openApiPaths: sources.openApi.map((file2) => file2.path),
+          guidancePaths: sources.guidance.map((file2) => file2.path),
+          discoveredGuidancePaths: sources.discoveredGuidance.map((file2) => file2.path)
+        });
         const publication = input.publication ?? (input.mode === "figma" ? "none" : "draft");
         const initialHead = await currentGitHead(input.projectRoot);
         const created = await this.dependencies.runService.createRun({
@@ -45124,12 +45138,12 @@ var init_workflow_service = __esm({
           changeKind: input.changeKind,
           publication,
           scope,
-          ...sources.brief === void 0 ? {} : { briefPath: sources.brief.path },
+          ...normalizedProfilePaths.briefPath === void 0 ? {} : { briefPath: normalizedProfilePaths.briefPath },
           ...figmaUrl === void 0 ? {} : { figmaUrl },
-          docsPaths: sources.docs.map((file2) => file2.path),
-          openApiPaths: sources.openApi.map((file2) => file2.path),
-          guidancePaths: sources.guidance.map((file2) => file2.path),
-          discoveredGuidancePaths: sources.discoveredGuidance.map((file2) => file2.path),
+          docsPaths: normalizedProfilePaths.docsPaths,
+          openApiPaths: normalizedProfilePaths.openApiPaths,
+          guidancePaths: normalizedProfilePaths.guidancePaths,
+          discoveredGuidancePaths: normalizedProfilePaths.discoveredGuidancePaths,
           skillHints: sources.skillHints
         });
         const workload = estimateWorkload({

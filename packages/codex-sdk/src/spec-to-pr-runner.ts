@@ -559,6 +559,7 @@ function validateComposableSources(input: SpecToPrCodexRunInput): void {
   }
   if (input.docsPath !== undefined) validateSourcePath(input.docsPath, "docsPath");
   if (input.openApiPath !== undefined) validateSourcePath(input.openApiPath, "openApiPath");
+  if (input.briefPath !== undefined) validateSourcePath(input.briefPath, "briefPath");
 
   const skillHints = input.skillHints ?? [];
   if (skillHints.length > MAX_COMPOSABLE_SOURCE_PATHS) {

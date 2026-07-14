@@ -69,6 +69,15 @@ const ComposableSourcePathsSchema = z
   .array(WorkflowSourcePathSchema)
   .max(MAX_COMPOSABLE_SOURCE_PATHS)
   .default([]);
+const NormalizedDeliveryProfilePathsSchema = z
+  .object({
+    briefPath: WorkflowSourcePathSchema.optional(),
+    docsPaths: ComposableSourcePathsSchema,
+    openApiPaths: ComposableSourcePathsSchema,
+    guidancePaths: ComposableSourcePathsSchema,
+    discoveredGuidancePaths: ComposableSourcePathsSchema,
+  })
+  .strict();
 const SkillHintsSchema = z.array(SkillHintSchema).max(20).default([]);
 
 const FigmaManifestSchema = z
@@ -105,7 +114,7 @@ export const WorkflowStartInputSchema = z
     mode: DeliveryModeSchema.default("auto"),
     changeKind: ChangeKindSchema.default("auto"),
     publication: PublicationIntentSchema.optional(),
-    briefPath: z.string().trim().min(1).optional(),
+    briefPath: WorkflowSourcePathSchema.optional(),
     figmaUrl: FigmaFileUrlSchema.optional(),
     docsPath: WorkflowSourcePathSchema.optional(),
     docsPaths: ComposableSourcePathsSchema,
@@ -293,6 +302,13 @@ export class WorkflowService {
   public async start(rawInput: unknown): Promise<WorkflowStatus> {
     const input = WorkflowStartInputSchema.parse(rawInput);
     const sources = await prepareComposableSources(input);
+    const normalizedProfilePaths = NormalizedDeliveryProfilePathsSchema.parse({
+      ...(sources.brief === undefined ? {} : { briefPath: sources.brief.path }),
+      docsPaths: sources.docs.map((file) => file.path),
+      openApiPaths: sources.openApi.map((file) => file.path),
+      guidancePaths: sources.guidance.map((file) => file.path),
+      discoveredGuidancePaths: sources.discoveredGuidance.map((file) => file.path),
+    });
     const publication = input.publication ?? (input.mode === "figma" ? "none" : "draft");
     const initialHead = await currentGitHead(input.projectRoot);
     const created = await this.dependencies.runService.createRun({
@@ -354,12 +370,14 @@ export class WorkflowService {
       changeKind: input.changeKind,
       publication,
       scope,
-      ...(sources.brief === undefined ? {} : { briefPath: sources.brief.path }),
+      ...(normalizedProfilePaths.briefPath === undefined
+        ? {}
+        : { briefPath: normalizedProfilePaths.briefPath }),
       ...(figmaUrl === undefined ? {} : { figmaUrl }),
-      docsPaths: sources.docs.map((file) => file.path),
-      openApiPaths: sources.openApi.map((file) => file.path),
-      guidancePaths: sources.guidance.map((file) => file.path),
-      discoveredGuidancePaths: sources.discoveredGuidance.map((file) => file.path),
+      docsPaths: normalizedProfilePaths.docsPaths,
+      openApiPaths: normalizedProfilePaths.openApiPaths,
+      guidancePaths: normalizedProfilePaths.guidancePaths,
+      discoveredGuidancePaths: normalizedProfilePaths.discoveredGuidancePaths,
       skillHints: sources.skillHints,
     });
     const workload = estimateWorkload({
