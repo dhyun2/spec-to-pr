@@ -47,13 +47,69 @@ export const ImplementationContextIdSchema = z
   .max(128)
   .regex(/^[a-z0-9][a-z0-9._:-]+$/i, "Implementation context ID contains unsupported characters");
 
+export const WorkflowSourcePathSchema = z.string().trim().min(1).max(1_000);
+export const SkillHintSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(128)
+  .regex(
+    /^[a-z0-9][a-z0-9._ -]*(?::[a-z0-9][a-z0-9._ -]*)?$/i,
+    "Skill hint must be a skill name, not a filesystem path",
+  );
+
+function uniqueBoundedArray<T extends z.ZodTypeAny>(item: T, label: string, max = 20) {
+  return z
+    .array(item)
+    .max(max)
+    .superRefine((items, context) => {
+      const seen = new Set<string>();
+      items.forEach((item, index) => {
+        const key = String(item);
+        if (seen.has(key)) {
+          context.addIssue({
+            code: "custom",
+            path: [index],
+            message: `${label} entries must be unique`,
+          });
+        }
+        seen.add(key);
+      });
+    });
+}
+
+const NormalizedSourcePathsSchema = uniqueBoundedArray(WorkflowSourcePathSchema, "Source path");
+const NormalizedSkillHintsSchema = uniqueBoundedArray(SkillHintSchema, "Skill hint");
+
+export const GuidanceTraceSchema = z
+  .object({
+    explicit: NormalizedSourcePathsSchema.default([]),
+    discovered: NormalizedSourcePathsSchema.default([]),
+    skillHints: NormalizedSkillHintsSchema.default([]),
+  })
+  .strict()
+  .superRefine((trace, context) => {
+    if (trace.explicit.length + trace.discovered.length > 20) {
+      context.addIssue({
+        code: "custom",
+        path: ["discovered"],
+        message: "Combined explicit and discovered guidance cannot exceed 20 files",
+      });
+    }
+  });
+
 export const DeliveryProfileSchema = z
   .object({
     mode: DeliveryModeSchema,
     changeKind: ChangeKindSchema,
     publication: PublicationIntentSchema,
-    briefPath: z.string().trim().min(1).optional(),
+    briefPath: WorkflowSourcePathSchema.optional(),
     figmaUrl: FigmaFileUrlSchema.optional(),
+    docsPaths: NormalizedSourcePathsSchema.default([]),
+    openApiPaths: NormalizedSourcePathsSchema.default([]),
+    guidancePaths: NormalizedSourcePathsSchema.default([]),
+    discoveredGuidancePaths: NormalizedSourcePathsSchema.default([]),
+    skillHints: NormalizedSkillHintsSchema.default([]),
     requirements: z
       .object({
         brief: z.boolean(),
@@ -64,7 +120,53 @@ export const DeliveryProfileSchema = z
       })
       .strict(),
   })
-  .strict();
+  .strict()
+  .superRefine((profile, context) => {
+    const classifiedSources = new Map<string, "docsPaths" | "openApiPaths">();
+    for (const field of ["docsPaths", "openApiPaths"] as const) {
+      profile[field].forEach((sourcePath, index) => {
+        const previous = classifiedSources.get(sourcePath);
+        if (previous !== undefined && previous !== field) {
+          context.addIssue({
+            code: "custom",
+            path: [field, index],
+            message: `Source path conflicts with ${previous}: ${sourcePath}`,
+          });
+        }
+        classifiedSources.set(sourcePath, field);
+      });
+    }
+
+    const explicitGuidance = new Set(profile.guidancePaths);
+    for (const field of ["guidancePaths", "discoveredGuidancePaths"] as const) {
+      profile[field].forEach((sourcePath, index) => {
+        const previous = classifiedSources.get(sourcePath);
+        if (previous !== undefined) {
+          context.addIssue({
+            code: "custom",
+            path: [field, index],
+            message: `Guidance path conflicts with ${previous}: ${sourcePath}`,
+          });
+        }
+      });
+    }
+    profile.discoveredGuidancePaths.forEach((sourcePath, index) => {
+      if (explicitGuidance.has(sourcePath)) {
+        context.addIssue({
+          code: "custom",
+          path: ["discoveredGuidancePaths", index],
+          message: `Discovered guidance duplicates explicit guidance: ${sourcePath}`,
+        });
+      }
+    });
+    if (profile.guidancePaths.length + profile.discoveredGuidancePaths.length > 20) {
+      context.addIssue({
+        code: "custom",
+        path: ["discoveredGuidancePaths"],
+        message: "Combined explicit and discovered guidance cannot exceed 20 files",
+      });
+    }
+  });
 
 export const ReviewVerdictSchema = z.enum(["approved", "changes-requested", "blocked"]);
 export const ReviewFindingSeveritySchema = z.enum(["minor", "major", "blocker"]);
@@ -250,6 +352,11 @@ export const ContractsSubmissionSchema = z
     requirementManifest: z.array(RequirementContractSchema).default([]),
     legacyBaseline: LegacyBaselineSchema.optional(),
     workloadSignals: WorkloadSignalsSchema.optional(),
+    guidanceTrace: GuidanceTraceSchema.default({
+      explicit: [],
+      discovered: [],
+      skillHints: [],
+    }),
   })
   .strict()
   .superRefine((submission, context) => {
@@ -578,6 +685,7 @@ export type WorkflowScope = z.infer<typeof WorkflowScopeSchema>;
 export type DeliveryMode = z.infer<typeof DeliveryModeSchema>;
 export type ChangeKind = z.infer<typeof ChangeKindSchema>;
 export type DeliveryProfile = z.infer<typeof DeliveryProfileSchema>;
+export type GuidanceTrace = z.infer<typeof GuidanceTraceSchema>;
 export type ReviewVerdict = z.infer<typeof ReviewVerdictSchema>;
 export type ImplementationReviewPacket = z.infer<typeof ImplementationReviewPacketSchema>;
 export type WorkflowSubmission = z.infer<typeof WorkflowSubmissionSchema>;

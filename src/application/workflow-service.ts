@@ -24,6 +24,8 @@ import {
   FigmaFileUrlSchema,
   ImplementationContextIdSchema,
   PublicationIntentSchema,
+  SkillHintSchema,
+  WorkflowSourcePathSchema,
   WorkflowActionSchema,
   WorkflowScopeSchema,
   WorkflowStatusSchema,
@@ -52,6 +54,21 @@ const WORKER_ID = "workflow-orchestrator" as const;
 const execFileAsync = promisify(execFile);
 const DEFAULT_EXTERNAL_LEASE_TTL_MS = 15 * 60 * 1000;
 const DEFAULT_EXTERNAL_HEARTBEAT_MS = 60 * 1000;
+const MAX_COMPOSABLE_SOURCE_PATHS = 20;
+const MAX_INTAKE_SOURCE_CHARS = 190_000;
+const GUIDANCE_CANDIDATES = [
+  "AGENTS.md",
+  "CLAUDE.md",
+  "README.md",
+  "docs/architecture/ARCHITECTURE.md",
+  "docs/etc/folder-structure.md",
+] as const;
+
+const ComposableSourcePathsSchema = z
+  .array(WorkflowSourcePathSchema)
+  .max(MAX_COMPOSABLE_SOURCE_PATHS)
+  .default([]);
+const SkillHintsSchema = z.array(SkillHintSchema).max(20).default([]);
 
 const FigmaManifestSchema = z
   .object({
@@ -89,6 +106,12 @@ export const WorkflowStartInputSchema = z
     publication: PublicationIntentSchema.optional(),
     briefPath: z.string().trim().min(1).optional(),
     figmaUrl: FigmaFileUrlSchema.optional(),
+    docsPath: WorkflowSourcePathSchema.optional(),
+    docsPaths: ComposableSourcePathsSchema,
+    openApiPath: WorkflowSourcePathSchema.optional(),
+    openApiPaths: ComposableSourcePathsSchema,
+    guidancePaths: ComposableSourcePathsSchema,
+    skillHints: SkillHintsSchema,
   })
   .strict()
   .superRefine((input, context) => {
@@ -115,6 +138,44 @@ export const WorkflowStartInputSchema = z
         code: "custom",
         path: ["scope"],
         message: `${input.mode} mode requires UI scope`,
+      });
+    }
+
+    for (const [singularField, arrayField] of [
+      ["docsPath", "docsPaths"],
+      ["openApiPath", "openApiPaths"],
+    ] as const) {
+      const paths = uniqueInputValues([
+        ...(input[singularField] === undefined ? [] : [input[singularField]]),
+        ...input[arrayField],
+      ]);
+      if (paths.length > MAX_COMPOSABLE_SOURCE_PATHS) {
+        context.addIssue({
+          code: "custom",
+          path: [arrayField],
+          message: `${singularField} and ${arrayField} cannot contain more than ${MAX_COMPOSABLE_SOURCE_PATHS} distinct paths`,
+        });
+      }
+    }
+
+    const roles = new Map<string, string>();
+    for (const [role, paths] of [
+      ["briefPath", input.briefPath === undefined ? [] : [input.briefPath]],
+      ["docsPaths", [input.docsPath, ...input.docsPaths].filter(isDefined)],
+      ["openApiPaths", [input.openApiPath, ...input.openApiPaths].filter(isDefined)],
+      ["guidancePaths", input.guidancePaths],
+    ] as const) {
+      paths.forEach((sourcePath, index) => {
+        const key = normalizedInputPathKey(sourcePath);
+        const previous = roles.get(key);
+        if (previous !== undefined && previous !== role) {
+          context.addIssue({
+            code: "custom",
+            path: [role, index],
+            message: `Source path conflicts with ${previous}: ${sourcePath}`,
+          });
+        }
+        roles.set(key, role);
       });
     }
   });
@@ -230,10 +291,7 @@ export class WorkflowService {
 
   public async start(rawInput: unknown): Promise<WorkflowStatus> {
     const input = WorkflowStartInputSchema.parse(rawInput);
-    const briefText =
-      input.mode === "brief" && input.briefPath !== undefined
-        ? await readProjectTextFile(input.projectRoot, input.briefPath, "Brief")
-        : undefined;
+    const sources = await prepareComposableSources(input);
     const publication = input.publication ?? (input.mode === "figma" ? "none" : "draft");
     const initialHead = await currentGitHead(input.projectRoot);
     const created = await this.dependencies.runService.createRun({
@@ -250,24 +308,44 @@ export class WorkflowService {
       runId: created.id,
       requestText: input.requestText,
     });
-    const parsedBrief =
-      briefText === undefined || input.briefPath === undefined
-        ? undefined
-        : await this.dependencies.intakeRequestService.parseIntakeRequest({
-            runId: created.id,
-            requestText: briefText,
-            label: `brief:${input.briefPath}`,
-          });
+    const intakeArtifactIds = [parsed.artifact.id];
+    for (const [kind, files] of [
+      ["brief", sources.brief === undefined ? [] : [sources.brief]],
+      ["docs", sources.docs],
+      ["openapi", sources.openApi],
+      ["guidance", [...sources.guidance, ...sources.discoveredGuidance]],
+    ] as const) {
+      for (const file of files) {
+        const artifactIds = await ingestProjectTextSource({
+          service: this.dependencies.intakeRequestService,
+          runId: created.id,
+          kind,
+          file,
+        });
+        intakeArtifactIds.push(...artifactIds);
+      }
+    }
+
     const figmaUrl = input.figmaUrl ?? parsed.parsed.figmaUrls[0];
     const explicitScope =
       (input.mode === "feature" || input.mode === "figma") && input.scope === "auto"
         ? "ui"
         : input.scope;
-    const scope = classifyWorkflowScope({
-      requestText:
-        briefText === undefined ? input.requestText : `${input.requestText}\n\n${briefText}`,
+    const classificationText = [
+      input.requestText,
+      ...(sources.brief === undefined ? [] : [sources.brief.text]),
+      ...sources.docs.map((file) => file.text),
+      ...sources.openApi.map((file) => file.text),
+    ].join("\n\n");
+    const classifiedScope = classifyWorkflowScope({
+      requestText: classificationText,
       explicitScope,
       figmaUrls: figmaUrl === undefined ? parsed.parsed.figmaUrls : [figmaUrl],
+    });
+    const scope = WorkflowScopeSchema.parse({
+      ...classifiedScope,
+      api: classifiedScope.api || sources.openApi.length > 0,
+      specification: classifiedScope.specification || sources.openApi.length > 0,
     });
     const gatePlan = buildGatePlan(scope);
     const deliveryProfile = buildDeliveryProfile({
@@ -275,18 +353,21 @@ export class WorkflowService {
       changeKind: input.changeKind,
       publication,
       scope,
-      ...(input.briefPath === undefined ? {} : { briefPath: input.briefPath }),
+      ...(sources.brief === undefined ? {} : { briefPath: sources.brief.path }),
       ...(figmaUrl === undefined ? {} : { figmaUrl }),
+      docsPaths: sources.docs.map((file) => file.path),
+      openApiPaths: sources.openApi.map((file) => file.path),
+      guidancePaths: sources.guidance.map((file) => file.path),
+      discoveredGuidancePaths: sources.discoveredGuidance.map((file) => file.path),
+      skillHints: sources.skillHints,
     });
     const workload = estimateWorkload({
       phase: "intake",
       mode: deliveryProfile.mode,
       scope,
       signals: {
-        requirements: countIntakeRequirements(
-          briefText === undefined ? input.requestText : `${input.requestText}\n${briefText}`,
-        ),
-        apiOperations: scope.api ? 1 : 0,
+        requirements: countIntakeRequirements(classificationText),
+        apiOperations: sources.openApi.length > 0 ? sources.openApi.length : scope.api ? 1 : 0,
         uiSurfaces: scope.ui ? 1 : 0,
         figmaNodes: figmaUrl === undefined ? 0 : 1,
         testTargets: scope.code ? 1 : 0,
@@ -300,10 +381,7 @@ export class WorkflowService {
       stageName: "intake",
       workerId: WORKER_ID,
       leaseId: started.stage.lease!.id,
-      artifactIds: [
-        parsed.artifact.id,
-        ...(parsedBrief === undefined ? [] : [parsedBrief.artifact.id]),
-      ],
+      artifactIds: [...intakeArtifactIds],
       checkpoint: {
         name: "scope-classified",
         data: { scope, gatePlan, deliveryProfile, workload },
@@ -1431,6 +1509,17 @@ function assertSubmissionPrerequisites(run: RunManifest, submission: WorkflowSub
   if (
     submission.kind === "contracts" &&
     submission.status === "passed" &&
+    (!sameStringMembers(submission.guidanceTrace.explicit, profile.guidancePaths) ||
+      !sameStringMembers(submission.guidanceTrace.discovered, profile.discoveredGuidancePaths) ||
+      !sameStringMembers(submission.guidanceTrace.skillHints, profile.skillHints))
+  ) {
+    throw new Error(
+      "Passed contracts must report every explicit and discovered guidance path and every skill hint",
+    );
+  }
+  if (
+    submission.kind === "contracts" &&
+    submission.status === "passed" &&
     profile.requirements.figmaBundle &&
     !run.artifacts.some(
       (artifact) => artifact.metadata["workflowSubmissionKind"] === "figma-bundle",
@@ -1781,11 +1870,191 @@ function producerForSubmission(submission: WorkflowSubmission) {
   return "orchestrator" as const;
 }
 
+type ProjectTextSource = {
+  path: string;
+  resolvedPath: string;
+  text: string;
+};
+
+type PreparedComposableSources = {
+  brief?: ProjectTextSource;
+  docs: ProjectTextSource[];
+  openApi: ProjectTextSource[];
+  guidance: ProjectTextSource[];
+  discoveredGuidance: ProjectTextSource[];
+  skillHints: string[];
+};
+
+async function prepareComposableSources(
+  input: z.infer<typeof WorkflowStartInputSchema>,
+): Promise<PreparedComposableSources> {
+  const root = await realpath(input.projectRoot);
+  const docsInput = uniqueInputValues([
+    ...(input.docsPath === undefined ? [] : [input.docsPath]),
+    ...input.docsPaths,
+  ]);
+  const openApiInput = uniqueInputValues([
+    ...(input.openApiPath === undefined ? [] : [input.openApiPath]),
+    ...input.openApiPaths,
+  ]);
+  const guidanceInput = uniqueInputValues(input.guidancePaths);
+  const skillHints = uniqueInputValues(input.skillHints);
+  const brief =
+    input.briefPath === undefined
+      ? undefined
+      : await readProjectTextFile(root, input.briefPath, "Brief");
+  const docs = await readDistinctProjectTextFiles(root, docsInput, "Supporting document");
+  const openApi = await readDistinctProjectTextFiles(root, openApiInput, "OpenAPI");
+  const guidance = await readDistinctProjectTextFiles(root, guidanceInput, "Guidance");
+
+  const claimedFiles = new Map<string, string>();
+  const claim = (file: ProjectTextSource, role: string, automatic = false): boolean => {
+    const previous = claimedFiles.get(file.resolvedPath);
+    if (previous !== undefined) {
+      if (automatic) return false;
+      throw new Error(`Source file cannot be used as both ${previous} and ${role}: ${file.path}`);
+    }
+    claimedFiles.set(file.resolvedPath, role);
+    return true;
+  };
+
+  if (brief !== undefined) claim(brief, "brief");
+  docs.forEach((file) => claim(file, "supporting documentation"));
+  openApi.forEach((file) => claim(file, "OpenAPI"));
+  guidance.forEach((file) => claim(file, "explicit guidance"));
+
+  const occupiedInputPaths = new Set(
+    [input.briefPath, ...docsInput, ...openApiInput, ...guidanceInput]
+      .filter(isDefined)
+      .map(normalizedInputPathKey),
+  );
+  const discoveredGuidance: ProjectTextSource[] = [];
+  for (const candidate of GUIDANCE_CANDIDATES) {
+    if (guidance.length + discoveredGuidance.length >= MAX_COMPOSABLE_SOURCE_PATHS) break;
+    if (occupiedInputPaths.has(normalizedInputPathKey(candidate))) continue;
+    const file = await readOptionalProjectTextFile(root, candidate, "Discovered guidance");
+    if (file !== undefined && claim(file, "discovered guidance", true)) {
+      discoveredGuidance.push(file);
+    }
+  }
+
+  return {
+    ...(brief === undefined ? {} : { brief }),
+    docs,
+    openApi,
+    guidance,
+    discoveredGuidance,
+    skillHints,
+  };
+}
+
+async function readDistinctProjectTextFiles(
+  projectRoot: string,
+  paths: string[],
+  label: string,
+): Promise<ProjectTextSource[]> {
+  const files: ProjectTextSource[] = [];
+  const seen = new Set<string>();
+  for (const filePath of paths) {
+    const file = await readProjectTextFile(projectRoot, filePath, label);
+    if (!seen.has(file.resolvedPath)) {
+      files.push(file);
+      seen.add(file.resolvedPath);
+    }
+  }
+  return files;
+}
+
+async function ingestProjectTextSource(input: {
+  service: IntakeRequestService;
+  runId: string;
+  kind: "brief" | "docs" | "openapi" | "guidance";
+  file: ProjectTextSource;
+}): Promise<string[]> {
+  const chunks = chunkIntakeSource(input.file.text);
+  const artifactIds: string[] = [];
+  for (let index = 0; index < chunks.length; index += 1) {
+    const result = await input.service.parseIntakeRequest({
+      runId: input.runId,
+      requestText: chunks[index],
+      label: intakeSourceLabel(input.kind, input.file.path, index, chunks.length),
+    });
+    artifactIds.push(result.artifact.id);
+  }
+  return artifactIds;
+}
+
+function chunkIntakeSource(text: string): string[] {
+  if (text.trim() === "") {
+    throw new Error("Project text sources must contain non-whitespace content");
+  }
+  const chunks: string[] = [];
+  for (let offset = 0; offset < text.length; offset += MAX_INTAKE_SOURCE_CHARS) {
+    chunks.push(text.slice(offset, offset + MAX_INTAKE_SOURCE_CHARS));
+  }
+  return chunks;
+}
+
+function intakeSourceLabel(
+  kind: "brief" | "docs" | "openapi" | "guidance",
+  filePath: string,
+  index: number,
+  total: number,
+): string {
+  const suffix = total === 1 ? "" : `#part-${index + 1}-of-${total}`;
+  const preferred = `${kind}:${filePath}${suffix}`;
+  if (preferred.length <= 200) return preferred;
+
+  const digest = createHash("sha256").update(filePath).digest("hex").slice(0, 16);
+  const basename = path.basename(filePath).slice(0, 120);
+  return `${kind}:${basename}:${digest}${suffix}`.slice(0, 200);
+}
+
+function uniqueInputValues(values: readonly string[]): string[] {
+  const unique = new Map<string, string>();
+  values.forEach((value) => {
+    const key = normalizedInputPathKey(value);
+    if (!unique.has(key)) unique.set(key, value);
+  });
+  return [...unique.values()];
+}
+
+function normalizedInputPathKey(value: string): string {
+  return path.normalize(value).split(path.sep).join("/");
+}
+
+function isDefined<T>(value: T | undefined): value is T {
+  return value !== undefined;
+}
+
+function sameStringMembers(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value) => right.includes(value));
+}
+
 async function readProjectTextFile(
   projectRoot: string,
   filePath: string,
   label: string,
-): Promise<string> {
+): Promise<ProjectTextSource> {
+  const file = await resolveProjectTextFile(projectRoot, filePath, label, false);
+  if (file === undefined) throw new Error(`${label} file does not exist: ${filePath}`);
+  return file;
+}
+
+async function readOptionalProjectTextFile(
+  projectRoot: string,
+  filePath: string,
+  label: string,
+): Promise<ProjectTextSource | undefined> {
+  return resolveProjectTextFile(projectRoot, filePath, label, true);
+}
+
+async function resolveProjectTextFile(
+  projectRoot: string,
+  filePath: string,
+  label: string,
+  missingAllowed: boolean,
+): Promise<ProjectTextSource | undefined> {
   const root = await realpath(projectRoot);
   const requestedPath = path.isAbsolute(filePath)
     ? path.normalize(filePath)
@@ -1795,7 +2064,8 @@ async function readProjectTextFile(
   let resolvedPath: string;
   try {
     resolvedPath = await realpath(requestedPath);
-  } catch {
+  } catch (error) {
+    if (missingAllowed && isMissingFileError(error)) return undefined;
     throw new Error(`${label} file does not exist: ${filePath}`);
   }
   assertWithinProjectRoot(root, resolvedPath, filePath);
@@ -1804,7 +2074,20 @@ async function readProjectTextFile(
   if (details.size > 1024 * 1024)
     throw new Error(`${label} file exceeds the 1 MB limit: ${filePath}`);
 
-  return readFile(resolvedPath, "utf8");
+  return {
+    path: path.relative(root, resolvedPath).split(path.sep).join("/"),
+    resolvedPath,
+    text: await readFile(resolvedPath, "utf8"),
+  };
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error.code === "ENOENT" || error.code === "ENOTDIR")
+  );
 }
 
 async function countDeclaredWorkspacePackages(projectRoot: string): Promise<number> {

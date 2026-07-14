@@ -136,4 +136,51 @@ describe("delivery policy", () => {
       }),
     ).toThrow(/UI scope/);
   });
+
+  it("composes feature sources and requires a Figma bundle whenever a URL is supplied", () => {
+    expect(
+      buildDeliveryProfile({
+        mode: "feature",
+        changeKind: "feature",
+        publication: "draft",
+        scope: { ...uiScope, api: true, hasVisualBaseline: true },
+        briefPath: "briefs/checkout.md",
+        figmaUrl: "https://www.figma.com/design/abc/file?node-id=1-2",
+        docsPaths: ["docs/business-rules.md"],
+        openApiPaths: ["docs/openapi.yaml"],
+        guidancePaths: ["docs/architecture/ARCHITECTURE.md"],
+        discoveredGuidancePaths: ["AGENTS.md"],
+        skillHints: ["react-best-practices", "api-generator"],
+      }),
+    ).toMatchObject({
+      mode: "feature",
+      briefPath: "briefs/checkout.md",
+      docsPaths: ["docs/business-rules.md"],
+      openApiPaths: ["docs/openapi.yaml"],
+      guidancePaths: ["docs/architecture/ARCHITECTURE.md"],
+      discoveredGuidancePaths: ["AGENTS.md"],
+      skillHints: ["react-best-practices", "api-generator"],
+      requirements: {
+        brief: true,
+        targetedFeatureE2E: true,
+        featureVideo: true,
+        figmaBundle: true,
+      },
+    });
+
+    expect(
+      buildDeliveryProfile({
+        mode: "brief",
+        changeKind: "feature",
+        publication: "draft",
+        scope: uiScope,
+        briefPath: "briefs/checkout.md",
+        figmaUrl: "https://www.figma.com/design/abc/file?node-id=1-2",
+      }).requirements,
+    ).toMatchObject({
+      targetedFeatureE2E: false,
+      featureVideo: false,
+      figmaBundle: true,
+    });
+  });
 });

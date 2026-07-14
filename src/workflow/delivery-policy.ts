@@ -13,6 +13,11 @@ export function buildDeliveryProfile(input: {
   scope: WorkflowScope;
   briefPath?: string;
   figmaUrl?: string;
+  docsPaths?: string[];
+  openApiPaths?: string[];
+  guidancePaths?: string[];
+  discoveredGuidancePaths?: string[];
+  skillHints?: string[];
 }): DeliveryProfile {
   if (input.mode === "brief" && input.briefPath === undefined) {
     throw new Error("brief mode requires briefPath");
@@ -32,12 +37,17 @@ export function buildDeliveryProfile(input: {
     publication: input.publication,
     ...(input.briefPath === undefined ? {} : { briefPath: input.briefPath }),
     ...(input.figmaUrl === undefined ? {} : { figmaUrl: input.figmaUrl }),
+    docsPaths: input.docsPaths ?? [],
+    openApiPaths: input.openApiPaths ?? [],
+    guidancePaths: input.guidancePaths ?? [],
+    discoveredGuidancePaths: input.discoveredGuidancePaths ?? [],
+    skillHints: input.skillHints ?? [],
     requirements: {
-      brief: input.mode === "brief",
+      brief: input.briefPath !== undefined,
       legacyBaseline: input.mode === "legacy",
       targetedFeatureE2E: userFacingFeature,
       featureVideo: userFacingFeature,
-      figmaBundle: input.mode === "figma",
+      figmaBundle: input.figmaUrl !== undefined,
     },
   });
 }

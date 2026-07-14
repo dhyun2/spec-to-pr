@@ -441,6 +441,183 @@ describe("WorkflowService", () => {
     ).toBe(true);
   });
 
+  it("composes feature, brief, Figma, supporting docs, OpenAPI, and guidance sources", async () => {
+    await mkdir(path.join(directory, "docs", "architecture"), { recursive: true });
+    await writeFile(
+      path.join(directory, "docs", "business-rules.md"),
+      "The checkout screen must show a concise payment error.\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(directory, "docs", "openapi.yaml"),
+      "openapi: 3.1.0\npaths:\n  /checkout:\n    post:\n      operationId: checkout\n      responses: {}\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(directory, "docs", "architecture", "ARCHITECTURE.md"),
+      "Place feature code in the checkout slice.\n",
+      "utf8",
+    );
+
+    const status = await service.start({
+      projectRoot: directory,
+      requestText: "Implement checkout from the supplied sources",
+      scope: "auto",
+      mode: "feature",
+      changeKind: "feature",
+      publication: "draft",
+      briefPath: "briefs/checkout.md",
+      figmaUrl: FIGMA_URL,
+      docsPath: "docs/business-rules.md",
+      docsPaths: ["docs/business-rules.md"],
+      openApiPath: "docs/openapi.yaml",
+      guidancePaths: ["docs/architecture/ARCHITECTURE.md"],
+      skillHints: ["react-best-practices", "api-generator"],
+    });
+
+    expect(status.deliveryProfile).toMatchObject({
+      mode: "feature",
+      briefPath: "briefs/checkout.md",
+      figmaUrl: FIGMA_URL,
+      docsPaths: ["docs/business-rules.md"],
+      openApiPaths: ["docs/openapi.yaml"],
+      guidancePaths: ["docs/architecture/ARCHITECTURE.md"],
+      discoveredGuidancePaths: [],
+      skillHints: ["react-best-practices", "api-generator"],
+      requirements: {
+        brief: true,
+        targetedFeatureE2E: true,
+        featureVideo: true,
+        figmaBundle: true,
+      },
+    });
+    expect(status.scope).toMatchObject({ ui: true, api: true, specification: true });
+
+    const stored = await store.get(status.runId);
+    const labels = stored.sources.flatMap((source) =>
+      source.locator.type === "inline" ? [source.locator.label] : [],
+    );
+    expect(labels).toEqual(
+      expect.arrayContaining([
+        "brief:briefs/checkout.md",
+        "docs:docs/business-rules.md",
+        "openapi:docs/openapi.yaml",
+        "guidance:docs/architecture/ARCHITECTURE.md",
+      ]),
+    );
+    expect(labels.filter((label) => label === "docs:docs/business-rules.md")).toHaveLength(1);
+  });
+
+  it("discovers only fixed project guidance without activating unrelated gates", async () => {
+    await mkdir(path.join(directory, "docs", "etc"), { recursive: true });
+    await writeFile(
+      path.join(directory, "AGENTS.md"),
+      "React UI API auth performance telemetry rules apply when relevant.\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(directory, "docs", "etc", "folder-structure.md"),
+      "Keep source files grouped by feature.\n",
+      "utf8",
+    );
+    await writeFile(path.join(directory, "docs", "not-discovered.md"), "Ignore me.\n", "utf8");
+
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Update one sentence in the release notes",
+      scope: "docs",
+      mode: "auto",
+      changeKind: "docs",
+      publication: "none",
+      skillHints: ["next-best-practices"],
+    });
+
+    expect(started.deliveryProfile).toMatchObject({
+      guidancePaths: [],
+      discoveredGuidancePaths: ["AGENTS.md", "docs/etc/folder-structure.md"],
+      skillHints: ["next-best-practices"],
+    });
+    expect(started.scope).toMatchObject({
+      code: false,
+      ui: false,
+      api: false,
+      securitySensitive: false,
+      performanceSensitive: false,
+      observabilityRequested: false,
+    });
+    for (const validation of ["accessibility", "api-ready", "security", "performance"]) {
+      expect(started.requiredValidations).not.toContain(validation);
+    }
+
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "contracts",
+          status: "passed",
+          summary: "Release-note contract ready.",
+          artifactPaths: ["contracts/requirements.json"],
+          requirementManifest: requirements("release-notes"),
+        },
+      }),
+    ).rejects.toThrow(/guidance/i);
+
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "contracts",
+          status: "passed",
+          summary: "Release-note contract follows project guidance.",
+          artifactPaths: ["contracts/requirements.json"],
+          requirementManifest: requirements("release-notes"),
+          guidanceTrace: {
+            explicit: [],
+            discovered: ["AGENTS.md", "docs/etc/folder-structure.md"],
+            skillHints: ["next-best-practices"],
+          },
+        },
+      }),
+    ).resolves.toMatchObject({ nextActions: [{ kind: "implement" }] });
+  });
+
+  it("blocks missing explicit guidance before creating a durable Run", async () => {
+    await expect(
+      service.start({
+        projectRoot: directory,
+        requestText: "Refactor the parser",
+        guidancePaths: ["docs/missing-guidance.md"],
+      }),
+    ).rejects.toThrow(/Guidance file does not exist/i);
+    await expect(store.list()).resolves.toHaveLength(0);
+  });
+
+  it("preserves the 1 MB text-source boundary for composable files", async () => {
+    await mkdir(path.join(directory, "docs"), { recursive: true });
+    await writeFile(path.join(directory, "docs", "large.md"), "a".repeat(300_000), "utf8");
+
+    const accepted = await service.start({
+      projectRoot: directory,
+      requestText: "Use the supplied supporting document",
+      docsPaths: ["docs/large.md"],
+    });
+    expect(accepted.deliveryProfile.docsPaths).toEqual(["docs/large.md"]);
+
+    await writeFile(
+      path.join(directory, "docs", "too-large.md"),
+      "a".repeat(1024 * 1024 + 1),
+      "utf8",
+    );
+    await expect(
+      service.start({
+        projectRoot: directory,
+        requestText: "Use the oversized document",
+        docsPaths: ["docs/too-large.md"],
+      }),
+    ).rejects.toThrow(/1 MB limit/i);
+    await expect(store.list()).resolves.toHaveLength(1);
+  });
+
   it("defaults older v2 Runs without delivery profiles to the lightweight auto profile", async () => {
     const started = await service.start({
       projectRoot: directory,

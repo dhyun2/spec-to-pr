@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { WorkflowStartInputSchema } from "../../src/application/workflow-service.js";
 import { RUN_STAGE_NAMES } from "../../src/run/stages.js";
 import {
   AGENT_ROLES,
@@ -9,12 +10,107 @@ import {
 import {
   ReviewSubmissionSchema,
   ContractsSubmissionSchema,
+  DeliveryProfileSchema,
+  GuidanceTraceSchema,
   ImplementationReviewPacketSchema,
   WorkflowResumeContextSchema,
   WorkflowSubmissionSchema,
 } from "../../src/workflow/index.js";
 
 describe("workflow v2 contracts", () => {
+  it("bounds composable source arrays and preserves legacy singular source inputs", () => {
+    const base = {
+      projectRoot: "/tmp/example",
+      requestText: "Implement checkout",
+    };
+
+    expect(
+      WorkflowStartInputSchema.safeParse({
+        ...base,
+        docsPath: "docs/legacy.md",
+        docsPaths: ["docs/rules.md"],
+        openApiPath: "docs/legacy-openapi.yaml",
+        openApiPaths: ["docs/checkout-openapi.yaml"],
+        guidancePaths: ["AGENTS.md"],
+        skillHints: ["react-best-practices", "design-system"],
+      }).success,
+    ).toBe(true);
+
+    for (const field of ["docsPaths", "openApiPaths", "guidancePaths", "skillHints"] as const) {
+      expect(
+        WorkflowStartInputSchema.safeParse({
+          ...base,
+          [field]: Array.from({ length: 21 }, (_, index) => `${field}-${index}`),
+        }).success,
+      ).toBe(false);
+    }
+
+    expect(
+      WorkflowStartInputSchema.safeParse({
+        ...base,
+        skillHints: ["../skills/react-best-practices"],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("stores unique normalized source and guidance trace fields", () => {
+    const profile = {
+      mode: "feature",
+      changeKind: "feature",
+      publication: "draft",
+      briefPath: "briefs/checkout.md",
+      figmaUrl: "https://www.figma.com/design/abc/file?node-id=1-2",
+      docsPaths: ["docs/business-rules.md"],
+      openApiPaths: ["docs/openapi.yaml"],
+      guidancePaths: ["docs/architecture/ARCHITECTURE.md"],
+      discoveredGuidancePaths: ["AGENTS.md"],
+      skillHints: ["react-best-practices"],
+      requirements: {
+        brief: true,
+        legacyBaseline: false,
+        targetedFeatureE2E: true,
+        featureVideo: true,
+        figmaBundle: true,
+      },
+    };
+
+    expect(DeliveryProfileSchema.safeParse(profile).success).toBe(true);
+    expect(
+      DeliveryProfileSchema.safeParse({
+        ...profile,
+        docsPaths: ["docs/business-rules.md", "docs/business-rules.md"],
+      }).success,
+    ).toBe(false);
+
+    expect(
+      ContractsSubmissionSchema.safeParse({
+        kind: "contracts",
+        status: "passed",
+        summary: "Contracts and project guidance applied.",
+        artifactPaths: ["contracts/requirements.json"],
+        requirementManifest: [
+          {
+            id: "checkout",
+            title: "Checkout",
+            acceptanceCriteria: ["Checkout follows project guidance."],
+          },
+        ],
+        guidanceTrace: {
+          explicit: ["docs/architecture/ARCHITECTURE.md"],
+          discovered: ["AGENTS.md"],
+          skillHints: ["react-best-practices"],
+        },
+      }).success,
+    ).toBe(true);
+    expect(
+      GuidanceTraceSchema.safeParse({
+        explicit: Array.from({ length: 20 }, (_, index) => `docs/guidance-${index}.md`),
+        discovered: ["AGENTS.md"],
+        skillHints: [],
+      }).success,
+    ).toBe(false);
+  });
+
   it("requires a structured requirement manifest and focused legacy baseline evidence", () => {
     const requirementManifest = [
       {
