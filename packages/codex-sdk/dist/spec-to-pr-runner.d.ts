@@ -8,8 +8,12 @@ export type SpecToPrCodexRunInput = {
     prompt?: string;
     briefPath?: string;
     docsPath?: string;
+    docsPaths?: string[];
     figmaUrl?: string;
     openApiPath?: string;
+    openApiPaths?: string[];
+    guidancePaths?: string[];
+    skillHints?: string[];
     resumeThreadId?: string;
     model?: string;
     modelReasoningEffort?: ModelReasoningEffort;

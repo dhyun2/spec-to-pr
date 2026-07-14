@@ -47,8 +47,12 @@ export type SpecToPrCodexRunInput = {
   prompt?: string;
   briefPath?: string;
   docsPath?: string;
+  docsPaths?: string[];
   figmaUrl?: string;
   openApiPath?: string;
+  openApiPaths?: string[];
+  guidancePaths?: string[];
+  skillHints?: string[];
   resumeThreadId?: string;
   model?: string;
   modelReasoningEffort?: ModelReasoningEffort;
@@ -107,6 +111,7 @@ export async function runSpecToPrWithCodex(
   input: SpecToPrCodexRunInput,
 ): Promise<SpecToPrCodexRunResult> {
   validateSpecToPrRunInput(input);
+  const composableSources = normalizeComposableSources(input);
   const codex = new Codex(buildCodexOptions(input));
   const deliveryMode = resolveDeliveryMode(input);
   const initialEstimate = estimateSdkWorkload({
@@ -114,7 +119,7 @@ export async function runSpecToPrWithCodex(
     promptLength: input.prompt?.length ?? 0,
     hasBrief: input.briefPath !== undefined,
     hasFigma: input.figmaUrl !== undefined,
-    hasOpenApi: input.openApiPath !== undefined,
+    hasOpenApi: composableSources.openApiPaths.length > 0,
   });
   const repositoryRoot = resolveRepositoryRoot(input.workingDirectory);
   const usageStore = new UsageCalibrationStore(resolveUsageHistoryPath(input), {
@@ -243,11 +248,18 @@ export async function runSpecToPrWithCodex(
 
 export function buildSpecToPrPrompt(input: SpecToPrCodexRunInput): string {
   validateSpecToPrRunInput(input);
+  const composableSources = normalizeComposableSources(input);
   const sources = [
     formatSource("Brief", input.briefPath),
-    formatSource("Docs", input.docsPath),
+    ...composableSources.docsPaths.map((sourcePath) => formatSource("Docs", sourcePath)),
     formatSource("Figma", input.figmaUrl),
-    formatSource("OpenAPI", input.openApiPath),
+    ...composableSources.openApiPaths.map((sourcePath) => formatSource("OpenAPI", sourcePath)),
+    ...composableSources.guidancePaths.map((sourcePath) =>
+      formatSource("Project guidance", sourcePath),
+    ),
+    ...composableSources.skillHints.map((skillHint) =>
+      formatSource("Optional skill hint", skillHint),
+    ),
   ].filter((line): line is string => line !== undefined);
 
   const userPrompt =
@@ -266,6 +278,18 @@ export function buildSpecToPrPrompt(input: SpecToPrCodexRunInput): string {
     `publication: ${JSON.stringify(publication)}`,
     ...(input.briefPath === undefined ? [] : [`briefPath: ${JSON.stringify(input.briefPath)}`]),
     ...(input.figmaUrl === undefined ? [] : [`figmaUrl: ${JSON.stringify(input.figmaUrl)}`]),
+    ...(composableSources.docsPaths.length === 0
+      ? []
+      : [`docsPaths: ${JSON.stringify(composableSources.docsPaths)}`]),
+    ...(composableSources.openApiPaths.length === 0
+      ? []
+      : [`openApiPaths: ${JSON.stringify(composableSources.openApiPaths)}`]),
+    ...(composableSources.guidancePaths.length === 0
+      ? []
+      : [`guidancePaths: ${JSON.stringify(composableSources.guidancePaths)}`]),
+    ...(composableSources.skillHints.length === 0
+      ? []
+      : [`skillHints: ${JSON.stringify(composableSources.skillHints)}`]),
   ].join(", ");
 
   return [
@@ -273,6 +297,8 @@ export function buildSpecToPrPrompt(input: SpecToPrCodexRunInput): string {
     `The complete public tool surface is: ${CODEX_WORKFLOW_TOOL_NAMES.join(", ")}. Do not call internal or legacy micro-tools.`,
     modeInstructions(deliveryMode),
     `Call workflow_info to read the contract, then workflow_start once with the request and these delivery fields: ${startFields}.`,
+    "Apply instructions in this precedence order: current user request > explicit project guidance > automatically discovered project guidance > applicable installed skills > SpecToPR defaults.",
+    "For each optional skill hint, ask the host to use the named skill only when it is installed and applicable. Missing optional skills do not block the Run; never assume a hinted capability is available.",
     publication === "draft"
       ? "Before implementation, inspect git status and work on an actual non-target codex/<short-slug> source branch without absorbing unrelated dirty changes. Before workflow_publish, stage only intended files, commit all intended changes on that source branch, require a clean tree and at least one commit beyond the target, then pass the actual sourceBranch and targetBranch."
       : "Do not create a publication-only branch when publication is none unless implementation isolation requires it.",
@@ -331,6 +357,7 @@ export function validateSpecToPrRunInput(input: SpecToPrCodexRunInput): void {
   if (input.maxTurns !== undefined && (!Number.isInteger(input.maxTurns) || input.maxTurns <= 0)) {
     throw new Error("maxTurns must be a positive integer");
   }
+  validateComposableSources(input);
   if (input.usageCalibration !== false) {
     const usageHistoryPath = resolveUsageHistoryPath(input);
     if (
@@ -434,6 +461,7 @@ function sdkUsage(usage: AggregatedUsage): RunResult["usage"] {
 function requiredValidationsForInput(input: SpecToPrCodexRunInput): string[] {
   const prompt = input.prompt ?? "";
   const mode = resolveDeliveryMode(input);
+  const composableSources = normalizeComposableSources(input);
   const ui = isUiScope(input, prompt);
   const validations = ["functional"];
   if (ui) validations.push("accessibility");
@@ -442,7 +470,8 @@ function requiredValidationsForInput(input: SpecToPrCodexRunInput): string[] {
   if (mode === "feature") validations.push("targeted-feature-e2e", "feature-video");
   if (
     ui &&
-    (input.openApiPath !== undefined || /\b(api|openapi|endpoint|schema|mock)\b/i.test(prompt))
+    (composableSources.openApiPaths.length > 0 ||
+      /\b(api|openapi|endpoint|schema|mock)\b/i.test(prompt))
   ) {
     validations.push("api-ready");
   }
@@ -485,6 +514,90 @@ function buildThreadOptions(input: SpecToPrCodexRunInput): ThreadOptions {
 
 function formatSource(label: string, value: string | undefined): string | undefined {
   return value === undefined || value.trim() === "" ? undefined : `- ${label}: ${value}`;
+}
+
+const MAX_COMPOSABLE_SOURCE_PATHS = 20;
+const MAX_SOURCE_PATH_LENGTH = 1_000;
+const MAX_SKILL_HINT_LENGTH = 128;
+const SKILL_HINT_PATTERN = /^[a-z0-9][a-z0-9._ -]*(?::[a-z0-9][a-z0-9._ -]*)?$/i;
+
+type NormalizedComposableSources = {
+  docsPaths: string[];
+  openApiPaths: string[];
+  guidancePaths: string[];
+  skillHints: string[];
+};
+
+function normalizeComposableSources(input: SpecToPrCodexRunInput): NormalizedComposableSources {
+  return {
+    docsPaths: uniqueInputValues([
+      ...(input.docsPath === undefined ? [] : [input.docsPath]),
+      ...(input.docsPaths ?? []),
+    ]),
+    openApiPaths: uniqueInputValues([
+      ...(input.openApiPath === undefined ? [] : [input.openApiPath]),
+      ...(input.openApiPaths ?? []),
+    ]),
+    guidancePaths: uniqueInputValues(input.guidancePaths ?? []),
+    skillHints: uniqueInputValues(input.skillHints ?? []),
+  };
+}
+
+function validateComposableSources(input: SpecToPrCodexRunInput): void {
+  const pathArrays = [
+    ["docsPaths", input.docsPaths ?? []],
+    ["openApiPaths", input.openApiPaths ?? []],
+    ["guidancePaths", input.guidancePaths ?? []],
+  ] as const;
+  for (const [field, values] of pathArrays) {
+    if (values.length > MAX_COMPOSABLE_SOURCE_PATHS) {
+      throw new Error(`${field} cannot contain more than ${MAX_COMPOSABLE_SOURCE_PATHS} paths`);
+    }
+    values.forEach((value) => validateSourcePath(value, field));
+  }
+  if (input.docsPath !== undefined) validateSourcePath(input.docsPath, "docsPath");
+  if (input.openApiPath !== undefined) validateSourcePath(input.openApiPath, "openApiPath");
+
+  const skillHints = input.skillHints ?? [];
+  if (skillHints.length > MAX_COMPOSABLE_SOURCE_PATHS) {
+    throw new Error(`skillHints cannot contain more than ${MAX_COMPOSABLE_SOURCE_PATHS} hints`);
+  }
+  skillHints.forEach((skillHint) => {
+    const normalized = skillHint.trim();
+    if (
+      normalized.length === 0 ||
+      normalized.length > MAX_SKILL_HINT_LENGTH ||
+      !SKILL_HINT_PATTERN.test(normalized)
+    ) {
+      throw new Error("skillHints must contain skill names, not filesystem paths");
+    }
+  });
+
+  const normalized = normalizeComposableSources(input);
+  for (const field of ["docsPaths", "openApiPaths"] as const) {
+    if (normalized[field].length > MAX_COMPOSABLE_SOURCE_PATHS) {
+      throw new Error(
+        `${field} legacy and plural inputs cannot contain more than ${MAX_COMPOSABLE_SOURCE_PATHS} distinct paths`,
+      );
+    }
+  }
+}
+
+function validateSourcePath(value: string, field: string): void {
+  const normalized = value.trim();
+  if (normalized.length === 0 || normalized.length > MAX_SOURCE_PATH_LENGTH) {
+    throw new Error(`${field} entries must be between 1 and ${MAX_SOURCE_PATH_LENGTH} characters`);
+  }
+}
+
+function uniqueInputValues(values: readonly string[]): string[] {
+  const unique = new Map<string, string>();
+  values.forEach((value) => {
+    const trimmed = value.trim();
+    const key = path.normalize(trimmed).split(path.sep).join("/");
+    if (!unique.has(key)) unique.set(key, trimmed);
+  });
+  return [...unique.values()];
 }
 
 function isUiScope(input: SpecToPrCodexRunInput, prompt: string): boolean {

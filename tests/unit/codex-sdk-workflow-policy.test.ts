@@ -2,7 +2,7 @@ import { link, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   buildResumeSpecToPrPrompt,
@@ -14,6 +14,20 @@ import {
   CODEX_REVIEW_AGENT_PROFILES,
   CODEX_WORKFLOW_TOOL_NAMES,
 } from "../../packages/codex-sdk/src/workflow-policy.js";
+
+const cliRuns = vi.hoisted(() => ({ inputs: [] as unknown[] }));
+
+vi.mock("../../packages/codex-sdk/src/spec-to-pr-runner.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../packages/codex-sdk/src/spec-to-pr-runner.js")>();
+  return {
+    ...actual,
+    runSpecToPrWithCodex: vi.fn(async (input: unknown) => {
+      cliRuns.inputs.push(input);
+      return {};
+    }),
+  };
+});
 
 const legacyToolNames = [
   "generate_pr_report",
@@ -116,6 +130,138 @@ describe("Codex SDK workflow policy", () => {
     expect(brief).toContain("workflow_status snapshot");
     expect(legacy).toContain('mode: "legacy"');
     expect(legacy).toContain("focused baseline");
+  });
+
+  it("normalizes legacy and plural sources into deduplicated workflow_start arrays", () => {
+    const prompt = buildSpecToPrPrompt({
+      workingDirectory: "/tmp/project",
+      deliveryMode: "feature",
+      prompt: "Implement checkout from the supplied brief.",
+      briefPath: "docs/checkout.md",
+      docsPath: "docs/business-rules.md",
+      docsPaths: ["docs/./business-rules.md", "docs/error-cases.md"],
+      openApiPath: "docs/openapi.yaml",
+      openApiPaths: ["docs/openapi.yaml", "docs/admin-openapi.yaml"],
+      guidancePaths: ["AGENTS.md", "AGENTS.md", "docs/architecture/ARCHITECTURE.md"],
+      skillHints: ["react-best-practices", "react-best-practices", "api-generator"],
+    });
+
+    expect(prompt).toContain('mode: "feature"');
+    expect(prompt).toContain('briefPath: "docs/checkout.md"');
+    expect(prompt).toContain('docsPaths: ["docs/business-rules.md","docs/error-cases.md"]');
+    expect(prompt).toContain('openApiPaths: ["docs/openapi.yaml","docs/admin-openapi.yaml"]');
+    expect(prompt).toContain('guidancePaths: ["AGENTS.md","docs/architecture/ARCHITECTURE.md"]');
+    expect(prompt).toContain('skillHints: ["react-best-practices","api-generator"]');
+    expect(prompt.match(/^- Docs: docs\/business-rules\.md$/gm)).toHaveLength(1);
+    expect(prompt.match(/^- OpenAPI: docs\/openapi\.yaml$/gm)).toHaveLength(1);
+    expect(prompt).toContain("- Project guidance: AGENTS.md");
+    expect(prompt).toContain("- Project guidance: docs/architecture/ARCHITECTURE.md");
+    expect(prompt).toContain("- Optional skill hint: react-best-practices");
+    expect(prompt).toContain("- Optional skill hint: api-generator");
+    expect(prompt).toContain("Feature mode:");
+    expect(prompt).not.toContain("Brief mode:");
+  });
+
+  it("treats skill hints as optional availability checks and states guidance precedence", () => {
+    const prompt = buildSpecToPrPrompt({
+      workingDirectory: "/tmp/project",
+      prompt: "Implement the requested API-backed UI.",
+      guidancePaths: ["AGENTS.md"],
+      skillHints: ["react-best-practices", "not-installed"],
+    });
+
+    expect(prompt).toContain("only when it is installed and applicable");
+    expect(prompt).toContain("Missing optional skills do not block the Run");
+    expect(prompt).toContain(
+      "current user request > explicit project guidance > automatically discovered project guidance > applicable installed skills > SpecToPR defaults",
+    );
+  });
+
+  it("matches runtime deduplication and twenty-item input bounds", () => {
+    const twentyPaths = Array.from({ length: 20 }, (_, index) => `docs/source-${index}.md`);
+    const twentySkills = Array.from({ length: 20 }, (_, index) => `skill-${index}`);
+
+    expect(() =>
+      validateSpecToPrRunInput({
+        workingDirectory: "/tmp/project",
+        docsPath: twentyPaths[0]!,
+        docsPaths: ["docs/./source-0.md", ...twentyPaths.slice(1)],
+        guidancePaths: twentyPaths,
+        skillHints: twentySkills,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateSpecToPrRunInput({
+        workingDirectory: "/tmp/project",
+        docsPath: "docs/legacy.md",
+        docsPaths: twentyPaths,
+      }),
+    ).toThrow(/20 distinct paths/);
+    expect(() =>
+      validateSpecToPrRunInput({
+        workingDirectory: "/tmp/project",
+        guidancePaths: [...twentyPaths, "docs/overflow.md"],
+      }),
+    ).toThrow(/guidancePaths.*20/i);
+    expect(() =>
+      validateSpecToPrRunInput({
+        workingDirectory: "/tmp/project",
+        skillHints: [...twentySkills, "skill-overflow"],
+      }),
+    ).toThrow(/skillHints.*20/i);
+  });
+
+  it("preserves every repeated CLI source and keeps an explicit feature mode", async () => {
+    const originalArgv = process.argv;
+    const consoleLog = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    cliRuns.inputs.length = 0;
+    process.argv = [
+      "node",
+      "spec-to-pr-codex",
+      "--cwd",
+      "/tmp/project",
+      "--mode",
+      "feature",
+      "--prompt",
+      "Implement checkout",
+      "--brief",
+      "docs/checkout.md",
+      "--docs",
+      "docs/business-rules.md",
+      "--docs",
+      "docs/error-cases.md",
+      "--openapi",
+      "docs/openapi.yaml",
+      "--openapi",
+      "docs/admin-openapi.yaml",
+      "--guidance",
+      "AGENTS.md",
+      "--guidance",
+      "docs/architecture/ARCHITECTURE.md",
+      "--skill",
+      "react-best-practices",
+      "--skill",
+      "api-generator",
+    ];
+
+    try {
+      await import("../../packages/codex-sdk/src/cli.js");
+    } finally {
+      process.argv = originalArgv;
+      consoleLog.mockRestore();
+    }
+
+    expect(cliRuns.inputs).toEqual([
+      expect.objectContaining({
+        workingDirectory: "/tmp/project",
+        deliveryMode: "feature",
+        briefPath: "docs/checkout.md",
+        docsPaths: ["docs/business-rules.md", "docs/error-cases.md"],
+        openApiPaths: ["docs/openapi.yaml", "docs/admin-openapi.yaml"],
+        guidancePaths: ["AGENTS.md", "docs/architecture/ARCHITECTURE.md"],
+        skillHints: ["react-best-practices", "api-generator"],
+      }),
+    ]);
   });
 
   it("does not preactivate UI validation for a backend-only brief", () => {

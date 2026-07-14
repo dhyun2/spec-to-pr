@@ -15,14 +15,20 @@ if (args.prompt !== undefined) {
 if (args.brief !== undefined) {
     input.briefPath = args.brief;
 }
-if (args.docs !== undefined) {
-    input.docsPath = args.docs;
+if (args.docs.length > 0) {
+    input.docsPaths = args.docs;
 }
 if (args.figma !== undefined) {
     input.figmaUrl = args.figma;
 }
-if (args.openapi !== undefined) {
-    input.openApiPath = args.openapi;
+if (args.openapi.length > 0) {
+    input.openApiPaths = args.openapi;
+}
+if (args.guidance.length > 0) {
+    input.guidancePaths = args.guidance;
+}
+if (args.skills.length > 0) {
+    input.skillHints = args.skills;
 }
 if (args.resume !== undefined) {
     input.resumeThreadId = args.resume;
@@ -63,7 +69,7 @@ console.log(JSON.stringify({
     usageCalibration: result.usageCalibration,
 }, null, 2));
 function parseArgs(argv) {
-    const parsed = {};
+    const parsed = { docs: [], openapi: [], guidance: [], skills: [] };
     for (let index = 0; index < argv.length; index += 1) {
         const arg = argv[index];
         const value = argv[index + 1];
@@ -105,13 +111,19 @@ function parseArgs(argv) {
                 parsed.brief = value;
                 break;
             case "--docs":
-                parsed.docs = value;
+                parsed.docs.push(value);
                 break;
             case "--figma":
                 parsed.figma = value;
                 break;
             case "--openapi":
-                parsed.openapi = value;
+                parsed.openapi.push(value);
+                break;
+            case "--guidance":
+                parsed.guidance.push(value);
+                break;
+            case "--skill":
+                parsed.skills.push(value);
                 break;
             case "--resume":
                 parsed.resume = value;
@@ -156,9 +168,11 @@ function printUsage() {
 Options:
   --prompt <text>       Additional user request
   --brief <path>        Brief or plan path
-  --docs <path>         Docs directory or file
+  --docs <path>         Supporting document path (repeatable)
   --figma <url>         Figma file or node URL
-  --openapi <path>      OpenAPI file path
+  --openapi <path>      OpenAPI file path (repeatable)
+  --guidance <path>     Project guidance file path (repeatable)
+  --skill <name>        Optional installed-skill hint (repeatable)
   --resume <thread-id>  Resume an existing Codex thread
   --model <model>       Optional Codex model override
   --max-turns <n>       Maximum workflow boundary turns (default: 12)
