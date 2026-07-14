@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import { WorkflowStartInputSchema } from "../../src/application/workflow-service.js";
+import {
+  WorkflowStartInputSchema,
+  buildParserSafeChunks,
+} from "../../src/application/workflow-service.js";
 import { RUN_STAGE_NAMES } from "../../src/run/stages.js";
 import {
   AGENT_ROLES,
   IMPLEMENTATION_AGENT_ROLES,
   VERIFICATION_AGENT_ROLES,
 } from "../../src/runtime/constants.js";
+import { canonicalizeFileContent } from "../../src/source-registry/canonical-content.js";
 import {
   ReviewSubmissionSchema,
   ContractsSubmissionSchema,
@@ -51,6 +55,26 @@ describe("workflow v2 contracts", () => {
         skillHints: ["../skills/react-best-practices"],
       }).success,
     ).toBe(false);
+  });
+
+  it("keeps CRLF and Unicode graphemes intact across parser chunks", () => {
+    const contents = [
+      `${"x".repeat(10)}\r\n${"y".repeat(199_999)}`,
+      `${"x".repeat(10)}e\u0301${"y".repeat(199_999)}`,
+      `${"x".repeat(10)}😀${"y".repeat(199_999)}`,
+    ];
+    const canonicalize = (text: string) =>
+      canonicalizeFileContent({
+        path: "source.txt",
+        mediaType: "text/plain; charset=utf-8",
+        rawContent: Buffer.from(text, "utf8"),
+      }).canonicalContent.toString("utf8");
+
+    for (const content of contents) {
+      const chunks = buildParserSafeChunks(content);
+      expect(chunks.every((chunk) => chunk.trim().length > 0)).toBe(true);
+      expect(chunks.map(canonicalize).join("")).toBe(canonicalize(content));
+    }
   });
 
   it("stores unique normalized source and guidance trace fields", () => {

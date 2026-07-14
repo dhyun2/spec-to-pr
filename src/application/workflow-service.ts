@@ -55,7 +55,8 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_EXTERNAL_LEASE_TTL_MS = 15 * 60 * 1000;
 const DEFAULT_EXTERNAL_HEARTBEAT_MS = 60 * 1000;
 const MAX_COMPOSABLE_SOURCE_PATHS = 20;
-const MAX_INTAKE_SOURCE_CHARS = 190_000;
+const MAX_INTAKE_SOURCE_CHARS = 200_000;
+const MAX_OPENAPI_OPERATIONS = 1_000;
 const GUIDANCE_CANDIDATES = [
   "AGENTS.md",
   "CLAUDE.md",
@@ -367,7 +368,8 @@ export class WorkflowService {
       scope,
       signals: {
         requirements: countIntakeRequirements(classificationText),
-        apiOperations: sources.openApi.length > 0 ? sources.openApi.length : scope.api ? 1 : 0,
+        apiOperations:
+          sources.openApi.length > 0 ? countOpenApiOperations(sources.openApi) : scope.api ? 1 : 0,
         uiSurfaces: scope.ui ? 1 : 0,
         figmaNodes: figmaUrl === undefined ? 0 : 1,
         testTargets: scope.code ? 1 : 0,
@@ -1510,12 +1512,16 @@ function assertSubmissionPrerequisites(run: RunManifest, submission: WorkflowSub
     submission.kind === "contracts" &&
     submission.status === "passed" &&
     (!sameStringMembers(submission.guidanceTrace.explicit, profile.guidancePaths) ||
-      !sameStringMembers(submission.guidanceTrace.discovered, profile.discoveredGuidancePaths) ||
-      !sameStringMembers(submission.guidanceTrace.skillHints, profile.skillHints))
+      !sameStringMembers(submission.guidanceTrace.discovered, profile.discoveredGuidancePaths))
   ) {
-    throw new Error(
-      "Passed contracts must report every explicit and discovered guidance path and every skill hint",
-    );
+    throw new Error("Passed contracts must report every explicit and discovered guidance path");
+  }
+  if (
+    submission.kind === "contracts" &&
+    submission.status === "passed" &&
+    submission.guidanceTrace.skillHints.some((skillHint) => !profile.skillHints.includes(skillHint))
+  ) {
+    throw new Error("Every applied skill hint must be requested in the delivery profile");
   }
   if (
     submission.kind === "contracts" &&
@@ -1870,10 +1876,14 @@ function producerForSubmission(submission: WorkflowSubmission) {
   return "orchestrator" as const;
 }
 
-type ProjectTextSource = {
+type ProjectTextFile = {
   path: string;
   resolvedPath: string;
+};
+
+type ProjectTextSource = ProjectTextFile & {
   text: string;
+  chunks: string[];
 };
 
 type PreparedComposableSources = {
@@ -1908,7 +1918,7 @@ async function prepareComposableSources(
   const guidance = await readDistinctProjectTextFiles(root, guidanceInput, "Guidance");
 
   const claimedFiles = new Map<string, string>();
-  const claim = (file: ProjectTextSource, role: string, automatic = false): boolean => {
+  const claim = (file: ProjectTextFile, role: string, automatic = false): boolean => {
     const previous = claimedFiles.get(file.resolvedPath);
     if (previous !== undefined) {
       if (automatic) return false;
@@ -1928,7 +1938,7 @@ async function prepareComposableSources(
       .filter(isDefined)
       .map(normalizedInputPathKey),
   );
-  const discoveredGuidance: ProjectTextSource[] = [];
+  const discoveredGuidance: ProjectTextFile[] = [];
   for (const candidate of GUIDANCE_CANDIDATES) {
     if (guidance.length + discoveredGuidance.length >= MAX_COMPOSABLE_SOURCE_PATHS) break;
     if (occupiedInputPaths.has(normalizedInputPathKey(candidate))) continue;
@@ -1938,12 +1948,27 @@ async function prepareComposableSources(
     }
   }
 
+  const loaded = new Map<string, ProjectTextSource>();
+  const load = async (file: ProjectTextFile): Promise<ProjectTextSource> => {
+    const existing = loaded.get(file.resolvedPath);
+    if (existing !== undefined) return existing;
+    const text = await readFile(file.resolvedPath, "utf8");
+    const source = { ...file, text, chunks: buildParserSafeChunks(text) };
+    loaded.set(file.resolvedPath, source);
+    return source;
+  };
+  const loadAll = async (files: ProjectTextFile[]): Promise<ProjectTextSource[]> => {
+    const sources: ProjectTextSource[] = [];
+    for (const file of files) sources.push(await load(file));
+    return sources;
+  };
+
   return {
-    ...(brief === undefined ? {} : { brief }),
-    docs,
-    openApi,
-    guidance,
-    discoveredGuidance,
+    ...(brief === undefined ? {} : { brief: await load(brief) }),
+    docs: await loadAll(docs),
+    openApi: await loadAll(openApi),
+    guidance: await loadAll(guidance),
+    discoveredGuidance: await loadAll(discoveredGuidance),
     skillHints,
   };
 }
@@ -1952,8 +1977,8 @@ async function readDistinctProjectTextFiles(
   projectRoot: string,
   paths: string[],
   label: string,
-): Promise<ProjectTextSource[]> {
-  const files: ProjectTextSource[] = [];
+): Promise<ProjectTextFile[]> {
+  const files: ProjectTextFile[] = [];
   const seen = new Set<string>();
   for (const filePath of paths) {
     const file = await readProjectTextFile(projectRoot, filePath, label);
@@ -1971,28 +1996,55 @@ async function ingestProjectTextSource(input: {
   kind: "brief" | "docs" | "openapi" | "guidance";
   file: ProjectTextSource;
 }): Promise<string[]> {
-  const chunks = chunkIntakeSource(input.file.text);
   const artifactIds: string[] = [];
-  for (let index = 0; index < chunks.length; index += 1) {
+  for (let index = 0; index < input.file.chunks.length; index += 1) {
     const result = await input.service.parseIntakeRequest({
       runId: input.runId,
-      requestText: chunks[index],
-      label: intakeSourceLabel(input.kind, input.file.path, index, chunks.length),
+      requestText: input.file.chunks[index],
+      label: intakeSourceLabel(input.kind, input.file.path, index, input.file.chunks.length),
     });
     artifactIds.push(result.artifact.id);
   }
   return artifactIds;
 }
 
-function chunkIntakeSource(text: string): string[] {
-  if (text.trim() === "") {
-    throw new Error("Project text sources must contain non-whitespace content");
-  }
+export function buildParserSafeChunks(text: string): string[] {
   const chunks: string[] = [];
-  for (let offset = 0; offset < text.length; offset += MAX_INTAKE_SOURCE_CHARS) {
-    chunks.push(text.slice(offset, offset + MAX_INTAKE_SOURCE_CHARS));
+  let end = text.length;
+  while (end > 0) {
+    let start = Math.max(0, end - MAX_INTAKE_SOURCE_CHARS);
+    start = advancePastUnsafeTextBoundary(text, start, end);
+    const chunk = text.slice(start, end);
+    if (chunk.trim() === "") {
+      throw new Error("Project text source cannot form non-whitespace parser-safe chunks");
+    }
+    chunks.push(chunk);
+    end = start;
+  }
+  chunks.reverse();
+  if (chunks.length === 0 || chunks.join("") !== text) {
+    throw new Error("Project text source cannot form parser-safe chunks without content loss");
   }
   return chunks;
+}
+
+function advancePastUnsafeTextBoundary(text: string, start: number, end: number): number {
+  while (start > 0 && start < end) {
+    const codeUnit = text.charCodeAt(start);
+    const codePoint = text.codePointAt(start);
+    const previousCodePoint = text.codePointAt(start - 1);
+    const splitsCrLf = text[start - 1] === "\r" && text[start] === "\n";
+    const splitsSurrogate = codeUnit >= 0xdc00 && codeUnit <= 0xdfff;
+    const continuesGrapheme =
+      codePoint !== undefined &&
+      (/\p{Mark}/u.test(String.fromCodePoint(codePoint)) ||
+        (codePoint >= 0xfe00 && codePoint <= 0xfe0f) ||
+        (codePoint >= 0x1f3fb && codePoint <= 0x1f3ff) ||
+        previousCodePoint === 0x200d);
+    if (!splitsCrLf && !splitsSurrogate && !continuesGrapheme) break;
+    start += codePoint !== undefined && codePoint > 0xffff ? 2 : 1;
+  }
+  return start;
 }
 
 function intakeSourceLabel(
@@ -2008,6 +2060,42 @@ function intakeSourceLabel(
   const digest = createHash("sha256").update(filePath).digest("hex").slice(0, 16);
   const basename = path.basename(filePath).slice(0, 120);
   return `${kind}:${basename}:${digest}${suffix}`.slice(0, 200);
+}
+
+function countOpenApiOperations(files: readonly ProjectTextSource[]): number {
+  let total = 0;
+  for (const file of files) {
+    let document: unknown;
+    try {
+      document = parseYaml(file.text);
+    } catch {
+      total += 1;
+      continue;
+    }
+
+    if (typeof document !== "object" || document === null) {
+      total += 1;
+      continue;
+    }
+    const paths = (document as { paths?: unknown }).paths;
+    if (typeof paths !== "object" || paths === null) {
+      total += 1;
+      continue;
+    }
+
+    let documentOperations = 0;
+    for (const pathItem of Object.values(paths)) {
+      if (typeof pathItem !== "object" || pathItem === null) continue;
+      documentOperations += Object.keys(pathItem).filter((key) =>
+        /^(?:get|put|post|delete|options|head|patch|trace)$/i.test(key),
+      ).length;
+      if (total + documentOperations >= MAX_OPENAPI_OPERATIONS) {
+        return MAX_OPENAPI_OPERATIONS;
+      }
+    }
+    total += Math.max(1, documentOperations);
+  }
+  return Math.min(total, MAX_OPENAPI_OPERATIONS);
 }
 
 function uniqueInputValues(values: readonly string[]): string[] {
@@ -2035,7 +2123,7 @@ async function readProjectTextFile(
   projectRoot: string,
   filePath: string,
   label: string,
-): Promise<ProjectTextSource> {
+): Promise<ProjectTextFile> {
   const file = await resolveProjectTextFile(projectRoot, filePath, label, false);
   if (file === undefined) throw new Error(`${label} file does not exist: ${filePath}`);
   return file;
@@ -2045,7 +2133,7 @@ async function readOptionalProjectTextFile(
   projectRoot: string,
   filePath: string,
   label: string,
-): Promise<ProjectTextSource | undefined> {
+): Promise<ProjectTextFile | undefined> {
   return resolveProjectTextFile(projectRoot, filePath, label, true);
 }
 
@@ -2054,7 +2142,7 @@ async function resolveProjectTextFile(
   filePath: string,
   label: string,
   missingAllowed: boolean,
-): Promise<ProjectTextSource | undefined> {
+): Promise<ProjectTextFile | undefined> {
   const root = await realpath(projectRoot);
   const requestedPath = path.isAbsolute(filePath)
     ? path.normalize(filePath)
@@ -2077,7 +2165,6 @@ async function resolveProjectTextFile(
   return {
     path: path.relative(root, resolvedPath).split(path.sep).join("/"),
     resolvedPath,
-    text: await readFile(resolvedPath, "utf8"),
   };
 }
 

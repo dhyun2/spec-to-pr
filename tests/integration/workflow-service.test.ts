@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { link, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -335,6 +335,45 @@ describe("WorkflowService", () => {
     expect(status.workload.score).toBeGreaterThanOrEqual(40);
   });
 
+  it("increases workload for many operations in one OpenAPI source", async () => {
+    await mkdir(path.join(directory, "docs"), { recursive: true });
+    const document = (operationCount: number) => ({
+      openapi: "3.1.0",
+      info: { title: "Test API", version: "1.0.0" },
+      paths: Object.fromEntries(
+        Array.from({ length: operationCount }, (_, index) => [
+          `/items/${index}`,
+          { get: { operationId: `getItem${index}`, responses: {} } },
+        ]),
+      ),
+    });
+    await writeFile(
+      path.join(directory, "docs", "one-operation.json"),
+      JSON.stringify(document(1)),
+      "utf8",
+    );
+    await writeFile(
+      path.join(directory, "docs", "many-operations.json"),
+      JSON.stringify(document(20)),
+      "utf8",
+    );
+
+    const one = await service.start({
+      projectRoot: directory,
+      requestText: "Implement the supplied service contract",
+      scope: "non-ui",
+      openApiPaths: ["docs/one-operation.json"],
+    });
+    const many = await service.start({
+      projectRoot: directory,
+      requestText: "Implement the supplied service contract",
+      scope: "non-ui",
+      openApiPaths: ["docs/many-operations.json"],
+    });
+
+    expect(many.workload.score).toBeGreaterThan(one.workload.score);
+  });
+
   it("makes both XS and XL reachable at intake and reports every required validation", async () => {
     const tiny = await service.start({
       projectRoot: directory,
@@ -581,6 +620,59 @@ describe("WorkflowService", () => {
     ).resolves.toMatchObject({ nextActions: [{ kind: "implement" }] });
   });
 
+  it("allows applied skill hints to be a subset but rejects unrequested hints", async () => {
+    const optional = await service.start({
+      projectRoot: directory,
+      requestText: "Update the release notes",
+      scope: "docs",
+      publication: "none",
+      skillHints: ["react-best-practices", "not-installed"],
+    });
+
+    await expect(
+      service.submit({
+        runId: optional.runId,
+        submission: {
+          kind: "contracts",
+          status: "passed",
+          summary: "Applied only the available and relevant skill.",
+          artifactPaths: ["contracts/requirements.json"],
+          requirementManifest: requirements("optional-skills"),
+          guidanceTrace: {
+            explicit: [],
+            discovered: [],
+            skillHints: ["react-best-practices"],
+          },
+        },
+      }),
+    ).resolves.toMatchObject({ nextActions: [{ kind: "implement" }] });
+
+    const unrequested = await service.start({
+      projectRoot: directory,
+      requestText: "Update another release note",
+      scope: "docs",
+      publication: "none",
+      skillHints: ["react-best-practices"],
+    });
+    await expect(
+      service.submit({
+        runId: unrequested.runId,
+        submission: {
+          kind: "contracts",
+          status: "passed",
+          summary: "Claimed an unrequested skill.",
+          artifactPaths: ["contracts/requirements.json"],
+          requirementManifest: requirements("unrequested-skills"),
+          guidanceTrace: {
+            explicit: [],
+            discovered: [],
+            skillHints: ["api-generator"],
+          },
+        },
+      }),
+    ).rejects.toThrow(/skill hint.*requested/i);
+  });
+
   it("blocks missing explicit guidance before creating a durable Run", async () => {
     await expect(
       service.start({
@@ -590,6 +682,64 @@ describe("WorkflowService", () => {
       }),
     ).rejects.toThrow(/Guidance file does not exist/i);
     await expect(store.list()).resolves.toHaveLength(0);
+  });
+
+  it("deduplicates same-role symlink aliases to one canonical source", async () => {
+    await mkdir(path.join(directory, "docs"), { recursive: true });
+    await writeFile(path.join(directory, "docs", "canonical.md"), "Canonical rules.\n", "utf8");
+    await symlink("canonical.md", path.join(directory, "docs", "alias-a.md"));
+    await symlink("canonical.md", path.join(directory, "docs", "alias-b.md"));
+
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Use the supporting rules",
+      docsPaths: ["docs/alias-a.md", "docs/alias-b.md"],
+    });
+    expect(started.deliveryProfile.docsPaths).toEqual(["docs/canonical.md"]);
+    const run = await store.get(started.runId);
+    expect(
+      run.sources.filter(
+        (source) =>
+          source.locator.type === "inline" && source.locator.label === "docs:docs/canonical.md",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("detects canonical cross-role conflicts before reading content", async () => {
+    await mkdir(path.join(directory, "docs"), { recursive: true });
+    await writeFile(path.join(directory, "docs", "canonical.txt"), " ".repeat(10), "utf8");
+    await symlink("canonical.txt", path.join(directory, "docs", "as-docs.txt"));
+    await symlink("canonical.txt", path.join(directory, "docs", "as-openapi.txt"));
+
+    await expect(
+      service.start({
+        projectRoot: directory,
+        requestText: "Use the supplied sources",
+        docsPaths: ["docs/as-docs.txt"],
+        openApiPaths: ["docs/as-openapi.txt"],
+      }),
+    ).rejects.toThrow(/both supporting documentation and OpenAPI/i);
+    await expect(store.list()).resolves.toHaveLength(0);
+  });
+
+  it("rejects a source alias whose canonical target is outside the project root", async () => {
+    const outside = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-outside-"));
+    try {
+      await writeFile(path.join(outside, "rules.md"), "Outside rules.\n", "utf8");
+      await mkdir(path.join(directory, "docs"), { recursive: true });
+      await symlink(path.join(outside, "rules.md"), path.join(directory, "docs", "outside.md"));
+
+      await expect(
+        service.start({
+          projectRoot: directory,
+          requestText: "Use the aliased document",
+          docsPaths: ["docs/outside.md"],
+        }),
+      ).rejects.toThrow(/project root/i);
+      await expect(store.list()).resolves.toHaveLength(0);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 
   it("preserves the 1 MB text-source boundary for composable files", async () => {
@@ -616,6 +766,39 @@ describe("WorkflowService", () => {
       }),
     ).rejects.toThrow(/1 MB limit/i);
     await expect(store.list()).resolves.toHaveLength(1);
+  });
+
+  it("builds parser-safe chunks for long internal whitespace spans", async () => {
+    await mkdir(path.join(directory, "docs"), { recursive: true });
+    await writeFile(
+      path.join(directory, "docs", "whitespace-span.md"),
+      `${"x".repeat(190_000)}${" ".repeat(190_000)}`,
+      "utf8",
+    );
+
+    await expect(
+      service.start({
+        projectRoot: directory,
+        requestText: "Use the supplied long document",
+        docsPaths: ["docs/whitespace-span.md"],
+      }),
+    ).resolves.toMatchObject({
+      deliveryProfile: { docsPaths: ["docs/whitespace-span.md"] },
+    });
+  });
+
+  it("rejects invalid chunk plans before creating a durable Run", async () => {
+    await mkdir(path.join(directory, "docs"), { recursive: true });
+    await writeFile(path.join(directory, "docs", "blank.md"), " ".repeat(300_000), "utf8");
+
+    await expect(
+      service.start({
+        projectRoot: directory,
+        requestText: "Use the blank document",
+        docsPaths: ["docs/blank.md"],
+      }),
+    ).rejects.toThrow(/non-whitespace|parser-safe/i);
+    await expect(store.list()).resolves.toHaveLength(0);
   });
 
   it("defaults older v2 Runs without delivery profiles to the lightweight auto profile", async () => {
