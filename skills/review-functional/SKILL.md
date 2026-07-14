@@ -7,7 +7,7 @@ description: Use when code scope reaches the mandatory v2 functional review acti
 
 Act as `functional-reviewer`, independently from implementation. Consume the immutable review packet supplied by the orchestrator: `workflow_status` snapshot, accepted contracts, diff, and evidence paths. Do not call workflow tools when delegated. Inspect referenced files and run safe focused checks when evidence is incomplete.
 
-Return a literal JSON-compatible object shaped as `{kind:"functional-review", verdict, summary, findings, requirements, artifactPaths, gateResults}`. The orchestrator validates it and calls `workflow_submit`. Approval permits only minor findings and requires every required functional gate to report `passed` with a referenced evidence path and every reviewed requirement to be accepted. Empty, skipped, failed, or not-run checks never satisfy a required gate.
+Return a literal JSON-compatible object shaped as `{kind:"functional-review", reviewPacketId, verdict, summary, findings, requirements, artifactPaths, gateResults}`. Copy `reviewPacketId` exactly from the current review action; the orchestrator rejects stale packets. The orchestrator validates the object and calls `workflow_submit`. Approval permits only minor findings and requires every required functional gate to report `passed` with a referenced evidence path and every reviewed `requirementManifest` ID to be accepted. Empty, skipped, failed, or not-run checks never satisfy a required gate.
 
 For API-backed UI, verify that the accepted `api-ready` checkpoint and final implementation use the same `implementationContextId`.
 

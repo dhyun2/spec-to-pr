@@ -24,7 +24,7 @@
 **Files:** `packages/codex-sdk/src/*.ts`, `src/workflow/workload-policy.ts`, SDK/workload tests, SDK README, root README, ADR 037.
 
 1. Add failing tests proving the public manual-budget API is absent, every hard-limit action is `split-required`, run IDs are pinned, validation sets cannot shrink, empty signals are rejected, non-UI briefs stay non-UI, and effective budget data appears in checkpoints.
-2. Add failing calibration tests proving displayed ranges may adapt while automatic hard limits never fall below defaults.
+2. Add failing calibration tests proving displayed ranges may adapt while automatic hard limits remain fixed at defaults and legacy caller-expanded samples are ignored.
 3. Add failing usage-history tests for Git-root containment, oversized/non-regular/link targets, bounded reads, and bounded retention.
 4. Implement the minimal runtime changes and rebuild SDK output from a clean directory.
 5. Run focused SDK/workload tests and complete-file-set generation checks.

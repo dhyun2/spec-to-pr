@@ -5,12 +5,10 @@ import packageJson from "../../package.json" with { type: "json" };
 import { ArtifactBlobStore } from "../artifact-registry/artifact-blob-store.js";
 import { IntakeRequestService } from "../application/intake-request-service.js";
 import { OpenSpecArchiveService } from "../application/openspec-archive-service.js";
-import { ProjectProfileService } from "../application/profile-service.js";
 import { PublisherService } from "../application/publisher-service.js";
 import { RunService } from "../application/run-service.js";
 import { StageService } from "../application/stage-service.js";
 import { WorkflowService } from "../application/workflow-service.js";
-import { JsonProfileStore } from "../profile/profile-store.js";
 import { SourceSnapshotStore } from "../source-registry/snapshot-store.js";
 import { SqliteRunStore } from "../store/sqlite-run-store.js";
 
@@ -37,9 +35,6 @@ export function createLazyServicesProvider(): ServicesProvider {
       new SourceSnapshotStore(path.join(dataDirectory, "source-snapshots")),
       artifactStore,
     );
-    const profileService = new ProjectProfileService(
-      new JsonProfileStore(path.join(dataDirectory, "profiles")),
-    );
     const stageService = new StageService(runStore);
     const publisherService = new PublisherService(runStore, artifactStore);
     const archiveService = new OpenSpecArchiveService(runStore, artifactStore);
@@ -50,7 +45,6 @@ export function createLazyServicesProvider(): ServicesProvider {
         artifactStore,
         runService,
         intakeRequestService,
-        profileService,
         stageService,
         publisherService,
         archiveService,

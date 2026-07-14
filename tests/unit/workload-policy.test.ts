@@ -54,9 +54,30 @@ describe("workload policy", () => {
   });
 
   it("accepts only non-negative numeric workload signals", () => {
+    expect(WorkloadSignalsSchema.safeParse({}).success).toBe(false);
+    expect(WorkloadSignalsSchema.safeParse({ uncertainty: 2 }).success).toBe(false);
     expect(WorkloadSignalsSchema.safeParse({ relevantFiles: -1 }).success).toBe(false);
     expect(WorkloadSignalsSchema.safeParse({ requirements: 2, prompt: "secret" }).success).toBe(
       false,
     );
+  });
+
+  it("keeps confidence low when contract evidence has sparse coverage or uncertainty", () => {
+    expect(
+      estimateWorkload({
+        phase: "contracts",
+        mode: "auto",
+        scope: { code: true, ui: false, api: false },
+        signals: { requirements: 2, uncertainty: 4 },
+      }).confidence,
+    ).toBe("low");
+    expect(
+      estimateWorkload({
+        phase: "contracts",
+        mode: "auto",
+        scope: { code: true, ui: false, api: false },
+        signals: { requirements: 2, relevantFiles: 3, testTargets: 1, uncertainty: 1 },
+      }).confidence,
+    ).toBe("medium");
   });
 });

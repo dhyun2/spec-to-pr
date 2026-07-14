@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process";
 import { link, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 
 import { PNG } from "pngjs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,7 +10,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ArtifactBlobStore } from "../../src/artifact-registry/artifact-blob-store.js";
 import { IntakeRequestService } from "../../src/application/intake-request-service.js";
 import type { OpenSpecArchiveService } from "../../src/application/openspec-archive-service.js";
-import { ProjectProfileService } from "../../src/application/profile-service.js";
 import type { PublisherService } from "../../src/application/publisher-service.js";
 import { RunService } from "../../src/application/run-service.js";
 import { StageService } from "../../src/application/stage-service.js";
@@ -16,16 +17,17 @@ import {
   WorkflowService,
   type WorkflowServiceDependencies,
 } from "../../src/application/workflow-service.js";
-import { JsonProfileStore } from "../../src/profile/profile-store.js";
 import { SourceSnapshotStore } from "../../src/source-registry/snapshot-store.js";
 import { SqliteRunStore } from "../../src/store/sqlite-run-store.js";
 
 const FIGMA_URL = "https://www.figma.com/design/abc/file?node-id=1-2";
 const FEATURE_CONTEXT_ID = `ctx_${"x".repeat(124)}`;
+const execFileAsync = promisify(execFile);
 
 describe("WorkflowService", () => {
   let directory: string;
   let store: SqliteRunStore;
+  let artifactStore: ArtifactBlobStore;
   let service: WorkflowService;
   let dependencies: WorkflowServiceDependencies;
 
@@ -46,6 +48,10 @@ describe("WorkflowService", () => {
       "test-results/checkout.json",
       "test-results/checkout.mp4",
       "briefs/checkout.md",
+      "src/checkout.tsx",
+      "src/parser.ts",
+      "src/tracing.ts",
+      ".gitignore",
     ]) {
       const absolutePath = path.join(directory, relativePath);
       await mkdir(path.dirname(absolutePath), { recursive: true });
@@ -81,20 +87,29 @@ describe("WorkflowService", () => {
       path.join(directory, "visual/diff.png"),
       PNG.sync.write(new PNG({ width: 1, height: 1 })),
     );
+    await writeFile(
+      path.join(directory, ".gitignore"),
+      "artifacts/\nsources/\nruns.sqlite3*\nprofiles/\n",
+      "utf8",
+    );
+    await execFileAsync("git", ["init", "-q"], { cwd: directory });
+    await execFileAsync("git", ["config", "user.email", "tests@example.com"], {
+      cwd: directory,
+    });
+    await execFileAsync("git", ["config", "user.name", "Workflow Tests"], { cwd: directory });
+    await execFileAsync("git", ["add", "."], { cwd: directory });
+    await execFileAsync("git", ["commit", "-qm", "fixture"], { cwd: directory });
     store = new SqliteRunStore(path.join(directory, "runs.sqlite3"));
-    const artifacts = new ArtifactBlobStore(path.join(directory, "artifacts"));
+    artifactStore = new ArtifactBlobStore(path.join(directory, "artifacts"));
 
     dependencies = {
       runStore: store,
-      artifactStore: artifacts,
+      artifactStore,
       runService: new RunService(store, { pluginVersion: "0.2.0" }),
       intakeRequestService: new IntakeRequestService(
         store,
         new SourceSnapshotStore(path.join(directory, "sources")),
-        artifacts,
-      ),
-      profileService: new ProjectProfileService(
-        new JsonProfileStore(path.join(directory, "profiles")),
+        artifactStore,
       ),
       stageService: new StageService(store),
     };
@@ -107,6 +122,12 @@ describe("WorkflowService", () => {
   });
 
   it("starts compactly and stops at the contracts boundary", async () => {
+    const inspectProject = vi.fn();
+    service = new WorkflowService(
+      Object.assign({}, dependencies, {
+        profileService: { inspectProject },
+      }) as WorkflowServiceDependencies,
+    );
     const status = await service.start({
       projectRoot: directory,
       requestText: "Refactor the parser and add unit tests",
@@ -132,6 +153,186 @@ describe("WorkflowService", () => {
     expect(status).not.toHaveProperty("sources");
     expect(status).not.toHaveProperty("evidence");
     expect(status).not.toHaveProperty("agentResults");
+    expect(inspectProject).not.toHaveBeenCalled();
+  });
+
+  it("reopens implementation and rejects stale review packets after changes are requested", async () => {
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Restyle the checkout form and its empty state",
+      scope: "ui",
+    });
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "contracts",
+        status: "passed",
+        summary: "Checkout states are specified.",
+        artifactPaths: ["contracts/requirements.json"],
+        requirementManifest: [
+          {
+            id: "checkout-state",
+            title: "Checkout empty state",
+            acceptanceCriteria: ["The empty state matches the approved contract."],
+          },
+        ],
+      },
+    });
+    await changeSource(directory, "src/checkout.tsx", "implemented checkout state\n");
+    const implemented = await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "implementation",
+        status: "passed",
+        summary: "Checkout state implemented.",
+        apiReady: false,
+        uiChanged: true,
+        changedFiles: ["src/checkout.tsx"],
+        artifactPaths: ["test-results/unit.json"],
+      },
+    });
+    const packetId = implemented.nextActions.find(
+      (action) => action.kind === "review-design",
+    )?.reviewPacketId;
+    expect(packetId).toMatch(/^packet_[a-f0-9]{64}$/);
+    if (packetId === undefined) throw new Error("Missing review packet");
+
+    await changeSource(directory, "src/checkout.tsx", "mutated after packet creation\n");
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "functional-review",
+          reviewPacketId: packetId,
+          verdict: "changes-requested",
+          summary: "This packet is stale.",
+          findings: [],
+          requirements: [{ id: "checkout-state", verdict: "rejected" }],
+          artifactPaths: ["test-results/unit.json"],
+          gateResults: [],
+        },
+      }),
+    ).rejects.toThrow(/packet.*stale|diff.*match/i);
+    await changeSource(directory, "src/checkout.tsx", "implemented checkout state\n");
+
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "design-review",
+        reviewPacketId: packetId,
+        verdict: "approved",
+        summary: "Design evidence passed.",
+        findings: [],
+        requirements: [{ id: "checkout-state", verdict: "accepted" }],
+        artifactPaths: ["visual/diff.png"],
+        gateResults: [
+          {
+            id: "accessibility",
+            status: "passed",
+            evidencePaths: ["visual/diff.png"],
+          },
+        ],
+      },
+    });
+    const reopened = await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "functional-review",
+        reviewPacketId: packetId,
+        verdict: "changes-requested",
+        summary: "The empty-state behavior is incorrect.",
+        findings: [{ severity: "major", title: "Wrong empty state", evidence: [] }],
+        requirements: [{ id: "checkout-state", verdict: "rejected" }],
+        artifactPaths: ["test-results/unit.json"],
+        gateResults: [],
+      },
+    });
+
+    expect(reopened.nextActions).toEqual([
+      { kind: "implement", runId: started.runId, requireApiReady: false },
+    ]);
+    expect(reopened.stages.find((stage) => stage.name === "design-review")?.status).toBe("pending");
+
+    const repaired = await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "implementation",
+        status: "passed",
+        summary: "Checkout state repaired.",
+        apiReady: false,
+        uiChanged: true,
+        changedFiles: ["src/checkout.tsx"],
+        artifactPaths: ["test-results/unit.json"],
+      },
+    });
+    const repairedPacketId = reviewPacketId(repaired, "review-functional");
+    expect(repairedPacketId).not.toBe(packetId);
+
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "functional-review",
+          reviewPacketId: packetId,
+          verdict: "changes-requested",
+          summary: "Stale packet must not be reviewed.",
+          findings: [],
+          requirements: [{ id: "checkout-state", verdict: "rejected" }],
+          artifactPaths: ["test-results/unit.json"],
+          gateResults: [],
+        },
+      }),
+    ).rejects.toThrow(/current implementation review packet/i);
+  });
+
+  it("derives the exact changed-file set from Git instead of trusting an agent claim", async () => {
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Refactor the parser",
+      scope: "non-ui",
+    });
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "contracts",
+        status: "passed",
+        summary: "Parser contract ready.",
+        artifactPaths: ["contracts/requirements.json"],
+        requirementManifest: requirements("parser"),
+      },
+    });
+    await changeSource(directory, "src/parser.ts", "export const parser = 'changed';\n");
+
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "implementation",
+          status: "passed",
+          summary: "Parser changed with an incomplete file claim.",
+          apiReady: false,
+          uiChanged: false,
+          changedFiles: [],
+          artifactPaths: ["test-results/unit.json"],
+        },
+      }),
+    ).rejects.toThrow(/changedFiles.*Git diff/i);
+  });
+
+  it("counts bounded package roots from pnpm workspace globs without full profiling", async () => {
+    await writeFile(path.join(directory, "pnpm-workspace.yaml"), "packages:\n  - packages/*\n");
+    for (let index = 0; index < 10; index += 1) {
+      const packageRoot = path.join(directory, "packages", `package-${index}`);
+      await mkdir(packageRoot, { recursive: true });
+      await writeFile(path.join(packageRoot, "package.json"), `{"name":"package-${index}"}\n`);
+    }
+
+    const status = await service.start({
+      projectRoot: directory,
+      requestText: "Update one sentence",
+    });
+
+    expect(status.workload.score).toBeGreaterThanOrEqual(40);
   });
 
   it("makes both XS and XL reachable at intake and reports every required validation", async () => {
@@ -185,6 +386,7 @@ describe("WorkflowService", () => {
         status: "passed",
         summary: "Mapped the concrete change surface.",
         artifactPaths: ["contracts/requirements.json"],
+        requirementManifest: requirements("dashboard"),
         workloadSignals: {
           requirements: 18,
           relevantFiles: 35,
@@ -305,6 +507,7 @@ describe("WorkflowService", () => {
           summary: "Captured the requested delta only.",
           artifactPaths: ["contracts/requirements.json"],
           baselinePaths: [],
+          requirementManifest: requirements("legacy-fix"),
         },
       }),
     ).rejects.toThrow(/baseline/i);
@@ -317,6 +520,18 @@ describe("WorkflowService", () => {
         summary: "Captured current behavior and the requested delta.",
         artifactPaths: ["contracts/requirements.json", "contracts/legacy-baseline.md"],
         baselinePaths: ["contracts/legacy-baseline.md"],
+        requirementManifest: requirements("legacy-fix"),
+        legacyBaseline: {
+          scope: "parser behavior changed by this fix",
+          evidencePaths: ["contracts/legacy-baseline.md"],
+          checks: [
+            {
+              command: "pnpm test -- parser",
+              resultPath: "contracts/legacy-baseline.md",
+              status: "passed",
+            },
+          ],
+        },
       },
     });
 
@@ -343,6 +558,7 @@ describe("WorkflowService", () => {
           status: "passed",
           summary: "Mapped design requirements.",
           artifactPaths: ["contracts/requirements.json"],
+          requirementManifest: requirements("figma-screen"),
         },
       }),
     ).rejects.toThrow(/Figma bundle/i);
@@ -387,6 +603,7 @@ describe("WorkflowService", () => {
         status: "passed",
         summary: "Mapped real design evidence.",
         artifactPaths: ["contracts/requirements.json"],
+        requirementManifest: requirements("figma-screen"),
       },
     });
     expect(accepted.nextActions[0]?.kind).toBe("implement");
@@ -408,6 +625,7 @@ describe("WorkflowService", () => {
         status: "passed",
         summary: "Feature contracts ready.",
         artifactPaths: ["contracts/requirements.json"],
+        requirementManifest: requirements("checkout-feature"),
       },
     });
 
@@ -485,6 +703,7 @@ describe("WorkflowService", () => {
     ).rejects.toThrow(/WebM or MP4/i);
     await writeFile(path.join(directory, "test-results/checkout.mp4"), validMp4());
 
+    await changeSource(directory, "src/checkout.tsx", "export const checkout = 'feature';\n");
     const implemented = await service.submit({
       runId: started.runId,
       submission: featureSubmission,
@@ -494,6 +713,49 @@ describe("WorkflowService", () => {
       "review-design",
       "review-functional",
     ]);
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "design-review",
+        reviewPacketId: reviewPacketId(implemented, "review-design"),
+        verdict: "approved",
+        summary: "Feature design passed.",
+        findings: [],
+        requirements: [{ id: "checkout-feature", verdict: "accepted" }],
+        artifactPaths: ["visual/diff.png"],
+        gateResults: [
+          {
+            id: "accessibility",
+            status: "passed",
+            evidencePaths: ["visual/diff.png"],
+          },
+        ],
+      },
+    });
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "functional-review",
+        reviewPacketId: reviewPacketId(implemented, "review-functional"),
+        verdict: "approved",
+        summary: "Targeted feature test passed.",
+        findings: [],
+        requirements: [{ id: "checkout-feature", verdict: "accepted" }],
+        artifactPaths: ["test-results/checkout.json"],
+        gateResults: [
+          {
+            id: "functional",
+            status: "passed",
+            evidencePaths: ["test-results/checkout.json"],
+          },
+        ],
+      },
+    });
+    await service.advance({ runId: started.runId, until: "report" });
+    const report = await reportMarkdown(store, artifactStore, started.runId);
+    expect(report).toContain("## Requirement traceability");
+    expect(report).toContain("## Feature E2E video");
+    expect(report).toContain("test-results/checkout.mp4");
   });
 
   it("rejects malformed Figma manifests and fake visual files", async () => {
@@ -591,6 +853,7 @@ describe("WorkflowService", () => {
         status: "passed",
         summary: "Generated API contracts and UI requirements.",
         artifactPaths: ["generated/api.ts", "generated/mock.ts"],
+        requirementManifest: requirements("checkout-api-ui"),
       },
     });
 
@@ -664,6 +927,7 @@ describe("WorkflowService", () => {
         status: "passed",
         summary: "API and UI contracts are ready.",
         artifactPaths: ["contracts/requirements.json"],
+        requirementManifest: requirements("checkout-api-ui"),
       },
     });
 
@@ -708,9 +972,18 @@ describe("WorkflowService", () => {
         status: "passed",
         summary: "Contracts and mocks generated.",
         artifactPaths: ["generated/mock.ts"],
+        requirementManifest: [
+          {
+            id: "checkout-states",
+            title: "Checkout | states",
+            acceptanceCriteria: ["Empty | loading\nSuccess states render."],
+          },
+          ...requirements("checkout-submit"),
+        ],
       },
     });
     await submitApiReady(service, started.runId);
+    await changeSource(directory, "src/checkout.tsx", "export const checkout = 'api-backed';\n");
     const implemented = await service.submit({
       runId: started.runId,
       submission: {
@@ -734,6 +1007,7 @@ describe("WorkflowService", () => {
       runId: started.runId,
       submission: {
         kind: "design-review",
+        reviewPacketId: reviewPacketId(implemented, "review-design"),
         verdict: "approved",
         summary: "Visual and interaction evidence passed.",
         findings: [],
@@ -752,6 +1026,7 @@ describe("WorkflowService", () => {
       runId: started.runId,
       submission: {
         kind: "functional-review",
+        reviewPacketId: reviewPacketId(implemented, "review-functional"),
         verdict: "approved",
         summary: "Contracts and tests passed.",
         findings: [],
@@ -767,11 +1042,27 @@ describe("WorkflowService", () => {
       },
     });
 
+    await changeSource(directory, "src/checkout.tsx", "mutated after approvals\n");
+    await expect(service.advance({ runId: started.runId, until: "publish-ready" })).rejects.toThrow(
+      /packet.*stale|diff.*match/i,
+    );
+    await changeSource(directory, "src/checkout.tsx", "export const checkout = 'api-backed';\n");
+
     const ready = await service.advance({ runId: started.runId, until: "publish-ready" });
 
     expect(ready.status).toBe("publish-ready");
     expect(ready.currentStage).toBe("publish");
     expect(ready.resumeContext.evidencePaths.length).toBeGreaterThanOrEqual(4);
+    const report = await reportMarkdown(store, artifactStore, started.runId);
+    expect(report).toContain("checkout-states");
+    expect(report).toContain("Checkout \\| states");
+    expect(report).toContain("Empty \\| loading<br>Success states render.");
+    expect(report).toContain("checkout-submit");
+    expect(report).toContain("src/checkout.tsx");
+    expect(report).toMatch(/Diff digest: sha256:[a-f0-9]{64}/);
+    expect(report).toContain("functional-review/functional: passed");
+    expect(report).toContain("## Risks");
+    expect(report).not.toContain("## Feature E2E video");
   });
 
   it("skips design review for non-UI scope", async () => {
@@ -788,12 +1079,14 @@ describe("WorkflowService", () => {
         status: "passed",
         summary: "Requirements normalized.",
         artifactPaths: ["contracts/requirements.json"],
+        requirementManifest: requirements("parser"),
       },
     });
     expect(contracted.nextActions).toEqual([
       { kind: "implement", runId: started.runId, requireApiReady: false },
     ]);
-    await service.submit({
+    await changeSource(directory, "src/parser.ts", "export const parser = 'refactored';\n");
+    const implemented = await service.submit({
       runId: started.runId,
       submission: {
         kind: "implementation",
@@ -809,6 +1102,7 @@ describe("WorkflowService", () => {
       runId: started.runId,
       submission: {
         kind: "functional-review",
+        reviewPacketId: reviewPacketId(implemented, "review-functional"),
         verdict: "approved",
         summary: "Functional evidence passed.",
         findings: [],
@@ -844,9 +1138,11 @@ describe("WorkflowService", () => {
         status: "passed",
         summary: "Requirements normalized.",
         artifactPaths: ["contracts/requirements.json"],
+        requirementManifest: requirements("parser"),
       },
     });
-    await service.submit({
+    await changeSource(directory, "src/parser.ts", "export const parser = 'no-publish';\n");
+    const implemented = await service.submit({
       runId: started.runId,
       submission: {
         kind: "implementation",
@@ -862,6 +1158,7 @@ describe("WorkflowService", () => {
       runId: started.runId,
       submission: {
         kind: "functional-review",
+        reviewPacketId: reviewPacketId(implemented, "review-functional"),
         verdict: "approved",
         summary: "Focused test passed.",
         findings: [],
@@ -909,6 +1206,7 @@ describe("WorkflowService", () => {
           status: "passed",
           summary: "Claimed contracts.",
           artifactPaths: ["contracts/does-not-exist.json"],
+          requirementManifest: requirements("parser"),
         },
       }),
     ).rejects.toThrow(/evidence/i);
@@ -921,6 +1219,7 @@ describe("WorkflowService", () => {
           status: "passed",
           summary: "Claimed outside evidence.",
           artifactPaths: [path.join(directory, "..", "outside.json")],
+          requirementManifest: requirements("parser"),
         },
       }),
     ).rejects.toThrow(/project root/i);
@@ -939,6 +1238,7 @@ describe("WorkflowService", () => {
         status: "passed",
         summary: "Requirements normalized.",
         artifactPaths: ["contracts/requirements.json"],
+        requirementManifest: requirements("parser"),
       },
     });
 
@@ -971,9 +1271,11 @@ describe("WorkflowService", () => {
         status: "passed",
         summary: "Contracts ready.",
         artifactPaths: ["contracts/requirements.json"],
+        requirementManifest: requirements("tracing"),
       },
     });
-    await service.submit({
+    await changeSource(directory, "src/tracing.ts", "export const tracing = true;\n");
+    const implemented = await service.submit({
       runId: started.runId,
       submission: {
         kind: "implementation",
@@ -991,6 +1293,7 @@ describe("WorkflowService", () => {
         runId: started.runId,
         submission: {
           kind: "functional-review",
+          reviewPacketId: reviewPacketId(implemented, "review-functional"),
           verdict: "approved",
           summary: "Only functional tests were supplied.",
           findings: [],
@@ -1288,9 +1591,11 @@ async function preparePublishReadyWorkflow(
       status: "passed",
       summary: "Requirements normalized.",
       artifactPaths: ["contracts/requirements.json"],
+      requirementManifest: requirements("parser"),
     },
   });
-  await service.submit({
+  await writeFile(path.join(projectRoot, "src/parser.ts"), "export const parser = 'publish';\n");
+  const implemented = await service.submit({
     runId: started.runId,
     submission: {
       kind: "implementation",
@@ -1306,6 +1611,7 @@ async function preparePublishReadyWorkflow(
     runId: started.runId,
     submission: {
       kind: "functional-review",
+      reviewPacketId: reviewPacketId(implemented, "review-functional"),
       verdict: "approved",
       summary: "Functional evidence passed.",
       findings: [],
@@ -1371,6 +1677,48 @@ function figmaManifest() {
     nodeIds: ["1:2"],
     visualPaths: ["visual/diff.png"],
   };
+}
+
+function requirements(...ids: string[]) {
+  return ids.map((id) => ({
+    id,
+    title: id.replaceAll("-", " "),
+    acceptanceCriteria: [`${id} satisfies the declared behavior.`],
+  }));
+}
+
+async function changeSource(
+  projectRoot: string,
+  relativePath: string,
+  content: string,
+): Promise<void> {
+  await writeFile(path.join(projectRoot, relativePath), content, "utf8");
+}
+
+function reviewPacketId(
+  status: Awaited<ReturnType<WorkflowService["status"]>>,
+  kind: "review-functional" | "review-design",
+): string {
+  const action = status.nextActions.find((item) => item.kind === kind);
+  if (action === undefined || !("reviewPacketId" in action)) {
+    throw new Error(`Missing ${kind} packet`);
+  }
+  return action.reviewPacketId;
+}
+
+async function reportMarkdown(
+  store: SqliteRunStore,
+  artifactStore: ArtifactBlobStore,
+  runId: string,
+): Promise<string> {
+  const run = await store.get(runId);
+  const artifact = [...run.artifacts]
+    .reverse()
+    .find(
+      (item) => item.kind === "pr-report" && item.metadata["reportKind"] === "pr-body-markdown",
+    );
+  if (artifact === undefined) throw new Error("Missing PR report");
+  return (await artifactStore.readContent(artifact.digest)).toString("utf8");
 }
 
 function validMp4(): Buffer {

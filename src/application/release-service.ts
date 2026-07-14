@@ -5,63 +5,24 @@ import { z } from "zod";
 
 import {
   defaultFeatureStatuses,
-  EvalRunner,
-  EvalSuiteReportSchema,
   ReleaseManifestSchema,
   ReleasePackageBuilder,
   ReleaseVerificationResultSchema,
   renderReleaseNotes,
-  SecurityHardeningReportSchema,
-  SecurityHardeningRunner,
   verifyReleasePackageFilesAndRuntime,
 } from "../release/index.js";
 
 const DEFAULT_RELEASE_OUTPUT_DIRECTORY = "artifacts/releases";
 
-export const ListEvalSuitesResultSchema = z
-  .object({
-    suites: z.array(
-      z
-        .object({
-          id: z.string().trim().min(1),
-          caseCount: z.number().int().nonnegative(),
-        })
-        .strict(),
-    ),
-  })
-  .strict();
-
-export const RunEvalSuiteInputSchema = z
-  .object({
-    suiteId: z.string().trim().min(1).optional(),
-    outputDirectory: z.string().trim().min(1).default(DEFAULT_RELEASE_OUTPUT_DIRECTORY),
-  })
-  .strict();
-
-export const RunEvalSuiteResultSchema = z
-  .object({
-    report: EvalSuiteReportSchema,
-    reportPath: z.string().trim().min(1),
-  })
-  .strict();
-
-export const RunSecurityHardeningSuiteInputSchema = z
-  .object({
-    outputDirectory: z.string().trim().min(1).default(DEFAULT_RELEASE_OUTPUT_DIRECTORY),
-  })
-  .strict();
-
-export const RunSecurityHardeningSuiteResultSchema = z
-  .object({
-    report: SecurityHardeningReportSchema,
-    reportPath: z.string().trim().min(1),
-  })
-  .strict();
-
 export const BuildReleasePackageInputSchema = z
   .object({
-    version: z.string().trim().min(1),
+    version: z
+      .string()
+      .regex(
+        /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/,
+      ),
     outputDirectory: z.string().trim().min(1).default(DEFAULT_RELEASE_OUTPUT_DIRECTORY),
+    allowDirty: z.boolean().default(false),
   })
   .strict();
 
@@ -72,6 +33,7 @@ export const BuildReleasePackageResultSchema = z
         packagePath: z.string().trim().min(1),
         sha256: z.string().regex(/^sha256:[a-f0-9]{64}$/),
         includedFiles: z.array(z.string()),
+        gitCommit: z.string().regex(/^[a-f0-9]{40}$/),
       })
       .strict(),
     verification: ReleaseVerificationResultSchema,
@@ -111,8 +73,6 @@ export const GenerateReleaseNotesResultSchema = z
   .strict();
 
 export class ReleaseService {
-  private latestEvalReport: z.infer<typeof EvalSuiteReportSchema> | undefined;
-  private latestSecurityReport: z.infer<typeof SecurityHardeningReportSchema> | undefined;
   private latestManifest: z.infer<typeof ReleaseManifestSchema> | undefined;
   private latestManifestPath: string | undefined;
 
@@ -121,50 +81,6 @@ export class ReleaseService {
     private readonly now: () => string = () => new Date().toISOString(),
   ) {}
 
-  public listEvalSuites() {
-    return ListEvalSuitesResultSchema.parse({
-      suites: new EvalRunner({ now: this.now }).listSuites(),
-    });
-  }
-
-  public async runEvalSuite(rawInput: unknown = {}) {
-    const input = RunEvalSuiteInputSchema.parse(rawInput);
-    const outputDirectory = this.resolveOutputDirectory(input.outputDirectory);
-    const report = await new EvalRunner({ now: this.now }).runSuite(input.suiteId);
-    const reportPath = path.join(outputDirectory, `${report.suiteId}.eval-report.json`);
-
-    await mkdir(outputDirectory, {
-      recursive: true,
-    });
-    await writeJson(reportPath, report);
-
-    this.latestEvalReport = report;
-
-    return RunEvalSuiteResultSchema.parse({
-      report,
-      reportPath,
-    });
-  }
-
-  public async runSecurityHardeningSuite(rawInput: unknown = {}) {
-    const input = RunSecurityHardeningSuiteInputSchema.parse(rawInput);
-    const outputDirectory = this.resolveOutputDirectory(input.outputDirectory);
-    const report = await new SecurityHardeningRunner(this.now).run();
-    const reportPath = path.join(outputDirectory, "security-hardening-report.json");
-
-    await mkdir(outputDirectory, {
-      recursive: true,
-    });
-    await writeJson(reportPath, report);
-
-    this.latestSecurityReport = report;
-
-    return RunSecurityHardeningSuiteResultSchema.parse({
-      report,
-      reportPath,
-    });
-  }
-
   public async buildReleasePackage(rawInput: unknown) {
     const input = BuildReleasePackageInputSchema.parse(rawInput);
     const outputDirectory = this.resolveOutputDirectory(input.outputDirectory);
@@ -172,9 +88,14 @@ export class ReleaseService {
     const build = await builder.build({
       version: input.version,
       outputDirectory,
+      allowDirty: input.allowDirty,
     });
     const verification = await verifyReleasePackageFilesAndRuntime({
       projectRoot: this.projectRoot,
+      packagePath: build.packagePath,
+      sha256: build.sha256,
+      gitCommit: build.gitCommit,
+      version: input.version,
       files: build.includedFiles,
     });
     const manifest = ReleaseManifestSchema.parse({
@@ -184,6 +105,7 @@ export class ReleaseService {
       nodeVersion: process.version,
       packagePath: build.packagePath,
       packageSha256: build.sha256,
+      gitCommit: build.gitCommit,
       includedFiles: build.includedFiles,
       excludedPatterns: [
         "node_modules/",
@@ -195,8 +117,6 @@ export class ReleaseService {
         "coverage/",
         "tmp/",
       ],
-      evalStatus: this.latestEvalReport?.status ?? "not-run",
-      securityStatus: this.latestSecurityReport?.status ?? "not-run",
       pluginValidationStatus: "skipped",
       features: defaultFeatureStatuses(),
     });
@@ -234,9 +154,37 @@ export class ReleaseService {
       throw new Error("No release manifest available. Build a release package first.");
     }
 
-    const verification = await verifyReleasePackageFilesAndRuntime({
+    const archiveVerification = await verifyReleasePackageFilesAndRuntime({
       projectRoot: this.projectRoot,
+      packagePath: manifest.packagePath,
+      sha256: manifest.packageSha256,
+      gitCommit: manifest.gitCommit,
+      version: manifest.version,
       files: manifest.includedFiles,
+    });
+    const checksumPath = path.join(
+      path.dirname(manifestPath ?? manifest.packagePath),
+      `spec-to-pr-${manifest.version}.sha256.txt`,
+    );
+    const expectedChecksum = `${manifest.packageSha256}  ${path.basename(manifest.packagePath)}\n`;
+    let checksumMatches = false;
+
+    try {
+      checksumMatches = (await readFile(checksumPath, "utf8")) === expectedChecksum;
+    } catch {
+      checksumMatches = false;
+    }
+
+    const failures = [
+      ...archiveVerification.failures,
+      ...(checksumMatches
+        ? []
+        : ["Release checksum sidecar does not match the manifest and package name."]),
+    ];
+    const verification = ReleaseVerificationResultSchema.parse({
+      ...archiveVerification,
+      status: failures.length === 0 ? "passed" : "failed",
+      failures,
     });
 
     return VerifyReleasePackageResultSchema.parse({

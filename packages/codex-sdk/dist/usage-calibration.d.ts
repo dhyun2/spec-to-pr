@@ -1,4 +1,4 @@
-import type { DeliveryMode, WorkloadSize } from "./workload-budget.js";
+import { type DeliveryMode, type WorkloadSize } from "./workload-budget.js";
 export type UsageCalibrationSample = {
     version: 1;
     mode: DeliveryMode;
@@ -18,9 +18,14 @@ export type UsageCalibrationSample = {
 };
 export declare class UsageCalibrationStore {
     readonly filePath: string;
-    constructor(filePath: string);
+    private readonly options;
+    constructor(filePath: string, options?: {
+        excludedRoot?: string;
+    });
     record(rawSample: UsageCalibrationSample): Promise<void>;
+    private recordExclusive;
     read(): Promise<UsageCalibrationSample[]>;
+    private assertLocationAllowed;
 }
 export type UsageCalibrationPort = Pick<UsageCalibrationStore, "read" | "record">;
 export declare function isUsageCalibrationReadEnabled(input: {

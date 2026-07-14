@@ -15,7 +15,11 @@ export const WorkloadSignalsSchema = z
     workspacePackages: z.number().int().nonnegative().optional(),
     uncertainty: z.number().int().min(0).max(5).optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (signals) => Object.keys(signals).some((key) => key !== "uncertainty"),
+    "At least one observed workload signal is required",
+  );
 
 export const WorkloadEstimateSchema = z
   .object({
@@ -107,7 +111,9 @@ export function estimateWorkload(input: {
       ? "low"
       : (signals.uncertainty ?? 1) === 0 && observedFields >= 5
         ? "high"
-        : "medium";
+        : (signals.uncertainty ?? 1) <= 2 && observedFields >= 3
+          ? "medium"
+          : "low";
   const reasons = [
     `${input.phase} signals score ${score}`,
     `${input.mode} delivery profile`,

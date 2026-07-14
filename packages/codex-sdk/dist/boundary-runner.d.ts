@@ -42,7 +42,7 @@ export type BoundaryClient = {
     startThread(): BoundaryThread;
     resumeThread(threadId: string): BoundaryThread;
 };
-export type BoundaryRunState = "completed" | "blocked" | "approval-required" | "split-required" | "usage-unavailable" | "status-unavailable" | "turn-limit";
+export type BoundaryRunState = "completed" | "blocked" | "split-required" | "run-mismatch" | "usage-unavailable" | "status-unavailable" | "turn-limit";
 export declare function executeBudgetedBoundaryTurns(input: {
     client: BoundaryClient;
     initialPrompt: string;
@@ -51,7 +51,6 @@ export declare function executeBudgetedBoundaryTurns(input: {
     hardLimitTokens: number;
     workloadSize: WorkloadSize;
     workloadHardLimits?: Partial<Record<WorkloadSize, number>>;
-    budgetLocked?: boolean;
     requiredValidations: readonly string[];
     maxTurns: number;
 }): Promise<{
@@ -69,6 +68,12 @@ export declare function executeBudgetedBoundaryTurns(input: {
     hardLimitTokens: number;
 }>;
 export declare function extractWorkflowStatus(items: RunResult["items"]): BoundaryWorkflowStatus | null;
-export declare function buildCompactCheckpointPrompt(status: BoundaryWorkflowStatus, requiredValidations: readonly string[]): string;
-export declare function buildBoundaryContinuationPrompt(status: BoundaryWorkflowStatus, requiredValidations: readonly string[]): string;
+export declare function buildCompactCheckpointPrompt(status: BoundaryWorkflowStatus, requiredValidations: readonly string[], effectiveBudget: {
+    usedTokens: number;
+    hardLimitTokens: number;
+}): string;
+export declare function buildBoundaryContinuationPrompt(status: BoundaryWorkflowStatus, requiredValidations: readonly string[], effectiveBudget: {
+    usedTokens: number;
+    hardLimitTokens: number;
+}): string;
 export declare function buildFinalResponsePrompt(status: BoundaryWorkflowStatus): string;

@@ -66,7 +66,9 @@ describe("v2 documentation", () => {
     expect(contents).toContain("clean tree");
     expect(contents).toContain("workloadSignals");
     expect(contents).toContain("split-required");
-    expect(contents).toContain("approval-required");
+    expect(contents).not.toContain("approval-required");
+    expect(contents).not.toContain("--token-budget");
+    expect(contents).not.toContain("tokenBudget");
     expect(contents).toContain("80%");
     expect(contents).toContain("numeric-only");
     expect(contents).toContain("usage-unavailable");

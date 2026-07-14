@@ -93,6 +93,20 @@ const McpConfigSchema = z.object({
 describe("plugin layout", () => {
   const root = process.cwd();
 
+  it("keeps runtime dependencies limited to the production bundle", () => {
+    const packageJson = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")) as {
+      dependencies: Record<string, string>;
+      devDependencies: Record<string, string>;
+    };
+
+    expect(Object.keys(packageJson.dependencies).sort()).toEqual([
+      "@modelcontextprotocol/sdk",
+      "pngjs",
+      "zod",
+    ]);
+    expect(packageJson.devDependencies).toHaveProperty("yaml");
+  });
+
   it("declares valid plugin manifest paths", () => {
     const manifestPath = path.join(root, ".claude-plugin", "plugin.json");
     const manifest = ClaudePluginManifestSchema.parse(
@@ -145,6 +159,13 @@ describe("plugin layout", () => {
     expect(server.args).toEqual(["${CLAUDE_PLUGIN_ROOT}/dist/mcp/server.js"]);
 
     expect(existsSync(path.join(root, "dist", "mcp", "server.js"))).toBe(true);
+  });
+
+  it("describes compact workflow status without removed artifact handles", () => {
+    const serverSource = readFileSync(path.join(root, "src", "mcp", "create-server.ts"), "utf8");
+
+    expect(serverSource).toContain("submission-evidence status");
+    expect(serverSource).not.toContain("artifact-handle status");
   });
 
   it("ships a production bundle without runtime dependency imports", () => {
@@ -245,6 +266,8 @@ describe("plugin layout", () => {
     }
     expect(intake).toContain("provider: host-connected-figma");
     expect(intake).toContain("`capturedAt`");
+    expect(intake).toContain("requirementManifest");
+    expect(intake).toContain("legacyBaseline");
     const intakeBody = intake.slice(intake.indexOf("# Intake"));
     expect(intakeBody.indexOf("figma-bundle")).toBeLessThan(
       intakeBody.indexOf("Submit `contracts`"),
@@ -258,6 +281,7 @@ describe("plugin layout", () => {
     expect(functionalAgent).toContain("targeted-feature");
     expect(functionalAgent).toContain("full-project E2E");
     expect(functionalAgent).toContain("immutable review packet");
+    expect(functionalAgent).toContain("reviewPacketId");
     expect(functionalAgent).toContain("Do not call workflow tools");
     for (const requirement of [
       "one unchained Playwright invocation",
@@ -270,6 +294,7 @@ describe("plugin layout", () => {
     }
     expect(designAgent).toContain("does not replace a visual baseline");
     expect(designAgent).toContain("immutable review packet");
+    expect(designAgent).toContain("reviewPacketId");
 
     const functionalReviewSkill = readFileSync(
       path.join(root, "skills", "review-functional", "SKILL.md"),
@@ -284,6 +309,7 @@ describe("plugin layout", () => {
     ]) {
       expect(functionalReviewSkill).toContain(requirement);
     }
+    expect(functionalReviewSkill).toContain("reviewPacketId");
 
     const codexFunctionalAgent = readFileSync(
       path.join(root, ".codex", "agents", "spec-to-pr-functional-reviewer.toml"),
@@ -297,6 +323,15 @@ describe("plugin layout", () => {
     ]) {
       expect(codexFunctionalAgent).toContain(requirement);
     }
+    expect(codexFunctionalAgent).toContain("reviewPacketId");
+    expect(codexFunctionalAgent).toContain("Scope splits");
+
+    const codexDesignAgent = readFileSync(
+      path.join(root, ".codex", "agents", "spec-to-pr-design-reviewer.toml"),
+      "utf8",
+    );
+    expect(codexDesignAgent).toContain("reviewPacketId");
+    expect(codexDesignAgent).toContain("Scope splits");
 
     const publish = readFileSync(path.join(root, "skills", "publish", "SKILL.md"), "utf8");
     for (const field of [
@@ -410,13 +445,30 @@ describe("plugin layout", () => {
     expect(shipped).toContain("design-reviewer");
     expect(shipped).not.toContain("visual-regression-reviewer");
     expect(rootPackage.scripts["sdk:check-dist"]).toBe(
-      "git diff --exit-code -- packages/codex-sdk/dist",
+      "node scripts/check-generated-files.mjs packages/codex-sdk/dist",
+    );
+    expect(rootPackage.scripts["schemas:check"]).toBe(
+      "node scripts/check-generated-files.mjs schemas/runtime",
+    );
+    expect(rootPackage.scripts["bundle:check-dist"]).toBe(
+      "node scripts/check-generated-files.mjs dist/mcp/server.js",
     );
     expect(rootPackage.scripts["check"]).toContain("pnpm sdk:build && pnpm sdk:check-dist");
-    expect(rootPackage.scripts["bundle:check-dist"]).toBe(
-      "git diff --exit-code -- dist/mcp/server.js",
-    );
+    expect(rootPackage.scripts["check"]).toContain("pnpm schemas:build && pnpm schemas:check");
     expect(rootPackage.scripts["check"]).toContain("pnpm build && pnpm bundle:check-dist");
+
+    const sdkPackage = JSON.parse(
+      readFileSync(path.join(root, "packages", "codex-sdk", "package.json"), "utf8"),
+    ) as { scripts: Record<string, string> };
+    expect(sdkPackage.scripts["build"]).toBe("node ../../scripts/build-codex-sdk.mjs");
+    expect(existsSync(path.join(root, "scripts", "build-codex-sdk.mjs"))).toBe(true);
+    expect(existsSync(path.join(root, "scripts", "check-generated-files.mjs"))).toBe(true);
+
+    const schemaBuilder = readFileSync(
+      path.join(root, "scripts", "export-runtime-schemas.ts"),
+      "utf8",
+    );
+    expect(schemaBuilder).toContain("await rm(outputDirectory");
   });
 
   it("keeps the MDX installation page free of raw container directives", () => {

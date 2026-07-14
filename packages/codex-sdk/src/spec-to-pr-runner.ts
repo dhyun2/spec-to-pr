@@ -1,4 +1,4 @@
-import { realpathSync, statSync } from "node:fs";
+import { existsSync, realpathSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -27,6 +27,7 @@ import {
 } from "./usage-calibration.js";
 import {
   defaultTokenRangeForWorkload,
+  effectiveHardLimitForWorkload,
   estimateSdkWorkload,
   type AggregatedUsage,
   type SdkWorkloadEstimate,
@@ -58,7 +59,6 @@ export type SpecToPrCodexRunInput = {
   env?: Record<string, string>;
   outputSchema?: unknown;
   enableReviewAgents?: boolean;
-  tokenBudget?: number;
   maxTurns?: number;
   usageHistoryPath?: string;
   usageCalibration?: boolean;
@@ -74,8 +74,8 @@ export type SpecToPrCodexRunResult = {
     state:
       | "completed"
       | "blocked"
-      | "approval-required"
       | "split-required"
+      | "run-mismatch"
       | "usage-unavailable"
       | "status-unavailable"
       | "turn-limit";
@@ -116,7 +116,10 @@ export async function runSpecToPrWithCodex(
     hasFigma: input.figmaUrl !== undefined,
     hasOpenApi: input.openApiPath !== undefined,
   });
-  const usageStore = new UsageCalibrationStore(resolveUsageHistoryPath(input));
+  const repositoryRoot = resolveRepositoryRoot(input.workingDirectory);
+  const usageStore = new UsageCalibrationStore(resolveUsageHistoryPath(input), {
+    excludedRoot: repositoryRoot,
+  });
   const calibrationEnabled = input.usageCalibration !== false;
   const calibrationReadEnabled = isUsageCalibrationReadEnabled({
     enabled: calibrationEnabled,
@@ -144,7 +147,7 @@ export async function runSpecToPrWithCodex(
     tokenRange: { min: calibration.min, max: calibration.max },
     sampleCount: calibration.sampleCount,
   };
-  const hardLimitTokens = input.tokenBudget ?? initialWorkload.tokenRange.max;
+  const hardLimitTokens = effectiveHardLimitForWorkload(initialWorkload.size);
   const requiredValidations = requiredValidationsForInput(input);
   const result = await executeBudgetedBoundaryTurns({
     client: createBoundaryClient(codex, buildThreadOptions(input)),
@@ -155,9 +158,11 @@ export async function runSpecToPrWithCodex(
     hardLimitTokens,
     workloadSize: initialWorkload.size,
     workloadHardLimits: Object.fromEntries(
-      Object.entries(calibrationByWorkload).map(([size, value]) => [size, value.max]),
+      Object.keys(calibrationByWorkload).map((size) => [
+        size,
+        effectiveHardLimitForWorkload(size as WorkloadSize),
+      ]),
     ),
-    budgetLocked: input.tokenBudget !== undefined,
     requiredValidations,
     maxTurns: input.maxTurns ?? 12,
   });
@@ -283,7 +288,7 @@ export function buildSpecToPrPrompt(input: SpecToPrCodexRunInput): string {
       ? ""
       : buildCodexReviewAgentInstructions({
           includeFunctionalReview: true,
-          includeDesignReview: hasUiScope || deliveryMode === "brief",
+          includeDesignReview: hasUiScope,
         }),
     "",
     "User request:",
@@ -323,12 +328,6 @@ export function validateSpecToPrRunInput(input: SpecToPrCodexRunInput): void {
       throw new Error(`${mode} mode requires a concrete prompt describing the requested change`);
     }
   }
-  if (
-    input.tokenBudget !== undefined &&
-    (!Number.isInteger(input.tokenBudget) || input.tokenBudget < 1_000)
-  ) {
-    throw new Error("tokenBudget must be an integer of at least 1000 tokens");
-  }
   if (input.maxTurns !== undefined && (!Number.isInteger(input.maxTurns) || input.maxTurns <= 0)) {
     throw new Error("maxTurns must be a positive integer");
   }
@@ -336,7 +335,7 @@ export function validateSpecToPrRunInput(input: SpecToPrCodexRunInput): void {
     const usageHistoryPath = resolveUsageHistoryPath(input);
     if (
       isWithinDirectory(
-        canonicalizeThroughExistingAncestor(input.workingDirectory),
+        resolveRepositoryRoot(input.workingDirectory),
         canonicalizeThroughExistingAncestor(usageHistoryPath),
       )
     ) {
@@ -376,6 +375,16 @@ function canonicalizeThroughExistingAncestor(candidate: string): string {
       missingSegments.unshift(path.basename(current));
       current = parent;
     }
+  }
+}
+
+function resolveRepositoryRoot(workingDirectory: string): string {
+  let current = canonicalizeThroughExistingAncestor(workingDirectory);
+  while (true) {
+    if (existsSync(path.join(current, ".git"))) return current;
+    const parent = path.dirname(current);
+    if (parent === current) return canonicalizeThroughExistingAncestor(workingDirectory);
+    current = parent;
   }
 }
 
@@ -425,7 +434,7 @@ function sdkUsage(usage: AggregatedUsage): RunResult["usage"] {
 function requiredValidationsForInput(input: SpecToPrCodexRunInput): string[] {
   const prompt = input.prompt ?? "";
   const mode = resolveDeliveryMode(input);
-  const ui = isUiScope(input, prompt) || mode === "brief";
+  const ui = isUiScope(input, prompt);
   const validations = ["functional"];
   if (ui) validations.push("accessibility");
   if (input.figmaUrl !== undefined) validations.push("visual", "figma-bundle");

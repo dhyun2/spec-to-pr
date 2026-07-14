@@ -79,7 +79,7 @@ API-backed UI인데 명시적 `api-ready` checkpoint가 없거나 최종 `apiRea
 
 필수 gate는 empty/skipped/not-run evidence로 통과하지 않습니다. Repository의 실제 command를 실행해 project-local 결과를 제출하거나, 그 gate가 scope에 적용되지 않는다는 근거가 있을 때만 not applicable로 분류하세요.
 
-## Workload와 token budget
+## Workload와 자동 경계 제어
 
 ### Intake estimate가 부정확하다
 
@@ -93,9 +93,9 @@ Agent가 한 action group 뒤에 멈추라는 지시를 무시하면 같은 turn
 
 Fresh thread나 `--resume`은 기존 durable run ID로 `workflow_status`를 먼저 호출합니다. `resumeContext.goal`, `evidencePaths`, `submissions`가 비어 있거나 필요한 프로젝트 파일이 사라졌다면 새 Run을 만들지 말고 blocker로 처리하세요.
 
-### `split-required` 또는 `approval-required`가 나왔다
+### `split-required`가 나왔다
 
-Hard limit 뒤 다음 action을 임의로 시작하지 않습니다. `L`/`XL`은 독립적으로 검증 가능한 scope slice로 나누고, 더 작은 작업이거나 분할할 수 없으면 사용자가 더 큰 `--token-budget`을 명시적으로 승인해야 합니다. 어느 경우든 functional/design 등 required validation은 삭제하거나 waive하지 않습니다.
+자동 hard limit 뒤 다음 action을 임의로 시작하지 않습니다. 작업 크기와 관계없이 독립적으로 검증 가능한 scope slice로 나눕니다. 나누기 어렵다면 현재 Run을 멈추고 범위를 다시 정의하되 functional/design 등 required validation은 삭제하거나 waive하지 않습니다.
 
 ### Usage history를 남기고 싶지 않다
 

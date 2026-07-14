@@ -43,7 +43,7 @@ Review is deliberately split into only two independent roles:
 
 The orchestrator calls `workflow_status` and freezes its snapshot with accepted contracts, the diff, and evidence paths before dispatch. Reviewers consume that immutable packet and return literal schema-shaped verdicts; they do not call workflow tools or mutate implementation.
 
-The default gates are proportional to the change. Missing optional scripts are not applicable; missing or failed required evidence blocks. Full matrices, package verification, hardening, and cross-host checks are release-only.
+The default gates are proportional to the change. Missing optional scripts are not applicable; missing or failed required evidence blocks. Full matrices, tracked-archive integrity, package verification, and cross-host checks are release-only.
 
 Publication only creates or updates a draft PR/MR. It never merges, approves, closes, or marks a review request ready. Archive is a separate, explicit post-merge action supported by authoritative merge evidence; the runtime does not poll for merge state.
 

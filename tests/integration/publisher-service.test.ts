@@ -5,9 +5,10 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { ArtifactBlobStore } from "../../src/artifact-registry/artifact-blob-store.js";
-import { PrReportService } from "../../src/application/pr-report-service.js";
 import { PublisherService } from "../../src/application/publisher-service.js";
 import { RunService } from "../../src/application/run-service.js";
+import { ArtifactRefSchema } from "../../src/runtime/artifact.js";
+import { createArtifactId } from "../../src/runtime/id-factory.js";
 import type {
   PublishedReviewRequest,
   PublishTarget,
@@ -21,12 +22,17 @@ let projectRoot: string;
 let store: SqliteRunStore;
 let artifactStore: ArtifactBlobStore;
 let runService: RunService;
-let prReportService: PrReportService;
+let prReportService: {
+  generatePrReport: typeof generatePrReport;
+  getPrReport: typeof getPrReport;
+};
 let publisherService: PublisherService;
 let originalGithubToken: string | undefined;
 let githubPublisher: FakePublisher;
 let gitlabPublisher: FakePublisher;
 let gitCalls: string[][];
+let gitCurrentBranch: string;
+const gitHead = "a".repeat(40);
 
 beforeEach(async () => {
   directory = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-publisher-"));
@@ -46,10 +52,11 @@ beforeEach(async () => {
     pluginVersion: "0.1.0",
     now: () => "2026-06-23T00:00:00.000Z",
   });
-  prReportService = new PrReportService(store, artifactStore, () => "2026-06-23T00:00:01.000Z");
+  prReportService = { generatePrReport, getPrReport };
   githubPublisher = new FakePublisher("github");
   gitlabPublisher = new FakePublisher("gitlab");
   gitCalls = [];
+  gitCurrentBranch = "spec-to-pr/run-1";
   publisherService = new PublisherService(
     store,
     artifactStore,
@@ -65,6 +72,12 @@ beforeEach(async () => {
       }
       if (args[0] === "rev-list") {
         return { stdout: "1\n", stderr: "" };
+      }
+      if (args[0] === "symbolic-ref") {
+        return { stdout: `${gitCurrentBranch}\n`, stderr: "" };
+      }
+      if (args[0] === "rev-parse") {
+        return { stdout: `${gitHead}\n`, stderr: "" };
       }
       return {
         stdout: "https://github.com/acme/spec-to-pr.git\n",
@@ -195,6 +208,7 @@ describe("PublisherService", () => {
     await markRunReadyForPublish(run.id);
     const report = await prReportService.generatePrReport({ runId: run.id });
 
+    gitCurrentBranch = "spec-to-pr/run-upstream";
     const published = await publisherService.publish({
       runId: run.id,
       reportArtifactId: report.markdownArtifactId,
@@ -236,9 +250,13 @@ describe("PublisherService", () => {
           stdout:
             args[0] === "status"
               ? status
-              : args[0] === "rev-list"
-                ? ahead
-                : "https://github.com/acme/spec-to-pr.git\n",
+              : args[0] === "symbolic-ref"
+                ? "codex/checkout\n"
+                : args[0] === "rev-parse"
+                  ? `${gitHead}\n`
+                  : args[0] === "rev-list"
+                    ? ahead
+                    : "https://github.com/acme/spec-to-pr.git\n",
           stderr: "",
         }),
       );
@@ -249,6 +267,77 @@ describe("PublisherService", () => {
     await expect(createService("", "0\n").publish(input)).rejects.toThrow(
       /at least one committed change/i,
     );
+  });
+
+  it("binds publication to the checked-out source branch and its exact head", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    const sourceSha = "a".repeat(40);
+    const mismatchedBranch = new PublisherService(
+      store,
+      artifactStore,
+      () => "2026-06-23T00:00:02.000Z",
+      { github: githubPublisher, gitlab: gitlabPublisher },
+      async (_cwd, args) => ({
+        stdout:
+          args[0] === "status"
+            ? ""
+            : args[0] === "symbolic-ref"
+              ? "codex/other\n"
+              : args[0] === "rev-parse"
+                ? `${sourceSha}\n`
+                : args[0] === "rev-list"
+                  ? "1\n"
+                  : "https://github.com/acme/spec-to-pr.git\n",
+        stderr: "",
+      }),
+    );
+
+    await expect(
+      mismatchedBranch.publish({
+        runId: run.id,
+        reportArtifactId: report.markdownArtifactId,
+        sourceBranch: "codex/checkout",
+        targetBranch: "main",
+        headSha: sourceSha,
+        pushBranch: false,
+        confirm: true,
+      }),
+    ).rejects.toThrow(/checked-out branch/i);
+
+    const mismatchedHead = new PublisherService(
+      store,
+      artifactStore,
+      () => "2026-06-23T00:00:02.000Z",
+      { github: githubPublisher, gitlab: gitlabPublisher },
+      async (_cwd, args) => ({
+        stdout:
+          args[0] === "status"
+            ? ""
+            : args[0] === "symbolic-ref"
+              ? "codex/checkout\n"
+              : args[0] === "rev-parse" && args.at(-1) === "HEAD"
+                ? `${sourceSha}\n`
+                : args[0] === "rev-parse"
+                  ? `${"b".repeat(40)}\n`
+                  : args[0] === "rev-list"
+                    ? "1\n"
+                    : "https://github.com/acme/spec-to-pr.git\n",
+        stderr: "",
+      }),
+    );
+    await expect(
+      mismatchedHead.publish({
+        runId: run.id,
+        reportArtifactId: report.markdownArtifactId,
+        sourceBranch: "codex/checkout",
+        targetBranch: "main",
+        headSha: sourceSha,
+        pushBranch: false,
+        confirm: true,
+      }),
+    ).rejects.toThrow(/does not match source branch/i);
   });
 
   it("refuses to update an existing non-draft review request", async () => {
@@ -546,6 +635,7 @@ describe("PublisherService", () => {
     await addFeatureVideoEvidence(run.id);
     const report = await prReportService.generatePrReport({ runId: run.id });
 
+    gitCurrentBranch = "spec-to-pr/run-feature";
     const published = await publisherService.publish({
       runId: run.id,
       reportArtifactId: report.markdownArtifactId,
@@ -774,6 +864,65 @@ async function markRunReadyForPublish(runId: string): Promise<void> {
     },
     run.revision,
   );
+}
+
+async function generatePrReport(input: { runId: string }) {
+  const run = await store.get(input.runId);
+  const timestamp = "2026-06-23T00:00:01.000Z";
+  const decision = run.agentResults.some(
+    (result) => result.kind === "verification" && result.status === "passed",
+  )
+    ? "ready"
+    : "blocked";
+  const markdown = [
+    "# 요약",
+    "",
+    decision === "ready" ? "검증된 변경입니다." : "검증이 완료되지 않았습니다.",
+    "",
+    "## 결정",
+    "",
+    decision,
+    "",
+  ].join("\n");
+  const blob = await artifactStore.writeBlob({
+    content: Buffer.from(markdown),
+    mediaType: "text/markdown",
+    storedAt: timestamp,
+    label: "pr-report.md",
+  });
+  const artifact = ArtifactRefSchema.parse({
+    id: createArtifactId(),
+    kind: "pr-report",
+    uri: blob.uri,
+    mediaType: "text/markdown",
+    digest: blob.digest,
+    producedBy: "orchestrator",
+    evidenceIds: [],
+    createdAt: timestamp,
+    metadata: {
+      reportKind: "pr-body-markdown",
+      decision,
+    },
+  });
+  await store.save(
+    {
+      ...run,
+      revision: run.revision + 1,
+      updatedAt: timestamp,
+      artifacts: [...run.artifacts, artifact],
+    },
+    run.revision,
+  );
+  return { decision, markdownArtifactId: artifact.id };
+}
+
+async function getPrReport(input: { runId: string; artifactId: string }) {
+  const run = await store.get(input.runId);
+  const artifact = run.artifacts.find((item) => item.id === input.artifactId);
+  if (artifact === undefined) throw new Error("Missing report artifact");
+  return {
+    markdown: (await artifactStore.readContent(artifact.digest)).toString("utf8"),
+  };
 }
 
 async function addVisualEvidence(

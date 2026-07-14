@@ -112,10 +112,22 @@ describe("Codex SDK workflow policy", () => {
 
     expect(brief).toContain('mode: "brief"');
     expect(brief).toContain('briefPath: "docs/brief.md"');
-    expect(brief).toContain("design-reviewer");
+    expect(brief).not.toContain("design-reviewer");
     expect(brief).toContain("workflow_status snapshot");
     expect(legacy).toContain('mode: "legacy"');
     expect(legacy).toContain("focused baseline");
+  });
+
+  it("does not preactivate UI validation for a backend-only brief", () => {
+    const prompt = buildSpecToPrPrompt({
+      workingDirectory: "/tmp/project",
+      deliveryMode: "brief",
+      briefPath: "docs/backend-brief.md",
+      prompt: "Implement a database migration and API endpoint.",
+    });
+
+    expect(prompt).toContain("functional-reviewer");
+    expect(prompt).not.toContain("design-reviewer");
   });
 
   it("rejects incomplete mode-specific SDK inputs before starting Codex", () => {
@@ -209,6 +221,27 @@ describe("Codex SDK workflow policy", () => {
         usageCalibration: false,
       }),
     ).not.toThrow();
+  });
+
+  it("uses the enclosing git worktree root when the SDK runs from a nested package", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-history-git-root-"));
+    const repository = path.join(root, "repository");
+    const nestedPackage = path.join(repository, "packages", "app");
+
+    try {
+      await mkdir(path.join(repository, ".git"), { recursive: true });
+      await mkdir(nestedPackage, { recursive: true });
+
+      expect(() =>
+        validateSpecToPrRunInput({
+          workingDirectory: nestedPackage,
+          prompt: "Implement a feature",
+          usageHistoryPath: path.join(repository, ".history", "usage.jsonl"),
+        }),
+      ).toThrow("usageHistoryPath must stay outside the target repository");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("rejects an outside history path whose symlink resolves inside the repository", async () => {

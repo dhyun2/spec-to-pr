@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -66,6 +67,43 @@ export const REQUIRED_RELEASE_FILES = [
   "CHANGELOG.md",
   "dist/mcp/server.js",
   "package.json",
+  "packages/codex-sdk/package.json",
+  "schemas/runtime/index.json",
+] as const;
+
+export const REQUIRED_RELEASE_SKILLS = [
+  "skills/archive-openspec/SKILL.md",
+  "skills/doctor/SKILL.md",
+  "skills/implement/SKILL.md",
+  "skills/intake-contracts/SKILL.md",
+  "skills/prepare-release/SKILL.md",
+  "skills/publish/SKILL.md",
+  "skills/review-design/SKILL.md",
+  "skills/review-functional/SKILL.md",
+  "skills/spec-to-pr/SKILL.md",
+] as const;
+
+export const REQUIRED_MARKDOWN_AGENTS = [
+  "agents/design-reviewer.md",
+  "agents/functional-reviewer.md",
+] as const;
+
+export const REQUIRED_CODEX_AGENTS = [
+  ".codex/agents/spec-to-pr-design-reviewer.toml",
+  ".codex/agents/spec-to-pr-functional-reviewer.toml",
+] as const;
+
+const REQUIRED_RUNTIME_SCHEMAS = [
+  "schemas/runtime/agent-result.schema.json",
+  "schemas/runtime/artifact-ref.schema.json",
+  "schemas/runtime/check-result.schema.json",
+  "schemas/runtime/decision.schema.json",
+  "schemas/runtime/evidence-ref.schema.json",
+  "schemas/runtime/gap.schema.json",
+  "schemas/runtime/index.json",
+  "schemas/runtime/run-manifest.schema.json",
+  "schemas/runtime/run-summary.schema.json",
+  "schemas/runtime/source-ref.schema.json",
 ] as const;
 
 export function verifyReleasePackageFiles(files: string[]): ReleaseVerificationResult {
@@ -86,6 +124,36 @@ export function verifyReleasePackageFiles(files: string[]): ReleaseVerificationR
     }
   }
 
+  verifyExactInventory({
+    files: normalizedFiles,
+    expected: REQUIRED_RELEASE_SKILLS,
+    actual: normalizedFiles.filter((file) => /^skills\/[^/]+\/SKILL\.md$/u.test(file)),
+    label: "skill",
+    failures,
+  });
+  verifyExactInventory({
+    files: normalizedFiles,
+    expected: REQUIRED_MARKDOWN_AGENTS,
+    actual: normalizedFiles.filter((file) => /^agents\/[^/]+\.md$/u.test(file)),
+    label: "Markdown agent",
+    failures,
+  });
+  verifyExactInventory({
+    files: normalizedFiles,
+    expected: REQUIRED_CODEX_AGENTS,
+    actual: normalizedFiles.filter((file) => /^\.codex\/agents\/[^/]+\.toml$/u.test(file)),
+    label: "Codex agent",
+    failures,
+  });
+  verifyExactInventory({
+    files: normalizedFiles,
+    expected: REQUIRED_RUNTIME_SCHEMAS,
+    actual: normalizedFiles.filter((file) => file.startsWith("schemas/runtime/")),
+    label: "runtime schema",
+    failures,
+  });
+  verifySdkRuntimeInventory(normalizedFiles, failures);
+
   return ReleaseVerificationResultSchema.parse({
     status: failures.length === 0 ? "passed" : "failed",
     failures,
@@ -93,30 +161,207 @@ export function verifyReleasePackageFiles(files: string[]): ReleaseVerificationR
   });
 }
 
-export async function verifyReleasePackageRuntime(input: {
+export async function verifyReleaseArchive(input: {
   projectRoot: string;
-  includedFiles: string[];
+  packagePath: string;
+  expectedSha256: string;
+  expectedFiles: string[];
+  expectedGitCommit: string;
+  expectedVersion: string;
+  runtimeSmoke?: boolean;
+  dataDirectory?: string;
+  nodePath?: string;
+  timeoutMs?: number;
+}): Promise<ReleaseVerificationResult> {
+  const failures: string[] = [];
+  const archiveBytes = await readFile(input.packagePath);
+  const actualSha256 = sha256Buffer(archiveBytes);
+
+  if (actualSha256 !== input.expectedSha256) {
+    failures.push(
+      `Release archive checksum mismatch: expected ${input.expectedSha256}; received ${actualSha256}.`,
+    );
+  }
+  const expectedPackageName = `spec-to-pr-${input.expectedVersion}.zip`;
+  if (path.basename(input.packagePath) !== expectedPackageName) {
+    failures.push(
+      `Release archive filename mismatch: expected ${expectedPackageName}; received ${path.basename(input.packagePath)}.`,
+    );
+  }
+
+  const commitExists = await gitCommitExists(input.projectRoot, input.expectedGitCommit);
+  if (!commitExists) {
+    failures.push(`Release archive commit is not available: ${input.expectedGitCommit}.`);
+  }
+
+  let entries = new Map<string, Buffer>();
+
+  try {
+    entries = parseZipEntries(archiveBytes);
+    const actualFiles = [...entries.keys()].sort();
+    const expectedFiles = normalizeFiles(input.expectedFiles);
+
+    if (JSON.stringify(actualFiles) !== JSON.stringify(expectedFiles)) {
+      failures.push(
+        `Release archive entries mismatch: expected ${expectedFiles.join(", ")}; received ${actualFiles.join(", ")}.`,
+      );
+    }
+
+    failures.push(...verifyReleaseVersionDeclarations(entries, input.expectedVersion));
+
+    if (commitExists) {
+      failures.push(
+        ...(await verifyEntriesMatchCommit({
+          projectRoot: input.projectRoot,
+          gitCommit: input.expectedGitCommit,
+          entries,
+        })),
+      );
+    }
+  } catch (error: unknown) {
+    failures.push(
+      `Release archive entries could not be read: ${error instanceof Error ? error.message : "unknown ZIP error"}.`,
+    );
+  }
+
+  let runtimeSmoke: ReleaseRuntimeVerificationResult | undefined;
+
+  if (input.runtimeSmoke !== false && entries.has("dist/mcp/server.js")) {
+    runtimeSmoke = await verifyReleasePackageRuntime({
+      packagePath: input.packagePath,
+      ...(input.dataDirectory === undefined ? {} : { dataDirectory: input.dataDirectory }),
+      ...(input.nodePath === undefined ? {} : { nodePath: input.nodePath }),
+      ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+    });
+    failures.push(...runtimeSmoke.failures);
+  }
+
+  return ReleaseVerificationResultSchema.parse({
+    status: failures.length === 0 ? "passed" : "failed",
+    failures,
+    checkedFiles: [...entries.keys()].sort(),
+    ...(runtimeSmoke === undefined ? {} : { runtimeSmoke }),
+  });
+}
+
+export function verifyReleaseVersionDeclarations(
+  files: ReadonlyMap<string, Buffer>,
+  expectedVersion: string,
+): string[] {
+  const failures: string[] = [];
+
+  if (!isSemver(expectedVersion)) {
+    failures.push(`Release version must be valid semver: ${expectedVersion}`);
+    return failures;
+  }
+
+  for (const file of [
+    "package.json",
+    "packages/codex-sdk/package.json",
+    ".claude-plugin/plugin.json",
+    ".codex-plugin/plugin.json",
+  ]) {
+    const json = readJsonObject(files, file, failures);
+    if (json === undefined) continue;
+    verifyDeclaredVersion(file, json["version"], expectedVersion, failures);
+  }
+
+  const marketplace = readJsonObject(files, ".claude-plugin/marketplace.json", failures);
+  if (marketplace !== undefined) {
+    verifyDeclaredVersion(
+      ".claude-plugin/marketplace.json",
+      marketplace["version"],
+      expectedVersion,
+      failures,
+    );
+    const plugins = marketplace["plugins"];
+    const plugin = Array.isArray(plugins) && isRecord(plugins[0]) ? plugins[0] : undefined;
+    verifyDeclaredVersion(
+      ".claude-plugin/marketplace.json plugins[0]",
+      plugin?.["version"],
+      expectedVersion,
+      failures,
+    );
+    const source =
+      plugin !== undefined && isRecord(plugin["source"]) ? plugin["source"] : undefined;
+    const expectedRef = `spec-to-pr--v${expectedVersion}`;
+    if (source?.["ref"] !== expectedRef) {
+      failures.push(
+        `.claude-plugin/marketplace.json source ref is ${String(source?.["ref"])}; expected ${expectedRef}.`,
+      );
+    }
+  }
+
+  return failures;
+}
+
+export function verifyReviewerProfileParity(files: ReadonlyMap<string, Buffer>): string[] {
+  const failures: string[] = [];
+  const pairs = [
+    {
+      label: "functional reviewer",
+      markdown: "agents/functional-reviewer.md",
+      codex: ".codex/agents/spec-to-pr-functional-reviewer.toml",
+      markers: [
+        "immutable review packet",
+        "token pressure",
+        "scope split",
+        "every required functional gate",
+        "every reviewed requirement",
+        "playwright",
+        "25 mb",
+      ],
+    },
+    {
+      label: "design reviewer",
+      markdown: "agents/design-reviewer.md",
+      codex: ".codex/agents/spec-to-pr-design-reviewer.toml",
+      markers: [
+        "immutable review packet",
+        "token pressure",
+        "scope split",
+        "every required design gate",
+        "every reviewed requirement",
+        "visual baseline",
+      ],
+    },
+  ] as const;
+
+  for (const pair of pairs) {
+    const markdown = files.get(pair.markdown)?.toString("utf8").toLowerCase();
+    const codex = files.get(pair.codex)?.toString("utf8").toLowerCase();
+
+    if (markdown === undefined || codex === undefined) {
+      failures.push(`Reviewer profile pair missing for ${pair.label}.`);
+      continue;
+    }
+
+    for (const marker of pair.markers) {
+      if (!markdown.includes(marker) || !codex.includes(marker)) {
+        failures.push(`Reviewer profile parity missing '${marker}' for ${pair.label}.`);
+      }
+    }
+  }
+
+  return failures;
+}
+
+export async function verifyReleasePackageRuntime(input: {
+  packagePath: string;
   dataDirectory?: string;
   nodePath?: string;
   timeoutMs?: number;
 }): Promise<ReleaseRuntimeVerificationResult> {
-  const normalizedFiles = input.includedFiles.map((file) => file.split("\\").join("/")).sort();
-
-  if (!normalizedFiles.includes("dist/mcp/server.js")) {
-    return ReleaseRuntimeVerificationResultSchema.parse({
-      status: "failed",
-      failures: ["Runtime smoke skipped because dist/mcp/server.js is missing."],
-    });
-  }
-
   const stagingDirectory = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-release-smoke-"));
 
   try {
-    await copyReleaseFiles({
-      projectRoot: input.projectRoot,
-      stagingDirectory,
-      includedFiles: normalizedFiles,
-    });
+    const entries = parseZipEntries(await readFile(input.packagePath));
+
+    if (!entries.has("dist/mcp/server.js")) {
+      throw new Error("Runtime smoke skipped because dist/mcp/server.js is missing.");
+    }
+
+    await extractArchiveEntries(entries, stagingDirectory);
 
     const smoke = await runMcpKernelSmoke({
       serverPath: path.join(stagingDirectory, "dist", "mcp", "server.js"),
@@ -149,47 +394,340 @@ export async function verifyReleasePackageRuntime(input: {
 
 export async function verifyReleasePackageFilesAndRuntime(input: {
   projectRoot: string;
+  packagePath: string;
+  sha256: string;
+  gitCommit: string;
+  version: string;
   files: string[];
   dataDirectory?: string;
   nodePath?: string;
   timeoutMs?: number;
 }): Promise<ReleaseVerificationResult> {
   const fileVerification = verifyReleasePackageFiles(input.files);
-  const runtimeSmoke = await verifyReleasePackageRuntime({
+  const archiveVerification = await verifyReleaseArchive({
     projectRoot: input.projectRoot,
-    includedFiles: fileVerification.checkedFiles,
+    packagePath: input.packagePath,
+    expectedSha256: input.sha256,
+    expectedGitCommit: input.gitCommit,
+    expectedVersion: input.version,
+    expectedFiles: fileVerification.checkedFiles,
     ...(input.dataDirectory === undefined ? {} : { dataDirectory: input.dataDirectory }),
     ...(input.nodePath === undefined ? {} : { nodePath: input.nodePath }),
     ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
   });
-  const failures = [...fileVerification.failures, ...runtimeSmoke.failures];
+  const failures = [...fileVerification.failures, ...archiveVerification.failures];
 
   return ReleaseVerificationResultSchema.parse({
-    status:
-      fileVerification.status === "passed" && runtimeSmoke.status === "passed"
-        ? "passed"
-        : "failed",
+    status: failures.length === 0 ? "passed" : "failed",
     failures,
-    checkedFiles: fileVerification.checkedFiles,
-    runtimeSmoke,
+    checkedFiles: archiveVerification.checkedFiles,
+    ...(archiveVerification.runtimeSmoke === undefined
+      ? {}
+      : { runtimeSmoke: archiveVerification.runtimeSmoke }),
   });
 }
 
-async function copyReleaseFiles(input: {
-  projectRoot: string;
-  stagingDirectory: string;
-  includedFiles: string[];
-}): Promise<void> {
-  for (const file of input.includedFiles) {
-    const sourcePath = path.join(input.projectRoot, file);
-    const destinationPath = path.join(input.stagingDirectory, file);
+function verifyExactInventory(input: {
+  files: string[];
+  expected: readonly string[];
+  actual: string[];
+  label: string;
+  failures: string[];
+}): void {
+  const expected = new Set(input.expected);
+  const actual = new Set(input.actual);
 
-    await mkdir(path.dirname(destinationPath), {
-      recursive: true,
-    });
-    await copyFile(sourcePath, destinationPath);
+  for (const file of expected) {
+    if (!actual.has(file)) {
+      input.failures.push(`Required ${input.label} missing: ${file}`);
+    }
+  }
+  for (const file of actual) {
+    if (!expected.has(file)) {
+      input.failures.push(`Unexpected ${input.label} included: ${file}`);
+    }
   }
 }
+
+function verifySdkRuntimeInventory(files: string[], failures: string[]): void {
+  const sdkFiles = files.filter((file) => file.startsWith("packages/codex-sdk/dist/"));
+  const requiredModules = new Set([
+    "boundary-runner",
+    "cli",
+    "spec-to-pr-runner",
+    "usage-calibration",
+    "workflow-policy",
+    "workload-budget",
+  ]);
+  const modules = new Map<string, Set<"js" | "d.ts">>();
+
+  for (const file of sdkFiles) {
+    const relative = file.slice("packages/codex-sdk/dist/".length);
+    const match = /^(.+)\.(d\.ts|js)$/u.exec(relative);
+
+    if (match === null) {
+      failures.push(`Unexpected Codex SDK runtime file included: ${file}`);
+      continue;
+    }
+
+    const module = match[1]!;
+    const extension = match[2] as "js" | "d.ts";
+    const extensions = modules.get(module) ?? new Set<"js" | "d.ts">();
+    extensions.add(extension);
+    modules.set(module, extensions);
+  }
+
+  for (const module of requiredModules) {
+    if (!modules.has(module)) {
+      failures.push(`Required Codex SDK runtime module missing: ${module}`);
+    }
+  }
+  for (const [module, extensions] of modules) {
+    if (!requiredModules.has(module)) {
+      failures.push(`Unexpected Codex SDK runtime module included: ${module}`);
+    }
+    if (!extensions.has("js") || !extensions.has("d.ts")) {
+      failures.push(`Codex SDK runtime module must include JS and declarations: ${module}`);
+    }
+  }
+}
+
+function normalizeFiles(files: readonly string[]): string[] {
+  return files.map((file) => file.split("\\").join("/")).sort();
+}
+
+function sha256Buffer(buffer: Buffer): string {
+  return `sha256:${createHash("sha256").update(buffer).digest("hex")}`;
+}
+
+function parseZipEntries(buffer: Buffer): Map<string, Buffer> {
+  const endSignature = Buffer.from([0x50, 0x4b, 0x05, 0x06]);
+  const endOffset = buffer.lastIndexOf(endSignature);
+
+  if (endOffset < 0 || endOffset + 22 !== buffer.length) {
+    throw new Error("ZIP end-of-central-directory record is missing");
+  }
+
+  const entryCount = buffer.readUInt16LE(endOffset + 10);
+  const centralSize = buffer.readUInt32LE(endOffset + 12);
+  const centralOffset = buffer.readUInt32LE(endOffset + 16);
+
+  if (entryCount > 10_000 || centralOffset + centralSize > endOffset) {
+    throw new Error("ZIP central directory is outside the archive bounds");
+  }
+
+  const entries = new Map<string, Buffer>();
+  let offset = centralOffset;
+  let totalBytes = 0;
+
+  for (let index = 0; index < entryCount; index += 1) {
+    if (offset + 46 > buffer.length || buffer.readUInt32LE(offset) !== 0x02014b50) {
+      throw new Error(`ZIP central entry ${index} is invalid`);
+    }
+
+    const flags = buffer.readUInt16LE(offset + 8);
+    const method = buffer.readUInt16LE(offset + 10);
+    const expectedCrc = buffer.readUInt32LE(offset + 16);
+    const compressedSize = buffer.readUInt32LE(offset + 20);
+    const uncompressedSize = buffer.readUInt32LE(offset + 24);
+    const nameLength = buffer.readUInt16LE(offset + 28);
+    const extraLength = buffer.readUInt16LE(offset + 30);
+    const commentLength = buffer.readUInt16LE(offset + 32);
+    const localOffset = buffer.readUInt32LE(offset + 42);
+    const nameEnd = offset + 46 + nameLength;
+
+    if ((flags & 0x1) !== 0 || method !== 0 || compressedSize !== uncompressedSize) {
+      throw new Error("ZIP entries must be unencrypted and stored without compression");
+    }
+    if (nameEnd > buffer.length) {
+      throw new Error(`ZIP entry ${index} name is outside the archive bounds`);
+    }
+
+    const name = buffer.subarray(offset + 46, nameEnd).toString("utf8");
+    assertSafeArchivePath(name);
+
+    if (entries.has(name)) {
+      throw new Error(`ZIP contains a duplicate entry: ${name}`);
+    }
+    if (localOffset + 30 > buffer.length || buffer.readUInt32LE(localOffset) !== 0x04034b50) {
+      throw new Error(`ZIP local entry is invalid: ${name}`);
+    }
+
+    const localNameLength = buffer.readUInt16LE(localOffset + 26);
+    const localExtraLength = buffer.readUInt16LE(localOffset + 28);
+    const localFlags = buffer.readUInt16LE(localOffset + 6);
+    const localMethod = buffer.readUInt16LE(localOffset + 8);
+    const localCrc = buffer.readUInt32LE(localOffset + 14);
+    const localCompressedSize = buffer.readUInt32LE(localOffset + 18);
+    const localUncompressedSize = buffer.readUInt32LE(localOffset + 22);
+    const localNameStart = localOffset + 30;
+    const localNameEnd = localNameStart + localNameLength;
+    const dataStart = localNameEnd + localExtraLength;
+    const dataEnd = dataStart + compressedSize;
+
+    if (
+      localFlags !== flags ||
+      localMethod !== method ||
+      localCrc !== expectedCrc ||
+      localCompressedSize !== compressedSize ||
+      localUncompressedSize !== uncompressedSize ||
+      dataEnd > buffer.length ||
+      buffer.subarray(localNameStart, localNameEnd).toString("utf8") !== name
+    ) {
+      throw new Error(`ZIP local entry bounds or name mismatch: ${name}`);
+    }
+
+    const content = Buffer.from(buffer.subarray(dataStart, dataEnd));
+    if (crc32(content) !== expectedCrc) {
+      throw new Error(`ZIP entry CRC mismatch: ${name}`);
+    }
+
+    totalBytes += content.length;
+    if (totalBytes > 250 * 1024 * 1024) {
+      throw new Error("ZIP extracted content exceeds the 250 MB release limit");
+    }
+
+    entries.set(name, content);
+    offset = nameEnd + extraLength + commentLength;
+  }
+
+  if (offset !== centralOffset + centralSize) {
+    throw new Error("ZIP central directory size does not match its entries");
+  }
+
+  return entries;
+}
+
+function assertSafeArchivePath(file: string): void {
+  const segments = file.split("/");
+
+  if (
+    file.length === 0 ||
+    file.includes("\\") ||
+    file.startsWith("/") ||
+    /^[A-Za-z]:/u.test(file) ||
+    segments.some((segment) => segment.length === 0 || segment === "." || segment === "..")
+  ) {
+    throw new Error(`ZIP entry path is unsafe: ${file}`);
+  }
+}
+
+async function extractArchiveEntries(
+  entries: ReadonlyMap<string, Buffer>,
+  stagingDirectory: string,
+): Promise<void> {
+  for (const [file, content] of entries) {
+    assertSafeArchivePath(file);
+    const destination = path.join(stagingDirectory, ...file.split("/"));
+    await mkdir(path.dirname(destination), { recursive: true });
+    await writeFile(destination, content);
+  }
+}
+
+async function gitCommitExists(projectRoot: string, gitCommit: string): Promise<boolean> {
+  if (!/^[a-f0-9]{40}$/u.test(gitCommit)) return false;
+
+  try {
+    await runGit(projectRoot, ["cat-file", "-e", `${gitCommit}^{commit}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function verifyEntriesMatchCommit(input: {
+  projectRoot: string;
+  gitCommit: string;
+  entries: ReadonlyMap<string, Buffer>;
+}): Promise<string[]> {
+  const failures: string[] = [];
+
+  for (const [file, content] of input.entries) {
+    try {
+      const committed = await runGit(input.projectRoot, ["show", `${input.gitCommit}:${file}`]);
+      if (!committed.equals(content)) {
+        failures.push(`Release archive file does not match commit ${input.gitCommit}: ${file}`);
+      }
+    } catch {
+      failures.push(`Release archive file is absent from commit ${input.gitCommit}: ${file}`);
+    }
+  }
+
+  return failures;
+}
+
+async function runGit(cwd: string, args: string[]): Promise<Buffer> {
+  return await new Promise<Buffer>((resolve, reject) => {
+    const child = spawn("git", args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+    child.once("error", reject);
+    child.once("close", (code) => {
+      if (code === 0) {
+        resolve(Buffer.concat(stdout));
+        return;
+      }
+      reject(new Error(Buffer.concat(stderr).toString("utf8").trim()));
+    });
+  });
+}
+
+function isSemver(value: string): boolean {
+  return /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u.test(
+    value,
+  );
+}
+
+function readJsonObject(
+  files: ReadonlyMap<string, Buffer>,
+  file: string,
+  failures: string[],
+): Record<string, unknown> | undefined {
+  const content = files.get(file);
+
+  if (content === undefined) {
+    failures.push(`Release version declaration file missing: ${file}.`);
+    return undefined;
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(content.toString("utf8"));
+    if (!isRecord(parsed)) throw new Error("expected a JSON object");
+    return parsed;
+  } catch (error: unknown) {
+    failures.push(
+      `Release version declaration is invalid JSON: ${file} (${error instanceof Error ? error.message : "unknown error"}).`,
+    );
+    return undefined;
+  }
+}
+
+function verifyDeclaredVersion(
+  label: string,
+  actual: unknown,
+  expected: string,
+  failures: string[],
+): void {
+  if (actual !== expected) {
+    failures.push(`${label} declares version ${String(actual)}; expected ${expected}.`);
+  }
+}
+
+function crc32(buffer: Buffer): number {
+  let crc = 0xffffffff;
+  for (const byte of buffer) crc = (crc >>> 8) ^ CRC32_TABLE[(crc ^ byte) & 0xff]!;
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+const CRC32_TABLE = Array.from({ length: 256 }, (_, index) => {
+  let value = index;
+  for (let bit = 0; bit < 8; bit += 1) {
+    value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+  }
+  return value >>> 0;
+});
 
 async function runMcpKernelSmoke(input: {
   serverPath: string;

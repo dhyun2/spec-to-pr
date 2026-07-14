@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, link, mkdir, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   accumulateUsage,
   decideBudgetAction,
+  effectiveHardLimitForWorkload,
   estimateSdkWorkload,
 } from "../../packages/codex-sdk/src/workload-budget.js";
 import {
@@ -84,7 +85,7 @@ describe("Codex SDK workload budget", () => {
     ).toBe("continue");
   });
 
-  it("requires approval for smaller overruns and splitting for L/XL overruns", () => {
+  it("requires scope splitting for every hard-limit overrun", () => {
     const base = {
       usedTokens: 100_000,
       hardLimitTokens: 100_000,
@@ -92,11 +93,15 @@ describe("Codex SDK workload budget", () => {
       requiredValidations: ["functional"],
     } as const;
 
-    expect(decideBudgetAction({ ...base, workloadSize: "S" }).action).toBe("approval-required");
+    expect(decideBudgetAction({ ...base, workloadSize: "S" }).action).toBe("split-required");
     expect(decideBudgetAction({ ...base, workloadSize: "L" }).action).toBe("split-required");
     expect(decideBudgetAction({ ...base, workloadSize: "XL" }).requiredValidations).toEqual([
       "functional",
     ]);
+  });
+
+  it("keeps the automatic hard limit independent from calibrated ranges", () => {
+    expect(effectiveHardLimitForWorkload("M")).toBe(180_000);
   });
 
   it("returns an initial range and confidence for SDK intake", () => {
@@ -255,6 +260,40 @@ describe("Codex SDK workload budget", () => {
     expect(result.state).toBe("status-unavailable");
     expect(result.turnCount).toBe(2);
     expect(calls).toBe(2);
+  });
+
+  it("pins the first durable run id and stops on a later mismatch", async () => {
+    let calls = 0;
+    const client = {
+      startThread: () => ({
+        id: "thread-1",
+        run: async () => {
+          calls += 1;
+          return turnResult(
+            10_000,
+            workflowStatus("running", "implement", {
+              runId: calls === 1 ? "run_12345678" : "run_wrong_9999",
+            }),
+          );
+        },
+      }),
+      resumeThread: () => {
+        throw new Error("not expected");
+      },
+    };
+
+    const result = await executeBudgetedBoundaryTurns({
+      client,
+      initialPrompt: "implement",
+      hardLimitTokens: 100_000,
+      workloadSize: "M",
+      requiredValidations: ["functional"],
+      maxTurns: 8,
+    });
+
+    expect(result.state).toBe("run-mismatch");
+    expect(result.workflowStatus?.runId).toBe("run_12345678");
+    expect(result.turnCount).toBe(2);
   });
 
   it("applies a caller output schema only to the final formatting turn", async () => {
@@ -420,7 +459,6 @@ describe("Codex SDK workload budget", () => {
       initialPrompt: "implement",
       hardLimitTokens: 100_000,
       workloadSize: "S",
-      budgetLocked: false,
       requiredValidations: ["functional"],
       maxTurns: 8,
     });
@@ -433,6 +471,47 @@ describe("Codex SDK workload budget", () => {
       "targeted-feature-e2e",
       "feature-video",
     ]);
+  });
+
+  it("does not let later authoritative statuses shrink required validations", async () => {
+    let calls = 0;
+    const client = {
+      startThread: () => ({
+        id: "thread-1",
+        run: async () => {
+          calls += 1;
+          if (calls === 1) {
+            return turnResult(
+              10_000,
+              workflowStatus("running", "implement", {
+                requiredValidations: ["functional", "visual"],
+              }),
+            );
+          }
+          return turnResult(
+            100_000,
+            workflowStatus("running", "review-functional", {
+              requiredValidations: ["functional"],
+            }),
+          );
+        },
+      }),
+      resumeThread: () => {
+        throw new Error("not expected");
+      },
+    };
+
+    const result = await executeBudgetedBoundaryTurns({
+      client,
+      initialPrompt: "implement",
+      hardLimitTokens: 100_000,
+      workloadSize: "M",
+      requiredValidations: ["functional"],
+      maxTurns: 8,
+    });
+
+    expect(result.state).toBe("split-required");
+    expect(result.requiredValidations).toEqual(["functional", "visual"]);
   });
 
   it("keeps history calibration active when runtime refines the workload size", async () => {
@@ -459,14 +538,13 @@ describe("Codex SDK workload budget", () => {
       initialPrompt: "implement",
       hardLimitTokens: 100_000,
       workloadSize: "S",
-      workloadHardLimits: { XL: 150_000 },
-      budgetLocked: false,
+      workloadHardLimits: { XL: 600_000 },
       requiredValidations: ["functional"],
       maxTurns: 8,
     });
 
     expect(result.workloadSize).toBe("XL");
-    expect(result.hardLimitTokens).toBe(150_000);
+    expect(result.hardLimitTokens).toBe(600_000);
     expect(result.state).toBe("split-required");
   });
 
@@ -501,16 +579,21 @@ describe("Codex SDK workload budget", () => {
   });
 
   it("builds checkpoints from durable status handles without source payloads", () => {
-    const prompt = buildCompactCheckpointPrompt(workflowStatus("running", "review-functional"), [
-      "functional",
-      "design",
-    ]);
+    const prompt = buildCompactCheckpointPrompt(
+      workflowStatus("running", "review-functional"),
+      ["functional", "design"],
+      { usedTokens: 144_000, hardLimitTokens: 180_000 },
+    );
 
     expect(prompt).toContain("workflow_status");
     expect(prompt).toContain("review-functional");
     expect(prompt).toContain("requiredValidations");
     expect(prompt).toContain("Implement the checkout selector");
     expect(prompt).toContain("contracts/requirements.json");
+    expect(prompt).toContain('"usedTokens":144000');
+    expect(prompt).toContain('"remainingTokens":36000');
+    expect(prompt).toContain('"checkpointAtTokens":144000');
+    expect(prompt).toContain('"hardLimitTokens":180000');
     expect(prompt).not.toContain("promptText");
   });
 });
@@ -542,7 +625,7 @@ describe("usage calibration", () => {
       turnCount: 4,
       checkpointCount: 1,
       completed: true,
-      recordedAtEpochMs: 1_700_000_000_000,
+      recordedAtEpochMs: Date.now(),
       prompt: "must-not-be-persisted",
       sourcePath: "/secret/repo",
     } as never);
@@ -551,6 +634,67 @@ describe("usage calibration", () => {
     expect(raw).not.toContain("must-not-be-persisted");
     expect(raw).not.toContain("/secret/repo");
     await expect(store.read()).resolves.toHaveLength(1);
+  });
+
+  it("bounds retained history by size and record count", async () => {
+    directory = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-usage-bounds-"));
+    const filePath = path.join(directory, "usage.jsonl");
+    const store = new UsageCalibrationStore(filePath);
+
+    for (let index = 0; index < 300; index += 1) {
+      await store.record(calibrationSample({ recordedAtEpochMs: Date.now() + index }));
+    }
+
+    const samples = await store.read();
+    const raw = await readFile(filePath, "utf8");
+    expect(samples.length).toBeLessThanOrEqual(256);
+    expect(Buffer.byteLength(raw)).toBeLessThanOrEqual(1_048_576);
+  });
+
+  it("serializes concurrent history records without losing samples", async () => {
+    directory = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-usage-concurrent-"));
+    const store = new UsageCalibrationStore(path.join(directory, "usage.jsonl"));
+    const recordedAtEpochMs = Date.now();
+
+    await Promise.all(
+      Array.from({ length: 50 }, (_, index) =>
+        store.record(calibrationSample({ recordedAtEpochMs: recordedAtEpochMs + index })),
+      ),
+    );
+
+    await expect(store.read()).resolves.toHaveLength(50);
+  });
+
+  it("rejects repository-local history before creating its parent directory", async () => {
+    directory = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-usage-location-"));
+    const repositoryRoot = path.join(directory, "repo");
+    const historyDirectory = path.join(repositoryRoot, ".codex", "spec-to-pr");
+    await mkdir(repositoryRoot);
+    const store = new UsageCalibrationStore(path.join(historyDirectory, "usage.jsonl"), {
+      excludedRoot: repositoryRoot,
+    });
+
+    await expect(recordCalibrationBestEffort(store, calibrationSample())).resolves.toBe(
+      "unavailable",
+    );
+    await expect(access(historyDirectory)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("revalidates the history file before mutation and refuses a hard-link swap", async () => {
+    directory = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-usage-swap-"));
+    const protectedFile = path.join(directory, "protected.jsonl");
+    const filePath = path.join(directory, "usage.jsonl");
+    await writeFile(protectedFile, "protected\n", "utf8");
+    await writeFile(filePath, "", "utf8");
+    const store = new UsageCalibrationStore(filePath);
+
+    await unlink(filePath);
+    await link(protectedFile, filePath);
+
+    await expect(recordCalibrationBestEffort(store, calibrationSample())).resolves.toBe(
+      "unavailable",
+    );
+    await expect(readFile(protectedFile, "utf8")).resolves.toBe("protected\n");
   });
 
   it("uses median and p90 completed samples only after enough matching history", () => {
@@ -584,6 +728,32 @@ describe("usage calibration", () => {
     expect(calibrated.confidence).toBe("medium");
     expect(calibrated.min).toBeGreaterThanOrEqual(100_000);
     expect(calibrated.max).toBeLessThan(180_000);
+  });
+
+  it("does not calibrate from legacy caller-overridden hard limits", () => {
+    const samples = Array.from({ length: 10 }, (_, index) =>
+      calibrationSample({
+        hardLimitTokens: 1_000_000,
+        inputTokens: 780_000 + index * 1_000,
+        outputTokens: 20_000,
+        totalTokens: 800_000 + index * 1_000,
+        recordedAtEpochMs: Date.now() + index,
+      }),
+    );
+
+    expect(
+      calibrateTokenRange({
+        mode: "feature",
+        workloadSize: "M",
+        fallback: { min: 90_000, max: 180_000 },
+        samples,
+      }),
+    ).toMatchObject({
+      min: 90_000,
+      max: 180_000,
+      sampleCount: 0,
+      source: "intake",
+    });
   });
 
   it("isolates optional calibration read and write failures from workflow results", async () => {
@@ -632,6 +802,7 @@ function workflowStatus(
   status: "running" | "completed",
   nextKind?: string,
   options: {
+    runId?: string;
     size?: "XS" | "S" | "M" | "L" | "XL";
     hardLimitTokens?: number;
     requiredValidations?: string[];
@@ -640,7 +811,7 @@ function workflowStatus(
   const size = options.size ?? "M";
   const hardLimitTokens = options.hardLimitTokens ?? 180_000;
   return {
-    runId: "run_12345678",
+    runId: options.runId ?? "run_12345678",
     status,
     ...(status === "completed" ? {} : { currentStage: "contracts" }),
     stages: [{ name: "intake", status: "passed" }],
@@ -665,6 +836,29 @@ function workflowStatus(
         hardLimitTokens,
       },
     },
+  };
+}
+
+function calibrationSample(
+  overrides: Partial<Parameters<UsageCalibrationStore["record"]>[0]> = {},
+): Parameters<UsageCalibrationStore["record"]>[0] {
+  return {
+    version: 1,
+    mode: "feature",
+    workloadSize: "M",
+    estimatedMinTokens: 90_000,
+    estimatedMaxTokens: 180_000,
+    hardLimitTokens: 180_000,
+    inputTokens: 80_000,
+    cachedInputTokens: 40_000,
+    outputTokens: 20_000,
+    reasoningOutputTokens: 5_000,
+    totalTokens: 100_000,
+    turnCount: 4,
+    checkpointCount: 0,
+    completed: true,
+    recordedAtEpochMs: Date.now(),
+    ...overrides,
   };
 }
 

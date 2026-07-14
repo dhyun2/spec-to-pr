@@ -28,7 +28,7 @@ English version: [README.md](README.md)
 
 API와 UI 구현은 하나의 context에서 진행합니다. API 기반 UI라면 물리적으로 서로 다른 비어 있지 않은 type, schema, wrapper, mock 파일과 `status: passed`인 JSON contract-test 결과를 안정적인 `implementationContextId`와 함께 `api-ready`로 먼저 제출하고, 최종 구현에도 같은 ID를 냅니다. Path, symlink, hard link alias는 별도 증거로 인정하지 않습니다. `apiReady: true` 주장만으로는 통과하지 않습니다. API/UI 구현 에이전트와 통합 lane을 따로 두지 않습니다. 구현 뒤 orchestrator가 `workflow_status` snapshot, contracts, diff, evidence path를 고정해 독립 reviewer에게 넘기며 reviewer는 workflow tool을 직접 호출하지 않습니다.
 
-Intake 직후 `workflow_status`가 `XS`~`XL` 작업량, 예상 토큰 범위, 신뢰도, 근거, 80% checkpoint 기준과 authoritative required-validation 목록을 보여줍니다. 같은 status의 compact `resumeContext`에는 기록된 목표, 프로젝트 상대 evidence 경로, 제출 요약이 포함됩니다. Contracts에는 숫자형 `workloadSignals`를 선택적으로 제출해 새 tool/stage 없이 추정치를 정교화할 수 있습니다. SDK는 각 turn이 workflow action group 하나 뒤에 멈추도록 지시하고, 완료 경계마다 새 status를 요구해 실제 input+output token을 합산합니다. 80% 이상인 첫 경계에서는 compact 새 thread로 이어가며, hard limit에서는 필수 검증을 그대로 유지한 채 `L`/`XL`은 `split-required`, 그 이하는 `approval-required`로 멈춥니다. Usage가 없으면 `usage-unavailable`로 다음 action을 막습니다. 재개 tail은 전체 Run 사용량이 아니므로 제외하고 신규 완료 Run 이력만 숫자와 enum으로 저장해 다음 범위를 보정합니다. Calibration history에는 prompt, code, diff, path, tool output, final response를 저장하지 않으며 선택적 history I/O 실패가 workflow 성공을 뒤집지 않습니다.
+Intake 직후 `workflow_status`가 `XS`~`XL` 작업량, 예상 토큰 범위, 신뢰도, 근거, 80% checkpoint 기준과 authoritative required-validation 목록을 보여줍니다. 같은 status의 compact `resumeContext`에는 기록된 목표, 프로젝트 상대 evidence 경로, 제출 요약이 포함됩니다. Contracts에는 실제 관측값이 하나 이상인 숫자형 `workloadSignals`를 선택적으로 제출해 새 tool/stage 없이 추정치를 정교화할 수 있습니다. SDK는 첫 durable Run ID를 고정하고, 각 turn이 workflow action group 하나 뒤에 멈추도록 지시하며, 완료 경계마다 새 status를 요구해 실제 input+output token을 합산합니다. 80% 이상인 첫 경계에서는 compact 새 thread로 이어가고, 자동 hard limit에서는 작업 크기와 관계없이 필수 검증을 그대로 유지한 채 `split-required`로 멈춥니다. 사용자가 숫자 한도를 지정하는 기능은 없습니다. Usage가 없으면 `usage-unavailable`로 다음 action을 막습니다. 신규 완료 Run 이력은 숫자와 enum만 저장해 표시 범위만 보정하고, 자동 hard limit은 workload class 기본 최대값으로 고정됩니다. 과거에 다른 hard limit으로 기록된 표본은 보정에서도 제외합니다. Calibration history 기록은 직렬·원자적으로 처리되고, 크기와 보존 개수가 제한되며, 매 접근마다 다시 검증됩니다. Prompt, code, diff, path, tool output, final response는 저장하지 않으며 선택적 history I/O 실패가 workflow 성공을 뒤집지 않습니다.
 
 발행은 draft GitHub PR 또는 GitLab MR을 생성·갱신하는 데서 끝납니다. Draft 흐름은 target이 아닌 `codex/*` source branch에서 의도한 변경만 commit하며, runtime은 clean tree와 target보다 한 개 이상 앞선 source commit을 요구합니다. merge, approve, close, ready 전환은 하지 않습니다.
 
@@ -123,7 +123,7 @@ node packages/codex-sdk/dist/cli.js \
   --publish
 ```
 
-입력에는 `--brief`, `--figma`, `--openapi`, `--docs`를 사용할 수 있습니다. `--publish`는 draft 발행을 요청하고 `--no-publish`는 구현·리뷰 증거까지만 진행합니다. `--token-budget`은 승인된 hard limit을, `--max-turns`, `--usage-history`, `--no-usage-calibration`은 경계 실행과 숫자 전용 보정을 제어합니다.
+입력에는 `--brief`, `--figma`, `--openapi`, `--docs`를 사용할 수 있습니다. `--publish`는 draft 발행을 요청하고 `--no-publish`는 구현·리뷰 증거까지만 진행합니다. `--max-turns`, `--usage-history`, `--no-usage-calibration`은 경계 실행과 숫자 전용 보정을 제어합니다.
 
 `--resume <task-id>`는 최신 `workflow_status`와 `resumeContext`에서 기존 durable Run을 이어가며 intake를 반복하거나 중복 Run을 만들지 않습니다.
 
@@ -133,7 +133,7 @@ node packages/codex-sdk/dist/cli.js \
 
 일반 변경은 적용 가능한 format/lint, typecheck, build, 관련 기능 검사를 실행합니다. OpenSpec, architecture, targeted security, visual, accessibility, performance는 scope에 따라 적용하고 observability는 opt-in입니다. 선택 사항인 script가 없으면 not applicable이지만, 필수 증거가 없거나 비었거나 skip/실패했다면 blocked입니다.
 
-전체 test matrix, hardening, package verification, cross-host manifest 검증은 release 전용입니다. 모든 feature/fix에 붙이지 않습니다.
+전체 test matrix, archive integrity, package verification, cross-host manifest 검증은 release 전용입니다. 모든 feature/fix에 붙이지 않습니다.
 
 ```bash
 pnpm format:check

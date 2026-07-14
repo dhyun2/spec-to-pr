@@ -35,6 +35,7 @@ describe("release runtime smoke", () => {
     const build = await builder.build({
       version: "0.1.0",
       outputDirectory: path.join(directory, "release"),
+      allowDirty: true,
     });
     const dataDirectory = path.join(directory, "data");
 
@@ -43,8 +44,7 @@ describe("release runtime smoke", () => {
     });
 
     const verification = await verifyReleasePackageRuntime({
-      projectRoot: process.cwd(),
-      includedFiles: build.includedFiles,
+      packagePath: build.packagePath,
       dataDirectory,
       timeoutMs: 5_000,
     });

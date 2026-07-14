@@ -16,7 +16,6 @@ type ParsedArgs = {
   changeKind?: SpecToPrCodexRunInput["changeKind"];
   publication?: SpecToPrCodexRunInput["publication"];
   noReviewAgents?: boolean;
-  tokenBudget?: number;
   maxTurns?: number;
   usageHistory?: string;
   noUsageCalibration?: boolean;
@@ -65,9 +64,6 @@ if (args.publication !== undefined) {
 }
 if (args.noReviewAgents !== undefined) {
   input.enableReviewAgents = false;
-}
-if (args.tokenBudget !== undefined) {
-  input.tokenBudget = args.tokenBudget;
 }
 if (args.maxTurns !== undefined) {
   input.maxTurns = args.maxTurns;
@@ -160,9 +156,6 @@ function parseArgs(argv: string[]): ParsedArgs {
       case "--model":
         parsed.model = value;
         break;
-      case "--token-budget":
-        parsed.tokenBudget = parsePositiveInteger(value, arg);
-        break;
       case "--max-turns":
         parsed.maxTurns = parsePositiveInteger(value, arg);
         break;
@@ -210,7 +203,6 @@ Options:
   --openapi <path>      OpenAPI file path
   --resume <thread-id>  Resume an existing Codex thread
   --model <model>       Optional Codex model override
-  --token-budget <n>    Approved hard token limit for this invocation
   --max-turns <n>       Maximum workflow boundary turns (default: 12)
   --usage-history <p>   Numeric-only calibration JSONL path
   --no-usage-calibration  Disable calibration reads and writes

@@ -48,7 +48,7 @@ flowchart LR
 
 Stage는 pending/running/passed/failed/blocked/skipped/waived 상태와 lease/checkpoint를 durable ledger에 보관합니다. 사용자는 세부 stage machine microtool 대신 `workflow_advance`와 `workflow_status`를 사용합니다.
 
-## Workload와 token budget
+## Workload와 자동 경계 제어
 
 Intake가 끝나면 같은 checkpoint에 `XS`~`XL`, 예상 token 최소/최대, `low`/`medium`/`high` 신뢰도, 근거, hard limit과 80% 기준을 기록합니다. `workflow_status.resumeContext`는 기록된 목표, 프로젝트 상대 evidence 경로, 종류별 최신 제출 요약을 compact하게 반환합니다. Goal은 4,000자, path는 200개(초기 50+최신 150)와 각 1,000자, submission은 16종류와 요약별 500자로 제한하고 opaque artifact ID 목록은 status/checkpoint에서 제외합니다. 정보가 적은 intake는 넓은 범위와 낮은 신뢰도로 시작합니다. Contracts가 실제 요구사항 수, 관련 파일, API operation, UI surface, Figma node, test target, workspace package, uncertainty를 `workloadSignals`로 제출하면 같은 estimate만 갱신합니다. 별도 tool이나 아홉 번째 stage는 없습니다.
 
@@ -63,11 +63,10 @@ flowchart LR
     K --> N["fresh Codex thread"]
     N --> H{"hard limit 도달?"}
     H -->|아니오| T
-    H -->|L/XL| S["split-required"]
-    H -->|XS/S/M| A["approval-required"]
+    H -->|예| S["split-required"]
 ```
 
-한 turn 실행 중 정확한 80% 지점은 관찰할 수 없으므로 최초로 80% 이상이 확인된 완료 경계에서 압축합니다. Fresh thread는 먼저 durable Run의 `workflow_status`를 읽고 `resumeContext`의 목표·evidence 경로·제출 요약으로 다음 action을 재구성합니다. Agent가 경계 지시를 무시해 한 turn에서 여러 action을 수행한 경우 이미 생긴 side effect는 되돌릴 수 없지만, 다음 turn은 새 status와 budget 확인 전 시작하지 않습니다. Hard limit에 도달하면 다음 action을 시작하지 않습니다. 범위를 나누거나 추가 budget을 승인해도 runtime이 제공한 전체 required-validation 목록은 줄이거나 waive하지 않습니다. Complete usage가 있는 신규 비재개 완료 Run의 숫자/enum만 저장해 다음 p50/p90 범위를 보정하고, 전체 Run 사용량이 아닌 resume tail은 제외합니다. Calibration history에는 prompt, code, diff, path, tool payload, final response를 저장하지 않습니다. 선택적 history I/O 실패는 workflow 결과를 실패로 바꾸지 않습니다.
+한 turn 실행 중 정확한 80% 지점은 관찰할 수 없으므로 최초로 80% 이상이 확인된 완료 경계에서 압축합니다. Fresh thread는 먼저 durable Run의 `workflow_status`를 읽고 `resumeContext`의 목표·evidence 경로·제출 요약으로 다음 action을 재구성합니다. Agent가 경계 지시를 무시해 한 turn에서 여러 action을 수행한 경우 이미 생긴 side effect는 되돌릴 수 없지만, 다음 turn은 새 status와 자동 경계 확인 전 시작하지 않습니다. Hard limit에 도달하면 다음 action을 시작하지 않고 독립적으로 검증 가능한 범위로 나눕니다. Runtime이 제공한 전체 required-validation 목록은 줄이거나 waive하지 않습니다. Complete usage가 있는 신규 비재개 완료 Run의 숫자/enum만 저장해 표시 범위만 보정하며 자동 limit은 workload 기본 최대값으로 고정합니다. 과거에 다른 hard limit으로 기록된 표본은 제외합니다. Calibration history에는 prompt, code, diff, path, tool payload, final response를 저장하지 않으며 기록을 직렬·원자적으로 처리하고 크기와 보존 기간을 제한합니다. 선택적 history I/O 실패는 workflow 결과를 실패로 바꾸지 않습니다.
 
 ## 하나의 implementation context
 
@@ -102,6 +101,6 @@ Mode는 tool, stage, lane을 추가하지 않습니다. Feature mode만 영상 �
 
 ## Gate와 publication
 
-일반 change는 사용 가능한 format/lint, typecheck, build, 관련 functional test를 기본으로 합니다. OpenSpec, architecture, targeted security, visual, accessibility, performance는 scope에 따라 적용되고 observability는 opt-in입니다. Full matrix와 release hardening은 explicit release workflow 전용입니다.
+일반 change는 사용 가능한 format/lint, typecheck, build, 관련 functional test를 기본으로 합니다. OpenSpec, architecture, targeted security, visual, accessibility, performance는 scope에 따라 적용되고 observability는 opt-in입니다. Full matrix와 tracked archive/package integrity 검증은 explicit release workflow 전용입니다.
 
 `workflow_publish`는 draft만 생성/갱신합니다. Merge 뒤의 archive는 별도 사용자 action이며 자동 polling하지 않습니다.

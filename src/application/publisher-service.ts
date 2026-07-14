@@ -290,6 +290,7 @@ export class PublisherService {
       projectRoot: run.projectRoot,
       sourceBranch: input.sourceBranch,
       targetBranch: input.targetBranch,
+      ...(input.headSha === undefined ? {} : { headSha: input.headSha }),
     });
 
     const result = await this.executePublish({
@@ -378,11 +379,36 @@ export class PublisherService {
     projectRoot: string;
     sourceBranch: string;
     targetBranch: string;
+    headSha?: string;
   }): Promise<void> {
     const status = (await this.git(input.projectRoot, ["status", "--porcelain"])).stdout.trim();
     if (status.length > 0) {
       throw new Error(
         "Draft publication requires a clean working tree; commit the intended implementation changes first",
+      );
+    }
+
+    const checkedOutBranch = (
+      await this.git(input.projectRoot, ["symbolic-ref", "--quiet", "--short", "HEAD"])
+    ).stdout.trim();
+    if (checkedOutBranch !== input.sourceBranch) {
+      throw new Error(
+        `Draft publication requires checked-out branch ${input.sourceBranch}; found ${checkedOutBranch || "detached HEAD"}`,
+      );
+    }
+
+    const checkedOutHead = (
+      await this.git(input.projectRoot, ["rev-parse", "--verify", "HEAD"])
+    ).stdout.trim();
+    const sourceHead = (
+      await this.git(input.projectRoot, ["rev-parse", "--verify", input.sourceBranch])
+    ).stdout.trim();
+    if (checkedOutHead !== sourceHead) {
+      throw new Error(`Checked-out HEAD does not match source branch ${input.sourceBranch}`);
+    }
+    if (input.headSha !== undefined && checkedOutHead !== input.headSha) {
+      throw new Error(
+        `Checked-out HEAD ${checkedOutHead} does not match the reviewed source SHA ${input.headSha}`,
       );
     }
 

@@ -168,7 +168,7 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
     {
       title: "Workflow status",
       description:
-        "Return compact stage, workload, scope, blocker, action, and artifact-handle status.",
+        "Return compact stage, workload, scope, blocker, action, and submission-evidence status.",
       inputSchema: WorkflowStatusInputSchema.shape,
       outputSchema: WorkflowStatusSchema.shape,
       annotations: { readOnlyHint: true },

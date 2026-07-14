@@ -19,16 +19,18 @@ export const ReleaseFeatureSchema = z
 export const ReleaseManifestSchema = z
   .object({
     name: z.literal("spec-to-pr"),
-    version: z.string().trim().min(1),
+    version: z
+      .string()
+      .regex(
+        /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/,
+      ),
     builtAt: z.string().datetime({ offset: true }),
-    gitCommit: z.string().trim().min(1).optional(),
+    gitCommit: z.string().regex(/^[a-f0-9]{40}$/),
     nodeVersion: z.string().trim().min(1),
     packagePath: z.string().trim().min(1),
     packageSha256: z.string().regex(/^sha256:[a-f0-9]{64}$/),
     includedFiles: z.array(z.string()),
     excludedPatterns: z.array(z.string()),
-    evalStatus: z.enum(["passed", "failed", "not-run"]),
-    securityStatus: z.enum(["passed", "failed", "not-run"]),
     pluginValidationStatus: z.enum(["passed", "failed", "skipped"]),
     features: z.array(ReleaseFeatureSchema),
   })
@@ -46,9 +48,10 @@ export const RELEASE_FILE_ALLOWLIST = [
   "CHANGELOG.md",
   "dist/mcp/server.js",
   "package.json",
+  "packages/codex-sdk/package.json",
+  "packages/codex-sdk/README.md",
   "README.md",
   "LICENSE",
-  "scripts/validate-codex-plugin.ts",
 ] as const;
 
 export const RELEASE_DIRECTORY_ALLOWLIST = [
@@ -56,7 +59,7 @@ export const RELEASE_DIRECTORY_ALLOWLIST = [
   "skills/",
   "agents/",
   "schemas/runtime/",
-  "packages/codex-sdk/",
+  "packages/codex-sdk/dist/",
 ] as const;
 
 export const RELEASE_FORBIDDEN_PATTERNS = [

@@ -34,6 +34,10 @@ export function defaultTokenRangeForWorkload(size: WorkloadSize): { min: number;
   return { ...TOKEN_RANGES[size] };
 }
 
+export function effectiveHardLimitForWorkload(size: WorkloadSize): number {
+  return TOKEN_RANGES[size].max;
+}
+
 export function estimateSdkWorkload(input: {
   deliveryMode: DeliveryMode;
   promptLength: number;
@@ -109,7 +113,7 @@ export function decideBudgetAction(input: {
   workloadSize: WorkloadSize;
   requiredValidations: readonly string[];
 }): {
-  action: "continue" | "checkpoint" | "approval-required" | "split-required";
+  action: "continue" | "checkpoint" | "split-required";
   requiredValidations: string[];
   thresholdTokens: number;
   shortfallTokens: number;
@@ -126,10 +130,7 @@ export function decideBudgetAction(input: {
   const requiredValidations = [...input.requiredValidations];
   if (input.usedTokens >= input.hardLimitTokens) {
     return {
-      action:
-        input.workloadSize === "L" || input.workloadSize === "XL"
-          ? "split-required"
-          : "approval-required",
+      action: "split-required",
       requiredValidations,
       thresholdTokens,
       shortfallTokens: Math.max(1, input.usedTokens - input.hardLimitTokens + 1),

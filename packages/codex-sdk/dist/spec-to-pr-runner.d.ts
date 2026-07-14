@@ -20,7 +20,6 @@ export type SpecToPrCodexRunInput = {
     env?: Record<string, string>;
     outputSchema?: unknown;
     enableReviewAgents?: boolean;
-    tokenBudget?: number;
     maxTurns?: number;
     usageHistoryPath?: string;
     usageCalibration?: boolean;
@@ -32,7 +31,7 @@ export type SpecToPrCodexRunResult = {
     items: RunResult["items"];
     workload: SdkWorkloadEstimate;
     budget: {
-        state: "completed" | "blocked" | "approval-required" | "split-required" | "usage-unavailable" | "status-unavailable" | "turn-limit";
+        state: "completed" | "blocked" | "split-required" | "run-mismatch" | "usage-unavailable" | "status-unavailable" | "turn-limit";
         checkpointPercent: 80;
         checkpointAtTokens: number;
         hardLimitTokens: number;

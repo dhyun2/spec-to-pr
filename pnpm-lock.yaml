@@ -13,15 +13,9 @@ importers:
       "@modelcontextprotocol/sdk":
         specifier: 1.29.0
         version: 1.29.0(zod@4.4.3)
-      minimatch:
-        specifier: ^10.2.5
-        version: 10.2.5
       pngjs:
         specifier: ^7.0.0
         version: 7.0.0
-      yaml:
-        specifier: ^2.9.0
-        version: 2.9.0
       zod:
         specifier: ^4.0.0
         version: 4.4.3
@@ -50,6 +44,9 @@ importers:
       vitest:
         specifier: ^3.0.0
         version: 3.2.7(@types/node@22.20.0)(tsx@4.23.0)(yaml@2.9.0)
+      yaml:
+        specifier: ^2.9.0
+        version: 2.9.0
 
 packages:
   "@esbuild/aix-ppc64@0.28.1":
@@ -671,26 +668,12 @@ packages:
       }
     engines: { node: ">=12" }
 
-  balanced-match@4.0.4:
-    resolution:
-      {
-        integrity: sha512-BLrgEcRTwX2o6gGxGOCNyMvGSp35YofuYzw9h1IMTRmKqttAZZVU67bdb9Pr2vUHA8+j3i2tJfjO6C6+4myGTA==,
-      }
-    engines: { node: 18 || 20 || >=22 }
-
   body-parser@2.3.0:
     resolution:
       {
         integrity: sha512-2cGmJupaNgg+QUwVLAucDuWuoMZ6EX9iHDRswZ5lsNYEmwPaRknMPCLZz07yTzVq/83p4o/wzbDZbBrTvGGTIw==,
       }
     engines: { node: ">=18" }
-
-  brace-expansion@5.0.7:
-    resolution:
-      {
-        integrity: sha512-7oFy703dxfY3/NLxC1fh2SUCQ0H9rmAY+5EpDVfXjUTTs+HEwR2nYaqLv+GWcTsumwxPfiz6CzCNkwXwBUwqCA==,
-      }
-    engines: { node: 18 || 20 || >=22 }
 
   bundle-require@5.1.0:
     resolution:
@@ -1214,13 +1197,6 @@ packages:
         integrity: sha512-Lbgzdk0h4juoQ9fCKXW4by0UJqj+nOOrI9MJ1sSj4nI8aI2eo1qmvQEie4VD1glsS250n15LsWsYtCugiStS5A==,
       }
     engines: { node: ">=18" }
-
-  minimatch@10.2.5:
-    resolution:
-      {
-        integrity: sha512-MULkVLfKGYDFYejP07QOurDLLQpcjk7Fw+7jXS2R2czRQzR56yHRveU5NDJEOviH+hETZKSkIk5c+T23GjFUMg==,
-      }
-    engines: { node: 18 || 20 || >=22 }
 
   mlly@1.8.2:
     resolution:
@@ -2137,8 +2113,6 @@ snapshots:
 
   assertion-error@2.0.1: {}
 
-  balanced-match@4.0.4: {}
-
   body-parser@2.3.0:
     dependencies:
       bytes: 3.1.2
@@ -2152,10 +2126,6 @@ snapshots:
       type-is: 2.1.0
     transitivePeerDependencies:
       - supports-color
-
-  brace-expansion@5.0.7:
-    dependencies:
-      balanced-match: 4.0.4
 
   bundle-require@5.1.0(esbuild@0.28.1):
     dependencies:
@@ -2448,10 +2418,6 @@ snapshots:
   mime-types@3.0.2:
     dependencies:
       mime-db: 1.54.0
-
-  minimatch@10.2.5:
-    dependencies:
-      brace-expansion: 5.0.7
 
   mlly@1.8.2:
     dependencies:

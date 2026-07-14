@@ -5,7 +5,6 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { IntakeRequestService } from "../../src/application/intake-request-service.js";
-import { OpenApiIntakeService } from "../../src/application/openapi-intake-service.js";
 import { RunService } from "../../src/application/run-service.js";
 import { ArtifactBlobStore } from "../../src/artifact-registry/artifact-blob-store.js";
 import { SourceSnapshotStore } from "../../src/source-registry/snapshot-store.js";
@@ -17,7 +16,6 @@ let dataRoot: string;
 let store: SqliteRunStore;
 let runService: RunService;
 let intakeRequestService: IntakeRequestService;
-let openApiIntakeService: OpenApiIntakeService;
 
 beforeEach(async () => {
   directory = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-intake-request-"));
@@ -43,12 +41,6 @@ beforeEach(async () => {
     snapshotStore,
     artifactStore,
     () => "2026-06-29T00:00:00.000Z",
-  );
-  openApiIntakeService = new OpenApiIntakeService(
-    store,
-    snapshotStore,
-    artifactStore,
-    () => "2026-06-29T00:00:01.000Z",
   );
 });
 
@@ -156,13 +148,6 @@ describe("IntakeRequestService", () => {
         (evidence) => evidence.metadata["openapiEvidenceKind"] === "operation",
       ),
     ).toHaveLength(3);
-
-    const analysis = await openApiIntakeService.analyzeOpenApiSource({
-      runId: run.id,
-      sourceId: inlineOpenApiSource!.id,
-    });
-
-    expect(analysis.operationCount).toBe(3);
   });
 
   it("parses Korean file paths without inferring publish intent from generic request words", async () => {

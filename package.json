@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "schemas:build": "tsx scripts/export-runtime-schemas.ts",
+    "schemas:check": "node scripts/check-generated-files.mjs schemas/runtime",
     "release:build": "tsx scripts/build-release.ts",
     "release:verify": "tsx scripts/publish-release.ts --verify-only",
     "release:publish": "tsx scripts/publish-release.ts",
@@ -24,18 +25,16 @@
     "release:update:codex": "tsx scripts/publish-release.ts --skip-verify --skip-push --skip-tag --local-target codex",
     "sdk:typecheck": "pnpm --dir packages/codex-sdk typecheck",
     "sdk:build": "pnpm --dir packages/codex-sdk build",
-    "sdk:check-dist": "git diff --exit-code -- packages/codex-sdk/dist",
-    "bundle:check-dist": "git diff --exit-code -- dist/mcp/server.js",
-    "check": "pnpm sdk:typecheck && pnpm sdk:build && pnpm sdk:check-dist && pnpm format:check && pnpm typecheck && pnpm schemas:build && pnpm build && pnpm bundle:check-dist && pnpm test",
+    "sdk:check-dist": "node scripts/check-generated-files.mjs packages/codex-sdk/dist",
+    "bundle:check-dist": "node scripts/check-generated-files.mjs dist/mcp/server.js",
+    "check": "pnpm sdk:typecheck && pnpm sdk:build && pnpm sdk:check-dist && pnpm format:check && pnpm typecheck && pnpm schemas:build && pnpm schemas:check && pnpm build && pnpm bundle:check-dist && pnpm test",
     "plugin:validate": "pnpm plugin:validate:claude && pnpm plugin:validate:codex",
     "plugin:validate:claude": "claude plugin validate . --strict",
     "plugin:validate:codex": "tsx scripts/validate-codex-plugin.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",
-    "minimatch": "^10.2.5",
     "pngjs": "^7.0.0",
-    "yaml": "^2.9.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {
@@ -46,6 +45,7 @@
     "tsup": "^8.0.0",
     "tsx": "^4.22.4",
     "typescript": "^5.8.0",
+    "yaml": "^2.9.0",
     "vitest": "^3.0.0"
   },
   "pnpm": {

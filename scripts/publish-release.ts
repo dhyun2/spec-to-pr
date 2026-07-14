@@ -7,6 +7,10 @@ import {
   parseReleasePublishArgs,
   type ReleasePublishOptions,
 } from "../src/release/release-publish-plan.js";
+import {
+  verifyReleaseVersionDeclarations,
+  verifyReviewerProfileParity,
+} from "../src/release/release-verifier.js";
 
 const args = parseReleasePublishArgs(process.argv.slice(2));
 
@@ -30,6 +34,16 @@ if (args.dryRun) {
   }
   process.exit(0);
 }
+
+const performsRemoteMutation =
+  args.verifyOnly !== true && (args.skipPush !== true || args.skipTag !== true);
+runReleasePreflight({
+  version,
+  branch: planOptions.branch ?? "main",
+  requireClean: performsRemoteMutation,
+  requireTagAvailable: performsRemoteMutation && args.skipTag !== true,
+  requireBranchBinding: performsRemoteMutation,
+});
 
 console.log(`Release publish for ${version}`);
 for (const step of plan) {
@@ -64,6 +78,116 @@ function readPackageVersion(): string {
   }
 
   return packageJson.version;
+}
+
+function runReleasePreflight(input: {
+  version: string;
+  branch: string;
+  requireClean: boolean;
+  requireTagAvailable: boolean;
+  requireBranchBinding: boolean;
+}): void {
+  const failures = [
+    ...verifyReleaseVersionDeclarations(readVersionFiles(), input.version),
+    ...verifyReviewerProfileParity(readReviewerFiles()),
+  ];
+
+  if (input.requireClean) {
+    const status = runGit(["status", "--porcelain=v1", "--untracked-files=all"]);
+    if (status.length > 0) {
+      failures.push(`Release publication requires a clean worktree:\n${status}`);
+    }
+  }
+
+  if (input.requireBranchBinding) {
+    const currentBranch = runGit(["branch", "--show-current"]);
+    const head = runGit(["rev-parse", "HEAD"]);
+    const branchHead = runGit(["rev-parse", input.branch]);
+
+    if (currentBranch !== input.branch) {
+      failures.push(
+        `Release source branch mismatch: checked out ${currentBranch || "detached HEAD"}; expected ${input.branch}.`,
+      );
+    }
+    if (head !== branchHead) {
+      failures.push(`Release source branch ${input.branch} does not point at checked-out HEAD.`);
+    }
+  }
+
+  if (input.requireTagAvailable) {
+    const tag = `spec-to-pr--v${input.version}`;
+    if (runGitOptional(["tag", "--list", tag]).length > 0) {
+      failures.push(`Release tag already exists locally: ${tag}.`);
+    }
+
+    const origin = runGitOptional(["remote", "get-url", "origin"]);
+    if (origin.length === 0) {
+      failures.push("Release publication requires an origin remote.");
+    } else {
+      const remoteTag = spawnSync("git", ["ls-remote", "--tags", "origin", `refs/tags/${tag}`], {
+        cwd: process.cwd(),
+        encoding: "utf8",
+        shell: false,
+      });
+      if (remoteTag.error !== undefined || remoteTag.status !== 0) {
+        failures.push(`Unable to verify remote release tag availability for ${tag}.`);
+      } else if ((remoteTag.stdout ?? "").trim().length > 0) {
+        failures.push(`Release tag already exists on origin: ${tag}.`);
+      }
+    }
+  }
+
+  if (failures.length > 0) {
+    throw new Error(`Release preflight failed:\n- ${failures.join("\n- ")}`);
+  }
+}
+
+function readVersionFiles(): Map<string, Buffer> {
+  return readFiles([
+    "package.json",
+    "packages/codex-sdk/package.json",
+    ".claude-plugin/plugin.json",
+    ".codex-plugin/plugin.json",
+    ".claude-plugin/marketplace.json",
+  ]);
+}
+
+function readReviewerFiles(): Map<string, Buffer> {
+  return readFiles([
+    "agents/design-reviewer.md",
+    "agents/functional-reviewer.md",
+    ".codex/agents/spec-to-pr-design-reviewer.toml",
+    ".codex/agents/spec-to-pr-functional-reviewer.toml",
+  ]);
+}
+
+function readFiles(files: string[]): Map<string, Buffer> {
+  return new Map(files.map((file) => [file, readFileSync(file)]));
+}
+
+function runGit(args: string[]): string {
+  const result = spawnSync("git", args, {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    shell: false,
+  });
+
+  if (result.error !== undefined || result.status !== 0) {
+    throw new Error(
+      `git ${args[0] ?? "command"} failed: ${(result.stderr ?? result.error?.message ?? "").trim()}`,
+    );
+  }
+
+  return (result.stdout ?? "").trim();
+}
+
+function runGitOptional(args: string[]): string {
+  const result = spawnSync("git", args, {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    shell: false,
+  });
+  return result.status === 0 ? (result.stdout ?? "").trim() : "";
 }
 
 function stripRuntimeOptions(

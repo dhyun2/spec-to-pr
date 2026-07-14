@@ -1,10 +1,10 @@
-import { realpathSync, statSync } from "node:fs";
+import { existsSync, realpathSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Codex, } from "@openai/codex-sdk";
 import { executeBudgetedBoundaryTurns, } from "./boundary-runner.js";
 import { UsageCalibrationStore, calibrateTokenRange, isUsageCalibrationReadEnabled, isUsageCalibrationEligible, readCalibrationBestEffort, recordCalibrationBestEffort, } from "./usage-calibration.js";
-import { defaultTokenRangeForWorkload, estimateSdkWorkload, } from "./workload-budget.js";
+import { defaultTokenRangeForWorkload, effectiveHardLimitForWorkload, estimateSdkWorkload, } from "./workload-budget.js";
 import { CODEX_WORKFLOW_TOOL_NAMES, buildCodexPublishInstructions, buildCodexReviewAgentInstructions, } from "./workflow-policy.js";
 export async function runSpecToPrWithCodex(input) {
     validateSpecToPrRunInput(input);
@@ -17,7 +17,10 @@ export async function runSpecToPrWithCodex(input) {
         hasFigma: input.figmaUrl !== undefined,
         hasOpenApi: input.openApiPath !== undefined,
     });
-    const usageStore = new UsageCalibrationStore(resolveUsageHistoryPath(input));
+    const repositoryRoot = resolveRepositoryRoot(input.workingDirectory);
+    const usageStore = new UsageCalibrationStore(resolveUsageHistoryPath(input), {
+        excludedRoot: repositoryRoot,
+    });
     const calibrationEnabled = input.usageCalibration !== false;
     const calibrationReadEnabled = isUsageCalibrationReadEnabled({
         enabled: calibrationEnabled,
@@ -43,7 +46,7 @@ export async function runSpecToPrWithCodex(input) {
         tokenRange: { min: calibration.min, max: calibration.max },
         sampleCount: calibration.sampleCount,
     };
-    const hardLimitTokens = input.tokenBudget ?? initialWorkload.tokenRange.max;
+    const hardLimitTokens = effectiveHardLimitForWorkload(initialWorkload.size);
     const requiredValidations = requiredValidationsForInput(input);
     const result = await executeBudgetedBoundaryTurns({
         client: createBoundaryClient(codex, buildThreadOptions(input)),
@@ -52,8 +55,10 @@ export async function runSpecToPrWithCodex(input) {
         ...(input.outputSchema === undefined ? {} : { outputSchema: input.outputSchema }),
         hardLimitTokens,
         workloadSize: initialWorkload.size,
-        workloadHardLimits: Object.fromEntries(Object.entries(calibrationByWorkload).map(([size, value]) => [size, value.max])),
-        budgetLocked: input.tokenBudget !== undefined,
+        workloadHardLimits: Object.fromEntries(Object.keys(calibrationByWorkload).map((size) => [
+            size,
+            effectiveHardLimitForWorkload(size),
+        ])),
         requiredValidations,
         maxTurns: input.maxTurns ?? 12,
     });
@@ -172,7 +177,7 @@ export function buildSpecToPrPrompt(input) {
             ? ""
             : buildCodexReviewAgentInstructions({
                 includeFunctionalReview: true,
-                includeDesignReview: hasUiScope || deliveryMode === "brief",
+                includeDesignReview: hasUiScope,
             }),
         "",
         "User request:",
@@ -208,16 +213,12 @@ export function validateSpecToPrRunInput(input) {
             throw new Error(`${mode} mode requires a concrete prompt describing the requested change`);
         }
     }
-    if (input.tokenBudget !== undefined &&
-        (!Number.isInteger(input.tokenBudget) || input.tokenBudget < 1_000)) {
-        throw new Error("tokenBudget must be an integer of at least 1000 tokens");
-    }
     if (input.maxTurns !== undefined && (!Number.isInteger(input.maxTurns) || input.maxTurns <= 0)) {
         throw new Error("maxTurns must be a positive integer");
     }
     if (input.usageCalibration !== false) {
         const usageHistoryPath = resolveUsageHistoryPath(input);
-        if (isWithinDirectory(canonicalizeThroughExistingAncestor(input.workingDirectory), canonicalizeThroughExistingAncestor(usageHistoryPath))) {
+        if (isWithinDirectory(resolveRepositoryRoot(input.workingDirectory), canonicalizeThroughExistingAncestor(usageHistoryPath))) {
             throw new Error("usageHistoryPath must stay outside the target repository");
         }
         if (isHardLinkedFile(usageHistoryPath)) {
@@ -252,6 +253,17 @@ function canonicalizeThroughExistingAncestor(candidate) {
             missingSegments.unshift(path.basename(current));
             current = parent;
         }
+    }
+}
+function resolveRepositoryRoot(workingDirectory) {
+    let current = canonicalizeThroughExistingAncestor(workingDirectory);
+    while (true) {
+        if (existsSync(path.join(current, ".git")))
+            return current;
+        const parent = path.dirname(current);
+        if (parent === current)
+            return canonicalizeThroughExistingAncestor(workingDirectory);
+        current = parent;
     }
 }
 function isMissingPath(error) {
@@ -297,7 +309,7 @@ function sdkUsage(usage) {
 function requiredValidationsForInput(input) {
     const prompt = input.prompt ?? "";
     const mode = resolveDeliveryMode(input);
-    const ui = isUiScope(input, prompt) || mode === "brief";
+    const ui = isUiScope(input, prompt);
     const validations = ["functional"];
     if (ui)
         validations.push("accessibility");

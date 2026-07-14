@@ -17,7 +17,7 @@ SpecToPR v2가 유지하는 skill은 정확히 9개입니다.
 | `/spec-to-pr:review-design`     | UI scope 독립 검토             | visual/interaction/design-system/accessibility 확인        |
 | `/spec-to-pr:publish`           | publish-ready Run 발행         | draft PR/MR과 required asset sync만 수행                   |
 | `/spec-to-pr:archive-openspec`  | merge 뒤 archive               | authoritative merge evidence 필수, polling 없음            |
-| `/spec-to-pr:prepare-release`   | plugin 자체 release 준비       | full matrix/hardening/package/cross-host checks            |
+| `/spec-to-pr:prepare-release`   | plugin 자체 release 준비       | full matrix/archive/package/cross-host checks              |
 
 ## Mode routing
 

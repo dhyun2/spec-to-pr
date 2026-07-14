@@ -1,7 +1,13 @@
-import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { mkdir, open, realpath, rename, unlink } from "node:fs/promises";
 import path from "node:path";
 
-import type { DeliveryMode, WorkloadSize } from "./workload-budget.js";
+import {
+  defaultTokenRangeForWorkload,
+  type DeliveryMode,
+  type WorkloadSize,
+} from "./workload-budget.js";
 
 export type UsageCalibrationSample = {
   version: 1;
@@ -23,38 +29,94 @@ export type UsageCalibrationSample = {
 
 const MODES = new Set<DeliveryMode>(["auto", "brief", "legacy", "feature", "figma"]);
 const SIZES = new Set<WorkloadSize>(["XS", "S", "M", "L", "XL"]);
+const MAX_HISTORY_BYTES = 1_048_576;
+const MAX_HISTORY_RECORDS = 256;
+const HISTORY_RETENTION_MS = 365 * 24 * 60 * 60 * 1_000;
+const SAFE_OPEN_FLAGS = (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
+const recordQueues = new Map<string, Promise<void>>();
 
 export class UsageCalibrationStore {
-  public constructor(public readonly filePath: string) {}
+  public constructor(
+    public readonly filePath: string,
+    private readonly options: { excludedRoot?: string } = {},
+  ) {}
 
   public async record(rawSample: UsageCalibrationSample): Promise<void> {
     const sample = parseSample(rawSample);
+    const queueKey = path.resolve(this.filePath);
+    const previous = recordQueues.get(queueKey) ?? Promise.resolve();
+    const current = previous.catch(() => undefined).then(() => this.recordExclusive(sample));
+    recordQueues.set(queueKey, current);
+
+    try {
+      await current;
+    } finally {
+      if (recordQueues.get(queueKey) === current) recordQueues.delete(queueKey);
+    }
+  }
+
+  private async recordExclusive(sample: UsageCalibrationSample): Promise<void> {
+    await this.assertLocationAllowed();
     await mkdir(path.dirname(this.filePath), { recursive: true, mode: 0o700 });
-    await appendFile(this.filePath, `${JSON.stringify(sample)}\n`, {
-      encoding: "utf8",
-      mode: 0o600,
-    });
+    await this.assertLocationAllowed();
+    const releaseLock = await acquireFileLock(`${this.filePath}.lock`);
+
+    try {
+      const retained = retainRecent([...(await this.read()), sample]);
+      const content = `${retained.map((entry) => JSON.stringify(entry)).join("\n")}\n`;
+      if (Buffer.byteLength(content) > MAX_HISTORY_BYTES) {
+        throw new Error("Usage calibration history exceeds its byte limit");
+      }
+
+      await this.assertLocationAllowed();
+      await writeAtomically(this.filePath, content);
+    } finally {
+      await releaseLock();
+    }
   }
 
   public async read(): Promise<UsageCalibrationSample[]> {
-    let content: string;
+    await this.assertLocationAllowed();
+    let handle: Awaited<ReturnType<typeof open>>;
     try {
-      content = await readFile(this.filePath, "utf8");
+      handle = await open(this.filePath, constants.O_RDONLY | SAFE_OPEN_FLAGS);
     } catch (error: unknown) {
       if (isMissingFile(error)) return [];
       throw error;
     }
 
-    return content
-      .split(/\r?\n/)
-      .filter((line) => line.trim() !== "")
-      .flatMap((line) => {
-        try {
-          return [parseSample(JSON.parse(line) as unknown)];
-        } catch {
-          return [];
-        }
-      });
+    try {
+      const metadata = await assertSafeRegularFile(handle);
+      if (metadata.size > MAX_HISTORY_BYTES) {
+        throw new Error("Usage calibration history exceeds its byte limit");
+      }
+      const content = await readBounded(handle, metadata.size);
+      return retainRecent(
+        content
+          .split(/\r?\n/)
+          .filter((line) => line.trim() !== "")
+          .flatMap((line) => {
+            try {
+              return [parseSample(JSON.parse(line) as unknown)];
+            } catch {
+              return [];
+            }
+          }),
+      );
+    } finally {
+      await handle.close();
+    }
+  }
+
+  private async assertLocationAllowed(): Promise<void> {
+    if (this.options.excludedRoot === undefined) return;
+    const [root, candidate] = await Promise.all([
+      canonicalizeThroughExistingAncestor(this.options.excludedRoot),
+      canonicalizeThroughExistingAncestor(this.filePath),
+    ]);
+    if (isWithinDirectory(root, candidate)) {
+      throw new Error("Usage calibration history must stay outside the target repository");
+    }
   }
 }
 
@@ -114,7 +176,8 @@ export function calibrateTokenRange(input: {
       (sample) =>
         sample.completed &&
         sample.mode === input.mode &&
-        sample.workloadSize === input.workloadSize,
+        sample.workloadSize === input.workloadSize &&
+        sample.hardLimitTokens === defaultTokenRangeForWorkload(sample.workloadSize).max,
     )
     .map((sample) => sample.totalTokens)
     .sort((left, right) => left - right);
@@ -208,4 +271,117 @@ function isMissingFile(error: unknown): boolean {
     "code" in error &&
     (error as { code?: unknown }).code === "ENOENT"
   );
+}
+
+async function assertSafeRegularFile(handle: Awaited<ReturnType<typeof open>>) {
+  const metadata = await handle.stat();
+  if (!metadata.isFile() || metadata.nlink !== 1) {
+    throw new Error("Usage calibration history must be a regular single-link file");
+  }
+  return metadata;
+}
+
+function retainRecent(samples: readonly UsageCalibrationSample[]): UsageCalibrationSample[] {
+  const cutoff = Date.now() - HISTORY_RETENTION_MS;
+  return samples
+    .filter((sample) => sample.recordedAtEpochMs >= cutoff)
+    .sort((left, right) => left.recordedAtEpochMs - right.recordedAtEpochMs)
+    .slice(-MAX_HISTORY_RECORDS);
+}
+
+async function canonicalizeThroughExistingAncestor(candidate: string): Promise<string> {
+  let current = path.resolve(candidate);
+  const missingSegments: string[] = [];
+
+  while (true) {
+    try {
+      return path.resolve(await realpath(current), ...missingSegments);
+    } catch (error: unknown) {
+      if (!isMissingFile(error)) throw error;
+      const parent = path.dirname(current);
+      if (parent === current) return path.resolve(candidate);
+      missingSegments.unshift(path.basename(current));
+      current = parent;
+    }
+  }
+}
+
+function isWithinDirectory(directory: string, candidate: string): boolean {
+  const relative = path.relative(directory, candidate);
+  return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== "..");
+}
+
+async function readBounded(
+  handle: Awaited<ReturnType<typeof open>>,
+  size: number,
+): Promise<string> {
+  const buffer = Buffer.alloc(size);
+  let offset = 0;
+
+  while (offset < size) {
+    const { bytesRead } = await handle.read(buffer, offset, size - offset, offset);
+    if (bytesRead === 0) break;
+    offset += bytesRead;
+  }
+
+  return buffer.subarray(0, offset).toString("utf8");
+}
+
+async function writeAtomically(filePath: string, content: string): Promise<void> {
+  const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+  const handle = await open(
+    temporaryPath,
+    constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | SAFE_OPEN_FLAGS,
+    0o600,
+  );
+
+  try {
+    await assertSafeRegularFile(handle);
+    await handle.writeFile(content, "utf8");
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+
+  try {
+    await rename(temporaryPath, filePath);
+  } catch (error: unknown) {
+    await unlink(temporaryPath).catch(() => undefined);
+    throw error;
+  }
+}
+
+async function acquireFileLock(lockPath: string): Promise<() => Promise<void>> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      const handle = await open(
+        lockPath,
+        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | SAFE_OPEN_FLAGS,
+        0o600,
+      );
+      await assertSafeRegularFile(handle);
+      await handle.close();
+      return async () => {
+        await unlink(lockPath).catch(() => undefined);
+      };
+    } catch (error: unknown) {
+      if (!isAlreadyExists(error)) throw error;
+      await delay(5);
+    }
+  }
+
+  throw new Error("Usage calibration history is busy");
+}
+
+function isAlreadyExists(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "EEXIST"
+  );
+}
+
+async function delay(milliseconds: number): Promise<void> {
+  await new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 }

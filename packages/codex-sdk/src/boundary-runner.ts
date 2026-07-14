@@ -46,8 +46,8 @@ export type BoundaryClient = {
 export type BoundaryRunState =
   | "completed"
   | "blocked"
-  | "approval-required"
   | "split-required"
+  | "run-mismatch"
   | "usage-unavailable"
   | "status-unavailable"
   | "turn-limit";
@@ -60,7 +60,6 @@ export async function executeBudgetedBoundaryTurns(input: {
   hardLimitTokens: number;
   workloadSize: WorkloadSize;
   workloadHardLimits?: Partial<Record<WorkloadSize, number>>;
-  budgetLocked?: boolean;
   requiredValidations: readonly string[];
   maxTurns: number;
 }): Promise<{
@@ -109,6 +108,8 @@ export async function executeBudgetedBoundaryTurns(input: {
   let activeWorkloadSize = input.workloadSize;
   let activeHardLimitTokens = input.hardLimitTokens;
   let activeRequiredValidations = [...input.requiredValidations];
+  let hasAuthoritativeValidations = false;
+  let pinnedRunId: string | null = null;
   const items: RunResult["items"] = [];
 
   for (let index = 0; index < input.maxTurns; index += 1) {
@@ -123,14 +124,23 @@ export async function executeBudgetedBoundaryTurns(input: {
       state = "status-unavailable";
       break;
     }
+    if (pinnedRunId !== null && currentStatus.runId !== pinnedRunId) {
+      state = "run-mismatch";
+      break;
+    }
+    pinnedRunId ??= currentStatus.runId;
     workflowStatus = currentStatus;
-    if (input.budgetLocked === false) {
-      activeHardLimitTokens =
-        input.workloadHardLimits?.[currentStatus.workload.size] ??
-        currentStatus.workload.budget.hardLimitTokens;
+    const configuredHardLimit = input.workloadHardLimits?.[currentStatus.workload.size];
+    if (configuredHardLimit !== undefined) {
+      activeHardLimitTokens = configuredHardLimit;
+    } else if (currentStatus.workload.size !== activeWorkloadSize) {
+      activeHardLimitTokens = currentStatus.workload.budget.hardLimitTokens;
     }
     activeWorkloadSize = currentStatus.workload.size;
-    activeRequiredValidations = [...currentStatus.requiredValidations];
+    activeRequiredValidations = hasAuthoritativeValidations
+      ? unionStrings(activeRequiredValidations, currentStatus.requiredValidations)
+      : [...currentStatus.requiredValidations];
+    hasAuthoritativeValidations = true;
     if (workflowStatus.status === "completed") {
       state = "completed";
       break;
@@ -151,7 +161,7 @@ export async function executeBudgetedBoundaryTurns(input: {
       workloadSize: activeWorkloadSize,
       requiredValidations: activeRequiredValidations,
     });
-    if (decision.action === "approval-required" || decision.action === "split-required") {
+    if (decision.action === "split-required") {
       state = decision.action;
       break;
     }
@@ -163,11 +173,17 @@ export async function executeBudgetedBoundaryTurns(input: {
       checkpointed = true;
       checkpointCount += 1;
       thread = input.client.startThread();
-      prompt = buildCompactCheckpointPrompt(workflowStatus, activeRequiredValidations);
+      prompt = buildCompactCheckpointPrompt(workflowStatus, activeRequiredValidations, {
+        usedTokens: usage.totalTokens,
+        hardLimitTokens: activeHardLimitTokens,
+      });
       continue;
     }
 
-    prompt = buildBoundaryContinuationPrompt(workflowStatus, activeRequiredValidations);
+    prompt = buildBoundaryContinuationPrompt(workflowStatus, activeRequiredValidations, {
+      usedTokens: usage.totalTokens,
+      hardLimitTokens: activeHardLimitTokens,
+    });
   }
 
   if (input.outputSchema !== undefined && (state === "completed" || state === "blocked")) {
@@ -221,25 +237,27 @@ export function extractWorkflowStatus(items: RunResult["items"]): BoundaryWorkfl
 export function buildCompactCheckpointPrompt(
   status: BoundaryWorkflowStatus,
   requiredValidations: readonly string[],
+  effectiveBudget: { usedTokens: number; hardLimitTokens: number },
 ): string {
   return [
     "Resume the installed spec-to-pr workflow from this compact context checkpoint.",
     "Call workflow_status with the recorded runId first; durable workflow state and project files are authoritative.",
     "Complete only the next external action group, then stop after the returned workflow status. Independent functional and design reviews in the same action group may run in parallel.",
     "Do not waive, skip, or reduce required validation because of token pressure. Keep API and UI implementation in one context.",
-    `Checkpoint: ${JSON.stringify(compactStatus(status, requiredValidations))}`,
+    `Checkpoint: ${JSON.stringify(compactStatus(status, requiredValidations, effectiveBudget))}`,
   ].join("\n");
 }
 
 export function buildBoundaryContinuationPrompt(
   status: BoundaryWorkflowStatus,
   requiredValidations: readonly string[],
+  effectiveBudget: { usedTokens: number; hardLimitTokens: number },
 ): string {
   return [
     `Continue spec-to-pr Run ${status.runId}.`,
     "Call workflow_status first, complete only the next external action group, and stop after its returned status. Independent functional and design reviews in the same group may run in parallel.",
     "Preserve every required validation; budget pressure never authorizes a waiver.",
-    `Boundary: ${JSON.stringify(compactStatus(status, requiredValidations))}`,
+    `Boundary: ${JSON.stringify(compactStatus(status, requiredValidations, effectiveBudget))}`,
   ].join("\n");
 }
 
@@ -251,7 +269,11 @@ export function buildFinalResponsePrompt(status: BoundaryWorkflowStatus): string
   ].join("\n");
 }
 
-function compactStatus(status: BoundaryWorkflowStatus, requiredValidations: readonly string[]) {
+function compactStatus(
+  status: BoundaryWorkflowStatus,
+  requiredValidations: readonly string[],
+  effectiveBudget?: { usedTokens: number; hardLimitTokens: number },
+) {
   return {
     runId: status.runId,
     status: status.status,
@@ -261,8 +283,25 @@ function compactStatus(status: BoundaryWorkflowStatus, requiredValidations: read
     blockers: status.blockers,
     resumeContext: status.resumeContext,
     workload: status.workload,
+    ...(effectiveBudget === undefined
+      ? {}
+      : {
+          effectiveBudget: {
+            usedTokens: effectiveBudget.usedTokens,
+            remainingTokens: Math.max(
+              0,
+              effectiveBudget.hardLimitTokens - effectiveBudget.usedTokens,
+            ),
+            checkpointAtTokens: Math.floor(effectiveBudget.hardLimitTokens * 0.8),
+            hardLimitTokens: effectiveBudget.hardLimitTokens,
+          },
+        }),
     requiredValidations: [...requiredValidations],
   };
+}
+
+function unionStrings(left: readonly string[], right: readonly string[]): string[] {
+  return [...new Set([...left, ...right])];
 }
 
 function parseWorkflowStatus(value: unknown): BoundaryWorkflowStatus | null {

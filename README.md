@@ -30,7 +30,7 @@ The public runtime is intentionally small:
 
 API and UI implementation stay in one context. For API-backed UI, the agent first submits distinct physical, non-empty types, schemas, wrappers, mocks, and a passing JSON contract-test result with a stable `implementationContextId` as an explicit `api-ready` checkpoint; path, symlink, or hard-link aliases do not count as separate evidence. Final implementation must repeat that ID. `apiReady: true` alone is not evidence. There are no separate API/UI implementation agents and no integration lane. After implementation, the orchestrator freezes a `workflow_status` snapshot, contracts, diff, and evidence paths for each independent reviewer; reviewers return verdict payloads without calling workflow tools.
 
-Immediately after intake, `workflow_status` reports an `XS`–`XL` workload, estimated token range, confidence, reasons, an 80% checkpoint threshold, and the authoritative required-validation list. Contract authors may submit numeric `workloadSignals` to refine it without adding a tool or stage. The same status carries a compact `resumeContext` with the recorded goal, project-relative evidence paths, and submission summaries. The SDK instructs each turn to stop after one workflow action group, requires a fresh status at every completed boundary, sums actual input plus output tokens, and starts a compact fresh thread at the first boundary at or above 80%. At the hard limit it keeps every required validation and returns `split-required` for `L`/`XL`, otherwise `approval-required`. Missing usage stops continuation as `usage-unavailable`. Numeric-only fresh completed-run history calibrates future ranges; resumed tails are excluded because they do not contain whole-Run usage. Prompts, code, diffs, paths, tool output, and final responses are never stored in calibration history, and optional history I/O cannot fail the workflow.
+Immediately after intake, `workflow_status` reports an `XS`–`XL` workload, estimated token range, confidence, reasons, an 80% checkpoint threshold, and the authoritative required-validation list. Contract authors may submit non-empty numeric `workloadSignals` to refine it without adding a tool or stage. The same status carries a compact `resumeContext` with the recorded goal, project-relative evidence paths, and submission summaries. The SDK pins the first durable Run ID, instructs each turn to stop after one workflow action group, requires a fresh status at every completed boundary, never lets later statuses shrink required validation, sums actual input plus output tokens, and starts a compact fresh thread at the first boundary at or above 80%. At the hard limit it keeps every required validation and returns `split-required`; there is no caller-selected token allowance. Numeric-only fresh completed-run history may calibrate only the displayed range. The automatic hard limit stays at the workload class default, and legacy samples recorded with a different hard limit are excluded from calibration. Missing usage stops continuation as `usage-unavailable`. History writes are serialized and atomic, storage is bounded and revalidated on every access, prompts/code/diffs/paths/tool output/final responses are never stored, and optional history I/O cannot fail the workflow.
 
 Publishing only creates or updates a draft GitHub PR or GitLab MR. Draft flows work on a non-target `codex/*` source branch and commit only intended changes before publication; runtime preflight requires a clean tree and at least one source commit beyond the target. Publishing never merges, approves, closes, or marks a review request ready.
 
@@ -125,7 +125,7 @@ node packages/codex-sdk/dist/cli.js \
   --publish
 ```
 
-Use `--brief`, `--figma`, `--openapi`, and `--docs` for source inputs. `--publish` requests a draft; `--no-publish` stops after evidence-backed implementation and review. `--token-budget` sets the approved hard limit, while `--max-turns`, `--usage-history`, and `--no-usage-calibration` control bounded automation and numeric-only calibration.
+Use `--brief`, `--figma`, `--openapi`, and `--docs` for source inputs. `--publish` requests a draft; `--no-publish` stops after evidence-backed implementation and review. `--max-turns`, `--usage-history`, and `--no-usage-calibration` control bounded automation and numeric-only calibration.
 
 `--resume <task-id>` continues the existing durable Run from the latest `workflow_status` and `resumeContext`; it does not repeat intake or create a duplicate Run.
 
@@ -135,7 +135,7 @@ See [packages/codex-sdk/README.md](packages/codex-sdk/README.md) for the complet
 
 Normal changes run available formatting/lint, typecheck, build, and focused functional checks selected by applicability. OpenSpec, architecture, targeted security, visual, accessibility, and performance evidence are conditional. Observability is opt-in. Missing optional scripts are not applicable; missing, empty, skipped, or failed required evidence blocks.
 
-Full test matrices, hardening, package verification, and cross-host manifest checks are release-only. They are not added to every feature or fix.
+Full test matrices, archive integrity, package verification, and cross-host manifest checks are release-only. They are not added to every feature or fix.
 
 Repository checks:
 

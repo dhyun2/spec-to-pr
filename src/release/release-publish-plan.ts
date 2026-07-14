@@ -33,6 +33,9 @@ export function buildReleasePublishPlan(input: ReleasePublishOptions): ReleaseCo
   if (version.length === 0) {
     throw new Error("Release version is required");
   }
+  if (!isSemver(version)) {
+    throw new Error(`Release version must be valid semver: ${version}`);
+  }
 
   const branch = input.branch ?? "main";
   const claudeMarketplace = input.claudeMarketplace ?? "spec-to-pr";
@@ -58,7 +61,7 @@ export function buildReleasePublishPlan(input: ReleasePublishOptions): ReleaseCo
         id: "release-build",
         title: "Build and verify release package",
         command: "pnpm",
-        args: ["release:build", version, "--dry-run"],
+        args: ["release:build", version, "--full"],
       },
     );
   }
@@ -67,21 +70,23 @@ export function buildReleasePublishPlan(input: ReleasePublishOptions): ReleaseCo
     return steps;
   }
 
-  if (!input.skipPush) {
-    steps.push({
-      id: "git-push",
-      title: `Push ${branch} to origin`,
-      command: "git",
-      args: ["push", "origin", branch],
-    });
-  }
+  const releaseTag = `spec-to-pr--v${version}`;
 
   if (!input.skipTag) {
     steps.push({
-      id: "claude-tag",
-      title: "Create and push Claude plugin release tag",
-      command: "claude",
-      args: ["plugin", "tag", ".", "--push"],
+      id: "git-tag",
+      title: `Create local release tag ${releaseTag}`,
+      command: "git",
+      args: ["tag", "--annotate", releaseTag, "--message", `spec-to-pr ${version}`],
+    });
+  }
+
+  if (!input.skipPush) {
+    steps.push({
+      id: "git-push-release",
+      title: `Push ${branch}${input.skipTag ? "" : ` and ${releaseTag}`} to origin`,
+      command: "git",
+      args: ["push", "origin", branch, ...(input.skipTag ? [] : [`refs/tags/${releaseTag}`])],
     });
   }
 
@@ -116,6 +121,12 @@ export function buildReleasePublishPlan(input: ReleasePublishOptions): ReleaseCo
   }
 
   return steps;
+}
+
+function isSemver(value: string): boolean {
+  return /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u.test(
+    value,
+  );
 }
 
 export function parseReleasePublishArgs(args: string[]): ParsedReleasePublishArgs {

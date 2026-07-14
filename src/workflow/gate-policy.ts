@@ -101,7 +101,11 @@ export function buildGatePlan(scope: WorkflowScope): WorkflowGate[] {
       scope.observabilityRequested ? "required" : "opt-in",
       "Observability is generated only when explicitly requested.",
     ),
-    gate("release", "release-only", "Full hardening and packaging run only for releases."),
+    gate(
+      "release",
+      "release-only",
+      "Full archive integrity and package verification run only for releases.",
+    ),
   ];
 }
 

@@ -1,7 +1,11 @@
-import { readFile, realpath, stat } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
+import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
+import { promisify } from "node:util";
 
 import { PNG } from "pngjs";
+import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 
 import type { ArtifactBlobStore } from "../artifact-registry/artifact-blob-store.js";
@@ -13,6 +17,7 @@ import type { RunStageName, StageState } from "../run/stages.js";
 import type { RunStore } from "../store/run-store.js";
 import {
   ReviewSubmissionSchema,
+  ImplementationReviewPacketSchema,
   ChangeKindSchema,
   DeliveryModeSchema,
   DeliveryProfileSchema,
@@ -30,19 +35,21 @@ import {
   estimateWorkload,
   type WorkflowScope,
   type DeliveryProfile,
+  type ImplementationReviewPacket,
   type WorkloadEstimate,
   type WorkloadSignals,
   type WorkflowStatus,
   type WorkflowSubmission,
 } from "../workflow/index.js";
+import { reopenImplementationForReviewChanges } from "../state/stage-machine.js";
 import type { IntakeRequestService } from "./intake-request-service.js";
 import type { OpenSpecArchiveService } from "./openspec-archive-service.js";
-import type { ProjectProfileService } from "./profile-service.js";
 import type { PublisherService } from "./publisher-service.js";
 import type { RunService } from "./run-service.js";
 import type { StageService } from "./stage-service.js";
 
 const WORKER_ID = "workflow-orchestrator" as const;
+const execFileAsync = promisify(execFile);
 const DEFAULT_EXTERNAL_LEASE_TTL_MS = 15 * 60 * 1000;
 const DEFAULT_EXTERNAL_HEARTBEAT_MS = 60 * 1000;
 
@@ -194,7 +201,6 @@ export type WorkflowServiceDependencies = {
   artifactStore: ArtifactBlobStore;
   runService: RunService;
   intakeRequestService: IntakeRequestService;
-  profileService: ProjectProfileService;
   stageService: StageService;
   publisherService?: PublisherService;
   archiveService?: OpenSpecArchiveService;
@@ -229,8 +235,10 @@ export class WorkflowService {
         ? await readProjectTextFile(input.projectRoot, input.briefPath, "Brief")
         : undefined;
     const publication = input.publication ?? (input.mode === "figma" ? "none" : "draft");
+    const initialHead = await currentGitHead(input.projectRoot);
     const created = await this.dependencies.runService.createRun({
       projectRoot: input.projectRoot,
+      ...(initialHead === null ? {} : { baseCommit: initialHead }),
       sources: [],
     });
     const started = await this.dependencies.stageService.start({
@@ -250,11 +258,6 @@ export class WorkflowService {
             requestText: briefText,
             label: `brief:${input.briefPath}`,
           });
-    const projectProfile = await this.dependencies.profileService.inspectProject({
-      runId: created.id,
-      projectRoot: input.projectRoot,
-    });
-
     const figmaUrl = input.figmaUrl ?? parsed.parsed.figmaUrls[0];
     const explicitScope =
       (input.mode === "feature" || input.mode === "figma") && input.scope === "auto"
@@ -287,7 +290,7 @@ export class WorkflowService {
         uiSurfaces: scope.ui ? 1 : 0,
         figmaNodes: figmaUrl === undefined ? 0 : 1,
         testTargets: scope.code ? 1 : 0,
-        workspacePackages: projectProfile.workspace.packages.length,
+        workspacePackages: await countDeclaredWorkspacePackages(input.projectRoot),
         uncertainty: scope.code ? 3 : 1,
       },
     });
@@ -359,7 +362,21 @@ export class WorkflowService {
     const run = await this.dependencies.runStore.get(input.runId);
     const submission = input.submission;
     assertSubmissionPrerequisites(run, submission);
+    if (submission.kind === "functional-review" || submission.kind === "design-review") {
+      await assertReviewPacketFresh(run);
+    }
     const evidenceArtifacts = await this.ingestSubmissionEvidence(run, submission);
+    const implementationSnapshot =
+      submission.kind === "implementation" && submission.status === "passed"
+        ? await captureGitSnapshot(run)
+        : undefined;
+    if (submission.kind === "implementation" && implementationSnapshot !== undefined) {
+      assertChangedFilesMatch(submission.changedFiles, implementationSnapshot.changedFiles);
+    }
+    const reviewPacket =
+      submission.kind === "implementation" && implementationSnapshot !== undefined
+        ? createImplementationReviewPacket(run, implementationSnapshot, evidenceArtifacts)
+        : undefined;
 
     if (submission.kind === "figma-bundle") {
       await this.recordSubmissionArtifact(run, submission, evidenceArtifacts);
@@ -386,9 +403,20 @@ export class WorkflowService {
       await this.dependencies.runStore.get(run.id),
       submission,
       evidenceArtifacts,
+      reviewPacket,
     );
     const artifactIds = [...evidenceArtifacts.map((item) => item.id), artifact.id];
     const outcome = submissionOutcome(submission);
+
+    if (
+      (submission.kind === "functional-review" || submission.kind === "design-review") &&
+      submission.verdict === "changes-requested"
+    ) {
+      const current = await this.dependencies.runStore.get(run.id);
+      const reopened = reopenImplementationForReviewChanges(current, submission.summary, this.now);
+      await this.dependencies.runStore.save(reopened, current.revision);
+      return this.status({ runId: run.id });
+    }
 
     if (outcome === "passed") {
       await this.dependencies.stageService.complete({
@@ -405,6 +433,7 @@ export class WorkflowService {
                   apiReady: submission.apiReady,
                   implementationContextId: submission.implementationContextId,
                   uiChanged: submission.uiChanged,
+                  reviewPacket,
                   apiReadyArtifactIds:
                     stage(run, "implementation").checkpoint?.data["artifactIds"] ?? [],
                 },
@@ -495,6 +524,7 @@ export class WorkflowService {
       throw new Error("Draft publication was not requested for this workflow");
     }
     const reportArtifact = latestArtifact(run, "pr-report", "pr-body-markdown");
+    const reviewedHeadSha = reviewPacketFromRun(run)?.headSha;
     const baseInput = {
       runId: run.id,
       reportArtifactId: reportArtifact.id,
@@ -507,6 +537,9 @@ export class WorkflowService {
       labels: ["spec-to-pr"],
       reviewers: [],
       assignees: [],
+      ...(reviewedHeadSha === null || reviewedHeadSha === undefined
+        ? {}
+        : { headSha: reviewedHeadSha }),
     };
 
     if (input.mode === "preview") {
@@ -648,6 +681,7 @@ export class WorkflowService {
     run: RunManifest,
     submission: WorkflowSubmission,
     evidenceArtifacts: ArtifactRef[],
+    reviewPacket?: ImplementationReviewPacket,
   ): Promise<ArtifactRef> {
     const timestamp = this.now();
     const content = `${JSON.stringify(submission, null, 2)}\n`;
@@ -675,6 +709,32 @@ export class WorkflowService {
         ...("verdict" in submission ? { verdict: submission.verdict } : {}),
         ...("status" in submission ? { status: submission.status } : {}),
         evidenceArtifactIds: evidenceArtifacts.map((item) => item.id),
+        ...(submission.kind !== "contracts"
+          ? {}
+          : {
+              requirementManifest: submission.requirementManifest,
+              requirementIds: submission.requirementManifest.map((item) => item.id),
+              ...(submission.legacyBaseline === undefined
+                ? {}
+                : { legacyBaseline: submission.legacyBaseline }),
+            }),
+        ...(submission.kind !== "implementation"
+          ? {}
+          : {
+              changedFiles: submission.changedFiles,
+              ...(reviewPacket === undefined ? {} : { reviewPacket }),
+              ...(submission.featureEvidence === undefined
+                ? {}
+                : { featureVideoPath: submission.featureEvidence.videoPath }),
+            }),
+        ...(submission.kind !== "functional-review" && submission.kind !== "design-review"
+          ? {}
+          : {
+              reviewPacketId: submission.reviewPacketId,
+              reviewedRequirements: submission.requirements,
+              gateResults: submission.gateResults,
+              findings: submission.findings,
+            }),
       },
     });
     const current = await this.dependencies.runStore.get(run.id);
@@ -935,12 +995,50 @@ export class WorkflowService {
   private async generateReport(runId: string): Promise<void> {
     const run = await this.dependencies.runStore.get(RunIdSchema.parse(runId));
     const timestamp = this.now();
-    const summaries = run.artifacts
-      .filter((artifact) => artifact.metadata["workflowSubmissionKind"] !== undefined)
-      .map(
-        (artifact) =>
-          `- ${String(artifact.metadata["workflowSubmissionKind"])}: ${String(artifact.metadata["summary"] ?? "recorded")}`,
-      );
+    const packet = reviewPacketFromRun(run);
+    if (packet === undefined) throw new Error("A current implementation review packet is required");
+    await assertReviewPacketFresh(run);
+    const submissions = await this.latestWorkflowSubmissions(run);
+    const contracts = submissions.get("contracts");
+    const implementation = submissions.get("implementation");
+    const functional = submissions.get("functional-review");
+    const design = submissions.get("design-review");
+    if (contracts?.kind !== "contracts" || implementation?.kind !== "implementation") {
+      throw new Error("PR report requires current contracts and implementation evidence");
+    }
+    const reviews = [functional, design].filter(
+      (submission): submission is z.infer<typeof ReviewSubmissionSchema> =>
+        submission?.kind === "functional-review" || submission?.kind === "design-review",
+    );
+    if (reviews.some((review) => review.reviewPacketId !== packet.id)) {
+      throw new Error("PR report cannot use stale review packet evidence");
+    }
+    const reviewedRequirements = new Set(
+      reviews.flatMap((review) => review.requirements.map((r) => r.id)),
+    );
+    const unreviewed = contracts.requirementManifest
+      .map((requirement) => requirement.id)
+      .filter((requirementId) => !reviewedRequirements.has(requirementId));
+    if (unreviewed.length > 0) {
+      throw new Error(`PR report requires review coverage for: ${unreviewed.join(", ")}`);
+    }
+    const verdictFor = (requirementId: string) =>
+      reviews
+        .flatMap((review) => review.requirements)
+        .filter((requirement) => requirement.id === requirementId)
+        .map((requirement) => requirement.verdict)
+        .join(", ");
+    const evidencePaths = [
+      ...new Set([contracts, implementation, ...reviews].flatMap((item) => item.artifactPaths)),
+    ];
+    const gateLines = reviews.flatMap((review) =>
+      review.gateResults.map(
+        (gate) => `- ${review.kind}/${gate.id}: ${gate.status} (${gate.evidencePaths.join(", ")})`,
+      ),
+    );
+    const riskLines = reviews.flatMap((review) =>
+      review.findings.map((finding) => `- ${finding.severity}: ${finding.title}`),
+    );
     const markdown = [
       `# SpecToPR Run ${run.id}`,
       "",
@@ -948,9 +1046,55 @@ export class WorkflowService {
       "",
       "Ready for draft review.",
       "",
+      "## Review packet",
+      "",
+      `- ID: ${packet.id}`,
+      `- Revision: ${packet.revision}`,
+      `- Base: ${packet.baseSha ?? "unavailable"}`,
+      `- Head: ${packet.headSha ?? "unavailable"}`,
+      `- Evidence digest: ${packet.evidenceDigest}`,
+      `- Diff digest: ${packet.diffDigest}`,
+      "",
+      "## Requirement traceability",
+      "",
+      "| Requirement | Acceptance criteria | Review verdict |",
+      "| --- | --- | --- |",
+      ...contracts.requirementManifest.map(
+        (requirement) =>
+          `| ${markdownTableCell(`${requirement.id}: ${requirement.title}`)} | ${markdownTableCell(requirement.acceptanceCriteria.join("\n"))} | ${markdownTableCell(verdictFor(requirement.id))} |`,
+      ),
+      ...(contracts.legacyBaseline === undefined
+        ? []
+        : [
+            "",
+            "## Focused legacy baseline",
+            "",
+            `- Scope: ${contracts.legacyBaseline.scope}`,
+            ...contracts.legacyBaseline.checks.map(
+              (check) => `- ${check.status}: \`${check.command}\` → ${check.resultPath}`,
+            ),
+          ]),
+      "",
+      "## Changed files",
+      "",
+      ...(packet.changedFiles.length === 0
+        ? ["- No changed files declared."]
+        : packet.changedFiles.map((file) => `- ${file}`)),
+      "",
       "## Evidence",
       "",
-      ...(summaries.length === 0 ? ["- No external submissions recorded."] : summaries),
+      ...evidencePaths.map((evidencePath) => `- ${evidencePath}`),
+      "",
+      "## Validation gates",
+      "",
+      ...(gateLines.length === 0 ? ["- No gates recorded."] : gateLines),
+      "",
+      "## Risks",
+      "",
+      ...(riskLines.length === 0 ? ["- No known review findings."] : riskLines),
+      ...(implementation.featureEvidence === undefined
+        ? []
+        : ["", "## Feature E2E video", "", `- ${implementation.featureEvidence.videoPath}`]),
       "",
     ].join("\n");
     const blob = await this.dependencies.artifactStore.writeBlob({
@@ -973,6 +1117,7 @@ export class WorkflowService {
         reportKind: "pr-body-markdown",
         decision: "ready",
         locale: "ko",
+        reviewPacketId: packet.id,
       },
     });
 
@@ -986,6 +1131,29 @@ export class WorkflowService {
       run.revision,
     );
     await this.completeStage(run.id, "report", [artifact.id]);
+  }
+
+  private async latestWorkflowSubmissions(
+    run: RunManifest,
+  ): Promise<Map<string, WorkflowSubmission>> {
+    const submissions = new Map<string, WorkflowSubmission>();
+    for (const artifact of [...run.artifacts].reverse()) {
+      const kind = artifact.metadata["workflowSubmissionKind"];
+      if (
+        typeof kind !== "string" ||
+        submissions.has(kind) ||
+        artifact.metadata["adapter"] !== "workflow-v2"
+      ) {
+        continue;
+      }
+      const parsed = WorkflowSubmissionSchema.safeParse(
+        JSON.parse(
+          (await this.dependencies.artifactStore.readContent(artifact.digest)).toString("utf8"),
+        ),
+      );
+      if (parsed.success) submissions.set(kind, parsed.data);
+    }
+    return submissions;
   }
 
   private async completeStage(
@@ -1197,13 +1365,29 @@ function actionsForRun(run: RunManifest, scope: WorkflowScope, profile: Delivery
   if (stage(run, "implementation").status !== "passed") {
     return [];
   }
+  const packet = reviewPacketFromRun(run);
+  if (packet === undefined) {
+    throw new Error(`Run ${run.id} has no implementation review packet`);
+  }
 
   const actions = [];
   if (isActionable(stage(run, "functional-review"))) {
-    actions.push(WorkflowActionSchema.parse({ kind: "review-functional", runId: run.id }));
+    actions.push(
+      WorkflowActionSchema.parse({
+        kind: "review-functional",
+        runId: run.id,
+        reviewPacketId: packet.id,
+      }),
+    );
   }
   if (scope.ui && isActionable(stage(run, "design-review"))) {
-    actions.push(WorkflowActionSchema.parse({ kind: "review-design", runId: run.id }));
+    actions.push(
+      WorkflowActionSchema.parse({
+        kind: "review-design",
+        runId: run.id,
+        reviewPacketId: packet.id,
+      }),
+    );
   }
   if (
     profile.publication === "draft" &&
@@ -1240,7 +1424,7 @@ function assertSubmissionPrerequisites(run: RunManifest, submission: WorkflowSub
     submission.kind === "contracts" &&
     submission.status === "passed" &&
     profile.requirements.legacyBaseline &&
-    submission.baselinePaths.length === 0
+    submission.legacyBaseline === undefined
   ) {
     throw new Error("Legacy mode requires a focused baseline before contracts can pass");
   }
@@ -1306,6 +1490,21 @@ function assertSubmissionPrerequisites(run: RunManifest, submission: WorkflowSub
   if (submission.kind === "design-review" && !scopeFromRun(run).ui) {
     throw new Error("Design review is not applicable to non-UI scope");
   }
+  if (submission.kind === "functional-review" || submission.kind === "design-review") {
+    const packet = reviewPacketFromRun(run);
+    if (packet === undefined || submission.reviewPacketId !== packet.id) {
+      throw new Error("Review submission must reference the current implementation review packet");
+    }
+    const requirementIds = contractRequirementIds(run);
+    const unknownRequirements = submission.requirements
+      .map((requirement) => requirement.id)
+      .filter((requirementId) => !requirementIds.has(requirementId));
+    if (unknownRequirements.length > 0) {
+      throw new Error(
+        `Review references requirements outside the contract manifest: ${unknownRequirements.join(", ")}`,
+      );
+    }
+  }
   if (
     submission.kind === "implementation" &&
     submission.status === "passed" &&
@@ -1320,6 +1519,24 @@ function assertSubmissionPrerequisites(run: RunManifest, submission: WorkflowSub
   ) {
     assertRequiredGateResults(run, submission);
   }
+}
+
+function contractRequirementIds(run: RunManifest): Set<string> {
+  const artifact = [...run.artifacts]
+    .reverse()
+    .find((item) => item.metadata["workflowSubmissionKind"] === "contracts");
+  const rawIds = artifact?.metadata["requirementIds"];
+  if (!Array.isArray(rawIds) || rawIds.some((value) => typeof value !== "string")) {
+    throw new Error("The contracts stage is missing its structured requirement manifest");
+  }
+  return new Set(rawIds as string[]);
+}
+
+function reviewPacketFromRun(run: RunManifest): ImplementationReviewPacket | undefined {
+  const parsed = ImplementationReviewPacketSchema.safeParse(
+    stage(run, "implementation").checkpoint?.data["reviewPacket"],
+  );
+  return parsed.success ? parsed.data : undefined;
 }
 
 function assertRequiredGateResults(
@@ -1588,6 +1805,228 @@ async function readProjectTextFile(
     throw new Error(`${label} file exceeds the 1 MB limit: ${filePath}`);
 
   return readFile(resolvedPath, "utf8");
+}
+
+async function countDeclaredWorkspacePackages(projectRoot: string): Promise<number> {
+  const patterns = new Set<string>();
+  try {
+    const content = await readFile(path.join(projectRoot, "package.json"), "utf8");
+    const parsed = JSON.parse(content) as { workspaces?: unknown };
+    const declared = Array.isArray(parsed.workspaces)
+      ? parsed.workspaces
+      : typeof parsed.workspaces === "object" && parsed.workspaces !== null
+        ? (parsed.workspaces as { packages?: unknown }).packages
+        : undefined;
+    if (Array.isArray(declared)) {
+      declared.forEach((value) => {
+        if (typeof value === "string") patterns.add(value);
+      });
+    }
+  } catch {
+    // package.json is optional for non-JavaScript projects.
+  }
+  try {
+    const content = await readFile(path.join(projectRoot, "pnpm-workspace.yaml"), "utf8");
+    const parsed = parseYaml(content) as { packages?: unknown } | null;
+    if (Array.isArray(parsed?.packages)) {
+      parsed.packages.forEach((value) => {
+        if (typeof value === "string") patterns.add(value);
+      });
+    }
+  } catch {
+    // pnpm-workspace.yaml is optional.
+  }
+
+  const packageRoots = new Set<string>();
+  for (const rawPattern of [...patterns].slice(0, 100)) {
+    if (rawPattern.startsWith("!")) continue;
+    const pattern = rawPattern.replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/$/, "");
+    const wildcard = pattern.match(/^(.*)\/\*{1,2}$/);
+    if (wildcard !== null) {
+      const parent = path.resolve(projectRoot, wildcard[1] ?? "");
+      if (!isWithinRoot(path.resolve(projectRoot), parent)) continue;
+      let entries;
+      try {
+        entries = await readdir(parent, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const entry of entries.slice(0, 1_000)) {
+        if (!entry.isDirectory()) continue;
+        const candidate = path.join(parent, entry.name);
+        if (await hasPackageManifest(candidate)) packageRoots.add(candidate);
+      }
+    } else if (!pattern.includes("*")) {
+      const candidate = path.resolve(projectRoot, pattern);
+      if (
+        isWithinRoot(path.resolve(projectRoot), candidate) &&
+        (await hasPackageManifest(candidate))
+      ) {
+        packageRoots.add(candidate);
+      }
+    }
+    if (packageRoots.size >= 1_000) return 1_000;
+  }
+  return packageRoots.size;
+}
+
+function createImplementationReviewPacket(
+  run: RunManifest,
+  snapshot: GitSnapshot,
+  evidenceArtifacts: ArtifactRef[],
+): ImplementationReviewPacket {
+  const previous = reviewPacketFromRun(run);
+  const evidenceHex = createHash("sha256")
+    .update(
+      JSON.stringify({
+        changedFiles: snapshot.changedFiles,
+        evidenceDigests: evidenceArtifacts.map((artifact) => artifact.digest).sort(),
+      }),
+    )
+    .digest("hex");
+  if (run.baseCommit === undefined) {
+    throw new Error("Implementation review packets require a Git base commit");
+  }
+  const identity = {
+    runId: run.id,
+    revision: (previous?.revision ?? 0) + 1,
+    baseSha: run.baseCommit,
+    headSha: snapshot.headSha,
+    evidenceDigest: `sha256:${evidenceHex}`,
+    diffDigest: snapshot.diffDigest,
+    changedFiles: snapshot.changedFiles,
+  };
+  const id = createHash("sha256").update(JSON.stringify(identity)).digest("hex");
+  return ImplementationReviewPacketSchema.parse({ id: `packet_${id}`, ...identity });
+}
+
+type GitSnapshot = {
+  headSha: string;
+  diffDigest: `sha256:${string}`;
+  changedFiles: string[];
+};
+
+async function captureGitSnapshot(run: RunManifest): Promise<GitSnapshot> {
+  if (run.baseCommit === undefined) {
+    throw new Error("Implementation review packets require a Git base commit");
+  }
+  const headSha = await currentGitHead(run.projectRoot);
+  if (headSha === null)
+    throw new Error("Implementation review packets require a readable Git HEAD");
+  try {
+    const [{ stdout: diff }, { stdout: trackedNames }, { stdout: untrackedNames }] =
+      await Promise.all([
+        execFileAsync("git", ["diff", "--binary", run.baseCommit, "--"], {
+          cwd: run.projectRoot,
+          encoding: "buffer",
+          maxBuffer: 50 * 1024 * 1024,
+        }),
+        execFileAsync("git", ["diff", "--name-only", "-z", run.baseCommit, "--"], {
+          cwd: run.projectRoot,
+          encoding: "buffer",
+          maxBuffer: 5 * 1024 * 1024,
+        }),
+        execFileAsync("git", ["ls-files", "--others", "--exclude-standard", "-z"], {
+          cwd: run.projectRoot,
+          encoding: "buffer",
+          maxBuffer: 5 * 1024 * 1024,
+        }),
+      ]);
+    const tracked = splitNullPaths(trackedNames);
+    const untracked = splitNullPaths(untrackedNames);
+    const changedFiles = [...new Set([...tracked, ...untracked])].sort();
+    const digest = createHash("sha256").update(Buffer.isBuffer(diff) ? diff : Buffer.from(diff));
+    const root = await realpath(run.projectRoot);
+    for (const relativePath of untracked.sort()) {
+      const requestedPath = path.resolve(root, relativePath);
+      assertWithinProjectRoot(root, requestedPath, relativePath);
+      const resolvedPath = await realpath(requestedPath);
+      assertWithinProjectRoot(root, resolvedPath, relativePath);
+      const details = await stat(resolvedPath);
+      if (!details.isFile() || details.size > 50 * 1024 * 1024) {
+        throw new Error(`Untracked review file is not a bounded regular file: ${relativePath}`);
+      }
+      digest.update(`\0untracked:${relativePath}\0`).update(await readFile(resolvedPath));
+    }
+    return {
+      headSha,
+      diffDigest: `sha256:${digest.digest("hex")}`,
+      changedFiles,
+    };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Unable to capture the implementation Git diff: ${message}`);
+  }
+}
+
+async function assertReviewPacketFresh(run: RunManifest): Promise<void> {
+  const packet = reviewPacketFromRun(run);
+  if (packet === undefined) throw new Error("The implementation review packet is missing");
+  const snapshot = await captureGitSnapshot(run);
+  if (
+    snapshot.headSha !== packet.headSha ||
+    snapshot.diffDigest !== packet.diffDigest ||
+    !sameStrings(snapshot.changedFiles, packet.changedFiles)
+  ) {
+    throw new Error("The implementation review packet is stale; current Git diff does not match");
+  }
+}
+
+function assertChangedFilesMatch(declared: string[], actual: string[]): void {
+  const normalized = [...new Set(declared.map(normalizeGitPath))].sort();
+  if (!sameStrings(normalized, actual)) {
+    throw new Error(
+      `Implementation changedFiles must exactly match the Git diff: expected ${actual.join(", ") || "none"}`,
+    );
+  }
+}
+
+function splitNullPaths(value: Buffer | string): string[] {
+  return (Buffer.isBuffer(value) ? value.toString("utf8") : value)
+    .split("\0")
+    .filter(Boolean)
+    .map(normalizeGitPath);
+}
+
+function normalizeGitPath(value: string): string {
+  return value.replaceAll("\\", "/").replace(/^\.\//, "");
+}
+
+function sameStrings(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function isWithinRoot(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== "..");
+}
+
+async function hasPackageManifest(packageRoot: string): Promise<boolean> {
+  try {
+    return (await stat(path.join(packageRoot, "package.json"))).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function markdownTableCell(value: string): string {
+  return value.replaceAll("\\", "\\\\").replaceAll("|", "\\|").replace(/\r?\n/g, "<br>");
+}
+
+async function currentGitHead(projectRoot: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync("git", ["rev-parse", "--verify", "HEAD"], {
+      cwd: projectRoot,
+      encoding: "utf8",
+    });
+    const parsed = z
+      .string()
+      .regex(/^[a-f0-9]{7,64}$/i)
+      .safeParse(stdout.trim());
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
 }
 
 function latestArtifact(

@@ -25,6 +25,7 @@ export declare function defaultTokenRangeForWorkload(size: WorkloadSize): {
     min: number;
     max: number;
 };
+export declare function effectiveHardLimitForWorkload(size: WorkloadSize): number;
 export declare function estimateSdkWorkload(input: {
     deliveryMode: DeliveryMode;
     promptLength: number;
@@ -40,7 +41,7 @@ export declare function decideBudgetAction(input: {
     workloadSize: WorkloadSize;
     requiredValidations: readonly string[];
 }): {
-    action: "continue" | "checkpoint" | "approval-required" | "split-required";
+    action: "continue" | "checkpoint" | "split-required";
     requiredValidations: string[];
     thresholdTokens: number;
     shortfallTokens: number;

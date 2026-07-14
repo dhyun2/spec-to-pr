@@ -22,7 +22,7 @@ The runtime must preserve required functional and design validation, but it must
 - Remove `tokenBudget`, `--token-budget`, `budgetLocked`, and `approval-required` from the public SDK and CLI.
 - Keep XS-XL workload estimation, an estimated token range, confidence, an 80% boundary checkpoint, numeric-only calibration, and actual usage recording.
 - Treat the runtime's hard limit as an automatic safety boundary. Reaching it always returns `split-required`; no validation can be waived.
-- Calibration may narrow the displayed estimate, but it cannot reduce an automatic hard limit below the default workload maximum. This prevents low-cost completed samples from making larger runs fail prematurely.
+- Calibration changes only the displayed estimate. The automatic hard limit stays at the default workload maximum, and legacy samples recorded under a different limit are ignored. This prevents either unusually small or previously caller-expanded runs from changing later automatic limits.
 - Reject empty workload signals. Confidence rises only when meaningful observed fields exist and falls when uncertainty is declared.
 - Expose the effective hard limit, used tokens, remaining tokens, and checkpoint threshold in checkpoint/resume prompts.
 

@@ -8,6 +8,9 @@ const TOKEN_RANGES = {
 export function defaultTokenRangeForWorkload(size) {
     return { ...TOKEN_RANGES[size] };
 }
+export function effectiveHardLimitForWorkload(size) {
+    return TOKEN_RANGES[size].max;
+}
 export function estimateSdkWorkload(input) {
     const modeScore = {
         auto: 0,
@@ -72,9 +75,7 @@ export function decideBudgetAction(input) {
     const requiredValidations = [...input.requiredValidations];
     if (input.usedTokens >= input.hardLimitTokens) {
         return {
-            action: input.workloadSize === "L" || input.workloadSize === "XL"
-                ? "split-required"
-                : "approval-required",
+            action: "split-required",
             requiredValidations,
             thresholdTokens,
             shortfallTokens: Math.max(1, input.usedTokens - input.hardLimitTokens + 1),

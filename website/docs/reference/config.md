@@ -28,29 +28,28 @@ node packages/codex-sdk/dist/cli.js \
   --publish
 ```
 
-| Option                   | 설명                                |
-| ------------------------ | ----------------------------------- |
-| `--cwd <path>`           | 대상 저장소, 필수                   |
-| `--prompt <text>`        | 변경 요청/제약                      |
-| `--mode <mode>`          | delivery mode                       |
-| `--change-kind <kind>`   | 변경 분류                           |
-| `--brief <path>`         | brief/spec 입력                     |
-| `--docs <path>`          | 보조 문서 입력                      |
-| `--figma <url>`          | Figma file/node URL                 |
-| `--openapi <path>`       | OpenAPI 입력                        |
-| `--publish`              | 준비되면 draft PR/MR 발행           |
-| `--no-publish`           | 구현·리뷰 evidence까지만            |
-| `--resume <task-id>`     | 기존 Codex task 재개                |
-| `--model <model>`        | model override                      |
-| `--token-budget <n>`     | 이번 실행에 승인한 hard token limit |
-| `--max-turns <n>`        | action-group turn 상한, 기본 12     |
-| `--usage-history <p>`    | 숫자 전용 calibration JSONL 경로    |
-| `--no-usage-calibration` | usage 보정 읽기/쓰기 비활성화       |
-| `--no-review-agents`     | 독립 reviewer instruction 생략      |
+| Option                   | 설명                             |
+| ------------------------ | -------------------------------- |
+| `--cwd <path>`           | 대상 저장소, 필수                |
+| `--prompt <text>`        | 변경 요청/제약                   |
+| `--mode <mode>`          | delivery mode                    |
+| `--change-kind <kind>`   | 변경 분류                        |
+| `--brief <path>`         | brief/spec 입력                  |
+| `--docs <path>`          | 보조 문서 입력                   |
+| `--figma <url>`          | Figma file/node URL              |
+| `--openapi <path>`       | OpenAPI 입력                     |
+| `--publish`              | 준비되면 draft PR/MR 발행        |
+| `--no-publish`           | 구현·리뷰 evidence까지만         |
+| `--resume <task-id>`     | 기존 Codex task 재개             |
+| `--model <model>`        | model override                   |
+| `--max-turns <n>`        | action-group turn 상한, 기본 12  |
+| `--usage-history <p>`    | 숫자 전용 calibration JSONL 경로 |
+| `--no-usage-calibration` | usage 보정 읽기/쓰기 비활성화    |
+| `--no-review-agents`     | 독립 reviewer instruction 생략   |
 
 Mode를 생략하면 Figma URL은 `figma`, brief path는 `brief`, 나머지는 `auto`로 분류됩니다. Figma는 기본적으로 구현까지만 진행하고 `--publish`가 있을 때 draft를 발행합니다. 다른 명시적 delivery mode는 `--no-publish`가 없으면 draft publication을 요청합니다.
 
-`--token-budget`을 생략하면 현재 workload range의 max가 hard limit입니다. Contracts에서 size가 바뀌면 SDK가 runtime estimate와 전체 `requiredValidations`를 다음 경계부터 반영합니다. 완료된 action turn 뒤 80%를 넘으면 compact checkpoint로 fresh thread를 시작합니다. Hard limit이면 `L`/`XL`은 `split-required`, 그 이하는 `approval-required`를 반환합니다. Usage가 없으면 `usage-unavailable`이며 required validation은 유지됩니다.
+SDK가 workload class 기본 최대값을 자동 hard limit으로 사용합니다. 사용자가 숫자 한도를 지정하지 않고 calibration도 이 limit을 바꾸지 않습니다. Contracts에서 size가 바뀌면 SDK가 runtime estimate와 전체 `requiredValidations`를 다음 경계부터 반영합니다. 완료된 action turn 뒤 80%를 넘으면 compact checkpoint로 fresh thread를 시작합니다. Hard limit이면 크기와 관계없이 `split-required`를 반환하고 독립적으로 검증 가능한 범위로 나눕니다. Usage가 없으면 `usage-unavailable`이며 required validation은 유지됩니다. Calibration은 표시 범위만 보정하고 과거에 다른 hard limit으로 기록된 표본은 제외합니다.
 
 `--resume <task-id>`는 task history의 최신 run ID를 복구해 `workflow_status`부터 호출합니다. `resumeContext`의 목표, 프로젝트 상대 evidence 경로, 제출 요약으로 기존 Run을 이어가며 intake나 Run 생성을 반복하지 않습니다.
 
@@ -99,6 +98,6 @@ Codex에서는 이름이 `mcp__spec_to_pr__*`로 정규화될 수 있습니다. 
 - UI: applicable visual/interaction/accessibility evidence와 design review
 - targeted security/performance: scope가 해당될 때만
 - observability: opt-in
-- full matrix, hardening, package/cross-host validation: release-only
+- full matrix, archive/package/cross-host validation: release-only
 
 선택 script가 없으면 not applicable입니다. 필수 check를 실행하지 않았거나 skip/실패했다면 passed로 바꾸지 않습니다.

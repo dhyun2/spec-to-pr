@@ -10,6 +10,7 @@ import {
   completeStage,
   failStage,
   heartbeatStage,
+  reopenImplementationForReviewChanges,
   startStage,
 } from "../../src/state/stage-machine.js";
 
@@ -167,5 +168,39 @@ describe("stage machine", () => {
 
     expect(retried.stage.status).toBe("running");
     expect(retried.stage.attempt).toBe(1);
+  });
+
+  it("reopens implementation and invalidates stale verification after review changes", () => {
+    const run = baseRun();
+    const prepared = {
+      ...run,
+      stages: run.stages.map((stage) =>
+        ["implementation", "functional-review", "design-review", "report"].includes(stage.name)
+          ? {
+              ...stage,
+              status: "passed" as const,
+              completedAt: "2026-06-23T00:00:10.000Z",
+              artifactIds: [],
+            }
+          : stage,
+      ),
+    };
+
+    const reopened = reopenImplementationForReviewChanges(
+      prepared,
+      "The empty state is incorrect.",
+      () => "2026-06-23T00:00:20.000Z",
+    );
+
+    expect(reopened.stages.find((stage) => stage.name === "implementation")).toMatchObject({
+      status: "failed",
+      error: { code: "REVIEW_CHANGES_REQUESTED", retryable: true },
+    });
+    for (const name of ["functional-review", "design-review", "report", "publish"]) {
+      expect(reopened.stages.find((stage) => stage.name === name)).toMatchObject({
+        status: "pending",
+        artifactIds: [],
+      });
+    }
   });
 });

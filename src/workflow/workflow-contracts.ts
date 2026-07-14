@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { RunIdSchema } from "../runtime/ids.js";
+import { GitObjectIdSchema, Sha256DigestSchema } from "../runtime/scalars.js";
 import { WorkloadEstimateSchema, WorkloadSignalsSchema } from "./workload-policy.js";
 
 export const WorkflowScopeSchema = z
@@ -80,6 +81,50 @@ export const WorkflowGateIdSchema = z.enum([
   "release",
 ]);
 
+export const ReviewPacketIdSchema = z
+  .string()
+  .regex(/^packet_[a-f0-9]{64}$/, "Expected packet_<64 lowercase hex characters>");
+
+export const ImplementationReviewPacketSchema = z
+  .object({
+    id: ReviewPacketIdSchema,
+    runId: RunIdSchema,
+    revision: z.number().int().positive(),
+    baseSha: GitObjectIdSchema,
+    headSha: GitObjectIdSchema,
+    evidenceDigest: Sha256DigestSchema,
+    diffDigest: Sha256DigestSchema,
+    changedFiles: z.array(z.string().trim().min(1)).max(10_000),
+  })
+  .strict();
+
+const RequirementContractSchema = z
+  .object({
+    id: z.string().trim().min(1).max(200),
+    title: z.string().trim().min(1).max(500),
+    acceptanceCriteria: z.array(z.string().trim().min(1).max(2_000)).min(1).max(50),
+  })
+  .strict();
+
+const LegacyBaselineSchema = z
+  .object({
+    scope: z.string().trim().min(1).max(2_000),
+    evidencePaths: z.array(z.string().trim().min(1)).min(1),
+    checks: z
+      .array(
+        z
+          .object({
+            command: z.string().trim().min(1).max(2_000),
+            resultPath: z.string().trim().min(1),
+            status: z.enum(["passed", "failed"]),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(50),
+  })
+  .strict();
+
 const ReviewFindingSchema = z
   .object({
     severity: ReviewFindingSeveritySchema,
@@ -106,6 +151,7 @@ const ReviewGateResultSchema = z
 export const ReviewSubmissionSchema = z
   .object({
     kind: z.enum(["functional-review", "design-review"]),
+    reviewPacketId: ReviewPacketIdSchema,
     verdict: ReviewVerdictSchema,
     summary: z.string().trim().min(1).max(4_000),
     findings: z.array(ReviewFindingSchema).default([]),
@@ -201,6 +247,8 @@ export const ContractsSubmissionSchema = z
     summary: z.string().trim().min(1).max(4_000),
     artifactPaths: z.array(z.string().trim().min(1)).default([]),
     baselinePaths: z.array(z.string().trim().min(1)).default([]),
+    requirementManifest: z.array(RequirementContractSchema).default([]),
+    legacyBaseline: LegacyBaselineSchema.optional(),
     workloadSignals: WorkloadSignalsSchema.optional(),
   })
   .strict()
@@ -213,12 +261,58 @@ export const ContractsSubmissionSchema = z
       });
     }
 
+    if (submission.status === "passed" && submission.requirementManifest.length === 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["requirementManifest"],
+        message: "Passed contracts require structured requirements and acceptance criteria",
+      });
+    }
+
+    const requirementIds = new Set<string>();
+    submission.requirementManifest.forEach((requirement, index) => {
+      if (requirementIds.has(requirement.id)) {
+        context.addIssue({
+          code: "custom",
+          path: ["requirementManifest", index, "id"],
+          message: `Duplicate requirement ${requirement.id}`,
+        });
+      }
+      requirementIds.add(requirement.id);
+    });
+
     submission.baselinePaths.forEach((baselinePath, index) => {
       if (!submission.artifactPaths.includes(baselinePath)) {
         context.addIssue({
           code: "custom",
           path: ["baselinePaths", index],
           message: "Every baseline must be included in artifactPaths",
+        });
+      }
+    });
+
+    submission.legacyBaseline?.evidencePaths.forEach((baselinePath, index) => {
+      if (!submission.artifactPaths.includes(baselinePath)) {
+        context.addIssue({
+          code: "custom",
+          path: ["legacyBaseline", "evidencePaths", index],
+          message: "Every focused legacy baseline must be included in artifactPaths",
+        });
+      }
+    });
+    submission.legacyBaseline?.checks.forEach((check, index) => {
+      if (!submission.legacyBaseline?.evidencePaths.includes(check.resultPath)) {
+        context.addIssue({
+          code: "custom",
+          path: ["legacyBaseline", "checks", index, "resultPath"],
+          message: "Legacy baseline check results must be declared as baseline evidence",
+        });
+      }
+      if (submission.status === "passed" && check.status !== "passed") {
+        context.addIssue({
+          code: "custom",
+          path: ["legacyBaseline", "checks", index, "status"],
+          message: "Passed contracts require every focused legacy baseline check to pass",
         });
       }
     });
@@ -416,8 +510,20 @@ export const WorkflowActionSchema = z.discriminatedUnion("kind", [
       requireApiReady: z.boolean(),
     })
     .strict(),
-  z.object({ kind: z.literal("review-functional"), runId: RunIdSchema }).strict(),
-  z.object({ kind: z.literal("review-design"), runId: RunIdSchema }).strict(),
+  z
+    .object({
+      kind: z.literal("review-functional"),
+      runId: RunIdSchema,
+      reviewPacketId: ReviewPacketIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("review-design"),
+      runId: RunIdSchema,
+      reviewPacketId: ReviewPacketIdSchema,
+    })
+    .strict(),
   z.object({ kind: z.literal("publish-draft"), runId: RunIdSchema }).strict(),
   z.object({ kind: z.literal("archive-after-merge"), runId: RunIdSchema }).strict(),
 ]);
@@ -473,6 +579,7 @@ export type DeliveryMode = z.infer<typeof DeliveryModeSchema>;
 export type ChangeKind = z.infer<typeof ChangeKindSchema>;
 export type DeliveryProfile = z.infer<typeof DeliveryProfileSchema>;
 export type ReviewVerdict = z.infer<typeof ReviewVerdictSchema>;
+export type ImplementationReviewPacket = z.infer<typeof ImplementationReviewPacketSchema>;
 export type WorkflowSubmission = z.infer<typeof WorkflowSubmissionSchema>;
 export type WorkflowAction = z.infer<typeof WorkflowActionSchema>;
 export type WorkflowStatus = z.infer<typeof WorkflowStatusSchema>;

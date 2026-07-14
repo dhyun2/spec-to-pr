@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -12,6 +13,7 @@ export type ReleasePackageBuildResult = {
   packagePath: string;
   sha256: string;
   includedFiles: string[];
+  gitCommit: string;
 };
 
 type ZipEntry = {
@@ -30,16 +32,28 @@ export class ReleasePackageBuilder {
   public async build(input: {
     version: string;
     outputDirectory: string;
+    allowDirty?: boolean;
   }): Promise<ReleasePackageBuildResult> {
-    await mkdir(input.outputDirectory, {
-      recursive: true,
-    });
+    if (input.allowDirty !== true) {
+      const status = (
+        await runGit(this.projectRoot, ["status", "--porcelain=v1", "--untracked-files=all"])
+      )
+        .toString("utf8")
+        .trim();
 
-    const includedFiles = await this.collectReleaseFiles();
+      if (status.length > 0) {
+        throw new Error(
+          `Release build requires a clean worktree. Commit or remove these paths first:\n${status}`,
+        );
+      }
+    }
+
+    const snapshot = await this.collectReleaseSnapshot();
+    const includedFiles = [...snapshot.files.keys()].sort();
+    await mkdir(input.outputDirectory, { recursive: true });
     const packagePath = path.join(input.outputDirectory, `spec-to-pr-${input.version}.zip`);
     const zipBuffer = await createDeterministicZip({
-      projectRoot: this.projectRoot,
-      files: includedFiles,
+      files: snapshot.files,
     });
 
     await writeFile(packagePath, zipBuffer);
@@ -48,17 +62,44 @@ export class ReleasePackageBuilder {
       packagePath,
       sha256: sha256Buffer(zipBuffer),
       includedFiles,
+      gitCommit: snapshot.gitCommit,
     };
   }
 
-  private async collectReleaseFiles(): Promise<string[]> {
-    const allFiles = await walk(this.projectRoot);
+  private async collectReleaseSnapshot(): Promise<{
+    gitCommit: string;
+    files: Map<string, Buffer>;
+  }> {
+    const gitCommit = (await runGit(this.projectRoot, ["rev-parse", "HEAD"]))
+      .toString("utf8")
+      .trim();
+    const tree = (await runGit(this.projectRoot, ["ls-tree", "-r", "-z", "--full-tree", gitCommit]))
+      .toString("utf8")
+      .split("\0")
+      .filter((entry) => entry.length > 0);
+    const files = new Map<string, Buffer>();
 
-    return allFiles
-      .map((file) => path.relative(this.projectRoot, file).split(path.sep).join("/"))
-      .filter((file) => isAllowedReleaseFile(file))
-      .filter((file) => !isForbiddenReleaseFile(file))
-      .sort();
+    for (const entry of tree) {
+      const match = /^(\d{6})\s+blob\s+[a-f0-9]+\t(.+)$/u.exec(entry);
+
+      if (match === null) {
+        continue;
+      }
+
+      const mode = match[1]!;
+      const file = match[2]!.split(path.sep).join("/");
+
+      if (!isAllowedReleaseFile(file) || isForbiddenReleaseFile(file)) {
+        continue;
+      }
+      if (mode !== "100644" && mode !== "100755") {
+        throw new Error(`Release file must be a regular tracked file: ${file}`);
+      }
+
+      files.set(file, await runGit(this.projectRoot, ["show", `${gitCommit}:${file}`]));
+    }
+
+    return { gitCommit, files };
   }
 }
 
@@ -74,39 +115,15 @@ export function isForbiddenReleaseFile(file: string): boolean {
   return RELEASE_FORBIDDEN_PATTERNS.some((pattern) => file.includes(pattern));
 }
 
-async function walk(directory: string): Promise<string[]> {
-  const entries = await readdir(directory, {
-    withFileTypes: true,
-  });
-  const files: string[] = [];
-
-  for (const entry of entries) {
-    const absolute = path.join(directory, entry.name);
-
-    if (entry.isDirectory()) {
-      files.push(...(await walk(absolute)));
-      continue;
-    }
-
-    if (entry.isFile()) {
-      files.push(absolute);
-    }
-  }
-
-  return files;
-}
-
-async function createDeterministicZip(input: {
-  projectRoot: string;
-  files: string[];
-}): Promise<Buffer> {
+async function createDeterministicZip(input: { files: Map<string, Buffer> }): Promise<Buffer> {
   const localParts: Buffer[] = [];
   const centralParts: Buffer[] = [];
   const entries: ZipEntry[] = [];
   let offset = 0;
 
-  for (const file of input.files) {
-    const content = await readFile(path.join(input.projectRoot, file));
+  for (const [file, content] of [...input.files.entries()].sort(([left], [right]) =>
+    left.localeCompare(right),
+  )) {
     const crc = crc32(content);
     const name = Buffer.from(file, "utf8");
     const localHeader = Buffer.alloc(30);
@@ -174,6 +191,33 @@ async function createDeterministicZip(input: {
   end.writeUInt16LE(0, 20);
 
   return Buffer.concat([...localParts, ...centralParts, end]);
+}
+
+async function runGit(cwd: string, args: string[]): Promise<Buffer> {
+  return await new Promise<Buffer>((resolve, reject) => {
+    const child = spawn("git", args, {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+
+    child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+    child.once("error", reject);
+    child.once("close", (code) => {
+      if (code === 0) {
+        resolve(Buffer.concat(stdout));
+        return;
+      }
+
+      reject(
+        new Error(
+          `git ${args[0] ?? "command"} failed (${String(code)}): ${Buffer.concat(stderr).toString("utf8").trim()}`,
+        ),
+      );
+    });
+  });
 }
 
 function sha256Buffer(buffer: Buffer): string {

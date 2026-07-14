@@ -8,11 +8,118 @@ import {
 } from "../../src/runtime/constants.js";
 import {
   ReviewSubmissionSchema,
+  ContractsSubmissionSchema,
+  ImplementationReviewPacketSchema,
   WorkflowResumeContextSchema,
   WorkflowSubmissionSchema,
 } from "../../src/workflow/index.js";
 
 describe("workflow v2 contracts", () => {
+  it("requires a structured requirement manifest and focused legacy baseline evidence", () => {
+    const requirementManifest = [
+      {
+        id: "checkout-submit",
+        title: "Submit checkout",
+        acceptanceCriteria: ["A valid cart creates exactly one order."],
+      },
+    ];
+
+    expect(
+      ContractsSubmissionSchema.safeParse({
+        kind: "contracts",
+        status: "passed",
+        summary: "Contracts generated.",
+        artifactPaths: ["contracts/requirements.json"],
+      }).success,
+    ).toBe(false);
+    expect(
+      ContractsSubmissionSchema.safeParse({
+        kind: "contracts",
+        status: "passed",
+        summary: "Contracts and focused baseline generated.",
+        artifactPaths: ["contracts/requirements.json", "contracts/legacy-baseline.md"],
+        requirementManifest,
+        legacyBaseline: {
+          scope: "checkout submission only",
+          evidencePaths: ["contracts/legacy-baseline.md"],
+          checks: [
+            {
+              command: "pnpm test -- checkout",
+              resultPath: "contracts/legacy-baseline.md",
+              status: "passed",
+            },
+          ],
+        },
+      }).success,
+    ).toBe(true);
+    expect(
+      ContractsSubmissionSchema.safeParse({
+        kind: "contracts",
+        status: "passed",
+        summary: "A failing baseline cannot authorize implementation.",
+        artifactPaths: ["contracts/requirements.json", "contracts/legacy-baseline.md"],
+        requirementManifest,
+        legacyBaseline: {
+          scope: "checkout submission only",
+          evidencePaths: ["contracts/legacy-baseline.md"],
+          checks: [
+            {
+              command: "pnpm test -- checkout",
+              resultPath: "contracts/legacy-baseline.md",
+              status: "failed",
+            },
+          ],
+        },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("ties review packet identity to its run and actual diff digest", () => {
+    const packet = {
+      id: `packet_${"a".repeat(64)}`,
+      revision: 1,
+      baseSha: "a".repeat(40),
+      headSha: "b".repeat(40),
+      evidenceDigest: `sha256:${"c".repeat(64)}`,
+    };
+
+    expect(ImplementationReviewPacketSchema.safeParse(packet).success).toBe(false);
+    expect(
+      ImplementationReviewPacketSchema.safeParse({
+        ...packet,
+        runId: "run_11111111111111111111111111111111",
+        diffDigest: `sha256:${"d".repeat(64)}`,
+        changedFiles: ["src/checkout.tsx"],
+      }).success,
+    ).toBe(true);
+  });
+
+  it("requires every review to identify its immutable implementation packet", () => {
+    const validReview = {
+      kind: "functional-review",
+      verdict: "approved",
+      summary: "Functional checks passed.",
+      findings: [],
+      requirements: [{ id: "checkout-submit", verdict: "accepted" }],
+      artifactPaths: ["test-results/unit.json"],
+      gateResults: [
+        {
+          id: "functional",
+          status: "passed",
+          evidencePaths: ["test-results/unit.json"],
+        },
+      ],
+    } as const;
+
+    expect(ReviewSubmissionSchema.safeParse(validReview).success).toBe(false);
+    expect(
+      ReviewSubmissionSchema.safeParse({
+        ...validReview,
+        reviewPacketId: `packet_${"a".repeat(64)}`,
+      }).success,
+    ).toBe(true);
+  });
+
   it("uses the eight coarse durable stages", () => {
     expect(RUN_STAGE_NAMES).toEqual([
       "intake",

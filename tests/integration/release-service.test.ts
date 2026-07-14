@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -22,18 +22,12 @@ afterEach(async () => {
 });
 
 describe("ReleaseService", () => {
-  it("runs gates, builds package, verifies manifest, and generates notes", async () => {
+  it("builds, verifies the actual archive, and generates notes", async () => {
     const outputDirectory = path.join(directory, "release");
-    const suites = service.listEvalSuites();
-    const evalResult = await service.runEvalSuite({
-      outputDirectory,
-    });
-    const hardeningResult = await service.runSecurityHardeningSuite({
-      outputDirectory,
-    });
     const build = await service.buildReleasePackage({
       version: "0.1.0",
       outputDirectory,
+      allowDirty: true,
     });
     const verification = await service.verifyReleasePackage({
       manifestPath: build.manifestPath,
@@ -43,14 +37,18 @@ describe("ReleaseService", () => {
       outputDirectory,
     });
 
-    expect(suites.suites[0]?.id).toBe("default-release-readiness");
-    expect(evalResult.report.status).toBe("passed");
-    expect(hardeningResult.report.status).toBe("passed");
     expect(build.verification.status).toBe("passed");
-    expect(build.manifest.evalStatus).toBe("passed");
-    expect(build.manifest.securityStatus).toBe("passed");
     expect(build.build.includedFiles).toContain("dist/mcp/server.js");
     expect(verification.verification.status).toBe("passed");
     expect(notes.content).toContain("# spec-to-pr 0.1.0");
+
+    await writeFile(build.checksumPath, "sha256:bad  tampered.zip\n", "utf8");
+    const tamperedChecksum = await service.verifyReleasePackage({
+      manifestPath: build.manifestPath,
+    });
+    expect(tamperedChecksum.verification.status).toBe("failed");
+    expect(tamperedChecksum.verification.failures).toContain(
+      "Release checksum sidecar does not match the manifest and package name.",
+    );
   });
 });

@@ -122,6 +122,61 @@ export function startStage(
   );
 }
 
+export function reopenImplementationForReviewChanges(
+  run: RunManifest,
+  reason: string,
+  now: Clock,
+): RunManifest {
+  const implementation = findStage(run, "implementation");
+  if (implementation.status !== "passed") {
+    throw new InvalidStageTransitionError("implementation", implementation.status, "failed");
+  }
+
+  const nowIso = now();
+  const invalidatedStages = new Set<RunStageName>([
+    "functional-review",
+    "design-review",
+    "report",
+    "publish",
+    "archive",
+  ]);
+
+  return RunManifestSchema.parse({
+    ...run,
+    revision: run.revision + 1,
+    updatedAt: nowIso,
+    status: "running",
+    stages: run.stages.map((stage) => {
+      if (stage.name === "implementation") {
+        return {
+          ...stage,
+          status: "failed",
+          lease: undefined,
+          completedAt: nowIso,
+          error: {
+            code: "REVIEW_CHANGES_REQUESTED",
+            message: reason,
+            retryable: true,
+          },
+        };
+      }
+      if (!invalidatedStages.has(stage.name)) return stage;
+      return {
+        ...stage,
+        status: "pending",
+        attempt: 0,
+        startedAt: undefined,
+        completedAt: undefined,
+        lease: undefined,
+        checkpoint: undefined,
+        artifactIds: [],
+        gapIds: [],
+        error: undefined,
+      };
+    }),
+  });
+}
+
 export function heartbeatStage(
   run: RunManifest,
   command: HeartbeatStageCommand,

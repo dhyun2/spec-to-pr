@@ -19,24 +19,30 @@ describe("release publish plan", () => {
       "check",
       "plugin-validate",
       "release-build",
-      "git-push",
-      "claude-tag",
+      "git-tag",
+      "git-push-release",
       "claude-marketplace-update",
       "claude-plugin-update",
       "codex-marketplace-upgrade",
     ]);
     expect(plan[2]).toMatchObject({
       command: "pnpm",
-      args: ["release:build", "0.1.6", "--dry-run"],
+      args: ["release:build", "0.1.6", "--full"],
     });
     expect(plan[3]).toMatchObject({
       command: "git",
-      args: ["push", "origin", "main"],
+      args: ["tag", "--annotate", "spec-to-pr--v0.1.6", "--message", "spec-to-pr 0.1.6"],
     });
     expect(plan[4]).toMatchObject({
-      command: "claude",
-      args: ["plugin", "tag", ".", "--push"],
+      command: "git",
+      args: ["push", "origin", "main", "refs/tags/spec-to-pr--v0.1.6"],
     });
+  });
+
+  it("rejects non-semver versions before constructing mutating steps", () => {
+    expect(() => buildReleasePublishPlan({ version: "next" })).toThrow(
+      "Release version must be valid semver: next",
+    );
   });
 
   it("supports verify-only and local update subsets", () => {
