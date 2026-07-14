@@ -20,7 +20,11 @@ const config: Config = {
 
   i18n: {
     defaultLocale: "ko",
-    locales: ["ko"],
+    locales: ["ko", "en"],
+    localeConfigs: {
+      ko: { label: "한국어", htmlLang: "ko-KR" },
+      en: { label: "English", htmlLang: "en-US" },
+    },
   },
 
   markdown: {
@@ -66,8 +70,9 @@ const config: Config = {
       title: "SpecToPR",
       items: [
         { type: "docSidebar", sidebarId: "guideSidebar", position: "left", label: "가이드" },
-        { to: "/usage/recipes", position: "left", label: "4개 모드" },
+        { to: "/usage/recipes", position: "left", label: "4개 케이스" },
         { to: "/concepts/pipeline", position: "left", label: "v2 구조" },
+        { type: "localeDropdown", position: "right" },
         { href: "https://github.com/dhyun2/spec-to-pr", label: "GitHub", position: "right" },
       ],
     },

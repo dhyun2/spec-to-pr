@@ -1,0 +1,22 @@
+{
+  "title": {
+    "message": "SpecToPR",
+    "description": "The title in the navbar"
+  },
+  "item.label.가이드": {
+    "message": "Guide",
+    "description": "Navbar item with label 가이드"
+  },
+  "item.label.4개 케이스": {
+    "message": "4 Cases",
+    "description": "Navbar item with label 4개 케이스"
+  },
+  "item.label.v2 구조": {
+    "message": "v2 Architecture",
+    "description": "Navbar item with label v2 구조"
+  },
+  "item.label.GitHub": {
+    "message": "GitHub",
+    "description": "Navbar item with label GitHub"
+  }
+}

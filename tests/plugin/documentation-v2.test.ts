@@ -6,6 +6,20 @@ import { describe, expect, it } from "vitest";
 const root = process.cwd();
 
 describe("v2 documentation", () => {
+  it("publishes Korean and English guide locales with a locale dropdown", () => {
+    const config = readFileSync(path.join(root, "website/docusaurus.config.ts"), "utf8");
+    const navbar = JSON.parse(
+      readFileSync(path.join(root, "website/i18n/en/docusaurus-theme-classic/navbar.json"), "utf8"),
+    ) as Record<string, { message: string }>;
+
+    expect(config).toContain('defaultLocale: "ko"');
+    expect(config).toContain('locales: ["ko", "en"]');
+    expect(config).toContain('type: "localeDropdown"');
+    expect(config).toContain('ko: { label: "한국어"');
+    expect(config).toContain('en: { label: "English"');
+    expect(navbar["item.label.4개 케이스"]?.message).toBe("4 Cases");
+  });
+
   it("keeps only the current ADRs and compact website pages", () => {
     expect(readdirSync(path.join(root, "docs", "adr")).sort()).toEqual([
       "035-use-coarse-workflow-facade-and-split-reviews.md",
