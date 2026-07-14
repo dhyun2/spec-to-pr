@@ -1,0 +1,141 @@
+---
+sidebar_position: 4
+title: 4. Figma → design implementation
+description: Implement and verify a design from real connected-host Figma evidence
+---
+
+Immediately after intake, status reports an `XS`–`XL` workload, estimated token range, confidence, and reasons. These are estimates, not fixed promises. At the 80% boundary SpecToPR checkpoints and continues from compact context; at the hard limit it splits scope or waits for a user decision without removing anything from `requiredValidations`.
+
+## Use this case <span id="use-this-case-figma"></span>
+
+Use this case when Figma is the primary source and the goal is screen implementation plus design verification. The connected host reads real nodes and visual evidence, then maps them to the existing design system. **The default result is implementation and a review report with no PR.**
+
+:::tip Input / result
+**Input:** repository + valid Figma URL · **Result:** UI implementation from real Figma evidence, visual/responsive/interaction/accessibility validation, and a draft PR only when explicit
+:::
+
+## Required inputs <span id="required-inputs-figma"></span>
+
+| Input         | Requirement                                                            |
+| ------------- | ---------------------------------------------------------------------- |
+| Repository    | Target Git repository with its design system and screen code           |
+| `mode`        | `figma`                                                                |
+| `scope`       | `ui` is required                                                       |
+| `figmaUrl`    | Accessible file URL, preferably with a concrete `node-id`              |
+| `publication` | `none` by default; `draft` only when the user explicitly requests a PR |
+| Request       | Name screens, states, and responsive boundaries to implement           |
+
+## Optional inputs <span id="optional-inputs-figma"></span>
+
+- `briefPath` and `docsPaths` add acceptance criteria, copy, and business rules.
+- `openApiPaths` adds API-ready contracts for an API-backed screen.
+- `guidancePaths` supplies design-system, architecture, and folder-structure rules.
+- `skillHints` requests applicable installed design-system, React/Next, and accessibility skills.
+- `publication: draft` is an explicit variant for delivering the design implementation as a PR.
+
+## Minimal prompt <span id="minimal-prompt-figma"></span>
+
+```text
+/spec-to-pr /absolute/path/to/app
+mode: figma
+scope: ui
+figmaUrl: https://www.figma.com/design/FILE/checkout?node-id=12-345
+publication: none
+Implement the Figma design with the existing design system and verify visual, responsive, and accessibility behavior.
+```
+
+## Full prompt example <span id="full-prompt-figma"></span>
+
+```text
+/spec-to-pr /absolute/path/to/app
+mode: figma
+scope: ui
+figmaUrl: https://www.figma.com/design/FILE/checkout?node-id=12-345
+briefPath: docs/checkout-copy.md
+openApiPaths: [docs/openapi.yaml]
+docsPaths: [docs/checkout-states.md]
+guidancePaths: [docs/design-system.md, docs/etc/folder-structure.md]
+skillHints: [design-system, react-best-practices, accessibility-auditor]
+changeKind: feature
+publication: draft
+Implement desktop/mobile and loading/error/success states for node 12:345 with existing components.
+Create real Figma, visual, interaction, and accessibility evidence, run independent review, and publish a draft PR.
+```
+
+## What SpecToPR does <span id="process-figma"></span>
+
+1. **Intake:** Confirm URL, node, screen/state scope, publication intent, and workload estimate.
+2. **Figma contracts:** Through the connected host, read node IDs, variables, component context, screenshots, and assets into a project-local strict manifest.
+3. **Design-system mapping:** Match the design to existing components and tokens before creating custom markup.
+4. **Implementation:** Build responsive layout, interaction, loading/error/empty/success states, and required API connections in one `implementationContextId`.
+5. **Reviews:** Run relevant functional checks and independent design review for fidelity, accessibility, and interaction.
+6. **Report / optional publish:** Stop at the report for `publication: none`; perform publication preflight and PR creation only for explicit `draft`.
+
+## Evidence and validation <span id="evidence-figma"></span>
+
+| Evidence               | Illustrative path                                                    | Passing condition                                                                           |
+| ---------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Bundle                 | `evidence/figma/figma-bundle.json`                                   | `provider: host-connected-figma`, ISO `capturedAt`, matching `fileUrl`, non-empty `nodeIds` |
+| Manifest/visuals       | `evidence/figma/manifest.json`, `evidence/figma/checkout-mobile.png` | Project-local strict manifest and actual PNG `visualPaths`                                  |
+| Responsive/interaction | `evidence/design/responsive.json`, `interaction.json`                | Named viewports and state transitions are verified                                          |
+| Accessibility          | `evidence/design/accessibility.json`                                 | Semantic, keyboard, focus, and contrast checks pass                                         |
+| Design review          | `evidence/reviews/design.json`                                       | Independent approved verdict over frozen diff/evidence                                      |
+
+Figma mode does not automatically require feature-targeted E2E and video. If complete feature delivery and video are the goal, choose `mode: feature` and compose `figmaUrl` as a source.
+
+## Expected branch and commits <span id="branch-and-commits-figma"></span>
+
+- `publication: none`: finish with a verified working-tree implementation and report on the existing work branch.
+- Illustrative explicit-draft branch: `codex/figma-checkout`
+- Illustrative commit: `feat: implement checkout from Figma`
+- Draft publication still requires a committed source branch and clean tree.
+
+## Expected draft PR <span id="expected-pr-figma"></span>
+
+There is no PR by default. The following is an **Illustrative expectation** only when `publication: draft` is explicit.
+
+**Illustrative expectation title:** `feat: implement checkout from Figma`
+
+```md
+## Figma source
+
+- file/node: checkout / 12:345
+- bundle: evidence/figma/figma-bundle.json
+
+## Implementation
+
+- existing design-system components and tokens
+- desktop/mobile and loading/error/success states
+
+## Design validation
+
+- responsive / interaction / accessibility: passed
+- design-reviewer: approved
+
+## Known differences
+
+- states not defined in Figma and intentionally excluded scope
+```
+
+## When the Run stops <span id="blockers-figma"></span>
+
+| Blocker                                         | User action to resume                                               |
+| ----------------------------------------------- | ------------------------------------------------------------------- |
+| Invalid or inaccessible URL/node                | Supply an accessible URL and exact node ID                          |
+| Connected-host evidence cannot be read          | Restore Figma connection, login, or permission                      |
+| Required state or viewport is absent            | Supply authoritative behavior or approved supplemental requirements |
+| Existing design system conflicts with Figma     | Decide whether to reuse, extend, or allow an exception              |
+| Draft requested from a dirty/uncommitted branch | Commit only intended files and satisfy clean preflight              |
+
+## What this case does not do <span id="exclusions-figma"></span>
+
+- It does not claim nodes, variables, or components from the URL alone.
+- It does not poll Figma or add a dedicated runtime microtool.
+- It does not create a PR without explicit draft intent.
+- It does not implicitly add the feature mode's full user-feature E2E and video contract.
+
+## Other usage cases
+
+- [Brief → draft PR](./brief)
+- [Legacy change → draft PR](./legacy)
+- [Feature → E2E, video, and draft PR](./feature)

@@ -1,0 +1,149 @@
+---
+sidebar_position: 3
+title: 3. Feature → E2E, video, and draft PR
+description: Implement API and UI with targeted feature E2E and exactly one video
+---
+
+Immediately after intake, status reports an `XS`–`XL` workload, estimated token range, confidence, and reasons. These are estimates, not fixed promises. At the 80% boundary SpecToPR checkpoints and continues from compact context; at the hard limit it splits scope or waits for a user decision without removing anything from `requiredValidations`.
+
+## Use this case <span id="use-this-case-feature"></span>
+
+Use this case for a user-facing capability that must be completed through API and UI, verified with **E2E targeting only that feature and exactly one video**, and delivered as a draft PR. It is the zero-to-100 flow that can combine a brief, Figma, OpenAPI, supporting docs, and folder-structure guidance in one Run.
+
+:::tip Input / result
+**Input:** concrete user feature + `mode: feature` + UI scope · **Result:** API/UI implementation, independent functional/design reviews, targeted E2E, one video, and a draft PR
+:::
+
+## Required inputs <span id="required-inputs-feature"></span>
+
+| Input           | Requirement                                                              |
+| --------------- | ------------------------------------------------------------------------ |
+| Repository      | Git repository where the browser feature and relevant checks can run     |
+| `mode`          | `feature`                                                                |
+| `scope`         | `ui` is required                                                         |
+| Feature request | State user, entry point, success/error states, and completion conditions |
+| `changeKind`    | `feature`                                                                |
+| `publication`   | `draft`, because the profile delivers its video through the PR           |
+
+## Optional inputs <span id="optional-inputs-feature"></span>
+
+- `briefPath` freezes acceptance criteria and boundaries.
+- `figmaUrl` supplies screen/state/component evidence and requires a connected-host `figma-bundle`.
+- `openApiPaths` grounds API types, schema, wrapper/client, and mock contracts.
+- `docsPaths` adds business rules and edge cases.
+- `guidancePaths` names project instructions such as `AGENTS.md`, architecture, and folder structure.
+- `skillHints` requests applicable installed skills such as `react-best-practices`, `next-best-practices`, `design-system`, and `api-generator`.
+- A Playwright test path, tag, or project can make the targeted selector unambiguous.
+
+## Minimal prompt <span id="minimal-prompt-feature"></span>
+
+```text
+/spec-to-pr /absolute/path/to/app
+mode: feature
+scope: ui
+changeKind: feature
+publication: draft
+Implement checkout through API and UI, verify only the checkout path with E2E, attach one video, and publish a draft PR.
+```
+
+## Full prompt example <span id="full-prompt-feature"></span>
+
+```text
+/spec-to-pr /absolute/path/to/app
+mode: feature
+scope: ui
+briefPath: docs/checkout.md
+figmaUrl: https://www.figma.com/design/FILE/checkout?node-id=12-345
+openApiPaths: [docs/openapi.yaml]
+docsPaths: [docs/business-rules.md, docs/error-cases.md]
+guidancePaths: [docs/architecture/ARCHITECTURE.md, docs/etc/folder-structure.md]
+skillHints: [react-best-practices, next-best-practices, design-system, api-generator]
+changeKind: feature
+publication: draft
+Implement checkout end to end. Run only the checkout test path, tag, or project and attach exactly one video.
+```
+
+## What SpecToPR does <span id="process-feature"></span>
+
+1. **Intake:** Normalize every source and feature boundary; report workload/token estimates and `requiredValidations`.
+2. **Contracts:** Reconcile brief, OpenAPI, and docs. When Figma is supplied, capture real nodes, variables, screenshots, assets, and a strict manifest.
+3. **API-ready:** Submit distinct non-empty type/schema/wrapper/mock files plus a passing contract-test JSON under one `implementationContextId`.
+4. **UI implementation:** In the same context, validate mock-backed states, connect the real API, and finish loading, empty, error, and success states.
+5. **Independent reviews:** Functional and design reviewers separately judge frozen contracts, diff, and evidence.
+6. **Targeted feature proof:** Run one Playwright invocation selecting the changed feature and record strict JSON plus one valid video.
+7. **Report / publish:** Publish a draft PR with the exact selector, command, result, video path, and every verdict.
+
+## Evidence and validation <span id="evidence-feature"></span>
+
+| Evidence        | Illustrative path                                 | Required condition                                                                  |
+| --------------- | ------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| API-ready       | `evidence/api/api-ready.json`                     | Four physical artifact roles, passing contract test, same `implementationContextId` |
+| Figma           | `evidence/figma/figma-bundle.json`                | If URL supplied: real connected-host bundle and actual PNGs                         |
+| Reviews         | `evidence/reviews/functional.json`, `design.json` | Both independent verdicts approved                                                  |
+| Targeted result | `evidence/e2e/targeted-feature.json`              | Only `status: passed`, exact selector, same context ID, positive `testCount`        |
+| Video           | `evidence/e2e/checkout.webm`                      | `featureVideo: required`, WebM/MP4, non-zero duration, ≤25 MB, exactly one          |
+
+The command must be one unchained Playwright invocation whose real argument selects the changed test path, tag, or project. `--list`, `--pass-with-no-tests`, broad or full-project E2E, zero tests, and zero or multiple videos are rejected.
+
+## Expected branch and commits <span id="branch-and-commits-feature"></span>
+
+- Illustrative branch: `codex/checkout-flow`
+- Illustrative commit: `feat: add API-backed checkout flow`
+- API and UI stay in one implementation agent/context rather than separate branches with an integration lane.
+- Before the PR, verify the evidence video exists and the committed source branch is clean.
+
+## Expected draft PR <span id="expected-pr-feature"></span>
+
+**Illustrative expectation title:** `feat: add API-backed checkout flow`
+
+```md
+## Requirement traceability
+
+- brief AC-1..AC-5, Figma node 12:345, checkout OpenAPI operation
+
+## API and UI implementation
+
+- api-ready: evidence/api/api-ready.json
+- implementationContextId: checkout-20260714
+- loading / error / success UI and real client integration
+
+## Independent reviews
+
+- functional-reviewer: approved
+- design-reviewer: approved
+
+## Targeted feature evidence
+
+- selector: tests/e2e/checkout.spec.ts
+- command: pnpm playwright test tests/e2e/checkout.spec.ts
+- result: evidence/e2e/targeted-feature.json
+- featureVideo: evidence/e2e/checkout.webm (exactly one)
+
+## Risks and exclusions
+
+- full-project E2E was not run
+```
+
+## When the Run stops <span id="blockers-feature"></span>
+
+| Blocker                                                          | User action to resume                                          |
+| ---------------------------------------------------------------- | -------------------------------------------------------------- |
+| Source contracts conflict                                        | Choose the authoritative source and revise acceptance criteria |
+| Figma URL exists but connected-host bundle is missing            | Restore host Figma access and recapture the same node          |
+| API-ready artifacts, contract test, or context ID are incomplete | Resubmit physical files and passing JSON under one context ID  |
+| E2E is broad, chained, list-only, skipped, or has zero tests     | Run one command selecting the changed path, tag, or project    |
+| Video is absent, duplicated, invalid, or over 25 MB              | Record exactly one valid WebM/MP4 from that run                |
+| Reviewer changes or dirty preflight                              | Fix, re-review, and commit only intended changes cleanly       |
+
+## What this case does not do <span id="exclusions-feature"></span>
+
+- It does not E2E-test or record every feature in the project.
+- It does not split API and design implementation into agents and integrate later.
+- It does not infer design from a Figma URL or poll Figma.
+- It does not add unrelated migrations, release matrices, or full-suite evidence to a feature PR.
+
+## Other usage cases
+
+- [Brief → draft PR](./brief)
+- [Legacy change → draft PR](./legacy)
+- [Figma → design implementation](./figma)

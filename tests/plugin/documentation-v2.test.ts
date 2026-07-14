@@ -20,8 +20,62 @@ describe("v2 documentation", () => {
     expect(navbar["item.label.4개 케이스"]?.message).toBe("4 Cases");
   });
 
-  it("documents exactly four detailed cases in Korean and English", () => {
-    const guides = {
+  it("documents four separate usage cases in Korean and English", () => {
+    const locales = {
+      ko: "website/docs/usage",
+      en: "website/i18n/en/docusaurus-plugin-content-docs/current/usage",
+    };
+    const cases = ["brief", "legacy", "feature", "figma"];
+    const headingIds = [
+      "use-this-case",
+      "required-inputs",
+      "optional-inputs",
+      "minimal-prompt",
+      "full-prompt",
+      "process",
+      "evidence",
+      "branch-and-commits",
+      "expected-pr",
+      "blockers",
+      "exclusions",
+    ];
+
+    for (const [locale, directory] of Object.entries(locales)) {
+      const guides = Object.fromEntries(
+        cases.map((caseName) => [
+          caseName,
+          readFileSync(path.join(root, directory, `${caseName}.mdx`), "utf8"),
+        ]),
+      );
+
+      for (const [caseName, guide] of Object.entries(guides)) {
+        expect(guide, `${locale}:${caseName}`).not.toContain('import Tabs from "@theme/Tabs"');
+        expect(guide, `${locale}:${caseName}`).not.toContain("<TabItem");
+        for (const headingId of headingIds) {
+          expect(guide, `${locale}:${caseName}:${headingId}`).toContain(
+            `id="${headingId}-${caseName}"`,
+          );
+        }
+        expect(guide).toContain("requiredValidations");
+        expect(guide).toContain("80%");
+        expect(guide).toContain(locale === "ko" ? "## 다른 사용법" : "## Other usage cases");
+        expect(guide.match(/\]\(\.\/(?:brief|legacy|feature|figma)\)/g)).toHaveLength(3);
+      }
+
+      expect(Object.values(guides).join("\n")).toContain("implementationContextId");
+      expect(guides.feature).toContain("targeted-feature");
+      expect(guides.feature).toContain("featureVideo: required");
+      expect(guides.feature).toContain("full-project E2E");
+      expect(guides.figma).toContain("figma-bundle");
+      expect(guides.figma).toContain("publication: none");
+      for (const caseName of ["brief", "legacy", "figma"]) {
+        expect(guides[caseName]).not.toContain("featureVideo: required");
+      }
+    }
+  });
+
+  it("keeps recipes as redirect-only compatibility documents", () => {
+    const redirects = {
       ko: readFileSync(path.join(root, "website/docs/usage/recipes.mdx"), "utf8"),
       en: readFileSync(
         path.join(root, "website/i18n/en/docusaurus-plugin-content-docs/current/usage/recipes.mdx"),
@@ -29,57 +83,12 @@ describe("v2 documentation", () => {
       ),
     };
 
-    for (const [locale, guide] of Object.entries(guides)) {
-      expect(guide, locale).toContain('import Tabs from "@theme/Tabs"');
-      expect(guide, locale).toContain('import TabItem from "@theme/TabItem"');
-      expect(guide.match(/<TabItem value="(?:brief|legacy|feature|figma)"/g)).toHaveLength(4);
-      for (const value of ["brief", "legacy", "feature", "figma"]) {
-        expect(guide, `${locale}:${value}`).toContain(`data-case-panel="${value}"`);
-        for (const headingId of [
-          "use-this-case",
-          "required-inputs",
-          "optional-inputs",
-          "minimal-prompt",
-          "full-prompt",
-          "process",
-          "evidence",
-          "branch-and-commits",
-          "expected-pr",
-          "blockers",
-          "exclusions",
-        ]) {
-          expect(guide, `${locale}:${headingId}:${value}`).toContain(`id="${headingId}-${value}"`);
-        }
-      }
-      for (const field of [
-        "mode:",
-        "scope:",
-        "changeKind:",
-        "publication:",
-        "briefPath",
-        "figmaUrl",
-        "docsPaths",
-        "openApiPaths",
-        "guidancePaths",
-        "skillHints",
-      ]) {
-        expect(guide, `${locale}:${field}`).toContain(field);
-      }
-      expect(guide).toContain("requiredValidations");
-      expect(guide).toContain("implementationContextId");
-      expect(guide).toContain("figma-bundle");
-    }
-
-    expect(guides.ko).toContain("예상 예시");
-    expect(guides.en).toContain("Illustrative expectation");
-    for (const guide of Object.values(guides)) {
-      const feature = tabSection(guide, "feature");
-      expect(feature).toContain("targeted-feature");
-      expect(feature).toContain("featureVideo");
-      expect(feature).toContain("full-project E2E");
-      for (const value of ["brief", "legacy", "figma"]) {
-        expect(tabSection(guide, value)).not.toContain("featureVideo: required");
-      }
+    expect(redirects.ko).toContain('<Redirect to="/usage/brief" />');
+    expect(redirects.en).toContain('<Redirect to="/en/usage/brief" />');
+    for (const redirect of Object.values(redirects)) {
+      expect(redirect).toContain('import { Redirect } from "@docusaurus/router"');
+      expect(redirect).not.toContain("## Required inputs");
+      expect(redirect).not.toContain("<Tabs");
     }
   });
 
@@ -98,6 +107,10 @@ describe("v2 documentation", () => {
       "reference/config.md",
       "reference/skills.md",
       "troubleshooting.md",
+      "usage/brief.mdx",
+      "usage/feature.mdx",
+      "usage/figma.mdx",
+      "usage/legacy.mdx",
       "usage/recipes.mdx",
     ]);
   });
@@ -178,7 +191,7 @@ describe("v2 documentation", () => {
     const readmes = ["README.md", "README.ko.md", "packages/codex-sdk/README.md"].map((file) =>
       readFileSync(path.join(root, file), "utf8"),
     );
-    const recipe = readFileSync(path.join(root, "website/docs/usage/recipes.mdx"), "utf8");
+    const recipe = readFileSync(path.join(root, "website/docs/usage/feature.mdx"), "utf8");
     const config = readFileSync(path.join(root, "website/docs/reference/config.md"), "utf8");
     const skills = readFileSync(path.join(root, "website/docs/reference/skills.md"), "utf8");
     const pipeline = readFileSync(path.join(root, "website/docs/concepts/pipeline.md"), "utf8");
@@ -216,9 +229,8 @@ describe("v2 documentation", () => {
     expect(recipe).toContain("design-system");
     expect(recipe).toContain("react-best-practices");
     expect(recipe).toContain("next-best-practices");
-    const apiBackedUiRecipe = tabSection(recipe, "feature");
-    expect(apiBackedUiRecipe).toContain("openApiPaths: [docs/openapi.yaml]");
-    expect(apiBackedUiRecipe).not.toContain("OpenAPI: docs/openapi.yaml");
+    expect(recipe).toContain("openApiPaths: [docs/openapi.yaml]");
+    expect(recipe).not.toContain("OpenAPI: docs/openapi.yaml");
 
     for (const field of [
       "docsPaths",
@@ -263,12 +275,4 @@ function relativeFiles(directory: string, prefix = ""): string[] {
         : [relative];
     })
     .sort();
-}
-
-function tabSection(contents: string, value: string): string {
-  const start = contents.indexOf(`<TabItem value="${value}"`);
-  if (start < 0) throw new Error(`Missing tab ${value}`);
-  const end = contents.indexOf("</TabItem>", start);
-  if (end < 0) throw new Error(`Unclosed tab ${value}`);
-  return contents.slice(start, end);
 }

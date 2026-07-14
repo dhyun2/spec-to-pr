@@ -88,9 +88,7 @@ it("documents four separate usage cases in Korean and English", () => {
       expect(guide).toContain("requiredValidations");
       expect(guide).toContain("80%");
       expect(guide).toContain(locale === "ko" ? "## 다른 사용법" : "## Other usage cases");
-      expect(guide.match(/\]\((?:\/en)?\/usage\/(?:brief|legacy|feature|figma)\)/g)).toHaveLength(
-        3,
-      );
+      expect(guide.match(/\]\(\.\/(?:brief|legacy|feature|figma)\)/g)).toHaveLength(3);
     }
 
     expect(Object.values(guides).join("\n")).toContain("implementationContextId");
@@ -205,10 +203,10 @@ Intake 직후 `XS`~`XL` workload, 예상 token range, confidence와 근거가 �
 Append exactly three links under `## 다른 사용법` and exclude the current page. Use these labels and routes:
 
 ```md
-- [기획서 → draft PR](/usage/brief)
-- [레거시 변경 → draft PR](/usage/legacy)
-- [기능 개발 → E2E·영상·draft PR](/usage/feature)
-- [Figma → 디자인 구현](/usage/figma)
+- [기획서 → draft PR](./brief)
+- [레거시 변경 → draft PR](./legacy)
+- [기능 개발 → E2E·영상·draft PR](./feature)
+- [Figma → 디자인 구현](./figma)
 ```
 
 For example, `brief.mdx` receives the legacy, feature, and Figma links; `feature.mdx` receives brief, legacy, and Figma. Do not retain the shared comparison table, Mermaid flow, `Tabs`/`TabItem` imports, or tab wrapper elements.
@@ -256,10 +254,10 @@ Immediately after intake, status reports an `XS`–`XL` workload, estimated toke
 Append exactly three links under `## Other usage cases`, excluding the current page:
 
 ```md
-- [Brief → draft PR](/en/usage/brief)
-- [Legacy change → draft PR](/en/usage/legacy)
-- [Feature → E2E, video, and draft PR](/en/usage/feature)
-- [Figma → design implementation](/en/usage/figma)
+- [Brief → draft PR](./brief)
+- [Legacy change → draft PR](./legacy)
+- [Feature → E2E, video, and draft PR](./feature)
+- [Figma → design implementation](./figma)
 ```
 
 - [ ] **Step 5: Replace both recipes documents with redirect-only shims**

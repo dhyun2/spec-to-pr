@@ -1,0 +1,143 @@
+---
+sidebar_position: 1
+title: 1. Brief → draft PR
+description: Implement an approved brief, verify it, and receive a draft PR
+---
+
+Immediately after intake, status reports an `XS`–`XL` workload, estimated token range, confidence, and reasons. These are estimates, not fixed promises. At the 80% boundary SpecToPR checkpoints and continues from compact context; at the hard limit it splits scope or waits for a user decision without removing anything from `requiredValidations`.
+
+## Use this case <span id="use-this-case-brief"></span>
+
+Use this case when an approved brief or PRD contains acceptance criteria and you want only that accepted scope implemented, verified, and delivered as a draft PR. A UI brief creates UI scope; a server-only brief does not. **The presence of a document does not imply complete feature E2E or design work.**
+
+:::tip Input / result
+**Input:** repository + brief path + concrete request · **Result:** acceptance traceability, relevant implementation and checks, independent review, and a draft PR
+:::
+
+## Required inputs <span id="required-inputs-brief"></span>
+
+| Input         | Requirement                                                                              |
+| ------------- | ---------------------------------------------------------------------------------------- |
+| Repository    | Absolute path to a Git repository, for example `/absolute/path/to/app`                   |
+| `mode`        | `brief`                                                                                  |
+| `briefPath`   | Existing regular file inside the repository, for example `docs/checkout.md`              |
+| Request       | Name the acceptance criteria or outcome to deliver; “implement it” alone is insufficient |
+| `changeKind`  | The real kind, such as `feature`, `fix`, `refactor`, or `docs`                           |
+| `publication` | `draft` for a PR or `none` for implementation and reviews only                           |
+
+## Optional inputs <span id="optional-inputs-brief"></span>
+
+- `scope: ui` or `scope: non-ui` makes design-review applicability explicit.
+- `figmaUrl` adds UI evidence. Supplying it immediately requires a real `figma-bundle`.
+- `openApiPaths` grounds API types, schemas, wrappers, clients, and mocks.
+- `docsPaths` adds business rules, error cases, and supporting analysis.
+- `guidancePaths` points to project rules such as `AGENTS.md`, architecture, or folder structure.
+- `skillHints` requests only installed and applicable skills. A missing optional skill is not a blocker.
+
+## Minimal prompt <span id="minimal-prompt-brief"></span>
+
+```text
+/spec-to-pr /absolute/path/to/app
+mode: brief
+briefPath: docs/checkout.md
+changeKind: feature
+publication: draft
+Implement only the brief's acceptance criteria, run the relevant checks, and publish a draft PR.
+```
+
+## Full prompt example <span id="full-prompt-brief"></span>
+
+```text
+/spec-to-pr /absolute/path/to/app
+mode: brief
+scope: ui
+briefPath: docs/checkout.md
+figmaUrl: https://www.figma.com/design/FILE/checkout?node-id=12-345
+openApiPaths: [docs/openapi.yaml]
+docsPaths: [docs/business-rules.md, docs/error-cases.md]
+guidancePaths: [docs/architecture/ARCHITECTURE.md, docs/etc/folder-structure.md]
+skillHints: [react-best-practices, next-best-practices, design-system, api-generator]
+changeKind: feature
+publication: draft
+Implement only the approved checkout criteria. Stop instead of guessing if sources conflict.
+Create API contract evidence first, then implement the UI in the same implementation context and run only relevant checks.
+```
+
+## What SpecToPR does <span id="process-brief"></span>
+
+1. **Intake:** Normalize paths and publication intent; report workload, token range, and confidence.
+2. **Contracts:** Freeze traceable acceptance criteria and reconcile optional sources.
+3. **Implementation:** Implement accepted scope in one `implementationContextId`. For API-backed UI, API-ready evidence precedes final UI evidence.
+4. **Functional review:** An independent reviewer evaluates the frozen contract, diff, and focused checks.
+5. **Design review:** Only for `scope: ui`, independently evaluate fidelity, interaction, design-system use, and accessibility.
+6. **Report / publish:** Build traceability, change, validation, review, and risk sections; publish only for `publication: draft`.
+
+## Evidence and validation <span id="evidence-brief"></span>
+
+The paths below are an **Illustrative expectation**.
+
+| Evidence            | Illustrative path                                            | Passing condition                                                                   |
+| ------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| Acceptance criteria | `evidence/contracts/brief-acceptance.json`                   | Every criterion maps to implementation and validation                               |
+| API-ready           | `evidence/api/contract-test.json`                            | When API applies: passed status, physical artifacts, same `implementationContextId` |
+| Focused checks      | `evidence/tests/focused-checks.json`                         | Applicable commands pass and are not skipped or empty                               |
+| Figma               | `evidence/figma/figma-bundle.json`                           | When a URL exists: connected-host provenance and actual PNGs                        |
+| Reviews             | `evidence/reviews/functional.json`, and `design.json` for UI | Independent verdicts are approved                                                   |
+
+Brief mode does not automatically require a targeted feature video. Validation follows the brief scope and scripts that actually exist in the repository.
+
+## Expected branch and commits <span id="branch-and-commits-brief"></span>
+
+- Illustrative branch: `codex/checkout-brief`
+- Illustrative commit: `feat: implement checkout acceptance criteria`
+- Publication requires a committed non-target source branch, intended changes only, a clean tree, and at least one commit ahead of target.
+- SpecToPR never merges, approves, closes, or marks the PR ready.
+
+## Expected draft PR <span id="expected-pr-brief"></span>
+
+**Illustrative expectation title:** `feat: implement checkout from approved brief`
+
+```md
+## Accepted requirements
+
+- AC-1 payment method selection → src/features/checkout/PaymentMethod.tsx
+- AC-2 failure state → tests/checkout/error-state.test.tsx
+
+## Implementation
+
+- Added API contract and mock, then connected the UI in the same implementationContextId
+
+## Validation and reviews
+
+- pnpm test -- checkout: passed
+- functional-reviewer: approved
+- design-reviewer: approved (UI scope)
+
+## Evidence and risks
+
+- evidence/contracts/brief-acceptance.json
+- known risks and excluded scope
+```
+
+## When the Run stops <span id="blockers-brief"></span>
+
+| Blocker                                         | User action to resume                                                   |
+| ----------------------------------------------- | ----------------------------------------------------------------------- |
+| Missing, external, or invalid `briefPath`       | Supply an existing regular file inside the repository                   |
+| Brief conflicts with Figma, OpenAPI, or request | Choose the authoritative source and update acceptance criteria          |
+| Required project guidance is missing            | Add the file or correct `guidancePaths`                                 |
+| Reviewer requests changes                       | Fix the named contract, implementation, or evidence issue and re-review |
+| Dirty tree or no source commit                  | Commit only intended changes and restore a clean source branch          |
+
+## What this case does not do <span id="exclusions-brief"></span>
+
+- It does not invent endpoints, screens, or migrations outside the brief.
+- It does not force design review for non-UI scope.
+- It does not automatically add feature-only targeted E2E and one video.
+- It never drops required validation because of token pressure.
+
+## Other usage cases
+
+- [Legacy change → draft PR](./legacy)
+- [Feature → E2E, video, and draft PR](./feature)
+- [Figma → design implementation](./figma)

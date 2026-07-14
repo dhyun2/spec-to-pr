@@ -1,0 +1,135 @@
+---
+sidebar_position: 2
+title: 2. Legacy change → draft PR
+description: Capture a focused baseline and change only a narrow legacy behavior delta
+---
+
+Immediately after intake, status reports an `XS`–`XL` workload, estimated token range, confidence, and reasons. These are estimates, not fixed promises. At the 80% boundary SpecToPR checkpoints and continues from compact context; at the hard limit it splits scope or waits for a user decision without removing anything from `requiredValidations`.
+
+## Use this case <span id="use-this-case-legacy"></span>
+
+Use this case to preserve an existing product while changing one **narrow current → desired behavior delta**. It fits bug fixes, small compatibility changes, and bounded refactors. It is not a request to inventory or modernize the entire repository.
+
+:::tip Input / result
+**Input:** repository + reproducible current behavior + desired delta · **Result:** focused baseline, minimal change, affected regression checks, and a draft PR
+:::
+
+## Required inputs <span id="required-inputs-legacy"></span>
+
+| Input         | Requirement                                                         |
+| ------------- | ------------------------------------------------------------------- |
+| Repository    | Absolute Git repository path with a usable run or test setup        |
+| `mode`        | `legacy`                                                            |
+| Delta         | Narrow current behavior, desired behavior, and affected entry point |
+| `changeKind`  | Usually `fix` or `refactor`, matching the actual intent             |
+| `scope`       | `ui` for a UI delta; otherwise normally `non-ui`                    |
+| `publication` | `draft` for a PR or `none` to stop after reviews                    |
+
+## Optional inputs <span id="optional-inputs-legacy"></span>
+
+- A reproduction command, failure log, test name, route, or screenshot makes the focused baseline precise.
+- `briefPath`, `docsPaths`, and `openApiPaths` add contract evidence for the delta.
+- `figmaUrl` adds UI design evidence and requires a real `figma-bundle`.
+- `guidancePaths` and `skillHints` specify project rules and applicable supporting skills.
+
+## Minimal prompt <span id="minimal-prompt-legacy"></span>
+
+```text
+/spec-to-pr /absolute/path/to/legacy-app
+mode: legacy
+scope: non-ui
+changeKind: fix
+publication: draft
+Reproduce the duplicate notification created by a payment retry, change only that behavior to create one notification, and publish a draft PR.
+```
+
+## Full prompt example <span id="full-prompt-legacy"></span>
+
+```text
+/spec-to-pr /absolute/path/to/legacy-app
+mode: legacy
+scope: non-ui
+docsPaths: [docs/payment-retry-rules.md]
+openApiPaths: [docs/payment-api.yaml]
+guidancePaths: [AGENTS.md, docs/architecture/ARCHITECTURE.md]
+skillHints: [api-generator]
+changeKind: fix
+publication: draft
+Change only the duplicate notification created when POST /payments/:id/retry returns 409.
+Reproduce it with the existing integration test and keep the result as a focused baseline.
+Run only affected payment retry checks. Do not perform a full inventory, migration, or full-project E2E.
+```
+
+## What SpecToPR does <span id="process-legacy"></span>
+
+1. **Intake:** Confirm the delta and affected entry point; report the workload/token estimate.
+2. **Focused baseline:** Before editing, reproduce current behavior as a real test, log, or screenshot artifact.
+3. **Contracts:** Separate preserved behavior from changed behavior and freeze `requiredValidations`.
+4. **Implementation:** Preserve unrelated behavior and apply the smallest sufficient change.
+5. **Independent reviews:** Always run functional review; run design review only for a UI delta.
+6. **Report / publish:** Include before/after evidence, risk, rollback notes, and the draft PR.
+
+## Evidence and validation <span id="evidence-legacy"></span>
+
+| Evidence        | Illustrative path                           | Passing condition                                               |
+| --------------- | ------------------------------------------- | --------------------------------------------------------------- |
+| Before baseline | `evidence/legacy/payment-retry-before.json` | Duplicate notifications reproduce under the same request        |
+| After result    | `evidence/legacy/payment-retry-after.json`  | One notification and the existing response contract remain      |
+| Affected checks | `evidence/tests/payment-retry.json`         | Relevant unit/integration checks pass                           |
+| Review          | `evidence/reviews/functional.json`          | Delta, preserved behavior, and regression evidence are approved |
+
+Filenames are an **Illustrative expectation**. UI or Figma sources add design evidence, but legacy mode does not automatically require a feature video.
+
+## Expected branch and commits <span id="branch-and-commits-legacy"></span>
+
+- Illustrative branch: `codex/payment-retry-notification`
+- Illustrative commit: `fix: prevent duplicate retry notification`
+- Do not mix broad formatting, dependency upgrades, or unrelated cleanup into the commit.
+- Confirm a clean tree and source commit ahead of target before publication.
+
+## Expected draft PR <span id="expected-pr-legacy"></span>
+
+**Illustrative expectation title:** `fix: prevent duplicate payment retry notification`
+
+```md
+## Current behavior baseline
+
+- One 409 retry creates two notification rows
+
+## Requested delta
+
+- An idempotency key limits the same retry to one notification row
+
+## Affected validation
+
+- pnpm test -- payment-retry: passed
+- functional-reviewer: approved
+
+## Risk / rollback
+
+- no behavior outside the retry path changed
+- single revertible commit
+```
+
+## When the Run stops <span id="blockers-legacy"></span>
+
+| Blocker                                  | User action to resume                                                    |
+| ---------------------------------------- | ------------------------------------------------------------------------ |
+| The delta is broad, such as “improve it” | State current/desired behavior and the affected entry point              |
+| Current behavior cannot be reproduced    | Supply reproduction data, command, environment condition, or failure log |
+| Baseline and source contract conflict    | Choose the authoritative expected behavior                               |
+| Required regression cannot run           | Provide the minimum run setup or an approved substitute artifact         |
+| Publication preflight fails              | Clean and commit intended changes on the source branch                   |
+
+## What this case does not do <span id="exclusions-legacy"></span>
+
+- It does not inventory, migrate, or modernize the whole repository.
+- It does not require an unaffected full test matrix or full-project E2E.
+- It does not guess current behavior without baseline evidence.
+- It does not create feature video or Figma evidence without those inputs.
+
+## Other usage cases
+
+- [Brief → draft PR](./brief)
+- [Feature → E2E, video, and draft PR](./feature)
+- [Figma → design implementation](./figma)

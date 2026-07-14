@@ -1,0 +1,149 @@
+---
+sidebar_position: 3
+title: 3. 기능 개발 → E2E·영상·draft PR
+description: API와 UI를 구현하고 해당 기능 E2E와 영상 하나를 포함해 draft PR로 받는 방법
+---
+
+Intake 직후 `XS`~`XL` workload, 예상 token range, confidence와 근거가 표시됩니다. 이는 고정 약속이 아닙니다. 80% 경계에서는 checkpoint와 compact context로 이어가며, 한계에 도달해도 `requiredValidations`를 빼지 않고 범위를 나누거나 사용자의 결정을 기다립니다.
+
+## 이 케이스를 쓰는 경우 <span id="use-this-case-feature"></span>
+
+사용자에게 보이는 기능을 API와 UI까지 완성하고, **그 기능만 고른 E2E와 정확히 영상 하나**를 증거로 넣어 draft PR로 받고 싶을 때 사용합니다. 기획서, Figma, OpenAPI, 보조 문서, 폴더 구조 지침을 모두 한 Run에 조합하는 zero-to-100 흐름입니다.
+
+:::tip 입력 / 결과
+**입력:** 구체적 사용자 기능 + `mode: feature` + UI scope · **결과:** API/UI 구현, 독립 기능·디자인 리뷰, targeted E2E, 영상 1개, draft PR
+:::
+
+## 반드시 제공할 것 <span id="required-inputs-feature"></span>
+
+| 입력          | 요구사항                                                    |
+| ------------- | ----------------------------------------------------------- |
+| 저장소        | 브라우저 기능과 관련 검사를 실행할 수 있는 Git 저장소       |
+| `mode`        | `feature`                                                   |
+| `scope`       | `ui` 필수                                                   |
+| 기능 요청     | 사용자, 진입점, 성공/오류 상태, 완료 조건을 구체적으로 기술 |
+| `changeKind`  | `feature`                                                   |
+| `publication` | 영상이 포함된 PR 납품 계약이므로 `draft`                    |
+
+## 선택 입력 <span id="optional-inputs-feature"></span>
+
+- `briefPath`: 수용 조건과 범위를 고정합니다.
+- `figmaUrl`: 화면·상태·component 근거를 제공합니다. 있으면 connected-host `figma-bundle`이 필수입니다.
+- `openApiPaths`: API types, schema, wrapper/client, mock 계약을 만듭니다.
+- `docsPaths`: 비즈니스 규칙과 edge case를 보충합니다.
+- `guidancePaths`: `AGENTS.md`, architecture, folder-structure 등 프로젝트 규칙을 명시합니다.
+- `skillHints`: `react-best-practices`, `next-best-practices`, `design-system`, `api-generator`처럼 설치·적용 가능한 skill을 요청합니다.
+- targeted selector: Playwright test path, tag, project 중 하나를 지정하면 범위 오해가 줄어듭니다.
+
+## 최소 프롬프트 <span id="minimal-prompt-feature"></span>
+
+```text
+/spec-to-pr /absolute/path/to/app
+mode: feature
+scope: ui
+changeKind: feature
+publication: draft
+checkout을 API와 UI까지 구현하고 해당 checkout 경로만 E2E로 검증해 영상 하나와 함께 draft PR로 발행해줘.
+```
+
+## 전체 프롬프트 예시 <span id="full-prompt-feature"></span>
+
+```text
+/spec-to-pr /absolute/path/to/app
+mode: feature
+scope: ui
+briefPath: docs/checkout.md
+figmaUrl: https://www.figma.com/design/FILE/checkout?node-id=12-345
+openApiPaths: [docs/openapi.yaml]
+docsPaths: [docs/business-rules.md, docs/error-cases.md]
+guidancePaths: [docs/architecture/ARCHITECTURE.md, docs/etc/folder-structure.md]
+skillHints: [react-best-practices, next-best-practices, design-system, api-generator]
+changeKind: feature
+publication: draft
+checkout을 end-to-end로 구현해줘. checkout test path/tag/project만 실행하고 영상은 정확히 하나만 첨부해.
+```
+
+## SpecToPR이 진행하는 과정 <span id="process-feature"></span>
+
+1. **Intake:** 모든 source와 기능 경계를 정규화하고 workload/token 추정과 `requiredValidations`를 표시합니다.
+2. **Contracts:** brief/OpenAPI/docs를 합치고 충돌을 멈춥니다. Figma URL이 있으면 실제 node·variables·screenshot·asset context와 strict manifest를 캡처합니다.
+3. **API-ready:** 물리적으로 다른 non-empty type/schema/wrapper/mock과 passing contract-test JSON을 하나의 `implementationContextId`로 먼저 제출합니다.
+4. **UI implementation:** 같은 context ID에서 mock 기반 상태를 검증하고 실제 API 연결, loading/empty/error/success 상태를 완성합니다.
+5. **Independent reviews:** functional reviewer와 design reviewer가 고정된 계약·diff·증거를 각각 판정합니다.
+6. **Targeted feature proof:** 변경 기능을 고르는 Playwright invocation 하나만 실행하고 strict JSON과 유효한 영상 하나를 기록합니다.
+7. **Report / publish:** exact selector, command, result, video path와 모든 verdict를 포함한 draft PR을 발행합니다.
+
+## 증거와 검증 <span id="evidence-feature"></span>
+
+| 증거             | 예상 예시                                         | 필수 조건                                                                  |
+| ---------------- | ------------------------------------------------- | -------------------------------------------------------------------------- |
+| API-ready        | `evidence/api/api-ready.json`                     | 실제 artifact 4종, passing contract test, 같은 `implementationContextId`   |
+| Figma            | `evidence/figma/figma-bundle.json`                | URL을 줬다면 real connected-host bundle과 실제 PNG                         |
+| 기능/디자인 리뷰 | `evidence/reviews/functional.json`, `design.json` | 두 독립 verdict 모두 approved                                              |
+| targeted result  | `evidence/e2e/targeted-feature.json`              | `status: passed`, exact selector, 같은 context ID, 양수 `testCount`만 포함 |
+| 영상             | `evidence/e2e/checkout.webm`                      | `featureVideo: required`, WebM/MP4, 0초 초과, 25 MB 이하, 정확히 1개       |
+
+허용되는 E2E는 변경 기능을 실제로 고르는 test path/tag/project를 인자로 쓰는 **unchained Playwright command 하나**입니다. `--list`, `--pass-with-no-tests`, broad 또는 full-project E2E, 테스트 0건, 영상 0개나 2개 이상은 거부됩니다.
+
+## 예상 브랜치와 커밋 <span id="branch-and-commits-feature"></span>
+
+- 브랜치 예상 예시: `codex/checkout-flow`
+- 커밋 예상 예시: `feat: add API-backed checkout flow`
+- API와 UI를 별도 agent/branch로 나누지 않고 하나의 implementation context에서 진행합니다.
+- PR 전에는 영상 포함 evidence path가 존재하고 source branch가 committed/clean인지 확인합니다.
+
+## 예상 Draft PR <span id="expected-pr-feature"></span>
+
+**예상 예시 제목:** `feat: add API-backed checkout flow`
+
+```md
+## Requirement traceability
+
+- brief AC-1..AC-5, Figma node 12:345, checkout OpenAPI operation
+
+## API and UI implementation
+
+- api-ready: evidence/api/api-ready.json
+- implementationContextId: checkout-20260714
+- loading / error / success UI와 실제 client 연결
+
+## Independent reviews
+
+- functional-reviewer: approved
+- design-reviewer: approved
+
+## Targeted feature evidence
+
+- selector: tests/e2e/checkout.spec.ts
+- command: pnpm playwright test tests/e2e/checkout.spec.ts
+- result: evidence/e2e/targeted-feature.json
+- featureVideo: evidence/e2e/checkout.webm (exactly one)
+
+## Risks and exclusions
+
+- 전체 프로젝트 E2E는 실행하지 않음
+```
+
+## Run이 멈추는 경우 <span id="blockers-feature"></span>
+
+| 중단 원인                                          | 사용자가 할 일                                             |
+| -------------------------------------------------- | ---------------------------------------------------------- |
+| source 사이 계약 충돌                              | 우선 source와 수정된 acceptance criteria를 결정            |
+| Figma URL은 있지만 connected-host bundle 없음      | 호스트 Figma 연결·권한을 복구하고 같은 node로 재캡처       |
+| API-ready artifact/contract test/context ID 불완전 | 실제 파일과 passing JSON을 같은 context ID로 다시 제출     |
+| E2E가 broad/chained/list-only/skipped 또는 0건     | 변경 기능만 고르는 path/tag/project로 단일 명령 실행       |
+| 영상이 0개·여러 개·손상·25 MB 초과                 | 해당 실행의 유효한 WebM/MP4 하나만 다시 기록               |
+| reviewer changes requested 또는 dirty preflight    | 지적을 수정·재검토하고 의도한 변경을 clean commit으로 정리 |
+
+## 이 케이스가 하지 않는 것 <span id="exclusions-feature"></span>
+
+- 전체 프로젝트의 모든 feature를 E2E로 돌리거나 영상으로 기록하지 않습니다.
+- API agent와 디자인 agent를 따로 만들고 나중에 통합하지 않습니다.
+- Figma URL만 보고 디자인을 추측하거나 polling하지 않습니다.
+- unrelated migration, test matrix, release 검증을 feature PR에 추가하지 않습니다.
+
+## 다른 사용법
+
+- [기획서 → draft PR](./brief)
+- [레거시 변경 → draft PR](./legacy)
+- [Figma → 디자인 구현](./figma)
