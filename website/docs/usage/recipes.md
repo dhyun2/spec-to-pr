@@ -76,7 +76,7 @@ Figma가 primary source인 이 모드는 디자인 구현까지만 끝낼 수 �
 /spec-to-pr /absolute/path/to/app
 mode: brief
 briefPath: docs/profile.md
-OpenAPI: docs/openapi.yaml
+openApiPaths: [docs/openapi.yaml]
 물리적으로 서로 다른 비어 있지 않은 API type/schema/wrapper/mock 파일과 status: passed인
 contract-test JSON, 안정적인 implementationContextId를 먼저 api-ready로 제출하고,
 같은 구현 context에서 mock 기반 UI를 검증한 뒤 draft PR로 발행해줘.

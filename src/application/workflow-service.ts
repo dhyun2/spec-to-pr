@@ -1141,13 +1141,17 @@ export class WorkflowService {
       "",
       ...(contracts.guidanceTrace.explicit.length === 0
         ? ["- None."]
-        : contracts.guidanceTrace.explicit.map((guidancePath) => `- ${guidancePath}`)),
+        : contracts.guidanceTrace.explicit.map(
+            (guidancePath) => `- ${markdownListValue(guidancePath)}`,
+          )),
       "",
       "### Automatically discovered",
       "",
       ...(contracts.guidanceTrace.discovered.length === 0
         ? ["- None."]
-        : contracts.guidanceTrace.discovered.map((guidancePath) => `- ${guidancePath}`)),
+        : contracts.guidanceTrace.discovered.map(
+            (guidancePath) => `- ${markdownListValue(guidancePath)}`,
+          )),
       "",
       "## Applied optional skills",
       "",
@@ -2390,6 +2394,43 @@ async function hasPackageManifest(packageRoot: string): Promise<boolean> {
 
 function markdownTableCell(value: string): string {
   return value.replaceAll("\\", "\\\\").replaceAll("|", "\\|").replace(/\r?\n/g, "<br>");
+}
+
+const MARKDOWN_LIST_CONTROL_CHARACTERS = new Set([
+  "\\",
+  "`",
+  "*",
+  "_",
+  "{",
+  "}",
+  "[",
+  "]",
+  "(",
+  ")",
+  "#",
+  "+",
+  "-",
+  "!",
+  "|",
+  ">",
+  "<",
+  "&",
+  "~",
+  '"',
+  "'",
+  "=",
+]);
+
+function markdownListValue(value: string): string {
+  return [...value]
+    .map((character) => {
+      if (character === "\r") return "&#92;r";
+      if (character === "\n") return "&#92;n";
+      return MARKDOWN_LIST_CONTROL_CHARACTERS.has(character)
+        ? `&#${character.charCodeAt(0)};`
+        : character;
+    })
+    .join("");
 }
 
 async function currentGitHead(projectRoot: string): Promise<string | null> {

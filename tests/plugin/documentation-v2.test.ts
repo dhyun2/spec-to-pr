@@ -139,6 +139,12 @@ describe("v2 documentation", () => {
     expect(recipe).toContain("design-system");
     expect(recipe).toContain("react-best-practices");
     expect(recipe).toContain("next-best-practices");
+    const apiBackedUiRecipe = recipe.slice(
+      recipe.indexOf("## 5. API가 있는 UI"),
+      recipe.indexOf("## 6. 발행하지 않기"),
+    );
+    expect(apiBackedUiRecipe).toContain("openApiPaths: [docs/openapi.yaml]");
+    expect(apiBackedUiRecipe).not.toContain("OpenAPI: docs/openapi.yaml");
 
     for (const field of [
       "docsPaths",

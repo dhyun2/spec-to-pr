@@ -970,6 +970,8 @@ describe("WorkflowService", () => {
   });
 
   it("requires a targeted feature E2E and exactly one video only in feature mode", async () => {
+    const markdownBearingGuidancePath =
+      "docs/rules\n## Injected heading\n<!-- injected-comment --> [label](target).md";
     await mkdir(path.join(directory, "docs/architecture"), { recursive: true });
     await writeFile(path.join(directory, "AGENTS.md"), "Use project-local conventions.\n", "utf8");
     await writeFile(
@@ -977,9 +979,16 @@ describe("WorkflowService", () => {
       "Keep checkout API and UI in one implementation context.\n",
       "utf8",
     );
-    await execFileAsync("git", ["add", "AGENTS.md", "docs/architecture/ARCHITECTURE.md"], {
-      cwd: directory,
-    });
+    await writeFile(
+      path.join(directory, markdownBearingGuidancePath),
+      "Treat this unusual filename as inert report data.\n",
+      "utf8",
+    );
+    await execFileAsync(
+      "git",
+      ["add", "AGENTS.md", "docs/architecture/ARCHITECTURE.md", markdownBearingGuidancePath],
+      { cwd: directory },
+    );
     await execFileAsync("git", ["commit", "-qm", "add project guidance"], { cwd: directory });
     const started = await service.start({
       projectRoot: directory,
@@ -988,7 +997,7 @@ describe("WorkflowService", () => {
       mode: "feature",
       changeKind: "feature",
       publication: "draft",
-      guidancePaths: ["docs/architecture/ARCHITECTURE.md"],
+      guidancePaths: ["docs/architecture/ARCHITECTURE.md", markdownBearingGuidancePath],
       skillHints: ["react-best-practices", "api-generator", "not-installed"],
     });
     await service.submit({
@@ -1000,7 +1009,7 @@ describe("WorkflowService", () => {
         artifactPaths: ["contracts/requirements.json"],
         requirementManifest: requirements("checkout-feature"),
         guidanceTrace: {
-          explicit: ["docs/architecture/ARCHITECTURE.md"],
+          explicit: ["docs/architecture/ARCHITECTURE.md", markdownBearingGuidancePath],
           discovered: ["AGENTS.md"],
           skillHints: ["react-best-practices", "api-generator"],
         },
@@ -1133,7 +1142,16 @@ describe("WorkflowService", () => {
     const report = await reportMarkdown(store, artifactStore, started.runId);
     expect(report).toContain("## Project guidance");
     expect(report).toContain("### Explicit");
-    expect(report).toContain("docs/architecture/ARCHITECTURE.md");
+    const explicitGuidanceSection = report.slice(
+      report.indexOf("### Explicit"),
+      report.indexOf("### Automatically discovered"),
+    );
+    expect(explicitGuidanceSection.split("\n").filter((line) => line.startsWith("- "))).toEqual([
+      "- docs/architecture/ARCHITECTURE.md",
+      "- docs/rules&#92;n&#35;&#35; Injected heading&#92;n&#60;&#33;&#45;&#45; injected&#45;comment &#45;&#45;&#62; &#91;label&#93;&#40;target&#41;.md",
+    ]);
+    expect(explicitGuidanceSection).not.toContain("\n## Injected heading");
+    expect(explicitGuidanceSection).not.toContain("<!-- injected-comment -->");
     expect(report).toContain("### Automatically discovered");
     expect(report).toContain("AGENTS.md");
     expect(report).toContain("## Applied optional skills");
