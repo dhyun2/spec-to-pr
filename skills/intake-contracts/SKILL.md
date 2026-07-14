@@ -7,7 +7,7 @@ description: Use when a v2 workflow requests intake or contract preparation from
 
 Start with `workflow_status`, then use `workflow_advance` to confirm the `prepare-contracts` action.
 
-Read `deliveryProfile`. Treat mode as the delivery/evidence policy and collect composable sources independently:
+Read `deliveryProfile`. Accept only `auto | ui | non-ui | docs` as `scope`. Require `scope: ui` for `feature` and `figma`. Treat mode as the delivery/evidence policy and collect composable sources independently:
 
 - Read any `briefPath`, `docsPaths`, and `openApiPaths`; preserve acceptance criteria, API operations and schemas, contradictions, and gaps.
 - Read explicit `guidancePaths` and `discoveredGuidancePaths` as durable project instructions. Block on a missing explicit path; ignore missing automatic candidates. Exclude project guidance from scope classification.

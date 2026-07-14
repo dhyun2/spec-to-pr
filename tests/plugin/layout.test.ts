@@ -258,6 +258,8 @@ describe("plugin layout", () => {
     expect(main).toContain("Delivery mode controls delivery and evidence");
     expect(main).toContain("sources compose independently");
     expect(main).toContain("Any supplied `figmaUrl`");
+    expect(main).toContain("`auto | ui | non-ui | docs`");
+    expect(main).toContain("Set `scope: ui` for `feature` and `figma`");
     expect(main).toContain("Figma defaults to `publication: none`");
     expect(implement).toContain("targeted-feature");
     expect(implement).toContain("exactly one");
@@ -285,6 +287,8 @@ describe("plugin layout", () => {
     expect(intake).toContain("SpecToPR defaults");
     expect(intake).toContain("Exclude project guidance from scope classification");
     expect(intake).toContain("Missing optional skills do not block");
+    expect(intake).toContain("`auto | ui | non-ui | docs`");
+    expect(intake).toContain("Require `scope: ui` for `feature` and `figma`");
     const intakeBody = intake.slice(intake.indexOf("# Intake"));
     expect(intakeBody.indexOf("figma-bundle")).toBeLessThan(
       intakeBody.indexOf("Submit `contracts`"),

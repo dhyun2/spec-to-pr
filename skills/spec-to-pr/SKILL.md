@@ -8,7 +8,7 @@ description: Use when running an evidence-driven implementation from intake thro
 Use the v2 facade as the sole workflow authority:
 
 1. Call `workflow_info` and require contract version `2.0.0`.
-2. Choose one delivery profile. Delivery mode controls delivery and evidence; sources compose independently. Call `workflow_start` with `projectRoot`, `requestText`, `scope`, `mode`, `changeKind`, `publication`, and any supplied `briefPath`, `figmaUrl`, `docsPaths`, `openApiPaths`, `guidancePaths`, or `skillHints`:
+2. Choose one delivery profile. Delivery mode controls delivery and evidence; sources compose independently. Call `workflow_start` with `projectRoot`, `requestText`, `scope`, `mode`, `changeKind`, `publication`, and any supplied `briefPath`, `figmaUrl`, `docsPaths`, `openApiPaths`, `guidancePaths`, or `skillHints`. Set `scope` to exactly one of `auto | ui | non-ui | docs`; never send a natural-language label. Set `scope: ui` for `feature` and `figma`:
    - `brief`: require `briefPath`; default `changeKind: feature` and `publication: draft`.
    - `legacy`: require a concrete change request; use the actual change kind, commonly `fix`, and default `publication: draft`.
    - `feature`: use for zero-to-100 user-facing UI delivery; set `changeKind: feature` and default `publication: draft`, even when the sources include a brief, Figma, OpenAPI, and supporting documents.
