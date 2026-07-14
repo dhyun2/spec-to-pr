@@ -3,21 +3,20 @@ import assert from "node:assert/strict";
 import { chromium } from "playwright";
 
 const origin = process.env.GUIDE_BASE_URL ?? "http://127.0.0.1:3000/spec-to-pr";
-const locales = [
+const cases = [
+  { value: "brief", ko: "1. 기획서 → draft PR", en: "1. Brief → draft PR" },
+  { value: "legacy", ko: "2. 레거시 변경 → draft PR", en: "2. Legacy change → draft PR" },
   {
-    name: "ko",
-    url: `${origin}/usage/recipes`,
-    alternative: "/spec-to-pr/en/usage/recipes",
-    tabs: ["1. 기획서", "2. 레거시", "3. 기능 개발", "4. Figma"],
+    value: "feature",
+    ko: "3. 기능 개발 → E2E·영상·draft PR",
+    en: "3. Feature → E2E, video, and draft PR",
   },
-  {
-    name: "en",
-    url: `${origin}/en/usage/recipes`,
-    alternative: "/spec-to-pr/usage/recipes",
-    tabs: ["1. Brief", "2. Legacy", "3. Feature", "4. Figma"],
-  },
+  { value: "figma", ko: "4. Figma → 디자인 구현", en: "4. Figma → design implementation" },
 ];
-const values = ["brief", "legacy", "feature", "figma"];
+const locales = [
+  { name: "ko", prefix: "", titleKey: "ko", alternativePrefix: "/en" },
+  { name: "en", prefix: "/en", titleKey: "en", alternativePrefix: "" },
+];
 const viewports = [
   { name: "desktop", width: 1440, height: 1000 },
   { name: "mobile", width: 390, height: 844 },
@@ -26,95 +25,59 @@ const viewports = [
 const browser = await chromium.launch({ headless: true });
 try {
   for (const locale of locales) {
-    for (const viewport of viewports) {
-      const page = await browser.newPage({ viewport });
-      const errors = [];
-      page.on("console", (message) => {
-        if (message.type() === "error") errors.push(message.text());
-      });
-      page.on("pageerror", (error) => errors.push(error.message));
+    for (const testCase of cases) {
+      for (const viewport of viewports) {
+        const page = await browser.newPage({ viewport });
+        const errors = [];
+        page.on("console", (message) => {
+          if (message.type() === "error") errors.push(message.text());
+        });
+        page.on("pageerror", (error) => errors.push(error.message));
 
-      await page.goto(locale.url, { waitUntil: "networkidle" });
-      const tabs = page.getByRole("tab");
-      assert.equal(await tabs.count(), 4, `${locale.name}:${viewport.name}:tab count`);
+        await page.goto(`${origin}${locale.prefix}/usage/${testCase.value}`, {
+          waitUntil: "networkidle",
+        });
+        await page.getByRole("heading", { level: 1, name: testCase[locale.titleKey] }).waitFor();
+        await page.locator(`#use-this-case-${testCase.value}`).locator("..").waitFor();
+        assert.equal(await page.getByRole("tab").count(), 0);
 
-      for (let index = 0; index < values.length; index += 1) {
-        const tab = tabs.filter({ hasText: locale.tabs[index] });
-        await tab.click();
-        assert.equal(await tab.getAttribute("aria-selected"), "true");
-        await page.locator(`[data-case-panel="${values[index]}"]`).waitFor({ state: "attached" });
-        await page
-          .locator(`#use-this-case-${values[index]}`)
-          .locator("..")
-          .waitFor({ state: "visible" });
+        if (viewport.name === "desktop") {
+          const usageLinks = page.locator('nav.menu a.menu__link[href*="/usage/"]');
+          assert.equal(await usageLinks.count(), 4, `${locale.name}:sidebar usage links`);
+        }
+        assert.ok(
+          (await page
+            .locator(`a[href*="/spec-to-pr${locale.alternativePrefix}/usage/${testCase.value}"]`)
+            .count()) > 0,
+          `${locale.name}:${testCase.value}:locale link`,
+        );
+
+        const overflow = await page.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        );
+        assert.ok(
+          overflow <= 1,
+          `${locale.name}:${testCase.value}:${viewport.name}:horizontal overflow ${overflow}px`,
+        );
+        assert.deepEqual(
+          errors,
+          [],
+          `${locale.name}:${testCase.value}:${viewport.name}:console errors`,
+        );
+        await page.close();
       }
-
-      assert.ok(
-        (await page.locator(`a[href*="${locale.alternative}"]`).count()) > 0,
-        `${locale.name}:${viewport.name}:locale link`,
-      );
-      const overflow = await page.evaluate(
-        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-      );
-      const overflowElements =
-        overflow <= 1
-          ? []
-          : await page.evaluate(() => {
-              const candidates = [...document.querySelectorAll("*")]
-                .map((element) => {
-                  const rect = element.getBoundingClientRect();
-                  return {
-                    element,
-                    tag: element.tagName,
-                    className: element.className,
-                    text: element.textContent?.trim().slice(0, 80),
-                    left: Math.round(rect.left),
-                    right: Math.round(rect.right),
-                    width: Math.round(rect.width),
-                    scrollWidth: element.scrollWidth,
-                  };
-                })
-                .filter(
-                  (element) =>
-                    element.right > document.documentElement.clientWidth + 1 ||
-                    element.scrollWidth > element.width + 1,
-                )
-                .sort((left, right) => right.right - left.right)
-                .slice(0, 12);
-              const widest = candidates[0]?.element;
-              const ancestors = [];
-              for (
-                let element = widest;
-                element && ancestors.length < 10;
-                element = element.parentElement
-              ) {
-                const rect = element.getBoundingClientRect();
-                const style = getComputedStyle(element);
-                ancestors.push({
-                  tag: element.tagName,
-                  className: element.className,
-                  left: Math.round(rect.left),
-                  right: Math.round(rect.right),
-                  width: Math.round(rect.width),
-                  scrollWidth: element.scrollWidth,
-                  display: style.display,
-                  minWidth: style.minWidth,
-                  overflowX: style.overflowX,
-                });
-              }
-              return {
-                candidates: candidates.map(({ element: _element, ...rest }) => rest),
-                ancestors,
-              };
-            });
-      assert.ok(
-        overflow <= 1,
-        `${locale.name}:${viewport.name}:horizontal overflow ${overflow}px ${JSON.stringify(overflowElements)}`,
-      );
-      assert.deepEqual(errors, [], `${locale.name}:${viewport.name}:console errors`);
-      await page.close();
     }
   }
+
+  const redirectPage = await browser.newPage();
+  for (const redirect of [
+    { from: `${origin}/usage/recipes`, to: "/spec-to-pr/usage/brief" },
+    { from: `${origin}/en/usage/recipes`, to: "/spec-to-pr/en/usage/brief" },
+  ]) {
+    await redirectPage.goto(redirect.from, { waitUntil: "networkidle" });
+    await redirectPage.waitForURL((url) => url.pathname === redirect.to);
+  }
+  await redirectPage.close();
 } finally {
   await browser.close();
 }
