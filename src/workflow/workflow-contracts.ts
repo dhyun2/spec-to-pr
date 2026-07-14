@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { RunIdSchema } from "../runtime/ids.js";
+import { WorkloadEstimateSchema, WorkloadSignalsSchema } from "./workload-policy.js";
 
 export const WorkflowScopeSchema = z
   .object({
@@ -200,6 +201,7 @@ export const ContractsSubmissionSchema = z
     summary: z.string().trim().min(1).max(4_000),
     artifactPaths: z.array(z.string().trim().min(1)).default([]),
     baselinePaths: z.array(z.string().trim().min(1)).default([]),
+    workloadSignals: WorkloadSignalsSchema.optional(),
   })
   .strict()
   .superRefine((submission, context) => {
@@ -428,6 +430,24 @@ export const WorkflowStageSummarySchema = z
   })
   .strict();
 
+export const WorkflowResumeContextSchema = z
+  .object({
+    goal: z.string().trim().min(1).max(4_000),
+    evidencePaths: z.array(z.string().trim().min(1).max(1_000)).max(200),
+    submissions: z
+      .array(
+        z
+          .object({
+            kind: z.string().trim().min(1),
+            summary: z.string().trim().min(1).max(500),
+            outcome: z.string().trim().min(1),
+          })
+          .strict(),
+      )
+      .max(16),
+  })
+  .strict();
+
 export const WorkflowStatusSchema = z
   .object({
     runId: RunIdSchema,
@@ -435,10 +455,16 @@ export const WorkflowStatusSchema = z
     currentStage: z.string().trim().min(1).optional(),
     scope: WorkflowScopeSchema,
     deliveryProfile: DeliveryProfileSchema,
+    workload: WorkloadEstimateSchema,
+    requiredValidations: z.array(z.string().trim().min(1)).superRefine((items, context) => {
+      if (new Set(items).size !== items.length) {
+        context.addIssue({ code: "custom", message: "Required validations must be unique" });
+      }
+    }),
     stages: z.array(WorkflowStageSummarySchema),
     nextActions: z.array(WorkflowActionSchema),
     blockers: z.array(z.string().trim().min(1)),
-    artifactIds: z.array(z.string().trim().min(1)),
+    resumeContext: WorkflowResumeContextSchema,
   })
   .strict();
 

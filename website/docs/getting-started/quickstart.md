@@ -49,6 +49,8 @@ flowchart LR
 
 호스트는 `workflow_advance`로 다음 외부 action까지 이동하고 실제 산출물은 `workflow_submit`으로 제출합니다. 상태 전이와 재개 정보는 runtime이 관리합니다.
 
+Intake 직후 `workflow_status`에서 `XS`~`XL`, 예상 token range와 confidence를 확인할 수 있습니다. SDK runner는 action group마다 usage를 집계하고 hard limit의 80%에서 compact fresh thread로 이어갑니다. Budget 부족은 required check 생략 사유가 아니며 scope 분할 또는 명시적 추가 승인으로 처리합니다.
+
 API scope가 있다면 같은 구현 context에서 다음 순서를 지킵니다.
 
 1. type/schema/client 또는 wrapper 작성

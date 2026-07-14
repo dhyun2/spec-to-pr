@@ -45,6 +45,8 @@ API와 UI는 한 구현 context에서 처리합니다. API 기반 UI는 물리�
 
 검증은 변경 범위에 비례합니다. 필요한 증거가 없거나 실패하면 막고, 선택 사항인 검사를 무조건 실행하지 않습니다. 전체 matrix와 package 검증은 release 작업에만 둡니다.
 
+Intake가 끝나면 `XS`~`XL` 작업량과 예상 token range/confidence가 바로 보입니다. SDK는 workflow 경계별 actual usage로 estimate를 보정하고, 80%에서 compact checkpoint, hard limit에서 scope split 또는 명시적 budget 승인을 요구합니다. 이때도 필수 검증은 줄이지 않습니다.
+
 :::info Draft까지만
 SpecToPR은 target이 아닌 `codex/*` source branch에 의도한 변경을 commit한 뒤 draft PR/MR을 만들거나 갱신할 수 있습니다. Runtime은 clean tree와 target보다 한 개 이상 앞선 commit을 확인하며 merge, approve, close, ready 전환은 하지 않습니다.
 :::

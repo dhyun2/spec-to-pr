@@ -116,9 +116,99 @@ describe("WorkflowService", () => {
     expect(status.stages).toHaveLength(8);
     expect(status.stages[0]).toEqual({ name: "intake", status: "passed" });
     expect(status.nextActions).toEqual([{ kind: "prepare-contracts", runId: status.runId }]);
+    expect(status.workload).toMatchObject({
+      confidence: "low",
+      source: "intake",
+      budget: { checkpointPercent: 80 },
+    });
+    expect(status.workload.tokenRange.max).toBeGreaterThan(status.workload.tokenRange.min);
+    expect(status.requiredValidations).toEqual(["functional", "draft-publication-preflight"]);
+    expect(status.resumeContext).toMatchObject({
+      goal: "Refactor the parser and add unit tests",
+      evidencePaths: [],
+      submissions: [],
+    });
+    expect(status).not.toHaveProperty("artifactIds");
     expect(status).not.toHaveProperty("sources");
     expect(status).not.toHaveProperty("evidence");
     expect(status).not.toHaveProperty("agentResults");
+  });
+
+  it("makes both XS and XL reachable at intake and reports every required validation", async () => {
+    const tiny = await service.start({
+      projectRoot: directory,
+      requestText: "Update one sentence",
+      scope: "docs",
+      mode: "auto",
+      changeKind: "docs",
+      publication: "none",
+    });
+    const complex = await service.start({
+      projectRoot: directory,
+      requestText: Array.from(
+        { length: 50 },
+        (_, index) => `- Requirement ${index + 1}: update the API-backed checkout screen`,
+      ).join("\n"),
+      scope: "ui",
+      mode: "feature",
+      changeKind: "feature",
+      publication: "draft",
+    });
+
+    expect(tiny.workload.size).toBe("XS");
+    expect(complex.workload.size).toBe("XL");
+    expect(complex.requiredValidations).toEqual([
+      "functional",
+      "accessibility",
+      "targeted-feature-e2e",
+      "feature-video",
+      "api-ready",
+      "draft-publication-preflight",
+    ]);
+  });
+
+  it("refines the intake workload from contract signals without adding a stage", async () => {
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Implement the requested API-backed dashboard",
+      scope: "ui",
+      mode: "brief",
+      changeKind: "feature",
+      publication: "draft",
+      briefPath: "briefs/checkout.md",
+    });
+
+    const refined = await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "contracts",
+        status: "passed",
+        summary: "Mapped the concrete change surface.",
+        artifactPaths: ["contracts/requirements.json"],
+        workloadSignals: {
+          requirements: 18,
+          relevantFiles: 35,
+          apiOperations: 10,
+          uiSurfaces: 8,
+          figmaNodes: 40,
+          testTargets: 12,
+          uncertainty: 0,
+        },
+      },
+    });
+
+    expect(refined.stages).toHaveLength(8);
+    expect(refined.workload.source).toBe("contracts");
+    expect(refined.workload.confidence).toBe("high");
+    expect(["L", "XL"]).toContain(refined.workload.size);
+    expect(refined.workload.tokenRange.min).toBeGreaterThanOrEqual(started.workload.tokenRange.min);
+    expect(refined.resumeContext.goal).toContain("API-backed dashboard");
+    expect(refined.resumeContext.evidencePaths).toContain("contracts/requirements.json");
+    expect(refined.resumeContext.submissions).toContainEqual({
+      kind: "contracts",
+      summary: "Mapped the concrete change surface.",
+      outcome: "passed",
+    });
   });
 
   it("records an explicit delivery profile without adding stages", async () => {
@@ -257,7 +347,7 @@ describe("WorkflowService", () => {
       }),
     ).rejects.toThrow(/Figma bundle/i);
 
-    await service.submit({
+    const bundled = await service.submit({
       runId: started.runId,
       submission: {
         kind: "figma-bundle",
@@ -268,6 +358,11 @@ describe("WorkflowService", () => {
         manifestPath: "figma/design-context.json",
         artifactPaths: ["figma/design-context.json", "visual/diff.png"],
       },
+    });
+    expect(bundled.resumeContext.submissions).toContainEqual({
+      kind: "figma-bundle",
+      summary: "Accepted host-connected Figma bundle.",
+      outcome: "passed",
     });
 
     await expect(
@@ -676,7 +771,7 @@ describe("WorkflowService", () => {
 
     expect(ready.status).toBe("publish-ready");
     expect(ready.currentStage).toBe("publish");
-    expect(ready.artifactIds.length).toBeGreaterThanOrEqual(4);
+    expect(ready.resumeContext.evidencePaths.length).toBeGreaterThanOrEqual(4);
   });
 
   it("skips design review for non-UI scope", async () => {

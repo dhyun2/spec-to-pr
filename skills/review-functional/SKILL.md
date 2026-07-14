@@ -13,4 +13,6 @@ For API-backed UI, verify that the accepted `api-ready` checkpoint and final imp
 
 For a `feature` profile, verify one unchained Playwright invocation whose declared selector targets the changed feature and appears as an actual command argument. Require a strict project-local result JSON containing only `status: passed`, a selector exactly equal to `testSelector`, the implementation submission's matching `implementationContextId`, and a positive `testCount`, plus exactly one structurally valid, non-zero-duration WebM or MP4 container no larger than 25 MB. List-only, pass-with-no-tests, chained, broad, or unfiltered E2E commands are changes-requested even if they report success.
 
+Budget pressure never makes a required functional gate optional. Return changes-requested or blocked if a split omits its focused regression evidence or if an implementation reached the hard limit by skipping checks.
+
 Do not edit implementation while reviewing.

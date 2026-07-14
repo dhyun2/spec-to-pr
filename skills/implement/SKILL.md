@@ -15,3 +15,5 @@ Use one implementation context for API and UI; do not split them into separate a
 6. Call `workflow_submit` once with an `implementation` result: status, summary, `apiReady`, conditional `implementationContextId`, `uiChanged`, changed files, artifact paths, and conditional feature evidence.
 
 An API-backed passed UI result requires the earlier `api-ready` submission and final `apiReady: true`; the boolean alone is not evidence. Brief, legacy, Figma, fix, refactor, migration, docs, and `auto` runs do not record feature video unless their delivery profile explicitly requires it. Missing, empty, skipped, or failed contract evidence blocks submission. Do not invent endpoints or report checks that did not run.
+
+Keep implementation as one SDK action boundary. If the runner reaches 80% after this boundary, rely on the durable Run, contract artifacts, changed files, and test evidence in its compact checkpoint rather than replaying the full conversation. If the hard limit is reached, stop before review or publication and return `split-required` or `approval-required`; do not trade away tests, review, or required gates for more implementation tokens.

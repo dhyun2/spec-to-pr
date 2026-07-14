@@ -133,7 +133,8 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
     "workflow_start",
     {
       title: "Start workflow",
-      description: "Create a Run, capture intake, classify scope, and stop at the next boundary.",
+      description:
+        "Create a Run, capture intake, estimate workload, classify scope, and stop at the next boundary.",
       inputSchema: WorkflowStartInputSchema.shape,
       outputSchema: WorkflowStatusSchema.shape,
     },
@@ -166,7 +167,8 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
     "workflow_status",
     {
       title: "Workflow status",
-      description: "Return compact stage, scope, blocker, action, and artifact-handle status.",
+      description:
+        "Return compact stage, workload, scope, blocker, action, and artifact-handle status.",
       inputSchema: WorkflowStatusInputSchema.shape,
       outputSchema: WorkflowStatusSchema.shape,
       annotations: { readOnlyHint: true },

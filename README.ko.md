@@ -28,6 +28,8 @@ English version: [README.md](README.md)
 
 API와 UI 구현은 하나의 context에서 진행합니다. API 기반 UI라면 물리적으로 서로 다른 비어 있지 않은 type, schema, wrapper, mock 파일과 `status: passed`인 JSON contract-test 결과를 안정적인 `implementationContextId`와 함께 `api-ready`로 먼저 제출하고, 최종 구현에도 같은 ID를 냅니다. Path, symlink, hard link alias는 별도 증거로 인정하지 않습니다. `apiReady: true` 주장만으로는 통과하지 않습니다. API/UI 구현 에이전트와 통합 lane을 따로 두지 않습니다. 구현 뒤 orchestrator가 `workflow_status` snapshot, contracts, diff, evidence path를 고정해 독립 reviewer에게 넘기며 reviewer는 workflow tool을 직접 호출하지 않습니다.
 
+Intake 직후 `workflow_status`가 `XS`~`XL` 작업량, 예상 토큰 범위, 신뢰도, 근거, 80% checkpoint 기준과 authoritative required-validation 목록을 보여줍니다. 같은 status의 compact `resumeContext`에는 기록된 목표, 프로젝트 상대 evidence 경로, 제출 요약이 포함됩니다. Contracts에는 숫자형 `workloadSignals`를 선택적으로 제출해 새 tool/stage 없이 추정치를 정교화할 수 있습니다. SDK는 각 turn이 workflow action group 하나 뒤에 멈추도록 지시하고, 완료 경계마다 새 status를 요구해 실제 input+output token을 합산합니다. 80% 이상인 첫 경계에서는 compact 새 thread로 이어가며, hard limit에서는 필수 검증을 그대로 유지한 채 `L`/`XL`은 `split-required`, 그 이하는 `approval-required`로 멈춥니다. Usage가 없으면 `usage-unavailable`로 다음 action을 막습니다. 재개 tail은 전체 Run 사용량이 아니므로 제외하고 신규 완료 Run 이력만 숫자와 enum으로 저장해 다음 범위를 보정합니다. Calibration history에는 prompt, code, diff, path, tool output, final response를 저장하지 않으며 선택적 history I/O 실패가 workflow 성공을 뒤집지 않습니다.
+
 발행은 draft GitHub PR 또는 GitLab MR을 생성·갱신하는 데서 끝납니다. Draft 흐름은 target이 아닌 `codex/*` source branch에서 의도한 변경만 commit하며, runtime은 clean tree와 target보다 한 개 이상 앞선 source commit을 요구합니다. merge, approve, close, ready 전환은 하지 않습니다.
 
 ## 요구사항
@@ -121,7 +123,9 @@ node packages/codex-sdk/dist/cli.js \
   --publish
 ```
 
-입력에는 `--brief`, `--figma`, `--openapi`, `--docs`를 사용할 수 있습니다. `--publish`는 draft 발행을 요청하고 `--no-publish`는 구현·리뷰 증거까지만 진행합니다.
+입력에는 `--brief`, `--figma`, `--openapi`, `--docs`를 사용할 수 있습니다. `--publish`는 draft 발행을 요청하고 `--no-publish`는 구현·리뷰 증거까지만 진행합니다. `--token-budget`은 승인된 hard limit을, `--max-turns`, `--usage-history`, `--no-usage-calibration`은 경계 실행과 숫자 전용 보정을 제어합니다.
+
+`--resume <task-id>`는 최신 `workflow_status`와 `resumeContext`에서 기존 durable Run을 이어가며 intake를 반복하거나 중복 Run을 만들지 않습니다.
 
 전체 계약은 [packages/codex-sdk/README.md](packages/codex-sdk/README.md)를 참고하세요.
 
@@ -147,4 +151,4 @@ pnpm --dir website install
 pnpm --dir website start
 ```
 
-현재 구조 결정은 [ADR 035](docs/adr/035-use-coarse-workflow-facade-and-split-reviews.md)와 [ADR 036](docs/adr/036-use-delivery-profiles-not-mode-specific-pipelines.md)에 정리되어 있습니다.
+현재 구조 결정은 [ADR 035](docs/adr/035-use-coarse-workflow-facade-and-split-reviews.md), [ADR 036](docs/adr/036-use-delivery-profiles-not-mode-specific-pipelines.md), [ADR 037](docs/adr/037-use-boundary-budgeting-and-numeric-calibration.md)에 정리되어 있습니다.

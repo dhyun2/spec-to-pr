@@ -33,6 +33,13 @@ use the plugin tag format, for example `spec-to-pr--v0.1.0`.
 - Rebuilt the README, SDK guide, and documentation site around the four delivery profiles and v2
   contract; removed obsolete task specs, historical implementation plans, v1 ADRs, and stale docs
   pages.
+- Added intake and contract-refined `XS`–`XL` workload estimates with token ranges and confidence,
+  plus SDK action-boundary usage aggregation, compact fresh-thread checkpointing at 80%, mandatory
+  scope-split/approval decisions at the hard limit, and numeric-only historical calibration that
+  never stores prompt, source, code, diff, path, tool output, or final-response content.
+- Added bounded `workflow_status.resumeContext` recovery and a resume-only SDK prompt so budget
+  approvals and fresh-thread checkpoints continue the existing Run without repeating intake;
+  resumed tails are excluded from calibration.
 
 ## 0.1.0 - 2026-07-10
 

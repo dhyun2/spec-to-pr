@@ -97,6 +97,13 @@ describe("spec-to-pr MCP workflow facade", () => {
       status: "needs-external-action",
       currentStage: "contracts",
       deliveryProfile: { mode: "auto", publication: "draft" },
+      workload: {
+        size: expect.stringMatching(/^(XS|S|M|L|XL)$/),
+        confidence: "low",
+        source: "intake",
+        budget: { checkpointPercent: 80 },
+      },
+      requiredValidations: ["functional", "draft-publication-preflight"],
     });
 
     const status = await client.callTool({ name: "workflow_status", arguments: { runId } });

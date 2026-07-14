@@ -6,7 +6,11 @@ import {
   IMPLEMENTATION_AGENT_ROLES,
   VERIFICATION_AGENT_ROLES,
 } from "../../src/runtime/constants.js";
-import { ReviewSubmissionSchema, WorkflowSubmissionSchema } from "../../src/workflow/index.js";
+import {
+  ReviewSubmissionSchema,
+  WorkflowResumeContextSchema,
+  WorkflowSubmissionSchema,
+} from "../../src/workflow/index.js";
 
 describe("workflow v2 contracts", () => {
   it("uses the eight coarse durable stages", () => {
@@ -32,6 +36,16 @@ describe("workflow v2 contracts", () => {
       "design-reviewer",
       "pr-publisher",
     ]);
+  });
+
+  it("bounds every compact resume-context dimension", () => {
+    expect(
+      WorkflowResumeContextSchema.safeParse({
+        goal: "Continue the feature",
+        evidencePaths: ["x".repeat(1_001)],
+        submissions: [],
+      }).success,
+    ).toBe(false);
   });
 
   it("requires executable artifacts for passed implementation submissions", () => {

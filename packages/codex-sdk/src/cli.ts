@@ -16,6 +16,10 @@ type ParsedArgs = {
   changeKind?: SpecToPrCodexRunInput["changeKind"];
   publication?: SpecToPrCodexRunInput["publication"];
   noReviewAgents?: boolean;
+  tokenBudget?: number;
+  maxTurns?: number;
+  usageHistory?: string;
+  noUsageCalibration?: boolean;
 };
 
 const args = parseArgs(process.argv.slice(2));
@@ -62,6 +66,18 @@ if (args.publication !== undefined) {
 if (args.noReviewAgents !== undefined) {
   input.enableReviewAgents = false;
 }
+if (args.tokenBudget !== undefined) {
+  input.tokenBudget = args.tokenBudget;
+}
+if (args.maxTurns !== undefined) {
+  input.maxTurns = args.maxTurns;
+}
+if (args.usageHistory !== undefined) {
+  input.usageHistoryPath = args.usageHistory;
+}
+if (args.noUsageCalibration !== undefined) {
+  input.usageCalibration = false;
+}
 const result = await runSpecToPrWithCodex(input);
 
 console.log(
@@ -70,6 +86,11 @@ console.log(
       threadId: result.threadId,
       finalResponse: result.finalResponse,
       usage: result.usage,
+      workload: result.workload,
+      budget: result.budget,
+      turnCount: result.turnCount,
+      outputFormatting: result.outputFormatting,
+      usageCalibration: result.usageCalibration,
     },
     null,
     2,
@@ -95,6 +116,10 @@ function parseArgs(argv: string[]): ParsedArgs {
     if (!arg.startsWith("--") || value === undefined || value.startsWith("--")) {
       if (arg === "--no-review-agents") {
         parsed.noReviewAgents = true;
+        continue;
+      }
+      if (arg === "--no-usage-calibration") {
+        parsed.noUsageCalibration = true;
         continue;
       }
       if (arg === "--publish") {
@@ -135,6 +160,15 @@ function parseArgs(argv: string[]): ParsedArgs {
       case "--model":
         parsed.model = value;
         break;
+      case "--token-budget":
+        parsed.tokenBudget = parsePositiveInteger(value, arg);
+        break;
+      case "--max-turns":
+        parsed.maxTurns = parsePositiveInteger(value, arg);
+        break;
+      case "--usage-history":
+        parsed.usageHistory = value;
+        break;
       case "--mode":
         if (!["auto", "brief", "legacy", "feature", "figma"].includes(value)) {
           throw new Error(`Invalid delivery mode: ${value}`);
@@ -157,6 +191,14 @@ function parseArgs(argv: string[]): ParsedArgs {
   return parsed;
 }
 
+function parsePositiveInteger(value: string, argument: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`${argument} requires a positive integer`);
+  }
+  return parsed;
+}
+
 function printUsage(): void {
   console.error(`Usage: spec-to-pr-codex --cwd <repo> [options]
 
@@ -168,6 +210,10 @@ Options:
   --openapi <path>      OpenAPI file path
   --resume <thread-id>  Resume an existing Codex thread
   --model <model>       Optional Codex model override
+  --token-budget <n>    Approved hard token limit for this invocation
+  --max-turns <n>       Maximum workflow boundary turns (default: 12)
+  --usage-history <p>   Numeric-only calibration JSONL path
+  --no-usage-calibration  Disable calibration reads and writes
   --mode <mode>         auto, brief, legacy, feature, or figma
   --change-kind <kind>  feature, fix, refactor, migration, design, docs, or auto
   --publish             Publish a draft PR/MR when ready

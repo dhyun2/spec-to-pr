@@ -23,11 +23,15 @@ import {
   WorkflowScopeSchema,
   WorkflowStatusSchema,
   WorkflowSubmissionSchema,
+  WorkloadEstimateSchema,
   buildGatePlan,
   buildDeliveryProfile,
   classifyWorkflowScope,
+  estimateWorkload,
   type WorkflowScope,
   type DeliveryProfile,
+  type WorkloadEstimate,
+  type WorkloadSignals,
   type WorkflowStatus,
   type WorkflowSubmission,
 } from "../workflow/index.js";
@@ -246,7 +250,7 @@ export class WorkflowService {
             requestText: briefText,
             label: `brief:${input.briefPath}`,
           });
-    await this.dependencies.profileService.inspectProject({
+    const projectProfile = await this.dependencies.profileService.inspectProject({
       runId: created.id,
       projectRoot: input.projectRoot,
     });
@@ -271,6 +275,22 @@ export class WorkflowService {
       ...(input.briefPath === undefined ? {} : { briefPath: input.briefPath }),
       ...(figmaUrl === undefined ? {} : { figmaUrl }),
     });
+    const workload = estimateWorkload({
+      phase: "intake",
+      mode: deliveryProfile.mode,
+      scope,
+      signals: {
+        requirements: countIntakeRequirements(
+          briefText === undefined ? input.requestText : `${input.requestText}\n${briefText}`,
+        ),
+        apiOperations: scope.api ? 1 : 0,
+        uiSurfaces: scope.ui ? 1 : 0,
+        figmaNodes: figmaUrl === undefined ? 0 : 1,
+        testTargets: scope.code ? 1 : 0,
+        workspacePackages: projectProfile.workspace.packages.length,
+        uncertainty: scope.code ? 3 : 1,
+      },
+    });
 
     await this.dependencies.stageService.complete({
       runId: created.id,
@@ -283,7 +303,7 @@ export class WorkflowService {
       ],
       checkpoint: {
         name: "scope-classified",
-        data: { scope, gatePlan, deliveryProfile },
+        data: { scope, gatePlan, deliveryProfile, workload },
       },
     });
 
@@ -392,6 +412,9 @@ export class WorkflowService {
             }
           : {}),
       });
+      if (submission.kind === "contracts" && submission.workloadSignals !== undefined) {
+        await this.recordWorkloadEstimate(run.id, submission.workloadSignals);
+      }
     } else {
       await this.dependencies.stageService.fail({
         runId: run.id,
@@ -415,6 +438,7 @@ export class WorkflowService {
     const run = await this.dependencies.runStore.get(input.runId);
     const scope = scopeFromRun(run);
     const deliveryProfile = deliveryProfileFromRun(run);
+    const workload = workloadFromRun(run, scope, deliveryProfile);
     const nextActions = actionsForRun(run, scope, deliveryProfile);
     const currentStage = run.stages.find(
       (item) => !["passed", "skipped", "waived"].includes(item.status),
@@ -443,6 +467,8 @@ export class WorkflowService {
       ...(currentStage === undefined ? {} : { currentStage: currentStage.name }),
       scope,
       deliveryProfile,
+      workload,
+      requiredValidations: requiredValidationsForRun(scope, deliveryProfile),
       stages: run.stages.map((item) => ({
         name: item.name,
         status: item.status,
@@ -452,7 +478,7 @@ export class WorkflowService {
       })),
       nextActions,
       blockers,
-      artifactIds: run.artifacts.map((artifact) => artifact.id),
+      resumeContext: resumeContextForRun(run),
     });
   }
 
@@ -643,7 +669,9 @@ export class WorkflowService {
       metadata: {
         adapter: "workflow-v2",
         workflowSubmissionKind: submission.kind,
-        ...(submission.kind === "figma-bundle" ? {} : { summary: submission.summary }),
+        ...(submission.kind === "figma-bundle"
+          ? { summary: "Accepted host-connected Figma bundle.", status: "passed" }
+          : { summary: submission.summary }),
         ...("verdict" in submission ? { verdict: submission.verdict } : {}),
         ...("status" in submission ? { status: submission.status } : {}),
         evidenceArtifactIds: evidenceArtifacts.map((item) => item.id),
@@ -737,6 +765,42 @@ export class WorkflowService {
                 checkpoint: {
                   name: "api-ready",
                   data: { apiReady: true, artifactIds, implementationContextId },
+                  updatedAt: timestamp,
+                },
+              }
+            : item,
+        ),
+      },
+      current.revision,
+    );
+  }
+
+  private async recordWorkloadEstimate(runId: string, signals: WorkloadSignals): Promise<void> {
+    const current = await this.dependencies.runStore.get(RunIdSchema.parse(runId));
+    const intake = stage(current, "intake");
+    if (intake.checkpoint === undefined) {
+      throw new Error(`Run ${runId} is missing the intake checkpoint`);
+    }
+    const timestamp = this.now();
+    const workload = estimateWorkload({
+      phase: "contracts",
+      mode: deliveryProfileFromRun(current).mode,
+      scope: scopeFromRun(current),
+      signals,
+    });
+
+    await this.dependencies.runStore.save(
+      {
+        ...current,
+        revision: current.revision + 1,
+        updatedAt: timestamp,
+        stages: current.stages.map((item) =>
+          item.name === "intake"
+            ? {
+                ...item,
+                checkpoint: {
+                  ...intake.checkpoint!,
+                  data: { ...intake.checkpoint!.data, workload },
                   updatedAt: timestamp,
                 },
               }
@@ -1013,6 +1077,98 @@ function deliveryProfileFromRun(run: RunManifest): DeliveryProfile {
   }
 
   return parsed.data;
+}
+
+function workloadFromRun(
+  run: RunManifest,
+  scope: WorkflowScope,
+  profile: DeliveryProfile,
+): WorkloadEstimate {
+  const rawWorkload = stage(run, "intake").checkpoint?.data["workload"];
+  const parsed = WorkloadEstimateSchema.safeParse(rawWorkload);
+  if (parsed.success) return parsed.data;
+
+  return estimateWorkload({
+    phase: "intake",
+    mode: profile.mode,
+    scope,
+    signals: {
+      requirements: 1,
+      apiOperations: scope.api ? 1 : 0,
+      uiSurfaces: scope.ui ? 1 : 0,
+      figmaNodes: profile.figmaUrl === undefined ? 0 : 1,
+      testTargets: scope.code ? 1 : 0,
+      uncertainty: 5,
+    },
+  });
+}
+
+function countIntakeRequirements(text: string): number {
+  const explicitLines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => /^(?:[-*+] |\d+[.)] )/.test(line)).length;
+  if (explicitLines > 0) return Math.min(explicitLines, 50);
+
+  const sentences = text
+    .split(/[.!?\n]+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.length >= 3).length;
+  return Math.max(1, Math.min(sentences, 50));
+}
+
+function requiredValidationsForRun(scope: WorkflowScope, profile: DeliveryProfile): string[] {
+  const validations: string[] = buildGatePlan(scope)
+    .filter((gate) => gate.applicability === "required")
+    .map((gate) => gate.id);
+  if (profile.requirements.legacyBaseline) validations.push("legacy-baseline");
+  if (profile.requirements.targetedFeatureE2E) validations.push("targeted-feature-e2e");
+  if (profile.requirements.featureVideo) validations.push("feature-video");
+  if (profile.requirements.figmaBundle) validations.push("figma-bundle");
+  if (scope.ui && scope.api) validations.push("api-ready");
+  if (profile.publication === "draft") validations.push("draft-publication-preflight");
+  return validations;
+}
+
+function resumeContextForRun(run: RunManifest): WorkflowStatus["resumeContext"] {
+  const goal = run.evidence
+    .filter((item) => item.metadata["itemType"] === "instruction")
+    .map((item) => item.excerpt)
+    .filter((excerpt): excerpt is string => excerpt !== undefined)
+    .join("\n\n")
+    .slice(0, 4_000)
+    .trim();
+  const allEvidencePaths = [
+    ...new Set(
+      run.artifacts.flatMap((artifact) => {
+        const projectPath = artifact.metadata["projectRelativePath"];
+        return typeof projectPath === "string" && projectPath.trim() !== "" ? [projectPath] : [];
+      }),
+    ),
+  ].filter((projectPath) => projectPath.length <= 1_000);
+  const evidencePaths =
+    allEvidencePaths.length <= 200
+      ? allEvidencePaths
+      : [...allEvidencePaths.slice(0, 50), ...allEvidencePaths.slice(-150)];
+  const submissionsByKind = new Map<
+    string,
+    WorkflowStatus["resumeContext"]["submissions"][number]
+  >();
+  run.artifacts.forEach((artifact) => {
+    const kind = artifact.metadata["workflowSubmissionKind"];
+    const summary = artifact.metadata["summary"];
+    const outcome = artifact.metadata["status"] ?? artifact.metadata["verdict"];
+    if (typeof kind === "string" && typeof summary === "string" && typeof outcome === "string") {
+      submissionsByKind.set(kind, { kind, summary: summary.slice(0, 500), outcome });
+    }
+  });
+  const submissions = [...submissionsByKind.values()].slice(-16);
+
+  return {
+    goal: goal === "" ? "Continue the recorded spec-to-pr Run." : goal,
+    evidencePaths,
+    submissions,
+  };
 }
 
 function stage(run: RunManifest, name: RunStageName): StageState {

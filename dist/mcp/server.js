@@ -34540,6 +34540,110 @@ var init_id_factory = __esm({
   }
 });
 
+// src/workflow/workload-policy.ts
+function estimateWorkload(input) {
+  const signals = WorkloadSignalsSchema.parse(input.signals);
+  const score = Math.ceil(
+    (signals.requirements ?? 0) * 2 + (signals.relevantFiles ?? 0) + (signals.apiOperations ?? 0) * 3 + (signals.uiSurfaces ?? 0) * 4 + Math.min(signals.figmaNodes ?? 0, 40) * 0.5 + (signals.testTargets ?? 0) * 2 + Math.min(signals.workspacePackages ?? 0, 20) * 4 + (signals.uncertainty ?? 2) * 4 + MODE_WEIGHT[input.mode] + (input.scope.code ? 2 : 0) + (input.scope.api ? 3 : 0) + (input.scope.ui ? 4 : 0)
+  );
+  const size = sizeForScore(score);
+  const tokenRange = TOKEN_RANGES[size];
+  const observedFields = Object.keys(signals).filter((key) => key !== "uncertainty").length;
+  const confidence = input.phase === "intake" ? "low" : (signals.uncertainty ?? 1) === 0 && observedFields >= 5 ? "high" : "medium";
+  const reasons = [
+    `${input.phase} signals score ${score}`,
+    `${input.mode} delivery profile`,
+    input.scope.ui ? "UI scope included" : "No UI scope",
+    input.scope.api ? "API scope included" : "No API scope"
+  ];
+  return WorkloadEstimateSchema.parse({
+    size,
+    score,
+    confidence,
+    source: input.phase,
+    tokenRange,
+    budget: {
+      checkpointPercent: 80,
+      checkpointAtTokens: Math.floor(tokenRange.max * 0.8),
+      hardLimitTokens: tokenRange.max
+    },
+    sampleCount: 0,
+    reasons
+  });
+}
+function sizeForScore(score) {
+  if (score <= 8) return "XS";
+  if (score <= 24) return "S";
+  if (score <= 50) return "M";
+  if (score <= 90) return "L";
+  return "XL";
+}
+var WorkloadSizeSchema, WorkloadConfidenceSchema, WorkloadSignalsSchema, WorkloadEstimateSchema, TOKEN_RANGES, MODE_WEIGHT;
+var init_workload_policy = __esm({
+  "src/workflow/workload-policy.ts"() {
+    "use strict";
+    init_zod();
+    WorkloadSizeSchema = external_exports.enum(["XS", "S", "M", "L", "XL"]);
+    WorkloadConfidenceSchema = external_exports.enum(["low", "medium", "high"]);
+    WorkloadSignalsSchema = external_exports.object({
+      requirements: external_exports.number().int().nonnegative().optional(),
+      relevantFiles: external_exports.number().int().nonnegative().optional(),
+      apiOperations: external_exports.number().int().nonnegative().optional(),
+      uiSurfaces: external_exports.number().int().nonnegative().optional(),
+      figmaNodes: external_exports.number().int().nonnegative().optional(),
+      testTargets: external_exports.number().int().nonnegative().optional(),
+      workspacePackages: external_exports.number().int().nonnegative().optional(),
+      uncertainty: external_exports.number().int().min(0).max(5).optional()
+    }).strict();
+    WorkloadEstimateSchema = external_exports.object({
+      size: WorkloadSizeSchema,
+      score: external_exports.number().int().nonnegative(),
+      confidence: WorkloadConfidenceSchema,
+      source: external_exports.enum(["intake", "contracts", "calibrated"]),
+      tokenRange: external_exports.object({
+        min: external_exports.number().int().positive(),
+        max: external_exports.number().int().positive()
+      }).strict().refine((range) => range.min < range.max, "Token range min must be below max"),
+      budget: external_exports.object({
+        checkpointPercent: external_exports.literal(80),
+        checkpointAtTokens: external_exports.number().int().positive(),
+        hardLimitTokens: external_exports.number().int().positive()
+      }).strict(),
+      sampleCount: external_exports.number().int().nonnegative(),
+      reasons: external_exports.array(external_exports.string().trim().min(1)).min(1)
+    }).strict().superRefine((estimate, context) => {
+      if (estimate.budget.hardLimitTokens !== estimate.tokenRange.max) {
+        context.addIssue({
+          code: "custom",
+          path: ["budget", "hardLimitTokens"],
+          message: "Workload hard limit must equal the token range maximum"
+        });
+      }
+      if (estimate.budget.checkpointAtTokens !== Math.floor(estimate.budget.hardLimitTokens * 0.8)) {
+        context.addIssue({
+          code: "custom",
+          path: ["budget", "checkpointAtTokens"],
+          message: "Workload checkpoint must equal 80% of the hard limit"
+        });
+      }
+    });
+    TOKEN_RANGES = {
+      XS: { min: 2e4, max: 5e4 },
+      S: { min: 45e3, max: 1e5 },
+      M: { min: 9e4, max: 18e4 },
+      L: { min: 16e4, max: 32e4 },
+      XL: { min: 28e4, max: 6e5 }
+    };
+    MODE_WEIGHT = {
+      auto: 0,
+      brief: 4,
+      legacy: 8,
+      feature: 6,
+      figma: 5
+    };
+  }
+});
+
 // src/workflow/workflow-contracts.ts
 function isTargetedPlaywrightCommand(command, selector) {
   if (/(?:&&|\|\||[;&|`\n\r]|\$\()/.test(command)) return false;
@@ -34640,12 +34744,13 @@ function parsePlaywrightArguments(args) {
   }
   return { positionals, grep, projects };
 }
-var WorkflowScopeSchema, DeliveryModeSchema, ChangeKindSchema, PublicationIntentSchema, FigmaFileUrlSchema, ImplementationContextIdSchema, DeliveryProfileSchema, ReviewVerdictSchema, ReviewFindingSeveritySchema, RequirementVerdictSchema, WorkflowGateIdSchema, ReviewFindingSchema, ReviewRequirementSchema, ReviewGateResultSchema, ReviewSubmissionSchema, ContractsSubmissionSchema, ApiArtifactsSchema, ApiReadySubmissionSchema, FeatureEvidenceSchema, ImplementationSubmissionSchema, FigmaBundleSubmissionSchema, WorkflowSubmissionSchema, WorkflowActionSchema, WorkflowStageSummarySchema, WorkflowStatusSchema;
+var WorkflowScopeSchema, DeliveryModeSchema, ChangeKindSchema, PublicationIntentSchema, FigmaFileUrlSchema, ImplementationContextIdSchema, DeliveryProfileSchema, ReviewVerdictSchema, ReviewFindingSeveritySchema, RequirementVerdictSchema, WorkflowGateIdSchema, ReviewFindingSchema, ReviewRequirementSchema, ReviewGateResultSchema, ReviewSubmissionSchema, ContractsSubmissionSchema, ApiArtifactsSchema, ApiReadySubmissionSchema, FeatureEvidenceSchema, ImplementationSubmissionSchema, FigmaBundleSubmissionSchema, WorkflowSubmissionSchema, WorkflowActionSchema, WorkflowStageSummarySchema, WorkflowResumeContextSchema, WorkflowStatusSchema;
 var init_workflow_contracts = __esm({
   "src/workflow/workflow-contracts.ts"() {
     "use strict";
     init_zod();
     init_ids();
+    init_workload_policy();
     WorkflowScopeSchema = external_exports.object({
       code: external_exports.boolean(),
       ui: external_exports.boolean(),
@@ -34799,7 +34904,8 @@ var init_workflow_contracts = __esm({
       status: external_exports.enum(["passed", "failed", "blocked"]),
       summary: external_exports.string().trim().min(1).max(4e3),
       artifactPaths: external_exports.array(external_exports.string().trim().min(1)).default([]),
-      baselinePaths: external_exports.array(external_exports.string().trim().min(1)).default([])
+      baselinePaths: external_exports.array(external_exports.string().trim().min(1)).default([]),
+      workloadSignals: WorkloadSignalsSchema.optional()
     }).strict().superRefine((submission, context) => {
       if (submission.status === "passed" && submission.artifactPaths.length === 0) {
         context.addIssue({
@@ -34980,16 +35086,33 @@ var init_workflow_contracts = __esm({
       status: external_exports.enum(["pending", "running", "passed", "failed", "blocked", "skipped", "waived"]),
       checkpoint: external_exports.string().trim().min(1).optional()
     }).strict();
+    WorkflowResumeContextSchema = external_exports.object({
+      goal: external_exports.string().trim().min(1).max(4e3),
+      evidencePaths: external_exports.array(external_exports.string().trim().min(1).max(1e3)).max(200),
+      submissions: external_exports.array(
+        external_exports.object({
+          kind: external_exports.string().trim().min(1),
+          summary: external_exports.string().trim().min(1).max(500),
+          outcome: external_exports.string().trim().min(1)
+        }).strict()
+      ).max(16)
+    }).strict();
     WorkflowStatusSchema = external_exports.object({
       runId: RunIdSchema,
       status: external_exports.enum(["running", "needs-external-action", "blocked", "publish-ready", "completed"]),
       currentStage: external_exports.string().trim().min(1).optional(),
       scope: WorkflowScopeSchema,
       deliveryProfile: DeliveryProfileSchema,
+      workload: WorkloadEstimateSchema,
+      requiredValidations: external_exports.array(external_exports.string().trim().min(1)).superRefine((items, context) => {
+        if (new Set(items).size !== items.length) {
+          context.addIssue({ code: "custom", message: "Required validations must be unique" });
+        }
+      }),
       stages: external_exports.array(WorkflowStageSummarySchema),
       nextActions: external_exports.array(WorkflowActionSchema),
       blockers: external_exports.array(external_exports.string().trim().min(1)),
-      artifactIds: external_exports.array(external_exports.string().trim().min(1))
+      resumeContext: WorkflowResumeContextSchema
     }).strict();
   }
 });
@@ -35123,6 +35246,7 @@ var init_workflow = __esm({
     init_workflow_contracts();
     init_gate_policy();
     init_delivery_policy();
+    init_workload_policy();
   }
 });
 
@@ -35164,6 +35288,67 @@ function deliveryProfileFromRun(run) {
     throw new Error(`Run ${run.id} uses an unsupported delivery profile`);
   }
   return parsed.data;
+}
+function workloadFromRun(run, scope, profile) {
+  const rawWorkload = stage(run, "intake").checkpoint?.data["workload"];
+  const parsed = WorkloadEstimateSchema.safeParse(rawWorkload);
+  if (parsed.success) return parsed.data;
+  return estimateWorkload({
+    phase: "intake",
+    mode: profile.mode,
+    scope,
+    signals: {
+      requirements: 1,
+      apiOperations: scope.api ? 1 : 0,
+      uiSurfaces: scope.ui ? 1 : 0,
+      figmaNodes: profile.figmaUrl === void 0 ? 0 : 1,
+      testTargets: scope.code ? 1 : 0,
+      uncertainty: 5
+    }
+  });
+}
+function countIntakeRequirements(text) {
+  const explicitLines = text.split(/\r?\n/).map((line) => line.trim()).filter((line) => /^(?:[-*+] |\d+[.)] )/.test(line)).length;
+  if (explicitLines > 0) return Math.min(explicitLines, 50);
+  const sentences = text.split(/[.!?\n]+/).map((sentence) => sentence.trim()).filter((sentence) => sentence.length >= 3).length;
+  return Math.max(1, Math.min(sentences, 50));
+}
+function requiredValidationsForRun(scope, profile) {
+  const validations = buildGatePlan(scope).filter((gate2) => gate2.applicability === "required").map((gate2) => gate2.id);
+  if (profile.requirements.legacyBaseline) validations.push("legacy-baseline");
+  if (profile.requirements.targetedFeatureE2E) validations.push("targeted-feature-e2e");
+  if (profile.requirements.featureVideo) validations.push("feature-video");
+  if (profile.requirements.figmaBundle) validations.push("figma-bundle");
+  if (scope.ui && scope.api) validations.push("api-ready");
+  if (profile.publication === "draft") validations.push("draft-publication-preflight");
+  return validations;
+}
+function resumeContextForRun(run) {
+  const goal = run.evidence.filter((item) => item.metadata["itemType"] === "instruction").map((item) => item.excerpt).filter((excerpt) => excerpt !== void 0).join("\n\n").slice(0, 4e3).trim();
+  const allEvidencePaths = [
+    ...new Set(
+      run.artifacts.flatMap((artifact) => {
+        const projectPath = artifact.metadata["projectRelativePath"];
+        return typeof projectPath === "string" && projectPath.trim() !== "" ? [projectPath] : [];
+      })
+    )
+  ].filter((projectPath) => projectPath.length <= 1e3);
+  const evidencePaths = allEvidencePaths.length <= 200 ? allEvidencePaths : [...allEvidencePaths.slice(0, 50), ...allEvidencePaths.slice(-150)];
+  const submissionsByKind = /* @__PURE__ */ new Map();
+  run.artifacts.forEach((artifact) => {
+    const kind = artifact.metadata["workflowSubmissionKind"];
+    const summary = artifact.metadata["summary"];
+    const outcome = artifact.metadata["status"] ?? artifact.metadata["verdict"];
+    if (typeof kind === "string" && typeof summary === "string" && typeof outcome === "string") {
+      submissionsByKind.set(kind, { kind, summary: summary.slice(0, 500), outcome });
+    }
+  });
+  const submissions = [...submissionsByKind.values()].slice(-16);
+  return {
+    goal: goal === "" ? "Continue the recorded spec-to-pr Run." : goal,
+    evidencePaths,
+    submissions
+  };
 }
 function stage(run, name) {
   const value = run.stages.find((item) => item.name === name);
@@ -35602,7 +35787,7 @@ var init_workflow_service = __esm({
           requestText: briefText,
           label: `brief:${input.briefPath}`
         });
-        await this.dependencies.profileService.inspectProject({
+        const projectProfile = await this.dependencies.profileService.inspectProject({
           runId: created.id,
           projectRoot: input.projectRoot
         });
@@ -35624,6 +35809,23 @@ ${briefText}`,
           ...input.briefPath === void 0 ? {} : { briefPath: input.briefPath },
           ...figmaUrl === void 0 ? {} : { figmaUrl }
         });
+        const workload = estimateWorkload({
+          phase: "intake",
+          mode: deliveryProfile.mode,
+          scope,
+          signals: {
+            requirements: countIntakeRequirements(
+              briefText === void 0 ? input.requestText : `${input.requestText}
+${briefText}`
+            ),
+            apiOperations: scope.api ? 1 : 0,
+            uiSurfaces: scope.ui ? 1 : 0,
+            figmaNodes: figmaUrl === void 0 ? 0 : 1,
+            testTargets: scope.code ? 1 : 0,
+            workspacePackages: projectProfile.workspace.packages.length,
+            uncertainty: scope.code ? 3 : 1
+          }
+        });
         await this.dependencies.stageService.complete({
           runId: created.id,
           stageName: "intake",
@@ -35635,7 +35837,7 @@ ${briefText}`,
           ],
           checkpoint: {
             name: "scope-classified",
-            data: { scope, gatePlan, deliveryProfile }
+            data: { scope, gatePlan, deliveryProfile, workload }
           }
         });
         return this.status({ runId: created.id });
@@ -35720,6 +35922,9 @@ ${briefText}`,
               }
             } : {}
           });
+          if (submission.kind === "contracts" && submission.workloadSignals !== void 0) {
+            await this.recordWorkloadEstimate(run.id, submission.workloadSignals);
+          }
         } else {
           await this.dependencies.stageService.fail({
             runId: run.id,
@@ -35741,6 +35946,7 @@ ${briefText}`,
         const run = await this.dependencies.runStore.get(input.runId);
         const scope = scopeFromRun(run);
         const deliveryProfile = deliveryProfileFromRun(run);
+        const workload = workloadFromRun(run, scope, deliveryProfile);
         const nextActions = actionsForRun(run, scope, deliveryProfile);
         const currentStage = run.stages.find(
           (item) => !["passed", "skipped", "waived"].includes(item.status)
@@ -35758,6 +35964,8 @@ ${briefText}`,
           ...currentStage === void 0 ? {} : { currentStage: currentStage.name },
           scope,
           deliveryProfile,
+          workload,
+          requiredValidations: requiredValidationsForRun(scope, deliveryProfile),
           stages: run.stages.map((item) => ({
             name: item.name,
             status: item.status,
@@ -35765,7 +35973,7 @@ ${briefText}`,
           })),
           nextActions,
           blockers,
-          artifactIds: run.artifacts.map((artifact) => artifact.id)
+          resumeContext: resumeContextForRun(run)
         });
       }
       async publish(rawInput) {
@@ -35941,7 +36149,7 @@ ${briefText}`,
           metadata: {
             adapter: "workflow-v2",
             workflowSubmissionKind: submission.kind,
-            ...submission.kind === "figma-bundle" ? {} : { summary: submission.summary },
+            ...submission.kind === "figma-bundle" ? { summary: "Accepted host-connected Figma bundle.", status: "passed" } : { summary: submission.summary },
             ..."verdict" in submission ? { verdict: submission.verdict } : {},
             ..."status" in submission ? { status: submission.status } : {},
             evidenceArtifactIds: evidenceArtifacts.map((item) => item.id)
@@ -36013,6 +36221,38 @@ ${briefText}`,
                 checkpoint: {
                   name: "api-ready",
                   data: { apiReady: true, artifactIds, implementationContextId },
+                  updatedAt: timestamp
+                }
+              } : item
+            )
+          },
+          current.revision
+        );
+      }
+      async recordWorkloadEstimate(runId, signals) {
+        const current = await this.dependencies.runStore.get(RunIdSchema.parse(runId));
+        const intake = stage(current, "intake");
+        if (intake.checkpoint === void 0) {
+          throw new Error(`Run ${runId} is missing the intake checkpoint`);
+        }
+        const timestamp = this.now();
+        const workload = estimateWorkload({
+          phase: "contracts",
+          mode: deliveryProfileFromRun(current).mode,
+          scope: scopeFromRun(current),
+          signals
+        });
+        await this.dependencies.runStore.save(
+          {
+            ...current,
+            revision: current.revision + 1,
+            updatedAt: timestamp,
+            stages: current.stages.map(
+              (item) => item.name === "intake" ? {
+                ...item,
+                checkpoint: {
+                  ...intake.checkpoint,
+                  data: { ...intake.checkpoint.data, workload },
                   updatedAt: timestamp
                 }
               } : item
@@ -36239,7 +36479,7 @@ function createKernelServer(servicesProvider) {
     "workflow_start",
     {
       title: "Start workflow",
-      description: "Create a Run, capture intake, classify scope, and stop at the next boundary.",
+      description: "Create a Run, capture intake, estimate workload, classify scope, and stop at the next boundary.",
       inputSchema: WorkflowStartInputSchema.shape,
       outputSchema: WorkflowStatusSchema.shape
     },
@@ -36269,7 +36509,7 @@ function createKernelServer(servicesProvider) {
     "workflow_status",
     {
       title: "Workflow status",
-      description: "Return compact stage, scope, blocker, action, and artifact-handle status.",
+      description: "Return compact stage, workload, scope, blocker, action, and artifact-handle status.",
       inputSchema: WorkflowStatusInputSchema.shape,
       outputSchema: WorkflowStatusSchema.shape,
       annotations: { readOnlyHint: true }

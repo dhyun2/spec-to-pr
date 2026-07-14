@@ -1,6 +1,14 @@
+import { link, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
-import { buildSpecToPrPrompt } from "../../packages/codex-sdk/src/spec-to-pr-runner.js";
+import {
+  buildResumeSpecToPrPrompt,
+  buildSpecToPrPrompt,
+  validateSpecToPrRunInput,
+} from "../../packages/codex-sdk/src/spec-to-pr-runner.js";
 import {
   buildCodexReviewAgentInstructions,
   CODEX_REVIEW_AGENT_PROFILES,
@@ -168,5 +176,87 @@ describe("Codex SDK workflow policy", () => {
     expect(prompt).toContain("connected Figma capability");
     expect(prompt).toContain("figma-bundle");
     expect(prompt).toContain("before contracts");
+  });
+
+  it("resumes the durable run without starting intake again", () => {
+    const prompt = buildResumeSpecToPrPrompt();
+
+    expect(prompt).toContain("workflow_status");
+    expect(prompt).toContain("existing Run");
+    expect(prompt).toContain("one external action group");
+    expect(prompt).not.toContain("workflow_start");
+    expect(prompt).not.toContain("workflow_info");
+    expect(() =>
+      validateSpecToPrRunInput({
+        workingDirectory: "/tmp/project",
+        resumeThreadId: "thread-existing",
+        deliveryMode: "feature",
+      }),
+    ).not.toThrow();
+  });
+
+  it("keeps calibration history outside the target repository", () => {
+    expect(() =>
+      validateSpecToPrRunInput({
+        workingDirectory: "/tmp/project",
+        usageHistoryPath: "/tmp/project/.spec-to-pr/usage.jsonl",
+      }),
+    ).toThrow(/outside the target repository/i);
+    expect(() =>
+      validateSpecToPrRunInput({
+        workingDirectory: "/tmp/project",
+        usageHistoryPath: "/tmp/project/.spec-to-pr/usage.jsonl",
+        usageCalibration: false,
+      }),
+    ).not.toThrow();
+  });
+
+  it("rejects an outside history path whose symlink resolves inside the repository", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-history-path-"));
+    const repository = path.join(root, "repository");
+    const internalHistoryDirectory = path.join(repository, ".history");
+    const externalDirectory = path.join(root, "external");
+    const externalLink = path.join(externalDirectory, "history-link");
+
+    try {
+      await mkdir(internalHistoryDirectory, { recursive: true });
+      await mkdir(externalDirectory, { recursive: true });
+      await symlink(internalHistoryDirectory, externalLink, "dir");
+
+      expect(() =>
+        validateSpecToPrRunInput({
+          workingDirectory: repository,
+          prompt: "Implement a feature",
+          usageHistoryPath: path.join(externalLink, "usage.jsonl"),
+        }),
+      ).toThrow("usageHistoryPath must stay outside the target repository");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an outside history file hard-linked to a repository file", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-history-hardlink-"));
+    const repository = path.join(root, "repository");
+    const internalHistoryFile = path.join(repository, "tracked-history.jsonl");
+    const externalDirectory = path.join(root, "external");
+    const externalHistoryFile = path.join(externalDirectory, "usage.jsonl");
+
+    try {
+      await mkdir(repository, { recursive: true });
+      await mkdir(externalDirectory, { recursive: true });
+      await writeFile(internalHistoryFile, "", "utf8");
+      await link(internalHistoryFile, externalHistoryFile);
+
+      expect(() =>
+        validateSpecToPrRunInput({
+          workingDirectory: repository,
+          prompt: "Implement a feature",
+          usageHistoryPath: externalHistoryFile,
+        }),
+      ).toThrow("usageHistoryPath must not be a hard-linked file");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

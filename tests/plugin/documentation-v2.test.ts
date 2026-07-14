@@ -10,6 +10,7 @@ describe("v2 documentation", () => {
     expect(readdirSync(path.join(root, "docs", "adr")).sort()).toEqual([
       "035-use-coarse-workflow-facade-and-split-reviews.md",
       "036-use-delivery-profiles-not-mode-specific-pipelines.md",
+      "037-use-boundary-budgeting-and-numeric-calibration.md",
     ]);
     expect(relativeFiles(path.join(root, "website", "docs"))).toEqual([
       "concepts/pipeline.md",
@@ -63,6 +64,15 @@ describe("v2 documentation", () => {
     expect(contents).toContain("immutable");
     expect(contents).toContain("draft-only");
     expect(contents).toContain("clean tree");
+    expect(contents).toContain("workloadSignals");
+    expect(contents).toContain("split-required");
+    expect(contents).toContain("approval-required");
+    expect(contents).toContain("80%");
+    expect(contents).toContain("numeric-only");
+    expect(contents).toContain("usage-unavailable");
+    expect(contents).toContain("requiredValidations");
+    expect(contents).toContain("resumeContext");
+    expect(contents).toContain("outputFormatting");
   });
 
   it("keeps every retained Figma checklist aligned with the typed provenance contract", () => {

@@ -16,4 +16,4 @@ Read `deliveryProfile` and collect only supplied or repository-backed requiremen
 
 Resolve applicable scope, acceptance criteria, API operations and schemas, design evidence, and explicit gaps. Never invent undocumented API or UI behavior.
 
-Submit `contracts` with `passed`, `failed`, or `blocked`, a compact summary, artifact paths, and legacy `baselinePaths` when required. Use `blocked` when required evidence is absent. Advance only after the accepted submission is visible in `workflow_status`.
+Submit `contracts` with `passed`, `failed`, or `blocked`, a compact summary, artifact paths, and legacy `baselinePaths` when required. When the change surface is known, also submit non-negative numeric `workloadSignals`: requirements, relevant files, API operations, UI surfaces, Figma nodes, test targets, workspace packages, and remaining uncertainty. Counts refine the existing `XS`–`XL` range; do not include prompt/source text or create another tool/stage. Use `blocked` when required evidence is absent. Advance only after the accepted submission and refined workload are visible in `workflow_status`.

@@ -30,6 +30,8 @@ The public runtime is intentionally small:
 
 API and UI implementation stay in one context. For API-backed UI, the agent first submits distinct physical, non-empty types, schemas, wrappers, mocks, and a passing JSON contract-test result with a stable `implementationContextId` as an explicit `api-ready` checkpoint; path, symlink, or hard-link aliases do not count as separate evidence. Final implementation must repeat that ID. `apiReady: true` alone is not evidence. There are no separate API/UI implementation agents and no integration lane. After implementation, the orchestrator freezes a `workflow_status` snapshot, contracts, diff, and evidence paths for each independent reviewer; reviewers return verdict payloads without calling workflow tools.
 
+Immediately after intake, `workflow_status` reports an `XS`–`XL` workload, estimated token range, confidence, reasons, an 80% checkpoint threshold, and the authoritative required-validation list. Contract authors may submit numeric `workloadSignals` to refine it without adding a tool or stage. The same status carries a compact `resumeContext` with the recorded goal, project-relative evidence paths, and submission summaries. The SDK instructs each turn to stop after one workflow action group, requires a fresh status at every completed boundary, sums actual input plus output tokens, and starts a compact fresh thread at the first boundary at or above 80%. At the hard limit it keeps every required validation and returns `split-required` for `L`/`XL`, otherwise `approval-required`. Missing usage stops continuation as `usage-unavailable`. Numeric-only fresh completed-run history calibrates future ranges; resumed tails are excluded because they do not contain whole-Run usage. Prompts, code, diffs, paths, tool output, and final responses are never stored in calibration history, and optional history I/O cannot fail the workflow.
+
 Publishing only creates or updates a draft GitHub PR or GitLab MR. Draft flows work on a non-target `codex/*` source branch and commit only intended changes before publication; runtime preflight requires a clean tree and at least one source commit beyond the target. Publishing never merges, approves, closes, or marks a review request ready.
 
 ## Requirements
@@ -123,7 +125,9 @@ node packages/codex-sdk/dist/cli.js \
   --publish
 ```
 
-Use `--brief`, `--figma`, `--openapi`, and `--docs` for source inputs. `--publish` requests a draft; `--no-publish` stops after evidence-backed implementation and review.
+Use `--brief`, `--figma`, `--openapi`, and `--docs` for source inputs. `--publish` requests a draft; `--no-publish` stops after evidence-backed implementation and review. `--token-budget` sets the approved hard limit, while `--max-turns`, `--usage-history`, and `--no-usage-calibration` control bounded automation and numeric-only calibration.
+
+`--resume <task-id>` continues the existing durable Run from the latest `workflow_status` and `resumeContext`; it does not repeat intake or create a duplicate Run.
 
 See [packages/codex-sdk/README.md](packages/codex-sdk/README.md) for the complete runner contract.
 
@@ -153,4 +157,4 @@ pnpm --dir website install
 pnpm --dir website start
 ```
 
-The current architectural decisions are [ADR 035](docs/adr/035-use-coarse-workflow-facade-and-split-reviews.md) and [ADR 036](docs/adr/036-use-delivery-profiles-not-mode-specific-pipelines.md).
+The current architectural decisions are [ADR 035](docs/adr/035-use-coarse-workflow-facade-and-split-reviews.md), [ADR 036](docs/adr/036-use-delivery-profiles-not-mode-specific-pipelines.md), and [ADR 037](docs/adr/037-use-boundary-budgeting-and-numeric-calibration.md).

@@ -1,4 +1,5 @@
 import { type ApprovalMode, type ModelReasoningEffort, type RunResult, type SandboxMode } from "@openai/codex-sdk";
+import { type AggregatedUsage, type SdkWorkloadEstimate } from "./workload-budget.js";
 export type SpecToPrCodexRunInput = {
     workingDirectory: string;
     deliveryMode?: "auto" | "brief" | "legacy" | "feature" | "figma";
@@ -19,13 +20,37 @@ export type SpecToPrCodexRunInput = {
     env?: Record<string, string>;
     outputSchema?: unknown;
     enableReviewAgents?: boolean;
+    tokenBudget?: number;
+    maxTurns?: number;
+    usageHistoryPath?: string;
+    usageCalibration?: boolean;
 };
 export type SpecToPrCodexRunResult = {
     threadId: string | null;
     finalResponse: string;
     usage: RunResult["usage"];
     items: RunResult["items"];
+    workload: SdkWorkloadEstimate;
+    budget: {
+        state: "completed" | "blocked" | "approval-required" | "split-required" | "usage-unavailable" | "status-unavailable" | "turn-limit";
+        checkpointPercent: 80;
+        checkpointAtTokens: number;
+        hardLimitTokens: number;
+        usedTokens: number;
+        checkpointCount: number;
+        requiredValidations: string[];
+        usageAvailability: AggregatedUsage["availability"];
+    };
+    turnCount: number;
+    outputFormatting: "not-requested" | "not-terminal" | "applied" | "budget-skipped" | "usage-unavailable" | "failed";
+    usageCalibration: {
+        enabled: boolean;
+        read: "loaded" | "unavailable" | "disabled";
+        write: "recorded" | "unavailable" | "skipped" | "disabled";
+        sampleCount: number;
+    };
 };
 export declare function runSpecToPrWithCodex(input: SpecToPrCodexRunInput): Promise<SpecToPrCodexRunResult>;
 export declare function buildSpecToPrPrompt(input: SpecToPrCodexRunInput): string;
+export declare function buildResumeSpecToPrPrompt(): string;
 export declare function validateSpecToPrRunInput(input: SpecToPrCodexRunInput): void;

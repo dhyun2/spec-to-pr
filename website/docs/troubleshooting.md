@@ -79,6 +79,32 @@ API-backed UI인데 명시적 `api-ready` checkpoint가 없거나 최종 `apiRea
 
 필수 gate는 empty/skipped/not-run evidence로 통과하지 않습니다. Repository의 실제 command를 실행해 project-local 결과를 제출하거나, 그 gate가 scope에 적용되지 않는다는 근거가 있을 때만 not applicable로 분류하세요.
 
+## Workload와 token budget
+
+### Intake estimate가 부정확하다
+
+초기 estimate는 정보가 적어 `low` confidence와 넓은 범위가 정상입니다. Contracts 제출에 실제 요구사항, 관련 파일, API operation, UI surface, Figma node, test target, workspace package, uncertainty의 non-negative `workloadSignals`를 포함하세요. 완료된 같은 mode/size 표본이 10개 이상이면 SDK가 median/p90으로 보정합니다.
+
+### 80%인데 즉시 멈추지 않았다
+
+SDK가 usage를 받는 시점은 Codex turn 완료 뒤입니다. 실행 중 live token count는 없으므로 정확한 토큰에서 끊지 않고 최초로 80% 이상이 확인된 workflow action 경계에서 compact checkpoint와 fresh thread를 만듭니다. 한 turn이 매우 크면 경계 확인 전에 80%를 넘을 수 있습니다.
+
+Agent가 한 action group 뒤에 멈추라는 지시를 무시하면 같은 turn 안의 이미 발생한 side effect는 SDK가 되돌릴 수 없습니다. 다만 매 action turn의 새 structured status를 요구하므로 이전 status로 같은 action을 재생하지 않고, 다음 turn 전에 budget을 다시 확인합니다.
+
+Fresh thread나 `--resume`은 기존 durable run ID로 `workflow_status`를 먼저 호출합니다. `resumeContext.goal`, `evidencePaths`, `submissions`가 비어 있거나 필요한 프로젝트 파일이 사라졌다면 새 Run을 만들지 말고 blocker로 처리하세요.
+
+### `split-required` 또는 `approval-required`가 나왔다
+
+Hard limit 뒤 다음 action을 임의로 시작하지 않습니다. `L`/`XL`은 독립적으로 검증 가능한 scope slice로 나누고, 더 작은 작업이거나 분할할 수 없으면 사용자가 더 큰 `--token-budget`을 명시적으로 승인해야 합니다. 어느 경우든 functional/design 등 required validation은 삭제하거나 waive하지 않습니다.
+
+### Usage history를 남기고 싶지 않다
+
+`--no-usage-calibration`을 사용하세요. 기본 기록은 `~/.codex/spec-to-pr/usage-history.jsonl`에 숫자/enum만 보관하며 prompt, source, code, diff, path, tool output, final response는 저장하지 않습니다. 경로 권한 문제가 있으면 `--usage-history`로 쓰기 가능한 대상 저장소 밖 위치를 지정하세요.
+
+History read/write는 best-effort입니다. 권한 문제가 있어도 이미 완료·발행된 workflow를 실패로 뒤집지 않고 SDK 결과의 `usageCalibration.read` 또는 `write`가 `unavailable`을 보고합니다. Turn usage 자체가 없으면 calibration을 쓰지 않으며, nonterminal 실행은 `usage-unavailable`로 멈춥니다.
+
+`--usage-history`는 대상 저장소 밖 경로만 허용합니다. 저장소 안 JSONL은 git clean-tree와 draft publication preflight를 깨뜨릴 수 있으므로 외부 절대 경로를 사용하거나 calibration을 비활성화하세요. Terminal action이 이미 hard limit에 도달했다면 optional output-schema formatting turn도 시작하지 않습니다.
+
 ## Publication
 
 ### Draft PR/MR이 만들어지지 않는다

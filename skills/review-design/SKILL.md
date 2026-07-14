@@ -11,4 +11,6 @@ Return a literal JSON-compatible object shaped as `{kind:"design-review", verdic
 
 Use Figma screenshots or an explicit legacy screenshot as the visual baseline. A feature E2E video demonstrates interaction but does not become a visual baseline or replace accessibility evidence.
 
+Budget pressure never makes visual, interaction, or accessibility evidence optional when those gates are required. A split must remain independently design-verifiable; otherwise return changes-requested or blocked.
+
 Do not repair the UI while reviewing.
