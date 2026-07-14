@@ -166,37 +166,33 @@ Expected: FAIL because `brief.mdx`, `legacy.mdx`, `feature.mdx`, and `figma.mdx`
 
 For each value in the current `website/docs/usage/recipes.mdx`, move the full content between its `<TabItem ...>` and `</TabItem>` tags into the matching file. Remove the marker `<span data-case-panel="...">`, retain all eleven heading anchors, tables, code blocks, blockers, and exclusions, and add this exact frontmatter:
 
-```mdx
-## <!-- website/docs/usage/brief.mdx -->
-
+```text
+<!-- website/docs/usage/brief.mdx -->
+---
 sidebar_position: 1
 title: 1. 기획서 → draft PR
 description: 기획서의 수용 조건을 구현하고 검증해 draft PR로 받는 방법
-
 ---
 
-## <!-- website/docs/usage/legacy.mdx -->
-
+<!-- website/docs/usage/legacy.mdx -->
+---
 sidebar_position: 2
 title: 2. 레거시 변경 → draft PR
 description: 기존 동작의 focused baseline을 남기고 좁은 delta만 변경하는 방법
-
 ---
 
-## <!-- website/docs/usage/feature.mdx -->
-
+<!-- website/docs/usage/feature.mdx -->
+---
 sidebar_position: 3
 title: 3. 기능 개발 → E2E·영상·draft PR
 description: API와 UI를 구현하고 해당 기능 E2E와 영상 하나를 포함해 draft PR로 받는 방법
-
 ---
 
-## <!-- website/docs/usage/figma.mdx -->
-
+<!-- website/docs/usage/figma.mdx -->
+---
 sidebar_position: 4
 title: 4. Figma → 디자인 구현
 description: 실제 Figma 증거로 디자인을 구현하고 검증하는 방법
-
 ---
 ```
 
@@ -221,37 +217,33 @@ For example, `brief.mdx` receives the legacy, feature, and Figma links; `feature
 
 Move each English `<TabItem>` body into the same four filenames under `website/i18n/en/docusaurus-plugin-content-docs/current/usage`. Remove the marker span and tab wrappers, retain all eleven heading anchors and case content, and use:
 
-```mdx
-## <!-- brief.mdx -->
-
+```text
+<!-- brief.mdx -->
+---
 sidebar_position: 1
 title: 1. Brief → draft PR
 description: Implement an approved brief, verify it, and receive a draft PR
-
 ---
 
-## <!-- legacy.mdx -->
-
+<!-- legacy.mdx -->
+---
 sidebar_position: 2
 title: 2. Legacy change → draft PR
 description: Capture a focused baseline and change only a narrow legacy behavior delta
-
 ---
 
-## <!-- feature.mdx -->
-
+<!-- feature.mdx -->
+---
 sidebar_position: 3
 title: 3. Feature → E2E, video, and draft PR
 description: Implement API and UI with targeted feature E2E and exactly one video
-
 ---
 
-## <!-- figma.mdx -->
-
+<!-- figma.mdx -->
+---
 sidebar_position: 4
 title: 4. Figma → design implementation
 description: Implement and verify a design from real connected-host Figma evidence
-
 ---
 ```
 
