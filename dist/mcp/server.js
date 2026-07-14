@@ -41975,6 +41975,22 @@ var init_workload_policy = __esm({
 });
 
 // src/workflow/workflow-contracts.ts
+function uniqueBoundedArray(item, label, max = 20) {
+  return external_exports.array(item).max(max).superRefine((items, context) => {
+    const seen = /* @__PURE__ */ new Set();
+    items.forEach((item2, index) => {
+      const key = String(item2);
+      if (seen.has(key)) {
+        context.addIssue({
+          code: "custom",
+          path: [index],
+          message: `${label} entries must be unique`
+        });
+      }
+      seen.add(key);
+    });
+  });
+}
 function isTargetedPlaywrightCommand(command, selector) {
   if (/(?:&&|\|\||[;&|`\n\r]|\$\()/.test(command)) return false;
   const tokens = tokenizeCommand(command);
@@ -42074,7 +42090,7 @@ function parsePlaywrightArguments(args) {
   }
   return { positionals, grep, projects };
 }
-var WorkflowScopeSchema, DeliveryModeSchema, ChangeKindSchema, PublicationIntentSchema, FigmaFileUrlSchema, ImplementationContextIdSchema, DeliveryProfileSchema, ReviewVerdictSchema, ReviewFindingSeveritySchema, RequirementVerdictSchema, WorkflowGateIdSchema, ReviewPacketIdSchema, ImplementationReviewPacketSchema, RequirementContractSchema, LegacyBaselineSchema, ReviewFindingSchema, ReviewRequirementSchema, ReviewGateResultSchema, ReviewSubmissionSchema, ContractsSubmissionSchema, ApiArtifactsSchema, ApiReadySubmissionSchema, FeatureEvidenceSchema, ImplementationSubmissionSchema, FigmaBundleSubmissionSchema, WorkflowSubmissionSchema, WorkflowActionSchema, WorkflowStageSummarySchema, WorkflowResumeContextSchema, WorkflowStatusSchema;
+var WorkflowScopeSchema, DeliveryModeSchema, ChangeKindSchema, PublicationIntentSchema, FigmaFileUrlSchema, ImplementationContextIdSchema, WorkflowSourcePathSchema, SkillHintSchema, NormalizedSourcePathsSchema, NormalizedSkillHintsSchema, GuidanceTraceSchema, DeliveryProfileSchema, ReviewVerdictSchema, ReviewFindingSeveritySchema, RequirementVerdictSchema, WorkflowGateIdSchema, ReviewPacketIdSchema, ImplementationReviewPacketSchema, RequirementContractSchema, LegacyBaselineSchema, ReviewFindingSchema, ReviewRequirementSchema, ReviewGateResultSchema, ReviewSubmissionSchema, ContractsSubmissionSchema, ApiArtifactsSchema, ApiReadySubmissionSchema, FeatureEvidenceSchema, ImplementationSubmissionSchema, FigmaBundleSubmissionSchema, WorkflowSubmissionSchema, WorkflowActionSchema, WorkflowStageSummarySchema, WorkflowResumeContextSchema, WorkflowStatusSchema;
 var init_workflow_contracts = __esm({
   "src/workflow/workflow-contracts.ts"() {
     "use strict";
@@ -42109,12 +42125,37 @@ var init_workflow_contracts = __esm({
       return (host === "figma.com" || host === "www.figma.com") && /^\/(?:design|file|proto)\//i.test(parsed.pathname);
     }, "Figma URL must be a figma.com design, file, or prototype URL");
     ImplementationContextIdSchema = external_exports.string().trim().min(8).max(128).regex(/^[a-z0-9][a-z0-9._:-]+$/i, "Implementation context ID contains unsupported characters");
+    WorkflowSourcePathSchema = external_exports.string().trim().min(1).max(1e3);
+    SkillHintSchema = external_exports.string().trim().min(1).max(128).regex(
+      /^[a-z0-9][a-z0-9._ -]*(?::[a-z0-9][a-z0-9._ -]*)?$/i,
+      "Skill hint must be a skill name, not a filesystem path"
+    );
+    NormalizedSourcePathsSchema = uniqueBoundedArray(WorkflowSourcePathSchema, "Source path");
+    NormalizedSkillHintsSchema = uniqueBoundedArray(SkillHintSchema, "Skill hint");
+    GuidanceTraceSchema = external_exports.object({
+      explicit: NormalizedSourcePathsSchema.default([]),
+      discovered: NormalizedSourcePathsSchema.default([]),
+      skillHints: NormalizedSkillHintsSchema.default([])
+    }).strict().superRefine((trace, context) => {
+      if (trace.explicit.length + trace.discovered.length > 20) {
+        context.addIssue({
+          code: "custom",
+          path: ["discovered"],
+          message: "Combined explicit and discovered guidance cannot exceed 20 files"
+        });
+      }
+    });
     DeliveryProfileSchema = external_exports.object({
       mode: DeliveryModeSchema,
       changeKind: ChangeKindSchema,
       publication: PublicationIntentSchema,
-      briefPath: external_exports.string().trim().min(1).optional(),
+      briefPath: WorkflowSourcePathSchema.optional(),
       figmaUrl: FigmaFileUrlSchema.optional(),
+      docsPaths: NormalizedSourcePathsSchema.default([]),
+      openApiPaths: NormalizedSourcePathsSchema.default([]),
+      guidancePaths: NormalizedSourcePathsSchema.default([]),
+      discoveredGuidancePaths: NormalizedSourcePathsSchema.default([]),
+      skillHints: NormalizedSkillHintsSchema.default([]),
       requirements: external_exports.object({
         brief: external_exports.boolean(),
         legacyBaseline: external_exports.boolean(),
@@ -42122,7 +42163,51 @@ var init_workflow_contracts = __esm({
         featureVideo: external_exports.boolean(),
         figmaBundle: external_exports.boolean()
       }).strict()
-    }).strict();
+    }).strict().superRefine((profile, context) => {
+      const classifiedSources = /* @__PURE__ */ new Map();
+      for (const field of ["docsPaths", "openApiPaths"]) {
+        profile[field].forEach((sourcePath, index) => {
+          const previous = classifiedSources.get(sourcePath);
+          if (previous !== void 0 && previous !== field) {
+            context.addIssue({
+              code: "custom",
+              path: [field, index],
+              message: `Source path conflicts with ${previous}: ${sourcePath}`
+            });
+          }
+          classifiedSources.set(sourcePath, field);
+        });
+      }
+      const explicitGuidance = new Set(profile.guidancePaths);
+      for (const field of ["guidancePaths", "discoveredGuidancePaths"]) {
+        profile[field].forEach((sourcePath, index) => {
+          const previous = classifiedSources.get(sourcePath);
+          if (previous !== void 0) {
+            context.addIssue({
+              code: "custom",
+              path: [field, index],
+              message: `Guidance path conflicts with ${previous}: ${sourcePath}`
+            });
+          }
+        });
+      }
+      profile.discoveredGuidancePaths.forEach((sourcePath, index) => {
+        if (explicitGuidance.has(sourcePath)) {
+          context.addIssue({
+            code: "custom",
+            path: ["discoveredGuidancePaths", index],
+            message: `Discovered guidance duplicates explicit guidance: ${sourcePath}`
+          });
+        }
+      });
+      if (profile.guidancePaths.length + profile.discoveredGuidancePaths.length > 20) {
+        context.addIssue({
+          code: "custom",
+          path: ["discoveredGuidancePaths"],
+          message: "Combined explicit and discovered guidance cannot exceed 20 files"
+        });
+      }
+    });
     ReviewVerdictSchema = external_exports.enum(["approved", "changes-requested", "blocked"]);
     ReviewFindingSeveritySchema = external_exports.enum(["minor", "major", "blocker"]);
     RequirementVerdictSchema = external_exports.enum(["accepted", "rejected", "blocked"]);
@@ -42266,7 +42351,12 @@ var init_workflow_contracts = __esm({
       baselinePaths: external_exports.array(external_exports.string().trim().min(1)).default([]),
       requirementManifest: external_exports.array(RequirementContractSchema).default([]),
       legacyBaseline: LegacyBaselineSchema.optional(),
-      workloadSignals: WorkloadSignalsSchema.optional()
+      workloadSignals: WorkloadSignalsSchema.optional(),
+      guidanceTrace: GuidanceTraceSchema.default({
+        explicit: [],
+        discovered: [],
+        skillHints: []
+      })
     }).strict().superRefine((submission, context) => {
       if (submission.status === "passed" && submission.artifactPaths.length === 0) {
         context.addIssue({
@@ -42639,12 +42729,17 @@ function buildDeliveryProfile(input) {
     publication: input.publication,
     ...input.briefPath === void 0 ? {} : { briefPath: input.briefPath },
     ...input.figmaUrl === void 0 ? {} : { figmaUrl: input.figmaUrl },
+    docsPaths: input.docsPaths ?? [],
+    openApiPaths: input.openApiPaths ?? [],
+    guidancePaths: input.guidancePaths ?? [],
+    discoveredGuidancePaths: input.discoveredGuidancePaths ?? [],
+    skillHints: input.skillHints ?? [],
     requirements: {
-      brief: input.mode === "brief",
+      brief: input.briefPath !== void 0,
       legacyBaseline: input.mode === "legacy",
       targetedFeatureE2E: userFacingFeature,
       featureVideo: userFacingFeature,
-      figmaBundle: input.mode === "figma"
+      figmaBundle: input.figmaUrl !== void 0
     }
   });
 }
@@ -44145,6 +44240,12 @@ function assertSubmissionPrerequisites(run, submission) {
   if (submission.kind === "contracts" && submission.status === "passed" && profile.requirements.legacyBaseline && submission.legacyBaseline === void 0) {
     throw new Error("Legacy mode requires a focused baseline before contracts can pass");
   }
+  if (submission.kind === "contracts" && submission.status === "passed" && (!sameStringMembers(submission.guidanceTrace.explicit, profile.guidancePaths) || !sameStringMembers(submission.guidanceTrace.discovered, profile.discoveredGuidancePaths))) {
+    throw new Error("Passed contracts must report every explicit and discovered guidance path");
+  }
+  if (submission.kind === "contracts" && submission.status === "passed" && submission.guidanceTrace.skillHints.some((skillHint) => !profile.skillHints.includes(skillHint))) {
+    throw new Error("Every applied skill hint must be requested in the delivery profile");
+  }
   if (submission.kind === "contracts" && submission.status === "passed" && profile.requirements.figmaBundle && !run.artifacts.some(
     (artifact) => artifact.metadata["workflowSubmissionKind"] === "figma-bundle"
   )) {
@@ -44380,14 +44481,194 @@ function producerForSubmission(submission) {
   if (submission.kind === "design-review") return "design-reviewer";
   return "orchestrator";
 }
+async function prepareComposableSources(input) {
+  const root = await realpath(input.projectRoot);
+  const docsInput = uniqueInputValues([
+    ...input.docsPath === void 0 ? [] : [input.docsPath],
+    ...input.docsPaths
+  ]);
+  const openApiInput = uniqueInputValues([
+    ...input.openApiPath === void 0 ? [] : [input.openApiPath],
+    ...input.openApiPaths
+  ]);
+  const guidanceInput = uniqueInputValues(input.guidancePaths);
+  const skillHints = uniqueInputValues(input.skillHints);
+  const brief = input.briefPath === void 0 ? void 0 : await readProjectTextFile(root, input.briefPath, "Brief");
+  const docs = await readDistinctProjectTextFiles(root, docsInput, "Supporting document");
+  const openApi = await readDistinctProjectTextFiles(root, openApiInput, "OpenAPI");
+  const guidance = await readDistinctProjectTextFiles(root, guidanceInput, "Guidance");
+  const claimedFiles = /* @__PURE__ */ new Map();
+  const claim = (file2, role, automatic = false) => {
+    const previous = claimedFiles.get(file2.resolvedPath);
+    if (previous !== void 0) {
+      if (automatic) return false;
+      throw new Error(`Source file cannot be used as both ${previous} and ${role}: ${file2.path}`);
+    }
+    claimedFiles.set(file2.resolvedPath, role);
+    return true;
+  };
+  if (brief !== void 0) claim(brief, "brief");
+  docs.forEach((file2) => claim(file2, "supporting documentation"));
+  openApi.forEach((file2) => claim(file2, "OpenAPI"));
+  guidance.forEach((file2) => claim(file2, "explicit guidance"));
+  const occupiedInputPaths = new Set(
+    [input.briefPath, ...docsInput, ...openApiInput, ...guidanceInput].filter(isDefined).map(normalizedInputPathKey)
+  );
+  const discoveredGuidance = [];
+  for (const candidate of GUIDANCE_CANDIDATES) {
+    if (guidance.length + discoveredGuidance.length >= MAX_COMPOSABLE_SOURCE_PATHS) break;
+    if (occupiedInputPaths.has(normalizedInputPathKey(candidate))) continue;
+    const file2 = await readOptionalProjectTextFile(root, candidate, "Discovered guidance");
+    if (file2 !== void 0 && claim(file2, "discovered guidance", true)) {
+      discoveredGuidance.push(file2);
+    }
+  }
+  const loaded = /* @__PURE__ */ new Map();
+  const load = async (file2) => {
+    const existing = loaded.get(file2.resolvedPath);
+    if (existing !== void 0) return existing;
+    const text = await readFile(file2.resolvedPath, "utf8");
+    const source = { ...file2, text, chunks: buildParserSafeChunks(text) };
+    loaded.set(file2.resolvedPath, source);
+    return source;
+  };
+  const loadAll = async (files) => {
+    const sources = [];
+    for (const file2 of files) sources.push(await load(file2));
+    return sources;
+  };
+  return {
+    ...brief === void 0 ? {} : { brief: await load(brief) },
+    docs: await loadAll(docs),
+    openApi: await loadAll(openApi),
+    guidance: await loadAll(guidance),
+    discoveredGuidance: await loadAll(discoveredGuidance),
+    skillHints
+  };
+}
+async function readDistinctProjectTextFiles(projectRoot, paths, label) {
+  const files = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const filePath of paths) {
+    const file2 = await readProjectTextFile(projectRoot, filePath, label);
+    if (!seen.has(file2.resolvedPath)) {
+      files.push(file2);
+      seen.add(file2.resolvedPath);
+    }
+  }
+  return files;
+}
+async function ingestProjectTextSource(input) {
+  const artifactIds = [];
+  for (let index = 0; index < input.file.chunks.length; index += 1) {
+    const result = await input.service.parseIntakeRequest({
+      runId: input.runId,
+      requestText: input.file.chunks[index],
+      label: intakeSourceLabel(input.kind, input.file.path, index, input.file.chunks.length)
+    });
+    artifactIds.push(result.artifact.id);
+  }
+  return artifactIds;
+}
+function buildParserSafeChunks(text) {
+  const chunks = [];
+  const graphemes = new Intl.Segmenter(void 0, { granularity: "grapheme" }).segment(text);
+  let end = text.length;
+  while (end > 0) {
+    const target = Math.max(0, end - MAX_INTAKE_SOURCE_CHARS);
+    const containing = target === 0 ? void 0 : graphemes.containing(target);
+    const start = containing === void 0 || containing.index === target ? target : containing.index + containing.segment.length;
+    if (start >= end) {
+      throw new Error("Project text source contains a grapheme that exceeds the parser limit");
+    }
+    const chunk = text.slice(start, end);
+    if (chunk.trim() === "") {
+      throw new Error("Project text source cannot form non-whitespace parser-safe chunks");
+    }
+    chunks.push(chunk);
+    end = start;
+  }
+  chunks.reverse();
+  if (chunks.length === 0 || chunks.join("") !== text) {
+    throw new Error("Project text source cannot form parser-safe chunks without content loss");
+  }
+  return chunks;
+}
+function intakeSourceLabel(kind, filePath, index, total) {
+  const suffix = total === 1 ? "" : `#part-${index + 1}-of-${total}`;
+  const preferred = `${kind}:${filePath}${suffix}`;
+  if (preferred.length <= 200) return preferred;
+  const digest = createHash("sha256").update(filePath).digest("hex").slice(0, 16);
+  const basename = path.basename(filePath).slice(0, 120);
+  return `${kind}:${basename}:${digest}${suffix}`.slice(0, 200);
+}
+function countOpenApiOperations(files) {
+  let total = 0;
+  for (const file2 of files) {
+    let document;
+    try {
+      document = (0, import_yaml.parse)(file2.text);
+    } catch {
+      total += 1;
+      continue;
+    }
+    if (typeof document !== "object" || document === null) {
+      total += 1;
+      continue;
+    }
+    const paths = document.paths;
+    if (typeof paths !== "object" || paths === null) {
+      total += 1;
+      continue;
+    }
+    let documentOperations = 0;
+    for (const pathItem of Object.values(paths)) {
+      if (typeof pathItem !== "object" || pathItem === null) continue;
+      documentOperations += Object.keys(pathItem).filter(
+        (key) => /^(?:get|put|post|delete|options|head|patch|trace)$/i.test(key)
+      ).length;
+      if (total + documentOperations >= MAX_OPENAPI_OPERATIONS) {
+        return MAX_OPENAPI_OPERATIONS;
+      }
+    }
+    total += Math.max(1, documentOperations);
+  }
+  return Math.min(total, MAX_OPENAPI_OPERATIONS);
+}
+function uniqueInputValues(values) {
+  const unique2 = /* @__PURE__ */ new Map();
+  values.forEach((value) => {
+    const key = normalizedInputPathKey(value);
+    if (!unique2.has(key)) unique2.set(key, value);
+  });
+  return [...unique2.values()];
+}
+function normalizedInputPathKey(value) {
+  return path.normalize(value).split(path.sep).join("/");
+}
+function isDefined(value) {
+  return value !== void 0;
+}
+function sameStringMembers(left, right) {
+  return left.length === right.length && left.every((value) => right.includes(value));
+}
 async function readProjectTextFile(projectRoot, filePath, label) {
+  const file2 = await resolveProjectTextFile(projectRoot, filePath, label, false);
+  if (file2 === void 0) throw new Error(`${label} file does not exist: ${filePath}`);
+  return file2;
+}
+async function readOptionalProjectTextFile(projectRoot, filePath, label) {
+  return resolveProjectTextFile(projectRoot, filePath, label, true);
+}
+async function resolveProjectTextFile(projectRoot, filePath, label, missingAllowed) {
   const root = await realpath(projectRoot);
   const requestedPath = path.isAbsolute(filePath) ? path.normalize(filePath) : path.resolve(root, filePath);
   assertWithinProjectRoot(root, requestedPath, filePath);
   let resolvedPath;
   try {
     resolvedPath = await realpath(requestedPath);
-  } catch {
+  } catch (error51) {
+    if (missingAllowed && isMissingFileError(error51)) return void 0;
     throw new Error(`${label} file does not exist: ${filePath}`);
   }
   assertWithinProjectRoot(root, resolvedPath, filePath);
@@ -44395,7 +44676,13 @@ async function readProjectTextFile(projectRoot, filePath, label) {
   if (!details.isFile()) throw new Error(`${label} path must reference a file: ${filePath}`);
   if (details.size > 1024 * 1024)
     throw new Error(`${label} file exceeds the 1 MB limit: ${filePath}`);
-  return readFile(resolvedPath, "utf8");
+  return {
+    path: path.relative(root, resolvedPath).split(path.sep).join("/"),
+    resolvedPath
+  };
+}
+function isMissingFileError(error51) {
+  return typeof error51 === "object" && error51 !== null && "code" in error51 && (error51.code === "ENOENT" || error51.code === "ENOTDIR");
 }
 async function countDeclaredWorkspacePackages(projectRoot) {
   const patterns = /* @__PURE__ */ new Set();
@@ -44562,6 +44849,13 @@ async function hasPackageManifest(packageRoot) {
 function markdownTableCell(value) {
   return value.replaceAll("\\", "\\\\").replaceAll("|", "\\|").replace(/\r?\n/g, "<br>");
 }
+function markdownListValue(value) {
+  return [...value].map((character) => {
+    if (character === "\r") return "&#92;r";
+    if (character === "\n") return "&#92;n";
+    return MARKDOWN_LIST_CONTROL_CHARACTERS.has(character) ? `&#${character.charCodeAt(0)};` : character;
+  }).join("");
+}
 async function currentGitHead(projectRoot) {
   try {
     const { stdout } = await execFileAsync("git", ["rev-parse", "--verify", "HEAD"], {
@@ -44581,7 +44875,7 @@ function latestArtifact(run, kind, reportKind) {
   }
   return artifact;
 }
-var import_pngjs, import_yaml, WORKER_ID, execFileAsync, DEFAULT_EXTERNAL_LEASE_TTL_MS, DEFAULT_EXTERNAL_HEARTBEAT_MS, FigmaManifestSchema, FeatureResultSchema, WorkflowStartInputSchema, WorkflowAdvanceInputSchema, WorkflowSubmitInputSchema, WorkflowStatusInputSchema, WorkflowPublishInputSchema, WorkflowArchiveInputSchema, WorkflowService;
+var import_pngjs, import_yaml, WORKER_ID, execFileAsync, DEFAULT_EXTERNAL_LEASE_TTL_MS, DEFAULT_EXTERNAL_HEARTBEAT_MS, MAX_COMPOSABLE_SOURCE_PATHS, MAX_INTAKE_SOURCE_CHARS, MAX_OPENAPI_OPERATIONS, GUIDANCE_CANDIDATES, ComposableSourcePathsSchema, SkillHintsSchema, FigmaManifestSchema, FeatureResultSchema, WorkflowStartInputSchema, WorkflowAdvanceInputSchema, WorkflowSubmitInputSchema, WorkflowStatusInputSchema, WorkflowPublishInputSchema, WorkflowArchiveInputSchema, WorkflowService, MARKDOWN_LIST_CONTROL_CHARACTERS;
 var init_workflow_service = __esm({
   "src/application/workflow-service.ts"() {
     "use strict";
@@ -44597,6 +44891,18 @@ var init_workflow_service = __esm({
     execFileAsync = promisify(execFile);
     DEFAULT_EXTERNAL_LEASE_TTL_MS = 15 * 60 * 1e3;
     DEFAULT_EXTERNAL_HEARTBEAT_MS = 60 * 1e3;
+    MAX_COMPOSABLE_SOURCE_PATHS = 20;
+    MAX_INTAKE_SOURCE_CHARS = 2e5;
+    MAX_OPENAPI_OPERATIONS = 1e3;
+    GUIDANCE_CANDIDATES = [
+      "AGENTS.md",
+      "CLAUDE.md",
+      "README.md",
+      "docs/architecture/ARCHITECTURE.md",
+      "docs/etc/folder-structure.md"
+    ];
+    ComposableSourcePathsSchema = external_exports.array(WorkflowSourcePathSchema).max(MAX_COMPOSABLE_SOURCE_PATHS).default([]);
+    SkillHintsSchema = external_exports.array(SkillHintSchema).max(20).default([]);
     FigmaManifestSchema = external_exports.object({
       provider: external_exports.literal("host-connected-figma"),
       capturedAt: external_exports.string().datetime({ offset: true }),
@@ -44620,7 +44926,13 @@ var init_workflow_service = __esm({
       changeKind: ChangeKindSchema.default("auto"),
       publication: PublicationIntentSchema.optional(),
       briefPath: external_exports.string().trim().min(1).optional(),
-      figmaUrl: FigmaFileUrlSchema.optional()
+      figmaUrl: FigmaFileUrlSchema.optional(),
+      docsPath: WorkflowSourcePathSchema.optional(),
+      docsPaths: ComposableSourcePathsSchema,
+      openApiPath: WorkflowSourcePathSchema.optional(),
+      openApiPaths: ComposableSourcePathsSchema,
+      guidancePaths: ComposableSourcePathsSchema,
+      skillHints: SkillHintsSchema
     }).strict().superRefine((input, context) => {
       if (input.mode === "brief" && input.briefPath === void 0) {
         context.addIssue({
@@ -44641,6 +44953,42 @@ var init_workflow_service = __esm({
           code: "custom",
           path: ["scope"],
           message: `${input.mode} mode requires UI scope`
+        });
+      }
+      for (const [singularField, arrayField] of [
+        ["docsPath", "docsPaths"],
+        ["openApiPath", "openApiPaths"]
+      ]) {
+        const paths = uniqueInputValues([
+          ...input[singularField] === void 0 ? [] : [input[singularField]],
+          ...input[arrayField]
+        ]);
+        if (paths.length > MAX_COMPOSABLE_SOURCE_PATHS) {
+          context.addIssue({
+            code: "custom",
+            path: [arrayField],
+            message: `${singularField} and ${arrayField} cannot contain more than ${MAX_COMPOSABLE_SOURCE_PATHS} distinct paths`
+          });
+        }
+      }
+      const roles = /* @__PURE__ */ new Map();
+      for (const [role, paths] of [
+        ["briefPath", input.briefPath === void 0 ? [] : [input.briefPath]],
+        ["docsPaths", [input.docsPath, ...input.docsPaths].filter(isDefined)],
+        ["openApiPaths", [input.openApiPath, ...input.openApiPaths].filter(isDefined)],
+        ["guidancePaths", input.guidancePaths]
+      ]) {
+        paths.forEach((sourcePath, index) => {
+          const key = normalizedInputPathKey(sourcePath);
+          const previous = roles.get(key);
+          if (previous !== void 0 && previous !== role) {
+            context.addIssue({
+              code: "custom",
+              path: [role, index],
+              message: `Source path conflicts with ${previous}: ${sourcePath}`
+            });
+          }
+          roles.set(key, role);
         });
       }
     });
@@ -44718,7 +45066,7 @@ var init_workflow_service = __esm({
       externalHeartbeatMs;
       async start(rawInput) {
         const input = WorkflowStartInputSchema.parse(rawInput);
-        const briefText = input.mode === "brief" && input.briefPath !== void 0 ? await readProjectTextFile(input.projectRoot, input.briefPath, "Brief") : void 0;
+        const sources = await prepareComposableSources(input);
         const publication = input.publication ?? (input.mode === "figma" ? "none" : "draft");
         const initialHead = await currentGitHead(input.projectRoot);
         const created = await this.dependencies.runService.createRun({
@@ -44735,19 +45083,40 @@ var init_workflow_service = __esm({
           runId: created.id,
           requestText: input.requestText
         });
-        const parsedBrief = briefText === void 0 || input.briefPath === void 0 ? void 0 : await this.dependencies.intakeRequestService.parseIntakeRequest({
-          runId: created.id,
-          requestText: briefText,
-          label: `brief:${input.briefPath}`
-        });
+        const intakeArtifactIds = [parsed.artifact.id];
+        for (const [kind, files] of [
+          ["brief", sources.brief === void 0 ? [] : [sources.brief]],
+          ["docs", sources.docs],
+          ["openapi", sources.openApi],
+          ["guidance", [...sources.guidance, ...sources.discoveredGuidance]]
+        ]) {
+          for (const file2 of files) {
+            const artifactIds = await ingestProjectTextSource({
+              service: this.dependencies.intakeRequestService,
+              runId: created.id,
+              kind,
+              file: file2
+            });
+            intakeArtifactIds.push(...artifactIds);
+          }
+        }
         const figmaUrl = input.figmaUrl ?? parsed.parsed.figmaUrls[0];
         const explicitScope = (input.mode === "feature" || input.mode === "figma") && input.scope === "auto" ? "ui" : input.scope;
-        const scope = classifyWorkflowScope({
-          requestText: briefText === void 0 ? input.requestText : `${input.requestText}
-
-${briefText}`,
+        const classificationText = [
+          input.requestText,
+          ...sources.brief === void 0 ? [] : [sources.brief.text],
+          ...sources.docs.map((file2) => file2.text),
+          ...sources.openApi.map((file2) => file2.text)
+        ].join("\n\n");
+        const classifiedScope = classifyWorkflowScope({
+          requestText: classificationText,
           explicitScope,
           figmaUrls: figmaUrl === void 0 ? parsed.parsed.figmaUrls : [figmaUrl]
+        });
+        const scope = WorkflowScopeSchema.parse({
+          ...classifiedScope,
+          api: classifiedScope.api || sources.openApi.length > 0,
+          specification: classifiedScope.specification || sources.openApi.length > 0
         });
         const gatePlan = buildGatePlan(scope);
         const deliveryProfile = buildDeliveryProfile({
@@ -44755,19 +45124,21 @@ ${briefText}`,
           changeKind: input.changeKind,
           publication,
           scope,
-          ...input.briefPath === void 0 ? {} : { briefPath: input.briefPath },
-          ...figmaUrl === void 0 ? {} : { figmaUrl }
+          ...sources.brief === void 0 ? {} : { briefPath: sources.brief.path },
+          ...figmaUrl === void 0 ? {} : { figmaUrl },
+          docsPaths: sources.docs.map((file2) => file2.path),
+          openApiPaths: sources.openApi.map((file2) => file2.path),
+          guidancePaths: sources.guidance.map((file2) => file2.path),
+          discoveredGuidancePaths: sources.discoveredGuidance.map((file2) => file2.path),
+          skillHints: sources.skillHints
         });
         const workload = estimateWorkload({
           phase: "intake",
           mode: deliveryProfile.mode,
           scope,
           signals: {
-            requirements: countIntakeRequirements(
-              briefText === void 0 ? input.requestText : `${input.requestText}
-${briefText}`
-            ),
-            apiOperations: scope.api ? 1 : 0,
+            requirements: countIntakeRequirements(classificationText),
+            apiOperations: sources.openApi.length > 0 ? countOpenApiOperations(sources.openApi) : scope.api ? 1 : 0,
             uiSurfaces: scope.ui ? 1 : 0,
             figmaNodes: figmaUrl === void 0 ? 0 : 1,
             testTargets: scope.code ? 1 : 0,
@@ -44780,10 +45151,7 @@ ${briefText}`
           stageName: "intake",
           workerId: WORKER_ID,
           leaseId: started.stage.lease.id,
-          artifactIds: [
-            parsed.artifact.id,
-            ...parsedBrief === void 0 ? [] : [parsedBrief.artifact.id]
-          ],
+          artifactIds: [...intakeArtifactIds],
           checkpoint: {
             name: "scope-classified",
             data: { scope, gatePlan, deliveryProfile, workload }
@@ -45394,6 +45762,24 @@ ${briefText}`
           `- Evidence digest: ${packet.evidenceDigest}`,
           `- Diff digest: ${packet.diffDigest}`,
           "",
+          "## Project guidance",
+          "",
+          "### Explicit",
+          "",
+          ...contracts.guidanceTrace.explicit.length === 0 ? ["- None."] : contracts.guidanceTrace.explicit.map(
+            (guidancePath) => `- ${markdownListValue(guidancePath)}`
+          ),
+          "",
+          "### Automatically discovered",
+          "",
+          ...contracts.guidanceTrace.discovered.length === 0 ? ["- None."] : contracts.guidanceTrace.discovered.map(
+            (guidancePath) => `- ${markdownListValue(guidancePath)}`
+          ),
+          "",
+          "## Applied optional skills",
+          "",
+          ...contracts.guidanceTrace.skillHints.length === 0 ? ["- None."] : contracts.guidanceTrace.skillHints.map((skillHint) => `- ${skillHint}`),
+          "",
           "## Requirement traceability",
           "",
           "| Requirement | Acceptance criteria | Review verdict |",
@@ -45508,6 +45894,30 @@ ${briefText}`
         });
       }
     };
+    MARKDOWN_LIST_CONTROL_CHARACTERS = /* @__PURE__ */ new Set([
+      "\\",
+      "`",
+      "*",
+      "_",
+      "{",
+      "}",
+      "[",
+      "]",
+      "(",
+      ")",
+      "#",
+      "+",
+      "-",
+      "!",
+      "|",
+      ">",
+      "<",
+      "&",
+      "~",
+      '"',
+      "'",
+      "="
+    ]);
   }
 });
 

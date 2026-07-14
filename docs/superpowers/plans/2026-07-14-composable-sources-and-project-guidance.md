@@ -22,6 +22,7 @@
 ### Task 1: Runtime source and guidance contract
 
 **Files:**
+
 - Modify: `src/workflow/workflow-contracts.ts`
 - Modify: `src/workflow/delivery-policy.ts`
 - Modify: `src/application/workflow-service.ts`
@@ -30,6 +31,7 @@
 - Test: `tests/integration/workflow-service.test.ts`
 
 **Interfaces:**
+
 - Consumes: existing `WorkflowStartInputSchema`, `DeliveryProfileSchema`, and `readProjectTextFile` safety boundary.
 - Produces: normalized `docsPaths`, `openApiPaths`, `guidancePaths`, `skillHints`, and `discoveredGuidancePaths` on the delivery profile.
 
@@ -58,6 +60,7 @@ type GuidanceTrace = {
 ### Task 2: SDK and repeatable CLI sources
 
 **Files:**
+
 - Modify: `packages/codex-sdk/src/spec-to-pr-runner.ts`
 - Modify: `packages/codex-sdk/src/cli.ts`
 - Modify: generated `packages/codex-sdk/dist/**`
@@ -65,6 +68,7 @@ type GuidanceTrace = {
 - Test: `tests/unit/codex-sdk-budget.test.ts`
 
 **Interfaces:**
+
 - Consumes: Task 1 delivery fields.
 - Produces: `docsPaths`, `openApiPaths`, `guidancePaths`, and `skillHints` SDK inputs plus repeatable `--docs`, `--openapi`, `--guidance`, and `--skill` flags.
 
@@ -87,6 +91,7 @@ type SpecToPrCodexRunInput = {
 ### Task 3: Skills, reviewers, PR traceability, and public guide
 
 **Files:**
+
 - Modify: `skills/spec-to-pr/SKILL.md`
 - Modify: `skills/intake-contracts/SKILL.md`
 - Modify: `skills/implement/SKILL.md`
@@ -103,6 +108,7 @@ type SpecToPrCodexRunInput = {
 - Test: `tests/plugin/layout.test.ts`
 
 **Interfaces:**
+
 - Consumes: normalized delivery profile and contracts guidance traceability from Tasks 1-2.
 - Produces: reviewer-verifiable guidance/skill sections in the PR report and a complete zero-to-100 recipe.
 
@@ -125,12 +131,14 @@ skillHints: [react-best-practices, next-best-practices, design-system, api-gener
 ### Task 4: Integration and release safety
 
 **Files:**
+
 - Verify: `packages/codex-sdk/dist/**`
 - Verify: `schemas/runtime/**`
 - Verify: `dist/mcp/server.js`
 - Verify: `artifacts/releases/spec-to-pr-0.2.0.zip`
 
 **Interfaces:**
+
 - Consumes: Tasks 1-3.
 - Produces: a clean, generated-output-synchronized commit.
 
