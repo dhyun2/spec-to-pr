@@ -11,6 +11,8 @@ Return a literal JSON-compatible object shaped as `{kind:"design-review", review
 
 Use Figma screenshots or an explicit legacy screenshot as the visual baseline. A feature E2E video demonstrates interaction but does not become a visual baseline or replace accessibility evidence.
 
+Inspect `guidanceTrace`. Verify every explicit and discovered project-guidance path and the applied optional skills in the design dimension: design-system and UI conventions, component mapping, responsive states, interaction, and accessibility. An unavailable optional hint that was not applied is not a blocker.
+
 Budget pressure never makes visual, interaction, or accessibility evidence optional when those gates are required. A split must remain independently design-verifiable; otherwise return changes-requested or blocked.
 
 Do not repair the UI while reviewing.

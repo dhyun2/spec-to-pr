@@ -5,7 +5,9 @@ title: v2 파이프라인
 
 # v2 파이프라인
 
-네 delivery mode는 별도 pipeline이 아니라 하나의 Run과 하나의 delivery profile을 공유합니다.
+네 delivery mode는 별도 pipeline이 아니라 하나의 Run과 하나의 delivery profile을 공유합니다. Delivery mode controls delivery and evidence; input sources compose independently.
+
+`feature` profile 하나가 brief, Figma URL, OpenAPI, 보조 문서, project guidance, optional skill hint를 모두 받을 수 있습니다. Brief/문서/OpenAPI는 scope와 workload 분류에 참여합니다. Project guidance is excluded from scope classification; explicit/discovered path와 실제 적용 skill만 trace로 유지합니다.
 
 ## 7개 public tool
 
@@ -38,7 +40,7 @@ flowchart LR
 | Stage               | 완료 조건                                                                                        |
 | ------------------- | ------------------------------------------------------------------------------------------------ |
 | `intake`            | scope와 delivery profile이 기록됨                                                                |
-| `contracts`         | 필요한 요구사항/API/mock/design contract와 mode-specific intake evidence가 실제 파일로 제출됨    |
+| `contracts`         | 필요한 요구사항/API/mock/design contract, guidance trace와 source-dependent intake evidence 제출 |
 | `implementation`    | API-backed UI는 선행 `api-ready` evidence 필수; feature는 targeted E2E + 영상 1개                |
 | `functional-review` | 코드 scope의 필수 기능 gate와 requirement가 독립적으로 승인됨                                    |
 | `design-review`     | UI scope의 visual/interaction/accessibility evidence가 독립적으로 승인됨; 비-UI면 not applicable |
@@ -81,23 +83,25 @@ flowchart LR
 
 API와 UI를 별도 agent/worktree로 나누지 않으므로 context handoff와 integration lane이 없습니다. API 없는 변경은 해당 준비를 not applicable로 처리합니다. API-backed UI는 물리적으로 서로 다른 비어 있지 않은 type/schema/wrapper/mock 파일과 `status: passed`인 JSON contract-test 결과를 안정적인 `implementationContextId`와 함께 `apiArtifacts`로 제출합니다. Path, symlink, hard link alias는 별도 증거가 아닙니다. 최종 구현은 같은 ID를 반복해야 하며 `apiReady: true` 주장만으로 완료될 수 없습니다.
 
+Project instruction precedence는 current user request → explicit `guidancePaths` → automatically discovered guidance → available/applicable installed skill → SpecToPR defaults입니다. Missing optional skill은 blocker가 아니며 project guidance가 generic skill 조언보다 우선합니다.
+
 ## 두 개의 독립 review
 
-- `functional-reviewer`: code scope에 적용. 계약 일치, diff, 관련 테스트, architecture/security 등 필요한 gate를 확인합니다.
-- `design-reviewer`: UI scope에만 적용. design baseline, design-system 사용, responsive/interaction state, accessibility를 확인합니다.
+- `functional-reviewer`: code scope에 적용. 계약 일치, diff, 관련 테스트, guidance 기반 파일 배치/API/framework convention, architecture/security gate를 확인합니다.
+- `design-reviewer`: UI scope에만 적용. guidance와 적용 skill에 따른 design baseline, design-system/UI convention, responsive/interaction state, accessibility를 확인합니다.
 
 구현 뒤 orchestrator가 `workflow_status` snapshot, accepted contracts, diff, evidence path로 immutable packet을 만들고 두 reviewer에게 전달합니다. Reviewer는 workflow tool을 직접 호출하거나 implementation을 수정하지 않고 schema-shaped verdict를 반환합니다. UI scope라면 병렬로 검토할 수 있습니다. 한 reviewer가 다른 verdict를 대신하거나 합산 Review Council을 두지 않습니다.
 
 ## Mode별 조건부 evidence
 
-| Mode      | Contracts 이전/중                                | Implementation                                 |
-| --------- | ------------------------------------------------ | ---------------------------------------------- |
-| `brief`   | `briefPath`의 acceptance criteria                | 관련 검사                                      |
-| `legacy`  | 요청 delta의 focused baseline                    | 영향받은 회귀 검사                             |
-| `feature` | 일반 contracts                                   | 단일 Playwright + passing JSON + 유효 영상 1개 |
-| `figma`   | host Figma capability → typed `figma-bundle` 1개 | UI/visual evidence                             |
+| Mode      | Delivery/evidence 조건                             | 조합 가능한 source 예시                          |
+| --------- | -------------------------------------------------- | ------------------------------------------------ |
+| `brief`   | acceptance criteria와 관련 검사                    | `briefPath` + docs/OpenAPI/guidance              |
+| `legacy`  | 요청 delta의 focused baseline과 영향받은 회귀 검사 | docs/OpenAPI/guidance                            |
+| `feature` | 단일 Playwright + passing JSON + 유효 영상 1개     | brief + Figma + OpenAPI + docs + guidance/skills |
+| `figma`   | Figma-primary UI/visual evidence                   | `figmaUrl` + docs/guidance                       |
 
-Mode는 tool, stage, lane을 추가하지 않습니다. Feature mode만 영상 비용을 지며 full-project E2E는 기본이 아닙니다. Figma provider는 runtime 밖에 있고 polling하지 않습니다.
+Mode는 tool, stage, lane을 추가하지 않습니다. Feature mode만 영상 비용을 지며 full-project E2E는 기본이 아닙니다. 어떤 mode든 `figmaUrl`이 있으면 host Figma capability의 typed `figma-bundle` 한 개가 필요합니다. Figma provider는 runtime 밖에 있고 polling하지 않습니다.
 
 ## Gate와 publication
 

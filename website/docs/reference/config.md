@@ -7,15 +7,36 @@ title: 설정 · CLI · 환경변수
 
 ## Delivery profile
 
-| 필드          | 값                                                                  | 의미            |
-| ------------- | ------------------------------------------------------------------- | --------------- |
-| `mode`        | `auto`, `brief`, `legacy`, `feature`, `figma`                       | entry mode      |
-| `changeKind`  | `auto`, `feature`, `fix`, `refactor`, `migration`, `design`, `docs` | 변경 성격       |
-| `publication` | `draft`, `none`                                                     | draft 발행 여부 |
-| `briefPath`   | project-relative path                                               | brief mode 필수 |
-| `figmaUrl`    | URL                                                                 | figma mode 필수 |
+Mode는 납품·증거 동작을 정하고 source는 독립적으로 조합됩니다.
 
-`feature` mode가 UI scope일 때만 `targetedFeatureE2E`와 `featureVideo` requirement가 켜집니다. `legacy`는 focused baseline, `figma`는 `figma-bundle`이 contracts 통과 조건입니다.
+| 필드                      | 값                                                                  | 의미                                       |
+| ------------------------- | ------------------------------------------------------------------- | ------------------------------------------ |
+| `mode`                    | `auto`, `brief`, `legacy`, `feature`, `figma`                       | delivery/evidence profile                  |
+| `changeKind`              | `auto`, `feature`, `fix`, `refactor`, `migration`, `design`, `docs` | 변경 성격                                  |
+| `publication`             | `draft`, `none`                                                     | draft 발행 여부                            |
+| `briefPath`               | project-relative path                                               | 단일 brief source                          |
+| `figmaUrl`                | URL                                                                 | 단일 Figma source                          |
+| `docsPaths`               | project-relative path 배열                                          | 보조 문서, 최대 20개                       |
+| `openApiPaths`            | project-relative path 배열                                          | OpenAPI 문서, 최대 20개                    |
+| `guidancePaths`           | project-relative path 배열                                          | 명시적 project guidance, 최대 20개         |
+| `discoveredGuidancePaths` | 정규화된 project-relative path 배열                                 | runtime이 발견해 profile에 기록한 guidance |
+| `skillHints`              | 설치 skill 이름 배열                                                | 선택적 가용성 확인, 최대 20개              |
+
+`feature` mode가 UI scope일 때 `targetedFeatureE2E`와 `featureVideo` requirement가 켜집니다. `legacy`는 focused baseline이 필요합니다. Mode와 관계없이 `figmaUrl`이 있으면 real `figma-bundle`이 contracts 통과 조건입니다. Brief, 보조 문서, OpenAPI는 scope/workload 분류에 참여하지만 project guidance는 추적만 하고 scope classification에서 제외합니다.
+
+### Bounded guidance discovery
+
+Runtime은 재귀 scan 없이 다음 root-relative 후보만 확인합니다.
+
+- `AGENTS.md`
+- `CLAUDE.md`
+- `README.md`
+- `docs/architecture/ARCHITECTURE.md`
+- `docs/etc/folder-structure.md`
+
+명시적 path는 반드시 존재해야 합니다. 자동 후보와 선택 skill이 없으면 무시합니다. Source는 canonical project root 안의 1 MB 이하 regular file이어야 하며 역할별 최대 20개로 제한됩니다.
+
+충돌 시 precedence는 다음 표현 그대로 적용합니다: current user request → explicit `guidancePaths` → automatically discovered project guidance → applicable installed skills → SpecToPR defaults. `skillHints`는 availability와 applicability를 확인하는 이름이며 skill 본문이나 임의 파일 경로가 아닙니다.
 
 ## SDK runner CLI
 
@@ -35,9 +56,11 @@ node packages/codex-sdk/dist/cli.js \
 | `--mode <mode>`          | delivery mode                    |
 | `--change-kind <kind>`   | 변경 분류                        |
 | `--brief <path>`         | brief/spec 입력                  |
-| `--docs <path>`          | 보조 문서 입력                   |
+| `--docs <path>`          | 반복 가능한 보조 문서 입력       |
 | `--figma <url>`          | Figma file/node URL              |
-| `--openapi <path>`       | OpenAPI 입력                     |
+| `--openapi <path>`       | 반복 가능한 OpenAPI 입력         |
+| `--guidance <path>`      | 반복 가능한 명시적 guidance      |
+| `--skill <name>`         | 반복 가능한 선택 skill hint      |
 | `--publish`              | 준비되면 draft PR/MR 발행        |
 | `--no-publish`           | 구현·리뷰 evidence까지만         |
 | `--resume <task-id>`     | 기존 Codex task 재개             |

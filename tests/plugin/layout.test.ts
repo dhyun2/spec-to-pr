@@ -248,9 +248,16 @@ describe("plugin layout", () => {
       "publication",
       "briefPath",
       "figmaUrl",
+      "docsPaths",
+      "openApiPaths",
+      "guidancePaths",
+      "skillHints",
     ]) {
       expect(main).toContain(`\`${field}\``);
     }
+    expect(main).toContain("Delivery mode controls delivery and evidence");
+    expect(main).toContain("sources compose independently");
+    expect(main).toContain("Any supplied `figmaUrl`");
     expect(main).toContain("Figma defaults to `publication: none`");
     expect(implement).toContain("targeted-feature");
     expect(implement).toContain("exactly one");
@@ -270,6 +277,14 @@ describe("plugin layout", () => {
     expect(intake).toContain("`capturedAt`");
     expect(intake).toContain("requirementManifest");
     expect(intake).toContain("legacyBaseline");
+    expect(intake).toContain("guidanceTrace");
+    expect(intake).toContain("current user request");
+    expect(intake).toContain("explicit `guidancePaths`");
+    expect(intake).toContain("automatically discovered project guidance");
+    expect(intake).toContain("applicable installed skills");
+    expect(intake).toContain("SpecToPR defaults");
+    expect(intake).toContain("Exclude project guidance from scope classification");
+    expect(intake).toContain("Missing optional skills do not block");
     const intakeBody = intake.slice(intake.indexOf("# Intake"));
     expect(intakeBody.indexOf("figma-bundle")).toBeLessThan(
       intakeBody.indexOf("Submit `contracts`"),
@@ -297,6 +312,12 @@ describe("plugin layout", () => {
     expect(designAgent).toContain("does not replace a visual baseline");
     expect(designAgent).toContain("immutable review packet");
     expect(designAgent).toContain("reviewPacketId");
+    for (const reviewer of [functionalAgent, designAgent]) {
+      expect(reviewer).toContain("guidanceTrace");
+      expect(reviewer).toContain("applied optional skills");
+    }
+    expect(functionalAgent).toContain("API and framework conventions");
+    expect(designAgent).toContain("design-system and UI conventions");
 
     const functionalReviewSkill = readFileSync(
       path.join(root, "skills", "review-functional", "SKILL.md"),
@@ -327,6 +348,9 @@ describe("plugin layout", () => {
     }
     expect(codexFunctionalAgent).toContain("reviewPacketId");
     expect(codexFunctionalAgent).toContain("Scope splits");
+    expect(codexFunctionalAgent).toContain("guidanceTrace");
+    expect(codexFunctionalAgent).toContain("applied optional skills");
+    expect(codexFunctionalAgent).toContain("API and framework conventions");
 
     const codexDesignAgent = readFileSync(
       path.join(root, ".codex", "agents", "spec-to-pr-design-reviewer.toml"),
@@ -334,6 +358,21 @@ describe("plugin layout", () => {
     );
     expect(codexDesignAgent).toContain("reviewPacketId");
     expect(codexDesignAgent).toContain("Scope splits");
+    expect(codexDesignAgent).toContain("guidanceTrace");
+    expect(codexDesignAgent).toContain("applied optional skills");
+    expect(codexDesignAgent).toContain("design-system and UI conventions");
+
+    const workflowService = readFileSync(
+      path.join(root, "src", "application", "workflow-service.ts"),
+      "utf8",
+    );
+    expect(workflowService).toContain('"## Project guidance"');
+    expect(workflowService).toContain('"### Explicit"');
+    expect(workflowService).toContain('"### Automatically discovered"');
+    expect(workflowService).toContain('"## Applied optional skills"');
+    expect(workflowService).toContain("contracts.guidanceTrace.explicit");
+    expect(workflowService).toContain("contracts.guidanceTrace.discovered");
+    expect(workflowService).toContain("contracts.guidanceTrace.skillHints");
 
     const publish = readFileSync(path.join(root, "skills", "publish", "SKILL.md"), "utf8");
     for (const field of [

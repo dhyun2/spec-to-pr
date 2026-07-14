@@ -970,6 +970,17 @@ describe("WorkflowService", () => {
   });
 
   it("requires a targeted feature E2E and exactly one video only in feature mode", async () => {
+    await mkdir(path.join(directory, "docs/architecture"), { recursive: true });
+    await writeFile(path.join(directory, "AGENTS.md"), "Use project-local conventions.\n", "utf8");
+    await writeFile(
+      path.join(directory, "docs/architecture/ARCHITECTURE.md"),
+      "Keep checkout API and UI in one implementation context.\n",
+      "utf8",
+    );
+    await execFileAsync("git", ["add", "AGENTS.md", "docs/architecture/ARCHITECTURE.md"], {
+      cwd: directory,
+    });
+    await execFileAsync("git", ["commit", "-qm", "add project guidance"], { cwd: directory });
     const started = await service.start({
       projectRoot: directory,
       requestText: "Add the user-facing checkout feature",
@@ -977,6 +988,8 @@ describe("WorkflowService", () => {
       mode: "feature",
       changeKind: "feature",
       publication: "draft",
+      guidancePaths: ["docs/architecture/ARCHITECTURE.md"],
+      skillHints: ["react-best-practices", "api-generator", "not-installed"],
     });
     await service.submit({
       runId: started.runId,
@@ -986,6 +999,11 @@ describe("WorkflowService", () => {
         summary: "Feature contracts ready.",
         artifactPaths: ["contracts/requirements.json"],
         requirementManifest: requirements("checkout-feature"),
+        guidanceTrace: {
+          explicit: ["docs/architecture/ARCHITECTURE.md"],
+          discovered: ["AGENTS.md"],
+          skillHints: ["react-best-practices", "api-generator"],
+        },
       },
     });
 
@@ -1113,6 +1131,15 @@ describe("WorkflowService", () => {
     });
     await service.advance({ runId: started.runId, until: "report" });
     const report = await reportMarkdown(store, artifactStore, started.runId);
+    expect(report).toContain("## Project guidance");
+    expect(report).toContain("### Explicit");
+    expect(report).toContain("docs/architecture/ARCHITECTURE.md");
+    expect(report).toContain("### Automatically discovered");
+    expect(report).toContain("AGENTS.md");
+    expect(report).toContain("## Applied optional skills");
+    expect(report).toContain("react-best-practices");
+    expect(report).toContain("api-generator");
+    expect(report).not.toContain("not-installed");
     expect(report).toContain("## Requirement traceability");
     expect(report).toContain("## Feature E2E video");
     expect(report).toContain("test-results/checkout.mp4");

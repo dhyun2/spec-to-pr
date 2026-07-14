@@ -15,9 +15,11 @@ English version: [README.md](README.md)
 
 모드별 추가 증거가 필요 없는 가벼운 요청은 `auto`를 사용할 수 있습니다.
 
+Delivery mode는 납품·증거 정책을 정하고 input source는 독립적으로 조합됩니다. `feature` Run 하나에 `briefPath`, `figmaUrl`, 반복 가능한 `docsPaths`와 `openApiPaths`, `guidancePaths`, 선택적 `skillHints`를 함께 줄 수 있습니다. Figma URL이 있으면 `feature` 모드에서도 실제 bundle이 필수입니다. Project guidance는 추적하지만 scope 분류에서는 제외합니다. 우선순위는 현재 사용자 요청, 명시적 guidance, 자동 발견 project guidance, 적용 가능한 설치 skill, SpecToPR 기본값 순서입니다. 선택 skill이 설치되지 않았어도 Run을 막지 않습니다.
+
 `feature` 모드는 테스트 경로, 태그, 프로젝트 중 하나로 변경 기능을 고른 Playwright 명령 하나만 허용합니다. 명령 체이닝, 테스트 나열·0건 통과 옵션, 전체 프로젝트 E2E는 거부합니다. Strict JSON 결과에는 `status: passed`, 정확한 `selector`, 제출과 같은 `implementationContextId`, 양수 `testCount`만 있어야 합니다. 영상은 재생 시간이 0보다 큰 구조적으로 유효한 WebM/MP4 컨테이너 한 개이며 25 MB 이하여야 합니다. 다른 모드는 delivery profile이 명시적으로 요구하지 않는 한 기능 영상을 만들지 않습니다.
 
-`figma` 모드는 호스트에 이미 연결된 Figma 기능을 사용합니다. `provider: host-connected-figma`, ISO `capturedAt`, 같은 `fileUrl`, 비어 있지 않은 `nodeIds`, 명시적인 `manifestPath`, 실제 PNG 한 개 이상을 담은 `figma-bundle`을 정확히 한 번 제출합니다. Strict manifest는 동일한 출처 값과 PNG `visualPaths`를 반복합니다. Figma 전용 runtime microtool이나 polling은 추가하지 않습니다.
+어떤 delivery profile이든 `figmaUrl`이 있으면 호스트에 이미 연결된 Figma 기능을 사용합니다. `provider: host-connected-figma`, ISO `capturedAt`, 같은 `fileUrl`, 비어 있지 않은 `nodeIds`, 명시적인 `manifestPath`, 실제 PNG 한 개 이상을 담은 `figma-bundle`을 정확히 한 번 제출합니다. Strict manifest는 동일한 출처 값과 PNG `visualPaths`를 반복합니다. Figma 전용 runtime microtool이나 polling은 추가하지 않습니다.
 
 ## 경량화된 v2 표면
 
@@ -39,7 +41,7 @@ Intake 직후 `workflow_status`가 `XS`~`XL` 작업량, 예상 토큰 범위, �
 - Claude Code 또는 Codex
 - 소스에서 빌드할 때만 `pnpm`
 - 발행할 때 인증된 `gh`/`glab` 또는 지원 토큰
-- Figma 모드에서만 호스트에 연결된 Figma 기능
+- Figma URL을 입력할 때 호스트에 연결된 Figma 기능
 - 사용자 기능 모드에서만 영상 녹화를 지원하는 브라우저 테스트 환경
 
 ## 설치
@@ -92,12 +94,19 @@ mode는 legacy. 청구서 재시도 동작만 바꿔줘. 현재 동작을 먼저
 영향받은 검사만 실행한 다음 draft PR로 올려줘. 제품 전체를 조사하거나 이관하지 마.
 ```
 
-사용자 기능 + 제한된 E2E 증거:
+조합 가능한 source를 사용한 zero-to-100 사용자 기능:
 
 ```text
 /spec-to-pr /path/to/app
-mode는 feature. 저장 주소 선택 기능을 추가해줘. 이 기능의 E2E만 실행하고
-영상은 정확히 하나만 녹화해서 draft PR에 링크해줘.
+mode: feature
+briefPath: docs/checkout.md
+figmaUrl: https://www.figma.com/design/FILE/checkout?node-id=12-345
+openApiPaths: [docs/openapi.yaml]
+docsPaths: [docs/business-rules.md, docs/error-cases.md]
+guidancePaths: [docs/architecture/ARCHITECTURE.md, docs/etc/folder-structure.md]
+skillHints: [react-best-practices, next-best-practices, design-system, api-generator]
+API와 UI를 한 context에서 구현하고, checkout E2E 하나와 영상 하나를 검증한 뒤
+project guidance와 적용한 선택 skill을 PR report에 남겨 draft PR로 발행해줘.
 ```
 
 Figma 구현:
@@ -123,7 +132,7 @@ node packages/codex-sdk/dist/cli.js \
   --publish
 ```
 
-입력에는 `--brief`, `--figma`, `--openapi`, `--docs`를 사용할 수 있습니다. `--publish`는 draft 발행을 요청하고 `--no-publish`는 구현·리뷰 증거까지만 진행합니다. `--max-turns`, `--usage-history`, `--no-usage-calibration`은 경계 실행과 숫자 전용 보정을 제어합니다.
+입력에는 `--brief`, `--figma`, 반복 가능한 `--openapi`/`--docs`, `--guidance`, `--skill`을 사용할 수 있습니다. `--publish`는 draft 발행을 요청하고 `--no-publish`는 구현·리뷰 증거까지만 진행합니다. `--max-turns`, `--usage-history`, `--no-usage-calibration`은 경계 실행과 숫자 전용 보정을 제어합니다.
 
 `--resume <task-id>`는 최신 `workflow_status`와 `resumeContext`에서 기존 durable Run을 이어가며 intake를 반복하거나 중복 Run을 만들지 않습니다.
 

@@ -15,9 +15,11 @@ Korean version: [README.ko.md](README.ko.md)
 
 `auto` remains available for lightweight requests that do not need a mode-specific evidence policy.
 
+Delivery mode controls delivery and evidence; input sources compose independently. A zero-to-100 `feature` run can combine `briefPath`, `figmaUrl`, repeated `docsPaths`, repeated `openApiPaths`, `guidancePaths`, and optional `skillHints`. Any supplied Figma URL requires a real bundle even when the mode is `feature`. Project guidance is traceable but excluded from scope classification. Instruction precedence is the current user request, explicit guidance, automatically discovered project guidance, applicable installed skills, then SpecToPR defaults. Missing optional skills never block a Run.
+
 Feature mode accepts one unchained Playwright invocation that selects the changed feature by test path, tag, or project; listing and pass-with-no-tests options plus broad/full-project commands are rejected. Its strict JSON result contains only `status: passed`, the exact `selector`, the submission's `implementationContextId`, and a positive `testCount`. Its one video must be a structurally valid WebM/MP4 container with non-zero duration and be no larger than 25 MB. Other modes do not record feature video unless their delivery profile explicitly requires it.
 
-Figma mode uses the Figma capability already connected to the host. It submits exactly one `figma-bundle` with `provider: host-connected-figma`, ISO `capturedAt`, matching `fileUrl`, non-empty `nodeIds`, a declared `manifestPath`, and one or more actual PNG files. The strict manifest repeats that provenance and lists the PNG `visualPaths`. SpecToPR does not expose Figma microtools or poll Figma.
+Any delivery profile with a supplied `figmaUrl` uses the Figma capability already connected to the host. It submits exactly one `figma-bundle` with `provider: host-connected-figma`, ISO `capturedAt`, matching `fileUrl`, non-empty `nodeIds`, a declared `manifestPath`, and one or more actual PNG files. The strict manifest repeats that provenance and lists the PNG `visualPaths`. SpecToPR does not expose Figma microtools or poll Figma.
 
 ## Lightweight v2 surface
 
@@ -41,7 +43,7 @@ Publishing only creates or updates a draft GitHub PR or GitLab MR. Draft flows w
 - Claude Code or Codex
 - `pnpm` only when building from source
 - authenticated `gh`/`glab` or a supported token when publishing
-- a host-connected Figma capability only for Figma mode
+- a host-connected Figma capability whenever a Figma URL is supplied
 - a browser test setup capable of recording video only for user-facing feature mode
 
 ## Install
@@ -94,12 +96,19 @@ Mode: legacy. Change only the invoice retry behavior. Capture the current behavi
 run affected checks, and publish a draft PR. Do not scan or migrate the whole product.
 ```
 
-User-facing feature with bounded E2E evidence:
+Zero-to-100 user-facing feature with composable sources:
 
 ```text
 /spec-to-pr /path/to/app
-Mode: feature. Add the saved-address selector. Run only its targeted E2E,
-record exactly one video, and publish a draft PR with the video linked.
+mode: feature
+briefPath: docs/checkout.md
+figmaUrl: https://www.figma.com/design/FILE/checkout?node-id=12-345
+openApiPaths: [docs/openapi.yaml]
+docsPaths: [docs/business-rules.md, docs/error-cases.md]
+guidancePaths: [docs/architecture/ARCHITECTURE.md, docs/etc/folder-structure.md]
+skillHints: [react-best-practices, next-best-practices, design-system, api-generator]
+Implement checkout in one API/UI context. Run only its targeted E2E, record exactly one
+video, verify project guidance and applied optional skills, and publish a draft PR.
 ```
 
 Figma implementation:
@@ -125,7 +134,7 @@ node packages/codex-sdk/dist/cli.js \
   --publish
 ```
 
-Use `--brief`, `--figma`, `--openapi`, and `--docs` for source inputs. `--publish` requests a draft; `--no-publish` stops after evidence-backed implementation and review. `--max-turns`, `--usage-history`, and `--no-usage-calibration` control bounded automation and numeric-only calibration.
+Use `--brief`, `--figma`, repeated `--openapi`/`--docs`, `--guidance`, and `--skill` for source inputs and optional installed-skill hints. `--publish` requests a draft; `--no-publish` stops after evidence-backed implementation and review. `--max-turns`, `--usage-history`, and `--no-usage-calibration` control bounded automation and numeric-only calibration.
 
 `--resume <task-id>` continues the existing durable Run from the latest `workflow_status` and `resumeContext`; it does not repeat intake or create a duplicate Run.
 

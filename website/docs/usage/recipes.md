@@ -5,7 +5,7 @@ title: 사용 레시피
 
 # 사용 레시피
 
-모드, 대상 저장소, 실제 source, 변경 범위, publication intent를 명시하면 가장 안정적입니다.
+모드는 납품·증거 정책을 정하고 source는 독립적으로 조합됩니다. 대상 저장소, 실제 source, 변경 범위, publication intent를 함께 명시하세요.
 
 ## 1. 기획서 → draft PR
 
@@ -33,19 +33,26 @@ changeKind: fix
 
 Legacy 모드는 구체적인 delta가 필요합니다. baseline은 해당 동작의 테스트, 로그, screenshot 등 실제 파일이어야 하며 contracts evidence에 포함됩니다.
 
-## 3. 사용자 기능 → targeted E2E + 영상 + draft PR
+## 3. Brief + Figma + OpenAPI → zero-to-100 feature draft PR
 
 ```text
 /spec-to-pr /absolute/path/to/app
 mode: feature
+briefPath: docs/checkout.md
+figmaUrl: https://www.figma.com/design/FILE/checkout?node-id=12-345
+openApiPaths: [docs/openapi.yaml]
+docsPaths: [docs/business-rules.md, docs/error-cases.md]
+guidancePaths: [docs/architecture/ARCHITECTURE.md, docs/etc/folder-structure.md]
+skillHints: [react-best-practices, next-best-practices, design-system, api-generator]
 changeKind: feature
-저장 주소 선택 기능을 구현해줘.
-이 기능을 고르는 test path/tag/project로 E2E 하나만 실행하고,
-.webm 또는 .mp4 영상은 정확히 하나만 기록해서 draft PR에 링크해줘.
-프로젝트 전체 E2E는 실행하지 마.
+checkout을 API-backed UI로 구현해줘. Figma URL은 feature mode에서도 연결된 호스트로
+실제 figma-bundle을 만들고, API와 UI는 하나의 implementation context에서 진행해.
+checkout을 고르는 test path/tag/project로 E2E 하나만 실행하고 영상 하나만 기록해.
+project guidance와 실제 적용한 선택 skill을 reviewer와 PR report가 확인하게 해.
+프로젝트 전체 E2E는 실행하지 말고 draft PR로 발행해줘.
 ```
 
-Feature evidence에는 selector를 실제 인자로 쓰고 `--list`/`--pass-with-no-tests`를 쓰지 않는 단일 Playwright command, `status: passed`·정확한 selector·같은 `implementationContextId`·양수 `testCount`만 담은 strict JSON 결과, 재생 시간이 0보다 큰 구조적으로 유효한 WebM/MP4 video path가 필요합니다. 명령 체이닝, 전체 E2E, 이름만 영상인 파일, 영상 0개/2개 이상은 거부됩니다.
+`briefPath`가 함께 있어도 납품 모드는 `brief`가 아니라 `feature`입니다. Feature evidence에는 selector를 실제 인자로 쓰고 `--list`/`--pass-with-no-tests`를 쓰지 않는 단일 Playwright command, `status: passed`·정확한 selector·같은 `implementationContextId`·양수 `testCount`만 담은 strict JSON 결과, 재생 시간이 0보다 큰 구조적으로 유효한 WebM/MP4 video path가 필요합니다. 명령 체이닝, 전체 E2E, 이름만 영상인 파일, 영상 0개/2개 이상은 거부됩니다.
 
 ## 4. Figma URL → 디자인 구현
 
@@ -61,7 +68,7 @@ strict manifest에 나열한 실제 PNG visualPaths를 project-local figma-bundl
 URL만 근거로 주장하거나 Figma를 polling하지 마.
 ```
 
-Figma 모드는 디자인 구현까지만 끝낼 수 있습니다. draft PR도 원하면 마지막에 `publication: draft` 또는 “draft PR로 발행”을 추가하세요.
+Figma가 primary source인 이 모드는 디자인 구현까지만 끝낼 수 있습니다. 다른 모드에서도 `figmaUrl`을 공급하면 동일한 real bundle 경계가 적용됩니다. Draft PR도 원하면 마지막에 `publication: draft` 또는 “draft PR로 발행”을 추가하세요.
 
 ## 5. API가 있는 UI
 

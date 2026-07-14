@@ -13,25 +13,36 @@ pnpm build
 
 The runner passes one delivery profile to the shared v2 workflow:
 
-| `--mode`  | Required source              | Conditional behavior                                               |
-| --------- | ---------------------------- | ------------------------------------------------------------------ |
-| `brief`   | `--brief <path>`             | preserves supplied acceptance criteria                             |
-| `legacy`  | a concrete `--prompt`        | captures a focused current-behavior baseline                       |
-| `feature` | a user-facing feature prompt | runs only the changed-feature E2E and records exactly one video    |
-| `figma`   | `--figma <url>`              | uses the host Figma capability and submits one real `figma-bundle` |
-| `auto`    | none                         | activates no mode-specific evidence by default                     |
+| `--mode`  | Delivery/evidence condition                                     |
+| --------- | --------------------------------------------------------------- |
+| `brief`   | requires a brief and preserves its acceptance criteria          |
+| `legacy`  | captures a focused current-behavior baseline                    |
+| `feature` | runs only the changed-feature E2E and records exactly one video |
+| `figma`   | treats Figma as primary and submits one real `figma-bundle`     |
+| `auto`    | activates no mode-specific evidence by default                  |
 
 The modes share one pipeline. They do not add tools, durable stages, implementation lanes, or reviewers.
+
+Delivery mode controls delivery and evidence; sources compose independently. `briefPath`, `figmaUrl`, repeated `docsPaths`, repeated `openApiPaths`, `guidancePaths`, and optional `skillHints` can coexist in one profile. Use `mode: feature` for zero-to-100 user-facing delivery even when a brief is supplied. Any supplied Figma URL requires one real `figma-bundle`, including in feature mode.
 
 ## CLI
 
 ```bash
 node dist/cli.js \
   --cwd /path/to/app \
-  --mode brief \
+  --mode feature \
   --change-kind feature \
-  --brief docs/plan.md \
+  --brief docs/checkout.md \
+  --figma 'https://www.figma.com/design/FILE/checkout?node-id=12-345' \
   --openapi docs/openapi.yaml \
+  --docs docs/business-rules.md \
+  --docs docs/error-cases.md \
+  --guidance docs/architecture/ARCHITECTURE.md \
+  --guidance docs/etc/folder-structure.md \
+  --skill react-best-practices \
+  --skill next-best-practices \
+  --skill design-system \
+  --skill api-generator \
   --publish
 ```
 
@@ -44,9 +55,11 @@ Options:
 | `--mode <mode>`          | `auto`, `brief`, `legacy`, `feature`, or `figma`                       |
 | `--change-kind <kind>`   | `auto`, `feature`, `fix`, `refactor`, `migration`, `design`, or `docs` |
 | `--brief <path>`         | brief/spec source                                                      |
-| `--docs <path>`          | supporting documentation source                                        |
+| `--docs <path>`          | repeatable supporting documentation source                             |
 | `--figma <url>`          | Figma file or node URL                                                 |
-| `--openapi <path>`       | OpenAPI source                                                         |
+| `--openapi <path>`       | repeatable OpenAPI source                                              |
+| `--guidance <path>`      | repeatable explicit project-guidance source                            |
+| `--skill <name>`         | repeatable optional installed-skill hint                               |
 | `--publish`              | create or update a draft PR/MR when ready                              |
 | `--no-publish`           | stop after evidence-backed implementation and review                   |
 | `--resume <task-id>`     | resume an existing Codex task                                          |
@@ -57,6 +70,8 @@ Options:
 | `--no-review-agents`     | omit independent reviewer instructions                                 |
 
 Without an explicit mode, a Figma URL resolves to `figma`, a brief resolves to `brief`, and other requests resolve to `auto`. Brief, legacy, and feature profiles request draft publication unless `--no-publish` is supplied. Figma profile defaults to implementation without publication; use `--publish` when a draft PR/MR is wanted.
+
+The delivery profile records `docsPaths`, `openApiPaths`, explicit `guidancePaths`, automatically populated `discoveredGuidancePaths`, and `skillHints`. Guidance discovery checks only `AGENTS.md`, `CLAUDE.md`, `README.md`, `docs/architecture/ARCHITECTURE.md`, and `docs/etc/folder-structure.md`; it does not scan the repository recursively. Explicit sources must exist. Missing automatic candidates and optional skills are ignored. Precedence is: current user request; explicit `guidancePaths`; automatically discovered project guidance; applicable installed skills; SpecToPR defaults. Guidance is traceable but excluded from scope classification.
 
 ## Feature evidence boundary
 
@@ -72,7 +87,7 @@ It never asks for the full-project E2E suite by default. A broad command, missin
 
 ## Figma boundary
 
-The runner does not call a SpecToPR Figma microtool. Codex uses the Figma capability connected to its host, captures real nodes/screenshots/variables/assets/component context, writes project-local evidence, and submits exactly one `figma-bundle` through `workflow_submit`. The bundle declares `provider: host-connected-figma`, ISO `capturedAt`, matching `fileUrl`, non-empty `nodeIds`, `manifestPath`, and one or more real PNG artifacts. The strict manifest repeats the provenance and lists the PNG `visualPaths`. URL-only assertions, malformed images, repeated bundles, and provider polling are rejected.
+The runner does not call a SpecToPR Figma microtool. Whenever `figmaUrl` is supplied, Codex uses the Figma capability connected to its host, captures real nodes/screenshots/variables/assets/component context, writes project-local evidence, and submits exactly one `figma-bundle` through `workflow_submit`. The bundle declares `provider: host-connected-figma`, ISO `capturedAt`, matching `fileUrl`, non-empty `nodeIds`, `manifestPath`, and one or more real PNG artifacts. The strict manifest repeats the provenance and lists the PNG `visualPaths`. URL-only assertions, malformed images, repeated bundles, and provider polling are rejected.
 
 ## Workflow contract
 
@@ -116,7 +131,13 @@ const result = await runSpecToPrWithCodex({
   deliveryMode: "feature",
   changeKind: "feature",
   publication: "draft",
-  prompt: "Add the saved-address selector",
+  prompt: "Build checkout end to end",
+  briefPath: "docs/checkout.md",
+  figmaUrl: "https://www.figma.com/design/FILE/checkout?node-id=12-345",
+  openApiPaths: ["docs/openapi.yaml"],
+  docsPaths: ["docs/business-rules.md", "docs/error-cases.md"],
+  guidancePaths: ["docs/architecture/ARCHITECTURE.md", "docs/etc/folder-structure.md"],
+  skillHints: ["react-best-practices", "next-best-practices", "design-system", "api-generator"],
 });
 
 console.log(result.threadId, result.workload, result.budget, result.usage);

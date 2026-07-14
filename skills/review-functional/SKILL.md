@@ -11,6 +11,8 @@ Return a literal JSON-compatible object shaped as `{kind:"functional-review", re
 
 For API-backed UI, verify that the accepted `api-ready` checkpoint and final implementation use the same `implementationContextId`.
 
+Inspect `guidanceTrace`. Verify every explicit and discovered project-guidance path against changed-file placement, architecture, API and framework conventions, and confirm the applied optional skills were available, applicable, and subordinate to project guidance. An unavailable optional hint that was not applied is not a blocker.
+
 For a `feature` profile, verify one unchained Playwright invocation whose declared selector targets the changed feature and appears as an actual command argument. Require a strict project-local result JSON containing only `status: passed`, a selector exactly equal to `testSelector`, the implementation submission's matching `implementationContextId`, and a positive `testCount`, plus exactly one structurally valid, non-zero-duration WebM or MP4 container no larger than 25 MB. List-only, pass-with-no-tests, chained, broad, or unfiltered E2E commands are changes-requested even if they report success.
 
 Budget pressure never makes a required functional gate optional. Return changes-requested or blocked if a split omits its focused regression evidence or if an implementation reached the hard limit by skipping checks.

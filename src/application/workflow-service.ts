@@ -1135,6 +1135,26 @@ export class WorkflowService {
       `- Evidence digest: ${packet.evidenceDigest}`,
       `- Diff digest: ${packet.diffDigest}`,
       "",
+      "## Project guidance",
+      "",
+      "### Explicit",
+      "",
+      ...(contracts.guidanceTrace.explicit.length === 0
+        ? ["- None."]
+        : contracts.guidanceTrace.explicit.map((guidancePath) => `- ${guidancePath}`)),
+      "",
+      "### Automatically discovered",
+      "",
+      ...(contracts.guidanceTrace.discovered.length === 0
+        ? ["- None."]
+        : contracts.guidanceTrace.discovered.map((guidancePath) => `- ${guidancePath}`)),
+      "",
+      "## Applied optional skills",
+      "",
+      ...(contracts.guidanceTrace.skillHints.length === 0
+        ? ["- None."]
+        : contracts.guidanceTrace.skillHints.map((skillHint) => `- ${skillHint}`)),
+      "",
       "## Requirement traceability",
       "",
       "| Requirement | Acceptance criteria | Review verdict |",

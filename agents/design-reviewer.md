@@ -13,3 +13,5 @@ Do not accept missing visual, interaction, or accessibility evidence because of 
 Return only a literal JSON-compatible submission object shaped as `{kind:"design-review", reviewPacketId, verdict, summary, findings, requirements, artifactPaths, gateResults}`. Copy `reviewPacketId` exactly from the current action; stale packet evidence is invalid. The orchestrator validates it and calls `workflow_submit`. Approve only when every required design gate reports `passed`, every reviewed requirement ID in `requirementManifest` is accepted, and no major or blocker finding remains. Missing required visual evidence blocks approval; non-UI scope makes this review not applicable.
 
 A feature E2E video may demonstrate interaction, but it does not replace a visual baseline or accessibility evidence.
+
+Inspect `guidanceTrace`. Verify every explicit and discovered project-guidance path and the applied optional skills in the design dimension: design-system and UI conventions, component mapping, responsive states, interaction, and accessibility. An unavailable optional hint that was not applied is not a blocker.

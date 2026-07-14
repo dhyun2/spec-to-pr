@@ -8,12 +8,13 @@ description: Use when running an evidence-driven implementation from intake thro
 Use the v2 facade as the sole workflow authority:
 
 1. Call `workflow_info` and require contract version `2.0.0`.
-2. Choose one delivery profile. For `brief`, read the project-local brief before starting, set `scope: ui` when applicable, and include a compact faithful UI/API scope summary in `requestText`; the runtime also reads `briefPath` into classification. Call `workflow_start` with the literal fields `projectRoot`, `requestText`, `scope`, `mode`, `changeKind`, `publication`, and conditional `briefPath` or `figmaUrl`:
+2. Choose one delivery profile. Delivery mode controls delivery and evidence; sources compose independently. Call `workflow_start` with `projectRoot`, `requestText`, `scope`, `mode`, `changeKind`, `publication`, and any supplied `briefPath`, `figmaUrl`, `docsPaths`, `openApiPaths`, `guidancePaths`, or `skillHints`:
    - `brief`: require `briefPath`; default `changeKind: feature` and `publication: draft`.
    - `legacy`: require a concrete change request; use the actual change kind, commonly `fix`, and default `publication: draft`.
-   - `feature`: use only for user-facing UI delivery; set `changeKind: feature` and default `publication: draft`.
+   - `feature`: use for zero-to-100 user-facing UI delivery; set `changeKind: feature` and default `publication: draft`, even when the sources include a brief, Figma, OpenAPI, and supporting documents.
    - `figma`: require `figmaUrl`, set `changeKind: design`, and capture real Figma evidence before contracts. Figma defaults to `publication: none` unless the user requests a draft.
    - `auto`: preserve the lightweight v2 behavior when no mode was selected.
+   - Any supplied `figmaUrl` requires a real `figma-bundle` before contracts, including in `feature` mode.
 3. When `publication: draft`, inspect repository state before implementation. Work on an actual non-target `codex/<short-slug>` source branch; do not implement directly on the target branch or absorb unrelated dirty changes.
 4. Call `workflow_advance` until it returns an external action.
 5. Perform that action with the matching skill, then record its compact evidence with `workflow_submit`. For review actions, the orchestrator first calls `workflow_status`, freezes a review packet containing its `reviewPacketId`, Run/revision, base/head, binary diff digest, accepted contracts, and evidence paths, and passes the packet to the applicable independent reviewer. Reviewers do not call workflow tools; they copy the current `reviewPacketId` into literal schema-shaped submission objects for the orchestrator to validate and submit. A changes-requested verdict reopens implementation and invalidates reviews/report derived from that packet.

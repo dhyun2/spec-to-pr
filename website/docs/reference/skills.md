@@ -21,7 +21,7 @@ SpecToPR v2가 유지하는 skill은 정확히 9개입니다.
 
 ## Mode routing
 
-오케스트레이터가 `workflow_start`에 delivery profile을 기록합니다.
+오케스트레이터가 `workflow_start`에 delivery profile을 기록합니다. Mode는 납품·증거 동작을 정하고 brief/Figma/OpenAPI/보조 문서/project guidance source는 독립적으로 조합됩니다.
 
 - `brief`: `briefPath` 필수
 - `legacy`: concrete change request와 focused baseline 필수
@@ -30,6 +30,12 @@ SpecToPR v2가 유지하는 skill은 정확히 9개입니다.
 - `auto`: mode-specific evidence를 임의로 활성화하지 않음
 
 네 모드는 같은 `intake-contracts`, `implement`, review, publish skill을 재사용합니다. Mode마다 별도 skill이나 agent lane을 만들지 않습니다.
+
+## Project guidance와 optional skill routing
+
+`intake-contracts`는 explicit/discovered guidance를 `guidanceTrace`에 기록하고 scope 분류에서는 제외합니다. `implement`는 React, Next.js, design-system, API-generation hint를 available and applicable할 때만 사용합니다. Project guidance가 generic skill 조언보다 우선합니다. Missing optional skills do not block the Run; 실제 적용한 hint만 contracts와 PR report에 남깁니다.
+
+`review-functional`은 파일 배치, architecture, API와 framework convention 차원에서 guidance와 적용 skill을 확인합니다. `review-design`은 design-system/UI convention, component mapping, responsive/interaction/accessibility 차원에서 같은 trace를 확인합니다. Reviewer role은 늘 두 개뿐이며 optional skill마다 새 reviewer나 stage를 만들지 않습니다.
 
 Workload/budget도 별도 skill이 아닙니다. `workflow_status`의 `XS`~`XL` estimate와 전체 `requiredValidations`를 기존 skill들이 읽고, SDK runner가 action turn 경계에서 실제 usage를 집계합니다. Budget이 부족하거나 usage가 누락돼도 reviewer가 required gate/mode evidence를 생략하거나 approval로 바꿀 수 없습니다.
 

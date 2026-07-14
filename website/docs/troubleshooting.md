@@ -22,6 +22,10 @@ title: 트러블슈팅
 
 ## Mode 입력
 
+### Brief, Figma, OpenAPI를 함께 주면 mode를 무엇으로 해야 하나
+
+Mode는 source 종류가 아니라 납품·증거 정책입니다. 사용자에게 보이는 기능을 targeted E2E, 영상 하나, 독립 review, draft PR까지 전달하려면 brief가 있어도 `feature`를 사용하고 `briefPath`, `figmaUrl`, `docsPaths`, `openApiPaths`, `guidancePaths`, `skillHints`를 함께 공급하세요. Figma URL이 있으면 feature mode에서도 real `figma-bundle`이 필수입니다.
+
 ### Brief mode가 시작되지 않는다
 
 `briefPath`가 빠졌거나 대상 저장소에서 읽을 수 없는 경우입니다. Project-relative path를 명시하고 실제 파일을 확인하세요.
@@ -42,7 +46,21 @@ URL 문자열만으로는 evidence가 아닙니다.
 4. `provider: host-connected-figma`, ISO `capturedAt`, profile과 일치하는 `fileUrl`, 비어 있지 않은 `nodeIds`, JSON `manifestPath`를 기록합니다.
 5. Strict manifest에 같은 출처 값과 PNG `visualPaths`를 기록하고, manifest와 실제 PNG 한 개 이상을 포함한 typed `figma-bundle`을 정확히 한 번 제출합니다.
 
-같은 Run에 Figma bundle을 반복 제출하거나 SpecToPR에 Figma microtool을 추가하거나 provider 상태를 polling하는 방식으로 우회하지 않습니다. Host capability가 없다면 required evidence blocker를 해소할 때까지 Figma mode를 통과시킬 수 없습니다.
+같은 Run에 Figma bundle을 반복 제출하거나 SpecToPR에 Figma microtool을 추가하거나 provider 상태를 polling하는 방식으로 우회하지 않습니다. Host capability가 없다면 required evidence blocker를 해소할 때까지 `figmaUrl`이 있는 어떤 mode도 통과시킬 수 없습니다.
+
+## Project guidance와 optional skill
+
+### Explicit guidance가 없다고 나온다
+
+`guidancePaths`의 파일은 project root 안에 실제 regular file로 존재해야 하고 1 MB 이하여야 합니다. Runtime은 `AGENTS.md`, `CLAUDE.md`, `README.md`, `docs/architecture/ARCHITECTURE.md`, `docs/etc/folder-structure.md`만 자동 확인하며 `docs/`를 재귀 scan하지 않습니다. 명시한 파일 누락은 blocker지만 없는 자동 후보는 무시합니다.
+
+### Optional skill이 설치되지 않았다
+
+Missing optional skills do not block the Run. `skillHints`는 host가 이름을 확인해 available and applicable한 skill만 쓰도록 요청합니다. 설치되지 않았거나 관련 없는 hint는 적용 목록에서 빼고, project guidance와 나머지 required evidence를 계속 따르세요. 임의 경로에서 skill 본문을 읽거나 generic skill 조언으로 project guidance를 덮어쓰지 않습니다.
+
+### Guidance 때문에 UI/API gate가 잘못 켜졌다
+
+Project guidance는 durable instruction evidence이지만 scope classification에서 제외됩니다. `briefPath`, `docsPaths`, `openApiPaths`, request와 Figma source로 scope를 분류해야 합니다. PR report의 explicit/discovered guidance와 applied optional skills 목록은 traceability용이며 새 gate나 stage를 만들지 않습니다.
 
 ## Feature E2E와 영상
 

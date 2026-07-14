@@ -96,6 +96,82 @@ describe("v2 documentation", () => {
       expect(contents, file).not.toMatch(/JPEG|SVG/);
     }
   });
+
+  it("documents composable sources, guidance precedence, and the zero-to-100 feature recipe", () => {
+    const readmes = ["README.md", "README.ko.md", "packages/codex-sdk/README.md"].map((file) =>
+      readFileSync(path.join(root, file), "utf8"),
+    );
+    const recipe = readFileSync(path.join(root, "website/docs/usage/recipes.md"), "utf8");
+    const config = readFileSync(path.join(root, "website/docs/reference/config.md"), "utf8");
+    const skills = readFileSync(path.join(root, "website/docs/reference/skills.md"), "utf8");
+    const pipeline = readFileSync(path.join(root, "website/docs/concepts/pipeline.md"), "utf8");
+    const troubleshooting = readFileSync(
+      path.join(root, "website/docs/troubleshooting.md"),
+      "utf8",
+    );
+
+    for (const contents of readmes) {
+      for (const field of [
+        "briefPath",
+        "figmaUrl",
+        "docsPaths",
+        "openApiPaths",
+        "guidancePaths",
+        "skillHints",
+      ]) {
+        expect(contents).toContain(field);
+      }
+      expect(contents).toContain("mode: feature");
+    }
+
+    for (const field of [
+      "mode: feature",
+      "briefPath: docs/checkout.md",
+      "figmaUrl: https://www.figma.com/design/FILE/checkout?node-id=12-345",
+      "openApiPaths:",
+      "docsPaths:",
+      "guidancePaths:",
+      "skillHints:",
+    ]) {
+      expect(recipe).toContain(field);
+    }
+    expect(recipe).toContain("api-generator");
+    expect(recipe).toContain("design-system");
+    expect(recipe).toContain("react-best-practices");
+    expect(recipe).toContain("next-best-practices");
+
+    for (const field of [
+      "docsPaths",
+      "openApiPaths",
+      "guidancePaths",
+      "discoveredGuidancePaths",
+      "skillHints",
+    ]) {
+      expect(config).toContain(field);
+    }
+    for (const candidate of [
+      "AGENTS.md",
+      "CLAUDE.md",
+      "README.md",
+      "docs/architecture/ARCHITECTURE.md",
+      "docs/etc/folder-structure.md",
+    ]) {
+      expect(config).toContain(candidate);
+    }
+    expect(config).toContain("current user request");
+    expect(config).toContain("explicit `guidancePaths`");
+    expect(config).toContain("automatically discovered project guidance");
+    expect(config).toContain("applicable installed skills");
+    expect(config).toContain("SpecToPR defaults");
+
+    expect(skills).toContain("available and applicable");
+    expect(skills).toContain("Missing optional skills");
+    expect(pipeline).toContain("Delivery mode controls delivery and evidence");
+    expect(pipeline).toContain("excluded from scope classification");
+    expect(troubleshooting).toContain("Missing optional skills do not block");
+    expect(troubleshooting).toContain("feature mode");
+    expect(troubleshooting).toContain("figma-bundle");
+  });
 });
 
 function relativeFiles(directory: string, prefix = ""): string[] {
