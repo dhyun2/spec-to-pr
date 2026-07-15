@@ -48,26 +48,26 @@ node dist/cli.js \
 
 Options:
 
-| Option                   | Meaning                                                                |
-| ------------------------ | ---------------------------------------------------------------------- |
-| `--cwd <path>`           | target repository; required                                            |
-| `--prompt <text>`        | requested change or extra constraints                                  |
-| `--mode <mode>`          | `auto`, `brief`, `legacy`, `feature`, or `figma`                       |
-| `--change-kind <kind>`   | `auto`, `feature`, `fix`, `refactor`, `migration`, `design`, or `docs` |
-| `--brief <path>`         | brief/spec source                                                      |
-| `--docs <path>`          | repeatable supporting documentation source                             |
-| `--figma <url>`          | Figma file or node URL                                                 |
-| `--openapi <path>`       | repeatable OpenAPI source                                              |
-| `--guidance <path>`      | repeatable explicit project-guidance source                            |
-| `--skill <name>`         | repeatable optional installed-skill hint                               |
-| `--publish`              | create or update a draft PR/MR when ready                              |
-| `--no-publish`           | stop after evidence-backed implementation and review                   |
-| `--resume <task-id>`     | resume an existing Codex task                                          |
-| `--model <model>`        | optional model override                                                |
-| `--max-turns <n>`        | maximum workflow action-group turns; default `12`                      |
-| `--usage-history <p>`    | numeric-only JSONL calibration path                                    |
-| `--no-usage-calibration` | disable calibration reads and writes                                   |
-| `--no-review-agents`     | omit independent reviewer instructions                                 |
+| Option                   | Meaning                                                                           |
+| ------------------------ | --------------------------------------------------------------------------------- |
+| `--cwd <path>`           | target repository; required                                                       |
+| `--prompt <text>`        | requested change or extra constraints                                             |
+| `--mode <mode>`          | `auto`, `brief`, `legacy`, `feature`, or `figma`                                  |
+| `--change-kind <kind>`   | `auto`, `feature`, `fix`, `refactor`, `migration`, `design`, or `docs`            |
+| `--brief <path>`         | brief/spec source                                                                 |
+| `--docs <path>`          | repeatable supporting documentation source                                        |
+| `--figma <url>`          | Figma file or node URL                                                            |
+| `--openapi <path>`       | repeatable OpenAPI source                                                         |
+| `--guidance <path>`      | repeatable explicit project-guidance source                                       |
+| `--skill <name>`         | repeatable optional installed-skill hint                                          |
+| `--publish`              | create or update a draft PR/MR when ready                                         |
+| `--no-publish`           | stop after evidence-backed implementation and review                              |
+| `--resume <task-id>`     | resume an existing Codex task                                                     |
+| `--model <model>`        | optional model override                                                           |
+| `--max-turns <n>`        | maximum total SDK turns, including optional finalization/formatting; default `12` |
+| `--usage-history <p>`    | numeric-only JSONL calibration path                                               |
+| `--no-usage-calibration` | disable calibration reads and writes                                              |
+| `--no-review-agents`     | omit independent reviewer instructions                                            |
 
 Without an explicit mode, a Figma URL resolves to `figma`, a brief resolves to `brief`, and other requests resolve to `auto`. Brief, legacy, and feature profiles request draft publication unless `--no-publish` is supplied. Figma profile defaults to implementation without publication; use `--publish` when a draft PR/MR is wanted.
 
@@ -103,11 +103,15 @@ The runtime exposes an `XS`–`XL` intake estimate with a token range, confidenc
 
 SDK automation instructs Codex to stop after one external workflow action group per turn and requires a fresh structured workflow status from every action turn. Usage is available only when a turn completes, so the runner sums `input_tokens + output_tokens` and evaluates the policy at that boundary; cached input and reasoning output are retained as separate dimensions and are not added twice. At the first completed boundary at or above 80%, the runner creates a compact checkpoint from the durable run ID, stage/action status, blockers, workload, authoritative required validations, and `resumeContext` goal/project-relative evidence paths/submission summaries, then starts a fresh thread. It cannot interrupt at the exact token inside a running turn or undo multiple actions already performed by an agent that ignored the boundary instruction. Missing usage on a nonterminal turn returns `usage-unavailable` instead of treating it as zero.
 
+Every fresh `workflow_status` is the compact action envelope. The SDK projects typed `blockerDetails`, `deliveryProfile.publication`, `delegationPolicy`, `diagnosticPublication`, required validations, next actions, and resume context instead of repeating long skill/tool instructions at every boundary. Optional skill hints and recommendations are availability signals only; `guidanceTrace.appliedSkills` records only skills actually invoked for the submitted work.
+
+Delegation stays bounded by the status policy: `XS`/`S` use no scouts, `M` permits at most one, and `L`/`XL` permit at most two only for independent read-heavy discovery. Scouts are read-only and cannot nest. Implementation has one writer, with API and UI kept in the same context. Applicable functional and design reviewers may run in parallel only after implementation when `delegationPolicy.parallelReviewers` allows it, and remain read-only.
+
 At the hard limit, no following action group starts and every workload size returns `split-required`. Scope splitting creates independently verifiable slices rather than deleting gates. The caller cannot override the automatic hard limit. Calibration changes only the displayed estimate; the enforced limit is always the default maximum for the active workload size. Checkpoint and continuation prompts include the effective used, remaining, checkpoint, and hard-limit counters rather than a stale runtime estimate.
 
 By default, samples are stored at `~/.codex/spec-to-pr/usage-history.jsonl`. Records contain only mode/workload enums, estimated and actual numeric counters, turn/checkpoint counts, completion, and time. They never contain prompts, sources, repository paths, code, diffs, tool payloads, or final responses. Only fresh, non-resumed completed runs with complete usage are recorded; resumed invocations neither read mode-specific calibration nor record their tail counters because they do not represent the whole Run. Legacy samples whose recorded hard limit differs from the workload default are ignored, so an old caller-approved large run cannot affect later estimates or limits. Ten matching automatic-policy samples enable median/p90 display calibration; confidence increases with sample count and stable spread. The store serializes writes, replaces the file atomically, retains at most 256 records from the last year in at most 1 MiB, revalidates location and file type on every access, and refuses symlinks, hard links, devices, pipes, and oversized files. History reads/writes are best-effort and return `usageCalibration.read/write: unavailable` without failing completed workflow work. Use `--usage-history` to relocate this store or `--no-usage-calibration` to disable both reads and writes.
 
-If `outputSchema` is supplied programmatically, workflow action turns remain unconstrained by that final schema. After a terminal workflow status, one formatting-only turn applies the caller schema without performing another workflow action only while complete usage is known below the hard limit. `result.outputFormatting` reports `applied`, `failed`, `budget-skipped`, `usage-unavailable`, `not-terminal`, or `not-requested`, so callers never have to assume the final response matches their schema. A formatting error is best-effort: the runner preserves the terminal workflow response, reports `failed`, marks aggregate usage partial because the failed turn has no usage payload, and skips calibration recording. Once the limit is known to be reached, the runner returns the terminal action response instead of starting a formatting turn.
+If `outputSchema` is supplied programmatically, workflow action turns remain unconstrained by that final schema. After a terminal workflow status, one formatting-only turn applies the caller schema without performing another workflow action only while complete usage is known below the hard limit and a `maxTurns` slot remains. `result.outputFormatting` reports `applied`, `failed`, `budget-skipped`, `usage-unavailable`, `not-terminal`, or `not-requested`, so callers never have to assume the final response matches their schema. A formatting error is best-effort: the runner preserves the terminal workflow response, reports `failed`, marks aggregate usage partial because the failed turn has no usage payload, and skips calibration recording. Once a limit is known to be reached, the runner returns the terminal action response instead of starting a formatting turn.
 
 When `resumeThreadId` or `--resume` is supplied, the first turn recovers the latest durable run ID from task history and calls `workflow_status`. It continues that Run from `resumeContext` and never repeats intake or creates a replacement Run.
 
@@ -120,6 +124,8 @@ Implementation remains in one Codex context. For API-backed UI, Codex submits `k
 The SDK pins the first accepted durable Run ID and stops with `run-mismatch` if a later boundary reports another Run. The first structured status becomes authoritative for validation applicability; later statuses may add validations but cannot remove them.
 
 `workflow_publish` is draft-only. Before publication, the runner instructs Codex to use a non-target `codex/*` source branch, commit only intended changes, and require a clean tree with at least one commit beyond the target; runtime preflight enforces the committed delta. It never merges, approves, closes, or marks a review request ready. `workflow_archive` is explicit and requires verified post-merge evidence.
+
+When a draft-intent Run becomes blocked, the SDK may use exactly one remaining turn to publish the blocked diagnostic through `workflow_publish` with `intent: "blocked-diagnostic"`. It does so only when its live local preflight already finds a clean non-target `codex/*` branch, at least one committed change beyond the target, a supported GitHub/GitLab `origin`, existing non-interactive credentials, complete usage below the hard limit, and a remaining `maxTurns` slot. Canonical `github.com` and `gitlab.com` hosts are recognized automatically; every enterprise/custom hostname requires an explicit `SPEC_TO_PR_GIT_HOST` override. Lookalike hostnames are not inferred from substrings. Publication `none`, an existing diagnostic request, a `publish-precondition` blocker, missing usage/budget, or any failed git/credential check receives no finalization turn; the local diagnostic remains authoritative. The finalization status can remain blocked and is never retried recursively.
 
 ## Programmatic use
 

@@ -1,6 +1,6 @@
 {
   "name": "spec-to-pr",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Fast, evidence-backed Codex workflow for turning briefs, legacy changes, Figma designs, and API contracts into verified draft pull requests.",
   "author": {
     "name": "SpecToPR Team",

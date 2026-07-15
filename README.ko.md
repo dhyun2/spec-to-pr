@@ -4,6 +4,8 @@
 
 English version: [README.md](README.md)
 
+> **버전 표기:** 이 README는 `main` 브랜치의 **릴리스 0.2.1** 동작을 설명합니다.
+
 ## 네 가지 납품 모드
 
 | 모드      | 입력                        | 검증                                                 | 결과                             |
@@ -25,7 +27,7 @@ Delivery mode는 납품·증거 정책을 정하고 input source는 독립적으
 
 - **MCP tool 7개:** `workflow_info`, `workflow_start`, `workflow_advance`, `workflow_submit`, `workflow_status`, `workflow_publish`, `workflow_archive`
 - **durable stage 8개:** intake, contracts, implementation, functional review, design review, report, publish, archive
-- **skill 9개:** `spec-to-pr`, `doctor`, `intake-contracts`, `implement`, `review-functional`, `review-design`, `publish`, `archive-openspec`, `prepare-release`
+- **skill 8개:** `spec-to-pr`, `doctor`, `intake-contracts`, `implement`, `review-functional`, `review-design`, `publish`, `archive-openspec`
 - **독립 reviewer 2개:** `functional-reviewer`, UI 범위에만 적용되는 `design-reviewer`
 
 API와 UI 구현은 하나의 context에서 진행합니다. API 기반 UI라면 물리적으로 서로 다른 비어 있지 않은 type, schema, wrapper, mock 파일과 `status: passed`인 JSON contract-test 결과를 안정적인 `implementationContextId`와 함께 `api-ready`로 먼저 제출하고, 최종 구현에도 같은 ID를 냅니다. Path, symlink, hard link alias는 별도 증거로 인정하지 않습니다. `apiReady: true` 주장만으로는 통과하지 않습니다. API/UI 구현 에이전트와 통합 lane을 따로 두지 않습니다. 구현 뒤 orchestrator가 `workflow_status` snapshot, contracts, diff, evidence path를 고정해 독립 reviewer에게 넘기며 reviewer는 workflow tool을 직접 호출하지 않습니다.
@@ -33,6 +35,8 @@ API와 UI 구현은 하나의 context에서 진행합니다. API 기반 UI라면
 Intake 직후 `workflow_status`가 `XS`~`XL` 작업량, 예상 토큰 범위, 신뢰도, 근거, 80% checkpoint 기준과 authoritative required-validation 목록을 보여줍니다. 같은 status의 compact `resumeContext`에는 기록된 목표, 프로젝트 상대 evidence 경로, 제출 요약이 포함됩니다. Contracts에는 실제 관측값이 하나 이상인 숫자형 `workloadSignals`를 선택적으로 제출해 새 tool/stage 없이 추정치를 정교화할 수 있습니다. SDK는 첫 durable Run ID를 고정하고, 각 turn이 workflow action group 하나 뒤에 멈추도록 지시하며, 완료 경계마다 새 status를 요구해 실제 input+output token을 합산합니다. 80% 이상인 첫 경계에서는 compact 새 thread로 이어가고, 자동 hard limit에서는 작업 크기와 관계없이 필수 검증을 그대로 유지한 채 `split-required`로 멈춥니다. 사용자가 숫자 한도를 지정하는 기능은 없습니다. Usage가 없으면 `usage-unavailable`로 다음 action을 막습니다. 신규 완료 Run 이력은 숫자와 enum만 저장해 표시 범위만 보정하고, 자동 hard limit은 workload class 기본 최대값으로 고정됩니다. 과거에 다른 hard limit으로 기록된 표본은 보정에서도 제외합니다. Calibration history 기록은 직렬·원자적으로 처리되고, 크기와 보존 개수가 제한되며, 매 접근마다 다시 검증됩니다. Prompt, code, diff, path, tool output, final response는 저장하지 않으며 선택적 history I/O 실패가 workflow 성공을 뒤집지 않습니다.
 
 발행은 draft GitHub PR 또는 GitLab MR을 생성·갱신하는 데서 끝납니다. Draft 흐름은 target이 아닌 `codex/*` source branch에서 의도한 변경만 commit하며, runtime은 clean tree와 target보다 한 개 이상 앞선 source commit을 요구합니다. merge, approve, close, ready 전환은 하지 않습니다.
+
+정상 발행은 `workflow_publish intent: ready`를 사용합니다. Required input/tool, policy, verification, publish precondition, budget split, unexpected failure가 Run을 막으면 redacted typed `blockerDetails`에 완료 작업, attempted recovery, 미실행 validation, exact unblock action을 남깁니다. Preflight가 유효하면 `intent: blocked-diagnostic` draft를 낼 수 있지만 계속 `status: blocked`입니다. `PUBLISH_NO_DELTA` 등 preflight가 안 되면 empty commit/issue fallback 없이 **local blocked report**를 반환합니다. Required browser proof가 없으면 `BROWSER_NOT_RUN`입니다. 복구는 같은 durable Run을 이어가며 같은 source/target의 **same draft PR**을 blocked에서 ready로 갱신합니다.
 
 ## 요구사항
 
@@ -153,9 +157,11 @@ pnpm plugin:validate
 
 ## 문서
 
-유지되는 전체 가이드는 **https://dhyun2.github.io/spec-to-pr/** 에 있습니다. 사전 준비, 설치, 네 가지 케이스, v2 pipeline, skill, 설정, 트러블슈팅을 다룹니다.
+유지되는 전체 가이드는 **https://dhyun2.github.io/spec-to-pr/** 에 있습니다. 사전 준비, 설치, 네 가지 케이스, v2 pipeline, skill, 설정, 트러블슈팅과 Spec Kit/OpenSpec/Kiro/BMAD 공식 자료 비교를 다룹니다.
 
 [기획서 → draft PR 사용법](https://dhyun2.github.io/spec-to-pr/usage/brief)에서 필수 입력, 복사 가능한 프롬프트, 진행 단계, blocker, 증거와 예상 draft PR을 확인할 수 있습니다. 나머지 세 케이스는 사용법 사이드바에서 각각 열 수 있습니다.
+
+[비교와 채택 정책](https://dhyun2.github.io/spec-to-pr/concepts/comparison)에서 adopted, conditional, rejected orchestration pattern을 확인할 수 있습니다.
 
 ```bash
 pnpm --dir website install

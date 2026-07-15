@@ -1,3 +1,5 @@
+import type { WorkloadSize } from "./workload-budget.js";
+
 export type CodexReviewAgentProfile = {
   name: string;
   focus: string;
@@ -35,6 +37,46 @@ export const CODEX_REVIEW_AGENT_PROFILES: CodexReviewAgentProfile[] = [
       "An explicit approved, changes-requested, or blocked verdict with findings and evidence handles.",
   },
 ];
+
+export type CodexScoutRoutingPolicy = {
+  maxReadOnlyScouts: 0 | 1 | 2;
+  independentReadHeavyOnly: true;
+  allowNested: false;
+  parallelWriters: false;
+  parallelReviewersAfterImplementation: boolean;
+};
+
+export function scoutRoutingForWorkload(workloadSize: WorkloadSize): CodexScoutRoutingPolicy {
+  return {
+    maxReadOnlyScouts:
+      workloadSize === "M" ? 1 : workloadSize === "L" || workloadSize === "XL" ? 2 : 0,
+    independentReadHeavyOnly: true,
+    allowNested: false,
+    parallelWriters: false,
+    parallelReviewersAfterImplementation: workloadSize === "L" || workloadSize === "XL",
+  };
+}
+
+export function buildCodexActionEnvelopeInstructions(options: {
+  publication: "draft" | "none";
+  includeReviewAgents: boolean;
+  includeDesignReview: boolean;
+}): string {
+  const reviewers = options.includeReviewAgents
+    ? options.includeDesignReview
+      ? "functional-reviewer and design-reviewer"
+      : "functional-reviewer"
+    : "no independent reviewer agent";
+  return [
+    "Treat each fresh workflow_status as the compact action envelope: use status.nextActions, status.blockerDetails, status.deliveryProfile.publication, status.delegationPolicy, status.diagnosticPublication, status.requiredValidations, and status.resumeContext instead of restating workflow policy.",
+    "Complete only one external action group and stop after its fresh status. Keep API and UI work in one implementation context.",
+    "Scout routing is XS/S=0, M<=1, L/XL<=2, and only for independent read-heavy discovery; no nested scouts or parallel writers. Independent functional/design reviewers may run in parallel only when status.delegationPolicy.parallelReviewers is true and only after implementation.",
+    `Applicable review route: ${reviewers}. Give each reviewer the immutable workflow_status snapshot, accepted contracts, diff, and evidence paths; reviewers neither edit implementation nor call workflow tools.`,
+    options.publication === "draft"
+      ? "Draft publication uses an actual non-target codex/<short-slug> branch: commit all intended changes only, require a clean tree and at least one commit beyond the target, and pass actual branches; workflow_publish never merges or marks ready."
+      : "Publication is none: do not create a publication-only branch or call workflow_publish.",
+  ].join("\n");
+}
 
 export function buildCodexReviewAgentInstructions(
   options: CodexReviewAgentInstructionOptions = {},

@@ -8,6 +8,8 @@ export const ReviewHostSchema = z.enum(["github", "gitlab"]);
 
 export const PublishModeSchema = z.literal("draft");
 
+export const PublishIntentSchema = z.enum(["ready", "blocked-diagnostic"]);
+
 export const PublishTargetSchema = z
   .object({
     host: ReviewHostSchema,
@@ -57,6 +59,14 @@ export const ReviewRequestPayloadSchema = z
   })
   .strict();
 
+export const ReviewRequestUpdateSchema = z
+  .object({
+    title: z.string().trim().min(1).max(250),
+    body: z.string().min(1),
+    labels: z.array(z.string().trim().min(1)),
+  })
+  .strict();
+
 export const ReviewRequestAssetRoleSchema = z.enum([
   "figma",
   "browser",
@@ -82,9 +92,12 @@ export const PublishedReviewAssetSchema = z
 export const PublishPlanSchema = z
   .object({
     runId: RunIdSchema,
+    intent: PublishIntentSchema,
     target: PublishTargetSchema,
     payload: ReviewRequestPayloadSchema,
-    reportDecision: ReportDecisionSchema,
+    reportIntent: PublishIntentSchema.optional(),
+    reportDecision: ReportDecisionSchema.optional(),
+    reportMetadataValid: z.boolean(),
     requiredTokenEnv: z.string().trim().min(1),
     willPushBranch: z.boolean(),
     willCreateOrUpdate: z.boolean(),
@@ -132,8 +145,10 @@ export const PublishResultSchema = z
 
 export type ReviewHost = z.infer<typeof ReviewHostSchema>;
 export type PublishMode = z.infer<typeof PublishModeSchema>;
+export type PublishIntent = z.infer<typeof PublishIntentSchema>;
 export type PublishTarget = z.infer<typeof PublishTargetSchema>;
 export type ReviewRequestPayload = z.infer<typeof ReviewRequestPayloadSchema>;
+export type ReviewRequestUpdate = z.infer<typeof ReviewRequestUpdateSchema>;
 export type ReviewRequestAssetRole = z.infer<typeof ReviewRequestAssetRoleSchema>;
 export type PublishedReviewAsset = z.infer<typeof PublishedReviewAssetSchema>;
 export type PublishPlan = z.infer<typeof PublishPlanSchema>;

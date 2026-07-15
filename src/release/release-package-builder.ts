@@ -25,6 +25,10 @@ type ZipEntry = {
 
 const FIXED_DOS_TIME = 0;
 const FIXED_DOS_DATE = 33;
+const MAINTAINER_ONLY_SKILL_PATHS = [
+  ".agents/skills/prepare-release/",
+  "skills/prepare-release/",
+] as const;
 
 export class ReleasePackageBuilder {
   public constructor(private readonly projectRoot: string) {}
@@ -104,6 +108,10 @@ export class ReleasePackageBuilder {
 }
 
 export function isAllowedReleaseFile(file: string): boolean {
+  if (MAINTAINER_ONLY_SKILL_PATHS.some((prefix) => file.startsWith(prefix))) {
+    return false;
+  }
+
   if ((RELEASE_FILE_ALLOWLIST as readonly string[]).includes(file)) {
     return true;
   }

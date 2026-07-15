@@ -18,7 +18,7 @@ title: 트러블슈팅
 
 ### v1 tool/skill 이름이 보인다
 
-현재 public surface는 `workflow_*` tool 7개와 skill 9개뿐입니다. Marketplace를 갱신하고 plugin을 다시 설치한 뒤 새 task를 시작하세요. 오래된 task context에서 삭제된 microtool을 계속 호출하지 마세요.
+현재 public surface는 `workflow_*` tool 7개와 public marketplace skill 8개뿐입니다. Marketplace를 갱신하고 plugin을 다시 설치한 뒤 새 task를 시작하세요. 오래된 task context에서 삭제된 microtool을 계속 호출하지 마세요.
 
 ## Mode 입력
 
@@ -97,6 +97,31 @@ API-backed UI인데 명시적 `api-ready` checkpoint가 없거나 최종 `apiRea
 
 필수 gate는 empty/skipped/not-run evidence로 통과하지 않습니다. Repository의 실제 command를 실행해 project-local 결과를 제출하거나, 그 gate가 scope에 적용되지 않는다는 근거가 있을 때만 not applicable로 분류하세요.
 
+### Browser 검사와 진단 도구를 어떻게 고르나
+
+1. Acceptance는 Playwright Test/CLI의 web-first assertion과 structured result로 증명합니다.
+2. Browser MCP/host browser는 가능한 환경에서 interaction 재현·inspection에만 optional로 씁니다.
+3. Chrome DevTools MCP는 console error, network request, performance trace, memory, live DOM을 조사할 때만 씁니다.
+4. Screenshot, video, DevTools trace, agent 관찰은 assertion을 대신하지 않습니다.
+
+Required browser command가 없거나 실행할 수 없으면 `BROWSER_NOT_RUN`입니다. Test path/tag/project selector, server start command, dependency/browser 설치와 실행 권한을 복구한 뒤 같은 Run에서 Playwright proof를 다시 제출하세요. Feature에는 변경 기능 E2E와 video 정확히 1개가 필요하지만 brief/legacy/Figma에는 이 profile 비용을 자동 추가하지 않습니다.
+
+## Typed blocker 진단
+
+`blockerDetails.kind`는 아래 일곱 runtime enum 중 하나여야 합니다. 함께 `stage`, `code`, `retryable`, `resumable`, completed work, redacted evidence, attempted recovery, unrun validations, exact unblock action을 확인합니다. Raw prompt, secret/token, transcript, unrestricted private absolute path는 넣지 않습니다.
+
+| `kind`                 | 대표 상황                                             | 해소 방법                                            |
+| ---------------------- | ----------------------------------------------------- | ---------------------------------------------------- |
+| `missing-input`        | brief/path/source 같은 required input 없음            | 정확한 required input을 제공                         |
+| `missing-tool`         | Figma/browser/auth capability 또는 required tool 없음 | required tool, 연결 또는 권한을 제공                 |
+| `policy`               | source 충돌, 금지된 broad E2E/branch action           | authoritative source/허용 범위를 결정                |
+| `verification`         | test/reviewer/evidence 실패 또는 `BROWSER_NOT_RUN`    | 실패 원인을 수정하고 같은 required validation 재실행 |
+| `publish-precondition` | dirty/target branch, auth/remote/commit 문제          | 아래 preflight를 외부에서 해소한 뒤 재개             |
+| `budget-split`         | `split-required`                                      | 독립적으로 검증 가능한 scope로 나누되 gate 유지      |
+| `unexpected`           | 분류되지 않은 deterministic/runtime 오류              | redacted evidence와 재현 단계로 root cause 진단      |
+
+Blocker가 retryable이어도 필수 evidence를 optional로 바꾸지는 않습니다. Resumable이면 새 Run을 만들지 않고 latest `workflow_status.resumeContext`에서 이어갑니다.
+
 ## Workload와 자동 경계 제어
 
 ### Intake estimate가 부정확하다
@@ -136,9 +161,35 @@ History read/write는 best-effort입니다. 권한 문제가 있어도 이미 �
 
 Publisher는 draft만 다룹니다. Merge, approve, ready 전환 실패를 publisher 문제로 취급하지 마세요. 그런 action은 애초에 수행하지 않습니다.
 
+### Diagnostic draft도 만들어지지 않는다
+
+`workflow_publish intent: blocked-diagnostic`은 blocker를 우회하는 명령이 아닙니다. 다음 preflight가 이미 충족되어야 합니다.
+
+- 의도한 변경만 commit되어 working tree가 clean
+- source와 target branch가 다름
+- GitHub/GitLab authentication이 유효하고 remote가 지원됨
+- target 대비 committed delta가 있으며 source가 최소 한 commit ahead
+
+Delta가 없으면 `PUBLISH_NO_DELTA`이며 empty commit이나 issue fallback을 만들지 않습니다. Preflight blocker는 같은 publish action이 스스로 auth/commit/branch를 바꿔 해결할 수 없으므로 반복 호출하지 않고 **local blocked report**와 exact unblock action을 반환합니다. Diagnostic draft가 만들어져도 계속 `status: blocked`이며 report/publish 성공이 아닙니다.
+
+### `diagnostic-publication-uncertain`이 반환된다
+
+Durable publication claim이 만료되었거나 heartbeat를 잃었습니다. GitHub/GitLab mutation은 성공했지만 결과 기록만 끊겼을 수 있으므로 동일 요청을 자동 재시도하면 duplicate draft 위험이 있습니다.
+
+1. 추가 발행을 멈춥니다. `recoverUncertain: false`가 기본값이고 SDK는 이를 자동 승인하지 않습니다.
+2. GitHub/GitLab에서 source/target이 일치하는 existing matching draft와 `[Blocked]` 제목·본문·label을 확인합니다.
+3. 확인 결과를 사용자에게 보여주고 명시적 복구 승인을 받습니다.
+4. 승인된 경우에만 같은 Run과 기존 `workflow_publish` action을 `recoverUncertain: true`로 호출합니다.
+
+이 선택적 복구는 별도 tool이나 stage를 추가하지 않습니다. Diagnostic evidence일 뿐이므로 blocked stages와 `status: blocked`를 passed로 바꾸지 않으며 required validation도 생략하지 않습니다.
+
+### Blocked draft를 정상 draft로 복구한다
+
+Unblock action을 수행한 뒤 **same Run**을 재개합니다. Source/target이 같은 기존 **same draft PR**을 `workflow_publish intent: ready`로 갱신하여 `[Blocked]` prefix와 blocked label을 제거하고 정상 title/body/report/assets를 반영합니다. 새 PR을 만들거나 diagnostic evidence를 passed verdict로 바꾸지 않습니다.
+
 ## 재개와 archive
 
-중단된 Run은 `workflow_status`로 blocker와 next action을 확인한 뒤 `workflow_advance`로 이어갑니다. 이미 승인된 stage를 다시 실행하지 않습니다.
+중단된 Run은 `workflow_status`로 blocker와 next action을 확인한 뒤 `workflow_advance`로 이어갑니다. 이미 승인된 stage를 다시 실행하지 않습니다. Diagnostic publication은 evidence일 뿐 success가 아닙니다.
 
 Archive는 review request의 authoritative merge evidence가 있어야 합니다. Branch push, closed 상태, 사용자 의도만으로 merge를 추측하지 않으며 runtime은 merge 상태를 polling하지 않습니다.
 

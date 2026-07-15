@@ -72,6 +72,36 @@ API 계약 증거를 먼저 만든 뒤 같은 implementation context에서 UI를
 5. **Design review:** `scope: ui`일 때만 시각·interaction·design-system·accessibility를 별도로 판정합니다.
 6. **Report / publish:** 요구사항 추적, 변경, 검사, 리뷰, 위험을 보고서로 만든 뒤 `publication: draft`일 때만 PR을 발행합니다.
 
+## 실행 정책: stage, agent, skill, tool
+
+| Durable stage       | 이 케이스의 정확한 동작                                                                                                |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `intake`            | `briefPath`, 요청, scope, publication을 정규화하고 workload와 `requiredValidations`를 고정합니다.                      |
+| `contracts`         | brief 수용 조건과 optional source의 우선순위·충돌·추적표를 확정합니다.                                                 |
+| `implementation`    | 한 명의 implementation writer가 한 `implementationContextId`에서 구현합니다. API-backed UI는 `api-ready`가 먼저입니다. |
+| `functional-review` | read-only `functional-reviewer`가 immutable packet으로 계약·diff·focused check를 판정합니다.                           |
+| `design-review`     | UI scope일 때만 read-only `design-reviewer`가 판정하고, non-UI면 not applicable입니다.                                 |
+| `report`            | traceability, validation, reviewer verdict, risk와 redacted blocker를 canonical report로 만듭니다.                     |
+| `publish`           | `publication: draft`이며 ready일 때만 같은 source/target의 draft PR/MR을 생성·갱신합니다.                              |
+| `archive`           | merge 뒤 authoritative evidence와 별도 사용자 요청이 있을 때만 실행합니다.                                             |
+
+Agent 정책은 XS/S read-only scout 0명, M 최대 1명, L/XL 최대 2명입니다. Scout는 독립적인 read-heavy 탐색만 하고 구현을 편집하지 않습니다. 구현 뒤 reviewer만 병렬일 수 있으며 **no nesting**, **parallel writer 금지**입니다.
+
+- `stageSkillRoute`: public action은 `intake-contracts` → `implement` → `review-functional` 순서이며 UI면 `review-design`, draft면 `publish`로 이어집니다. 이 routing은 `deliveryProfile.recommendedSkills`가 아닙니다.
+- `recommendedSkills`: `figmaUrl` → `figma`, `design-system`; `openApiPaths` → `api-generator`; 감지된 React/Next package → `react-best-practices`, `next-best-practices` optional candidate입니다.
+- Brief UI라는 이유만으로 `playwright`를 추천하지 않습니다. `mode: feature` + UI mapping만 해당 candidate를 추가합니다.
+- `appliedSkills`: `recommendedSkills`와 사용자가 준 `skillHints` 중 실제로 설치되어 available/applicable한 optional skill의 허용 합집합만 기록합니다. Missing optional skills는 blocker가 아닙니다.
+- **workflow MCP:** Run/status/submission/publication에 필수. **Figma host:** `figmaUrl`을 줬을 때만 필수. **Playwright Test/CLI:** brief의 `requiredValidations`에 browser acceptance가 있을 때만 assertion과 structured result의 oracle로 사용하며 feature E2E나 영상은 자동 요구하지 않습니다.
+- **Browser MCP:** 가능한 host에서 interactive reproduction/inspection에만 optional. **Chrome DevTools MCP:** console, network, performance, memory, live DOM 진단이 필요할 때만 conditional이며 screenshot/trace는 assertion을 대신하지 않습니다.
+
+### Ready, blocked diagnostic, resume
+
+정상 경로는 `workflow_publish intent: ready`가 evidence-backed draft를 만듭니다. Blocker가 생기면 typed `blockerDetails`와 exact unblock action을 남기고, publication preflight가 허용할 때만 `workflow_publish intent: blocked-diagnostic`으로 diagnostic draft를 만듭니다. 이 draft는 계속 `status: blocked`이며 report/publish 통과가 아닙니다. Clean tree, non-target branch, 인증, 지원 remote, committed delta, target보다 한 commit ahead 중 하나라도 없거나 `PUBLISH_NO_DELTA`면 empty commit/issue fallback을 만들지 않고 **local blocked report**를 반환합니다.
+
+`diagnostic-publication-uncertain`이면 자동 재발행하지 않습니다. GitHub/GitLab에서 matching draft를 확인해 사용자에게 보여주고, 명시적 승인을 받은 경우에만 같은 `workflow_publish`를 `recoverUncertain: true`로 호출합니다.
+
+해결 뒤에는 **same Run**을 `workflow_status`/`resumeContext`에서 이어가 이미 통과한 stage를 반복하지 않습니다. Diagnostic draft가 있었다면 같은 source/target의 **same draft PR**을 `[Blocked]` 제목과 blocked label에서 정상 `intent: ready` 제목/본문으로 갱신하고 blocked label을 제거합니다.
+
 ## 증거와 검증 <span id="evidence-brief"></span>
 
 다음은 **예상 예시** 경로입니다.

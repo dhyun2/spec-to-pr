@@ -1,4 +1,5 @@
 import { type ApprovalMode, type ModelReasoningEffort, type RunResult, type SandboxMode } from "@openai/codex-sdk";
+import { type BlockedDiagnosticPreflight } from "./boundary-runner.js";
 import { type AggregatedUsage, type SdkWorkloadEstimate } from "./workload-budget.js";
 export type SpecToPrCodexRunInput = {
     workingDirectory: string;
@@ -56,4 +57,5 @@ export type SpecToPrCodexRunResult = {
 export declare function runSpecToPrWithCodex(input: SpecToPrCodexRunInput): Promise<SpecToPrCodexRunResult>;
 export declare function buildSpecToPrPrompt(input: SpecToPrCodexRunInput): string;
 export declare function buildResumeSpecToPrPrompt(): string;
+export declare function inspectBlockedDiagnosticPreflight(workingDirectory: string, configuredEnv?: Record<string, string>): BlockedDiagnosticPreflight;
 export declare function validateSpecToPrRunInput(input: SpecToPrCodexRunInput): void;

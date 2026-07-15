@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -18,6 +18,112 @@ describe("v2 documentation", () => {
     expect(config).toContain('ko: { label: "한국어"');
     expect(config).toContain('en: { label: "English"');
     expect(navbar["item.label.사용법"]?.message).toBe("Usage");
+  });
+
+  it("publishes a bilingual comparison route from verified primary sources", () => {
+    const comparisonPaths = [
+      "website/docs/concepts/comparison.mdx",
+      "website/i18n/en/docusaurus-plugin-content-docs/current/concepts/comparison.mdx",
+    ];
+    const sidebar = readFileSync(path.join(root, "website/sidebars.ts"), "utf8");
+    const allowedPrimarySources = new Set([
+      "https://github.github.com/spec-kit/index.html",
+      "https://github.github.com/spec-kit/quickstart.html",
+      "https://github.github.com/spec-kit/reference/workflows.html",
+      "https://openspec.dev/",
+      "https://github.com/Fission-AI/OpenSpec/blob/main/docs/overview.md",
+      "https://github.com/Fission-AI/OpenSpec/blob/main/docs/commands.md",
+      "https://github.com/Fission-AI/OpenSpec/blob/main/docs/troubleshooting.md",
+      "https://kiro.dev/docs/specs/",
+      "https://kiro.dev/docs/cli/v3/specs/",
+      "https://kiro.dev/docs/specs/correctness/",
+      "https://kiro.dev/docs/web/specs/",
+      "https://docs.bmad-method.org/reference/workflow-map/",
+      "https://docs.bmad-method.org/tutorials/getting-started/",
+      "https://docs.bmad-method.org/how-to/quick-fixes/",
+      "https://learn.chatgpt.com/docs/agent-configuration/subagents.md",
+      "https://learn.chatgpt.com/docs/build-skills.md",
+      "https://learn.chatgpt.com/docs/extend/mcp.md",
+      "https://learn.chatgpt.com/docs/browser.md",
+      "https://docs.github.com/en/copilot/concepts/agents/cloud-agent/risks-and-mitigations",
+      "https://github.github.com/gh-aw/reference/safe-outputs-pull-requests/",
+      "https://github.github.com/gh-aw/reference/permissions/",
+      "https://code.claude.com/docs/en/sub-agents",
+      "https://code.claude.com/docs/en/slash-commands",
+      "https://code.claude.com/docs/en/hooks",
+      "https://code.claude.com/docs/en/mcp",
+      "https://code.claude.com/docs/en/chrome",
+      "https://cursor.com/docs/subagents",
+      "https://cursor.com/docs/rules",
+      "https://docs.cursor.com/agent",
+      "https://cursor.com/blog/agent-best-practices",
+      "https://docs.cline.bot/features/subagents",
+      "https://docs.cline.bot/mcp/mcp-overview",
+      "https://docs.cline.bot/tools-reference/all-cline-tools",
+      "https://docs.cline.bot/sdk/guides/multi-agent-teams",
+      "https://playwright.dev/docs/test-assertions",
+      "https://playwright.dev/docs/test-reporters",
+      "https://playwright.dev/docs/videos",
+      "https://developer.chrome.com/docs/devtools/agents/get-started",
+      "https://github.com/ChromeDevTools/chrome-devtools-mcp",
+      "https://github.com/ChromeDevTools/chrome-devtools-mcp/blob/main/docs/tool-reference.md",
+    ]);
+
+    expect(sidebar).toContain('items: ["concepts/pipeline", "concepts/comparison"]');
+    for (const file of comparisonPaths) {
+      expect(existsSync(path.join(root, file)), file).toBe(true);
+      const comparison = readFileSync(path.join(root, file), "utf8");
+      for (const framework of ["GitHub Spec Kit", "OpenSpec", "Kiro", "BMAD"]) {
+        expect(comparison, `${file}:${framework}`).toContain(framework);
+      }
+      for (const dimension of [
+        "Intake / contracts",
+        "Implementation",
+        "Validation",
+        "Publication",
+        "Blocked / resume",
+        "Best fit",
+      ]) {
+        expect(comparison, `${file}:${dimension}`).toContain(dimension);
+      }
+      for (const product of [
+        "Codex",
+        "GitHub Copilot",
+        "GitHub Agentic Workflows",
+        "Claude Code",
+        "Cursor",
+        "Cline",
+        "Playwright",
+        "Chrome DevTools MCP",
+      ]) {
+        expect(comparison, `${file}:${product}`).toContain(product);
+      }
+      const claudeRow =
+        comparison.split("\n").find((line) => line.includes("| [Claude Code](")) ?? "";
+      expect(claudeRow, `${file}:Claude Code version`).toContain("v2.1.172");
+      expect(claudeRow, `${file}:Claude Code nesting bound`).toContain("fixed maximum depth five");
+      expect(claudeRow, `${file}:Claude Code nesting is not configurable`).not.toMatch(
+        /configurable/i,
+      );
+      expect(claudeRow, `${file}:Claude Code nesting disablement`).toContain(
+        "omitting `Agent` disables nesting",
+      );
+      expect(claudeRow, `${file}:stale Claude Code claim`).not.toContain("no nesting");
+      expect(claudeRow, `${file}:SpecToPR nesting disposition`).toContain(
+        "SpecToPR rejects nesting",
+      );
+      expect(comparison).toContain("2026-07-15");
+      expect(comparison).toContain("Adopted");
+      expect(comparison).toContain("Conditional");
+      expect(comparison).toContain("Rejected");
+      expect(comparison).toContain("issue fallback");
+      expect(comparison).toContain("heavy permanent teams");
+      const links = comparison.match(/https:\/\/[^)\s]+/g) ?? [];
+      expect(links.length, `${file}:primary source links`).toBeGreaterThan(10);
+      for (const link of links) {
+        expect(allowedPrimarySources.has(link), `${file}:non-primary ${link}`).toBe(true);
+      }
+    }
   });
 
   it("links directly to four separate usage pages", () => {
@@ -88,6 +194,61 @@ describe("v2 documentation", () => {
         }
         expect(guide).toContain("requiredValidations");
         expect(guide).toContain("80%");
+        for (const stage of [
+          "intake",
+          "contracts",
+          "implementation",
+          "functional-review",
+          "design-review",
+          "report",
+          "publish",
+          "archive",
+        ]) {
+          expect(guide, `${locale}:${caseName}:${stage}`).toContain(`\`${stage}\``);
+        }
+        for (const policy of [
+          "implementation writer",
+          "read-only scout",
+          "functional-reviewer",
+          "design-reviewer",
+          "no nesting",
+          "parallel writer",
+          "recommendedSkills",
+          "appliedSkills",
+          "workflow MCP",
+          "Playwright Test/CLI",
+          "Browser MCP",
+          "Chrome DevTools MCP",
+          "intent: ready",
+          "intent: blocked-diagnostic",
+          "local blocked report",
+          "same Run",
+          "same draft PR",
+          "status: blocked",
+          "PUBLISH_NO_DELTA",
+        ]) {
+          expect(guide, `${locale}:${caseName}:${policy}`).toContain(policy);
+        }
+        const stageSkillRoute = guide.match(/^- `stageSkillRoute`:[^\n]+$/m)?.[0] ?? "";
+        const recommendation = guide.match(/^- `recommendedSkills`:[^\n]+$/m)?.[0] ?? "";
+        expect(stageSkillRoute, `${locale}:${caseName}:stageSkillRoute`).not.toBe("");
+        expect(recommendation, `${locale}:${caseName}:recommendedSkills`).not.toBe("");
+        expect(
+          recommendation,
+          `${locale}:${caseName}:stage skills are not recommendations`,
+        ).not.toMatch(
+          /intake-contracts|(?:^|`)implement`|review-functional|review-design|(?:^|`)publish`|archive-openspec/,
+        );
+        expect(recommendation).toContain("`figma`");
+        expect(recommendation).toContain("`design-system`");
+        expect(recommendation).toContain("`api-generator`");
+        expect(recommendation).toContain("`react-best-practices`");
+        expect(recommendation).toContain("`next-best-practices`");
+        if (caseName === "feature") {
+          expect(recommendation).toContain("`playwright`");
+        } else {
+          expect(recommendation).not.toContain("`playwright`");
+        }
         expect(guide).toContain(locale === "ko" ? "## 다른 사용법" : "## Other usage cases");
         expect(guide.match(/\]\(\.\/(?:brief|legacy|feature|figma)\)/g)).toHaveLength(3);
       }
@@ -130,6 +291,7 @@ describe("v2 documentation", () => {
       "037-use-boundary-budgeting-and-numeric-calibration.md",
     ]);
     expect(relativeFiles(path.join(root, "website", "docs"))).toEqual([
+      "concepts/comparison.mdx",
       "concepts/pipeline.md",
       "getting-started/installation.mdx",
       "getting-started/prerequisites.md",
@@ -146,6 +308,38 @@ describe("v2 documentation", () => {
     ]);
   });
 
+  it("keeps the eight-skill count synchronized across current repository documentation", () => {
+    const documentationPaths = [
+      "README.md",
+      "README.ko.md",
+      ...relativeFiles(path.join(root, "docs")).map((file) => `docs/${file}`),
+      ...relativeFiles(path.join(root, "website", "docs")).map((file) => `website/docs/${file}`),
+      ...relativeFiles(
+        path.join(root, "website", "i18n", "en", "docusaurus-plugin-content-docs", "current"),
+      ).map((file) => `website/i18n/en/docusaurus-plugin-content-docs/current/${file}`),
+      "website/docusaurus.config.ts",
+    ];
+    const staleSkillCounts = [
+      /\b(?:9|nine)\s+(?:(?:public|installed|marketplace)\s+){0,3}skills?\b/i,
+      /skills?\s*9개/i,
+      /9개(?:의)?\s*(?:(?:public|marketplace|설치된)\s+){0,3}skills?/i,
+      /아홉\s*(?:개(?:의)?)?\s*(?:(?:public|marketplace|설치된)\s+){0,3}skills?/i,
+    ];
+
+    for (const file of documentationPaths) {
+      const contents = readFileSync(path.join(root, file), "utf8");
+      for (const staleCount of staleSkillCounts) {
+        expect(contents, `${file}:${staleCount}`).not.toMatch(staleCount);
+      }
+    }
+    expect(
+      readFileSync(
+        path.join(root, "docs/adr/036-use-delivery-profiles-not-mode-specific-pipelines.md"),
+        "utf8",
+      ),
+    ).toContain("eight public marketplace skills");
+  });
+
   it("documents the four profiles and exact lightweight surface without v1 calls", () => {
     const paths = [
       "README.md",
@@ -159,7 +353,7 @@ describe("v2 documentation", () => {
     for (const mode of ["brief", "legacy", "feature", "figma"]) {
       expect(contents).toContain(`\`${mode}\``);
     }
-    for (const fact of ["7 MCP tools", "8 durable stages", "9 skills", "2 independent reviewers"]) {
+    for (const fact of ["7 MCP tools", "8 durable stages", "8 skills", "2 independent reviewers"]) {
       expect(readFileSync(path.join(root, "README.md"), "utf8")).toContain(fact);
     }
     for (const obsolete of [
@@ -196,6 +390,191 @@ describe("v2 documentation", () => {
     expect(contents).toContain("requiredValidations");
     expect(contents).toContain("resumeContext");
     expect(contents).toContain("outputFormatting");
+  });
+
+  it("synchronizes the eight public skills, blocked diagnostics, and release labels", () => {
+    const readme = readFileSync(path.join(root, "README.md"), "utf8");
+    const readmeKo = readFileSync(path.join(root, "README.ko.md"), "utf8");
+    const intro = readFileSync(path.join(root, "website/docs/intro.md"), "utf8");
+    const skills = readFileSync(path.join(root, "website/docs/reference/skills.md"), "utf8");
+    const skillsEn = readFileSync(
+      path.join(root, "website/i18n/en/docusaurus-plugin-content-docs/current/reference/skills.md"),
+      "utf8",
+    );
+    const pipeline = readFileSync(path.join(root, "website/docs/concepts/pipeline.md"), "utf8");
+    const troubleshooting = readFileSync(
+      path.join(root, "website/docs/troubleshooting.md"),
+      "utf8",
+    );
+    const config = readFileSync(path.join(root, "website/docusaurus.config.ts"), "utf8");
+    const adr = readFileSync(
+      path.join(root, "docs/adr/035-use-coarse-workflow-facade-and-split-reviews.md"),
+      "utf8",
+    );
+    const publicSkills = [
+      "spec-to-pr",
+      "doctor",
+      "intake-contracts",
+      "implement",
+      "review-functional",
+      "review-design",
+      "publish",
+      "archive-openspec",
+    ];
+
+    for (const contents of [skills, skillsEn]) {
+      expect(contents).toContain("8 public marketplace skills");
+      for (const skill of publicSkills) expect(contents).toContain(`\`${skill}\``);
+      expect(contents).not.toContain("`prepare-release`");
+      expect(contents).toContain("recommendedSkills");
+      expect(contents).toContain("appliedSkills");
+    }
+    expect(readme).toContain("Released 0.2.1");
+    expect(readmeKo).toContain("릴리스 0.2.1");
+    expect(config).toContain("Released 0.2.1");
+    expect(intro).toContain("skill 8개");
+    expect(adr).toContain("eight public marketplace skills");
+
+    const blockedDocs = [readme, readmeKo, pipeline, troubleshooting].join("\n");
+    for (const term of [
+      "blockerDetails",
+      "intent: blocked-diagnostic",
+      "status: blocked",
+      "local blocked report",
+      "PUBLISH_NO_DELTA",
+      "same draft PR",
+      "BROWSER_NOT_RUN",
+    ]) {
+      expect(blockedDocs).toContain(term);
+    }
+  });
+
+  it("documents explicit recovery for uncertain diagnostic publication in both locales", () => {
+    const localizedPaths = [
+      [
+        "ko",
+        "website/docs/troubleshooting.md",
+        "website/docs/concepts/pipeline.md",
+        "website/docs/reference/skills.md",
+      ],
+      [
+        "en",
+        "website/i18n/en/docusaurus-plugin-content-docs/current/troubleshooting.md",
+        "website/i18n/en/docusaurus-plugin-content-docs/current/concepts/pipeline.md",
+        "website/i18n/en/docusaurus-plugin-content-docs/current/reference/skills.md",
+      ],
+    ] as const;
+
+    for (const [locale, troubleshootingPath, pipelinePath, skillsPath] of localizedPaths) {
+      const troubleshooting = readFileSync(path.join(root, troubleshootingPath), "utf8");
+      const pipeline = readFileSync(path.join(root, pipelinePath), "utf8");
+      const skills = readFileSync(path.join(root, skillsPath), "utf8");
+      const localizedContract = [troubleshooting, pipeline, skills].join("\n");
+
+      for (const term of [
+        "diagnostic-publication-uncertain",
+        "recoverUncertain: false",
+        "recoverUncertain: true",
+        "GitHub/GitLab",
+        "workflow_publish",
+      ]) {
+        expect(localizedContract, `${locale}:${term}`).toContain(term);
+      }
+      expect(troubleshooting, `${locale}:explicit approval`).toMatch(/explicit|명시적/);
+      expect(troubleshooting, `${locale}:matching draft inspection`).toMatch(
+        /matching draft|일치하는 draft/,
+      );
+      expect(pipeline, `${locale}:blocked stages remain blocked`).toContain("blocked stages");
+      expect(skills, `${locale}:SDK never auto-approves`).toContain("SDK");
+      expect(skills, `${locale}:SDK never auto-approves`).toMatch(
+        /never auto-approves|자동 승인하지/,
+      );
+    }
+
+    const usagePaths = [
+      ...["brief", "legacy", "feature", "figma"].map((name) => `website/docs/usage/${name}.mdx`),
+      ...["brief", "legacy", "feature", "figma"].map(
+        (name) => `website/i18n/en/docusaurus-plugin-content-docs/current/usage/${name}.mdx`,
+      ),
+    ];
+    for (const file of usagePaths) {
+      const guide = readFileSync(path.join(root, file), "utf8");
+      expect(guide, file).toContain("diagnostic-publication-uncertain");
+      expect(guide, file).toContain("recoverUncertain: true");
+    }
+  });
+
+  it("documents portable secret-safe artifact paths without rejecting descriptive names", () => {
+    const evidenceSkills = [
+      "skills/spec-to-pr/SKILL.md",
+      "skills/intake-contracts/SKILL.md",
+      "skills/implement/SKILL.md",
+      "skills/review-functional/SKILL.md",
+      "skills/review-design/SKILL.md",
+    ];
+    for (const file of evidenceSkills) {
+      const skill = readFileSync(path.join(root, file), "utf8");
+      expect(skill, `${file}:artifactPaths`).toContain("artifactPaths");
+      expect(skill, `${file}:project-relative`).toContain("project-relative");
+      expect(skill, `${file}:portable separators`).toContain("`/`-separated");
+      expect(skill, `${file}:absolute paths`).toContain("absolute");
+      expect(skill, `${file}:secret values`).toMatch(/token.*password.*secret.*credential/i);
+    }
+
+    const pipelines = [
+      "website/docs/concepts/pipeline.md",
+      "website/i18n/en/docusaurus-plugin-content-docs/current/concepts/pipeline.md",
+    ];
+    for (const file of pipelines) {
+      const pipeline = readFileSync(path.join(root, file), "utf8");
+      for (const term of [
+        "artifactPaths",
+        "project-relative",
+        "`/`-separated",
+        "non-portable",
+        "token/password/secret/credential",
+        "`token-validation.json`",
+      ]) {
+        expect(pipeline, `${file}:${term}`).toContain(term);
+      }
+    }
+  });
+
+  it("documents every blockerDetails.kind as the exact runtime enum", () => {
+    const troubleshootingPaths = [
+      "website/docs/troubleshooting.md",
+      "website/i18n/en/docusaurus-plugin-content-docs/current/troubleshooting.md",
+    ];
+    const blockerKinds = [
+      "missing-input",
+      "missing-tool",
+      "policy",
+      "verification",
+      "publish-precondition",
+      "budget-split",
+      "unexpected",
+    ];
+
+    for (const file of troubleshootingPaths) {
+      const troubleshooting = readFileSync(path.join(root, file), "utf8");
+      expect(troubleshooting).toContain("blockerDetails.kind");
+      const firstColumnCells = troubleshooting
+        .split("\n")
+        .map((line) => line.match(/^\|\s*`?([^|`]+?)`?\s*\|/)?.[1]?.trim())
+        .filter((cell): cell is string => cell !== undefined);
+      for (const kind of blockerKinds) {
+        expect(firstColumnCells, `${file}:${kind}`).toContain(kind);
+      }
+      for (const humanized of [
+        "missing input/tool",
+        "missing input",
+        "missing tool",
+        "publish precondition",
+        "budget split",
+      ]) {
+        expect(firstColumnCells, `${file}:${humanized}`).not.toContain(humanized);
+      }
+    }
   });
 
   it("keeps every retained Figma checklist aligned with the typed provenance contract", () => {

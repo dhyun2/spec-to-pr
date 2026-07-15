@@ -50,6 +50,10 @@ flowchart LR
 
 Stage는 pending/running/passed/failed/blocked/skipped/waived 상태와 lease/checkpoint를 durable ledger에 보관합니다. 사용자는 세부 stage machine microtool 대신 `workflow_advance`와 `workflow_status`를 사용합니다.
 
+### Artifact evidence path 계약
+
+모든 `artifactPaths`와 artifact evidence path는 project root 기준의 portable project-relative, `/`-separated safe name이어야 합니다. Runtime은 ingestion 전에 absolute, traversal, control-character, backslash를 포함한 non-portable path와 secret-shaped path를 거부합니다. Path에 token/password/secret/credential **값**을 넣지 않습니다. `token-validation.json`처럼 증거 의미를 설명할 뿐 실제 비밀값을 포함하지 않는 이름은 허용됩니다.
+
 ## Workload와 자동 경계 제어
 
 Intake가 끝나면 같은 checkpoint에 `XS`~`XL`, 예상 token 최소/최대, `low`/`medium`/`high` 신뢰도, 근거, hard limit과 80% 기준을 기록합니다. `workflow_status.resumeContext`는 기록된 목표, 프로젝트 상대 evidence 경로, 종류별 최신 제출 요약을 compact하게 반환합니다. Goal은 4,000자, path는 200개(초기 50+최신 150)와 각 1,000자, submission은 16종류와 요약별 500자로 제한하고 opaque artifact ID 목록은 status/checkpoint에서 제외합니다. 정보가 적은 intake는 넓은 범위와 낮은 신뢰도로 시작합니다. Contracts가 실제 요구사항 수, 관련 파일, API operation, UI surface, Figma node, test target, workspace package, uncertainty를 `workloadSignals`로 제출하면 같은 estimate만 갱신합니다. 별도 tool이나 아홉 번째 stage는 없습니다.
@@ -92,6 +96,18 @@ Project instruction precedence는 current user request → explicit `guidancePat
 
 구현 뒤 orchestrator가 `workflow_status` snapshot, accepted contracts, diff, evidence path로 immutable packet을 만들고 두 reviewer에게 전달합니다. Reviewer는 workflow tool을 직접 호출하거나 implementation을 수정하지 않고 schema-shaped verdict를 반환합니다. UI scope라면 병렬로 검토할 수 있습니다. 한 reviewer가 다른 verdict를 대신하거나 합산 Review Council을 두지 않습니다.
 
+## Delegation policy
+
+`delegationPolicy`는 workload에서 직접 계산됩니다.
+
+| Workload | read-only scout 상한 | 조건                                            |
+| -------- | -------------------: | ----------------------------------------------- |
+| XS/S     |                    0 | implementation writer가 직접 읽음               |
+| M        |                    1 | 독립적인 read-heavy discovery가 있을 때만       |
+| L/XL     |                    2 | 서로 겹치지 않는 read-heavy discovery로 bounded |
+
+Scout는 편집, browser, workflow MCP, nested delegation을 하지 않습니다. **No nesting**이며 API/UI를 포함한 implementation writer는 항상 한 명입니다. Parallel writer와 persistent agent team은 없습니다. `functional-reviewer`와 UI scope의 `design-reviewer`만 implementation 완료 뒤 immutable packet을 읽으며 병렬일 수 있고, 두 profile 모두 fully read-only, workflow-MCP-free입니다.
+
 ## Mode별 조건부 evidence
 
 | Mode      | Delivery/evidence 조건                             | 조합 가능한 source 예시                          |
@@ -107,4 +123,16 @@ Mode는 tool, stage, lane을 추가하지 않습니다. Feature mode만 영상 �
 
 일반 change는 사용 가능한 format/lint, typecheck, build, 관련 functional test를 기본으로 합니다. OpenSpec, architecture, targeted security, visual, accessibility, performance는 scope에 따라 적용되고 observability는 opt-in입니다. Full matrix와 tracked archive/package integrity 검증은 explicit release workflow 전용입니다.
 
-`workflow_publish`는 draft만 생성/갱신합니다. Merge 뒤의 archive는 별도 사용자 action이며 자동 polling하지 않습니다.
+### Browser evidence routing
+
+Playwright Test/CLI web-first assertion과 structured result가 browser acceptance oracle입니다. Browser MCP 또는 host browser는 interactive reproduction/inspection에만 optional이고, Chrome DevTools MCP는 console, network, performance, memory, live-DOM evidence가 필요할 때만 diagnostic입니다. Screenshot, video, DevTools trace, agent observation은 assertion을 대체하지 않습니다. Required browser proof를 실행하지 못하면 `BROWSER_NOT_RUN`과 exact unblock action으로 blocked합니다. `feature`만 변경 기능 selector의 E2E와 video 정확히 1개를 요구합니다.
+
+### Ready와 blocked publication
+
+`workflow_publish intent: ready`는 canonical passed report에서 draft PR/MR만 생성·갱신합니다. Blocker는 raw prompt/secret/transcript/private absolute path 없이 다음 typed `blockerDetails`를 보존합니다: `stage`, `code`, `kind`, `retryable`, `resumable`, completed work, redacted evidence, attempted recovery, unrun validations, exact unblock action.
+
+`workflow_publish intent: blocked-diagnostic`은 clean tree, non-target source, supported authenticated remote, committed delta, target보다 한 commit ahead 조건이 이미 맞을 때만 diagnostic draft를 만들 수 있습니다. Diagnostic publication은 계속 `status: blocked`이며 report/publish passed verdict가 아닙니다. 조건이 없거나 `PUBLISH_NO_DELTA`이면 empty commit 또는 issue fallback 없이 **local blocked report**를 반환합니다. 같은 action이 자기 precondition blocker를 다시 publish하며 loop하지 않습니다.
+
+동시 실행을 막는 durable claim이 만료되거나 heartbeat를 잃어 외부 mutation 성공 여부를 확정할 수 없으면 `reason: diagnostic-publication-uncertain`을 반환하고 자동 재발행하지 않습니다. `recoverUncertain: false`가 기본값입니다. 사용자가 GitHub/GitLab에서 같은 source/target의 matching draft를 직접 확인한 뒤 명시적으로 승인한 경우에만 기존 `workflow_publish`를 `recoverUncertain: true`로 다시 호출합니다. 이 선택적 복구는 새 tool/stage가 아니며 blocked stages를 passed로 바꾸지 않고, SDK도 자동 승인하지 않습니다.
+
+해결 뒤 `workflow_status.resumeContext`로 **same Run**을 이어가 통과한 stage를 반복하지 않습니다. Diagnostic draft가 있으면 같은 source/target의 **same draft PR**에서 `[Blocked]` 제목과 blocked label을 정상 ready 제목/본문으로 바꾸고 label을 제거합니다. Merge 뒤 archive는 별도 사용자 action이며 자동 polling하지 않습니다.

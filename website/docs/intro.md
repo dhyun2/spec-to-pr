@@ -8,6 +8,10 @@ title: SpecToPR 소개
 
 SpecToPR은 기획서, 레거시 변경 요청, 사용자 기능, Figma 디자인을 검증된 구현과 draft PR/MR로 연결하는 Claude Code · Codex 플러그인입니다.
 
+:::info 버전 표기
+이 사이트는 `main` 브랜치의 **릴리스 0.2.1(Released 0.2.1)** 동작을 설명합니다.
+:::
+
 ```mermaid
 flowchart LR
     B["brief"] --> W["하나의 v2 workflow"]
@@ -38,7 +42,7 @@ Figma는 호스트에 연결된 기능으로 읽고 `provider: host-connected-fi
 
 - MCP tool 7개
 - durable stage 8개
-- skill 9개
+- skill 8개
 - reviewer 2개
 
 API와 UI는 한 구현 context에서 처리합니다. API 기반 UI는 물리적으로 서로 다른 비어 있지 않은 type, schema, wrapper, mock 파일과 passing contract-test JSON을 `implementationContextId`와 함께 `api-ready`로 먼저 기록하고 최종 구현에 같은 ID를 씁니다. Path, symlink, hard link alias는 별도 증거가 아니며 `apiReady: true`만으로는 부족합니다. Orchestrator가 immutable status/contracts/diff/evidence packet을 넘기므로 functional/design reviewer는 workflow tool 없이 독립적으로 판정합니다. Design review는 UI 범위에만 적용됩니다.
@@ -58,4 +62,4 @@ SpecToPR은 target이 아닌 `codex/*` source branch에 의도한 변경을 comm
 3. [퀵스타트](/getting-started/quickstart)
 4. [기획서 → draft PR 사용법](/usage/brief)
 
-내부 계약은 [파이프라인](/concepts/pipeline), 전체 skill은 [스킬 레퍼런스](/reference/skills)에서 확인할 수 있습니다.
+내부 계약은 [파이프라인](/concepts/pipeline), 전체 skill은 [스킬 레퍼런스](/reference/skills), 공식 1차 자료 기반 도구 비교와 채택/거절 근거는 [비교와 채택 정책](/concepts/comparison)에서 확인할 수 있습니다.

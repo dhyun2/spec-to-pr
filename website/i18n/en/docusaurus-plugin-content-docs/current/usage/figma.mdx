@@ -71,6 +71,36 @@ Create real Figma, visual, interaction, and accessibility evidence, run independ
 5. **Reviews:** Run relevant functional checks and independent design review for fidelity, accessibility, and interaction.
 6. **Report / optional publish:** Stop at the report for `publication: none`; perform publication preflight and PR creation only for explicit `draft`.
 
+## Execution policy: stages, agents, skills, and tools
+
+| Durable stage       | Exact behavior for this case                                                                               |
+| ------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `intake`            | Fix the Figma file/node, UI states, responsive scope, publication, and workload.                           |
+| `contracts`         | Read real node/variables/assets/screenshots from the connected host and submit a strict `figma-bundle`.    |
+| `implementation`    | One implementation writer maps the design system and implements required API/UI in one context.            |
+| `functional-review` | The read-only `functional-reviewer` judges state behavior and relevant project checks.                     |
+| `design-review`     | The read-only `design-reviewer` judges visual/interaction/responsive/accessibility evidence against Figma. |
+| `report`            | Build the local/canonical provenance, implementation-difference, validation, review, and blocker report.   |
+| `publish`           | Skip for default `publication: none`; create a draft only when explicitly requested and ready.             |
+| `archive`           | Run only after a published draft merges, authoritative evidence exists, and the user requests it.          |
+
+Agent policy allows zero read-only scout workers for XS/S, at most one for M, and at most two for L/XL. Scouts only perform independent read-heavy Figma/repository mapping. One implementation writer edits: **no nesting**, no **parallel writer**. Reviewers may run in parallel only after implementation.
+
+- `stageSkillRoute`: public actions route `intake-contracts` → `implement` → `review-functional`/`review-design`, adding `publish` for draft delivery. This routing is not `deliveryProfile.recommendedSkills`.
+- `recommendedSkills`: `figmaUrl` → `figma`, `design-system`; `openApiPaths` → `api-generator`; detected React/Next packages → `react-best-practices`, `next-best-practices` optional candidates.
+- Figma UI alone does not recommend `playwright`; only the `mode: feature` + UI mapping adds that candidate.
+- `appliedSkills`: record only the allowed union of `recommendedSkills` and available/applicable optional `skillHints`. Missing optional skills do not block, but real Figma evidence is not optional.
+- **workflow MCP:** required. **Figma host:** required to read the URL's file/node and cannot be replaced by runtime polling. **Playwright Test/CLI:** use focused runtime assertions when `requiredValidations` require them; this profile does not inherit feature E2E or video.
+- **Browser MCP:** optional interactive visual inspection. **Chrome DevTools MCP:** conditional for console/network/performance/memory/live-DOM diagnosis. Screenshots or DevTools observations never replace assertions.
+
+### Ready, blocked diagnostic, and resume
+
+The normal `publication: none` result is a reviewed local report; an explicitly requested draft uses `workflow_publish intent: ready`. Missing required Figma/browser evidence records typed `blockerDetails` such as `BROWSER_NOT_RUN` and an exact unblock action. Only a passing preflight may create a `workflow_publish intent: blocked-diagnostic` draft, which stays `status: blocked`. Default none, a dirty/target branch, missing auth, unsupported remote, missing committed delta/one-commit lead, or `PUBLISH_NO_DELTA` returns a **local blocked report** without empty commits or issue fallback.
+
+If an explicitly requested draft returns `diagnostic-publication-uncertain`, never publish automatically. Inspect GitHub/GitLab for a matching draft, show the result to the user, and call the same `workflow_publish` action with `recoverUncertain: true` only after explicit approval.
+
+After fixing access, node, or evidence, resume the **same Run** at its latest status. If a diagnostic draft exists, update the same source/target **same draft PR** from `[Blocked]` to the normal `intent: ready` title/body and remove the blocked label.
+
 ## Evidence and validation <span id="evidence-figma"></span>
 
 | Evidence               | Illustrative path                                                    | Passing condition                                                                           |

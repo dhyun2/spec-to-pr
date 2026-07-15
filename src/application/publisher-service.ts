@@ -9,6 +9,7 @@ import {
   GitHubPublisherAdapter,
   GitLabPublisherAdapter,
   PublishedReviewRequestSchema,
+  PublishIntentSchema,
   PublishPlanSchema,
   PublishResultSchema,
   type PublishedReviewAsset,
@@ -16,16 +17,24 @@ import {
   redactSecrets,
   ReviewHostSchema,
   type ReviewRequestAsset,
+  ReviewRequestSynchronizationError,
   ReviewRequestPayloadSchema,
 } from "../publisher/index.js";
 import type {
+  PublishIntent,
   PublishedReviewRequest,
   PublishResult,
   PublishTarget,
   ReviewRequestPayload,
   ReviewRequestPublisher,
 } from "../publisher/index.js";
-import { ReportDecisionSchema, type ReportDecision } from "../pr-report/pr-report-model.js";
+import {
+  ReportDecisionSchema,
+  WorkflowReportMetadataSchema,
+  WorkflowReportIntentSchema,
+  type ReportDecision,
+  type WorkflowReportIntent,
+} from "../pr-report/pr-report-model.js";
 import { RunManifestSchema, RunSummarySchema, summarizeRun } from "../run/index.js";
 import { AgentResultSchema } from "../runtime/agent-result.js";
 import { ArtifactRefSchema } from "../runtime/artifact.js";
@@ -35,10 +44,12 @@ import { ArtifactIdSchema, RunIdSchema } from "../runtime/ids.js";
 import { GitObjectIdSchema, IsoDateTimeSchema } from "../runtime/scalars.js";
 import type { ArtifactRef } from "../runtime/index.js";
 import type { RunStore } from "../store/run-store.js";
+import { RevisionConflictError } from "../store/errors.js";
 import { VisualReportSchema, type VisualReport } from "../visual/visual-model.js";
 
 const execFileAsync = promisify(execFile);
 const PUBLISHER_ADAPTER = "publisher-v1" as const;
+const MAX_PUBLISH_RESULT_SAVE_ATTEMPTS = 8;
 
 type VisualPreviewPolicy = {
   includeFigma?: boolean;
@@ -60,6 +71,18 @@ class PublishPreparationError extends Error {
   }
 }
 
+class PublishNoDeltaError extends Error {
+  public constructor(
+    public readonly sourceBranch: string,
+    public readonly targetBranch: string,
+  ) {
+    super(
+      `Draft publication requires at least one committed change on ${sourceBranch} beyond ${targetBranch}`,
+    );
+    this.name = "PublishNoDeltaError";
+  }
+}
+
 export type GitCommandRunner = (
   cwd: string,
   args: string[],
@@ -70,6 +93,7 @@ export type GitCommandRunner = (
 
 const BasePublishInputShape = {
   runId: RunIdSchema,
+  intent: PublishIntentSchema.default("ready"),
   reportArtifactId: ArtifactIdSchema.optional(),
   sourceBranch: z.string().trim().min(1),
   targetBranch: z.string().trim().min(1).default("main"),
@@ -226,7 +250,7 @@ export class PublisherService {
     const reportBody = (await this.artifactStore.readContent(reportArtifact.digest)).toString(
       "utf8",
     );
-    const reportDecision = reportDecisionFromArtifact(reportArtifact);
+    const reportMetadata = reportMetadataFromArtifact(reportArtifact);
     const detected = await this.detectTarget({
       runId: input.runId,
       remoteName: input.remoteName,
@@ -236,13 +260,19 @@ export class PublisherService {
     const target = detected.target as PublishTarget;
     const payload = ReviewRequestPayloadSchema.parse({
       runId: run.id,
-      title: input.title ?? defaultTitle(run.id),
+      title: publishTitle({
+        runId: run.id,
+        intent: input.intent,
+        ...(input.title === undefined ? {} : { title: input.title }),
+      }),
       body: reportBody,
       sourceBranch: input.sourceBranch,
       targetBranch: input.targetBranch,
-      ...(input.headSha === undefined ? {} : { headSha: input.headSha }),
+      ...(input.headSha === undefined || input.intent === "blocked-diagnostic"
+        ? {}
+        : { headSha: input.headSha }),
       mode: input.mode,
-      labels: input.labels,
+      labels: publishLabels(input.labels, input.intent),
       reviewers: input.reviewers,
       assignees: input.assignees,
       reportArtifactId: reportArtifact.id,
@@ -250,18 +280,36 @@ export class PublisherService {
 
     return PublishPlanSchema.parse({
       runId: run.id,
+      intent: input.intent,
       target,
       payload,
-      reportDecision,
+      ...(reportMetadata.reportIntent === undefined
+        ? {}
+        : { reportIntent: reportMetadata.reportIntent }),
+      ...(reportMetadata.reportDecision === undefined
+        ? {}
+        : { reportDecision: reportMetadata.reportDecision }),
+      reportMetadataValid: reportMetadata.valid,
       requiredTokenEnv: publisherAuthHint(target.host),
       willPushBranch: input.pushBranch,
-      willCreateOrUpdate: reportDecision !== "blocked",
-      warnings: buildPlanWarnings({ payload, reportDecision }),
+      willCreateOrUpdate: reportMatchesPublishIntent({
+        reportMetadataValid: reportMetadata.valid,
+        reportDecision: reportMetadata.reportDecision,
+        reportIntent: reportMetadata.reportIntent,
+        publishIntent: input.intent,
+      }),
+      warnings: buildPlanWarnings({
+        payload,
+        reportMetadataValid: reportMetadata.valid,
+        reportDecision: reportMetadata.reportDecision,
+        reportIntent: reportMetadata.reportIntent,
+        publishIntent: input.intent,
+      }),
       plannedAt: timestamp,
     });
   }
 
-  public async publish(rawInput: unknown) {
+  public async publish(rawInput: unknown, options: { signal?: AbortSignal } = {}) {
     const input = PublishReviewRequestInputSchema.parse(rawInput);
     const run = await this.runStore.get(input.runId);
     const timestamp = IsoDateTimeSchema.parse(this.now());
@@ -269,11 +317,15 @@ export class PublisherService {
     void confirm;
 
     const plan = await this.plan(planInput);
-    if (plan.reportDecision === "blocked") {
+    if (!plan.willCreateOrUpdate) {
       const result = blockedPublishResult({
         runId: run.id,
         target: plan.target,
         reportArtifactId: plan.payload.reportArtifactId,
+        intent: plan.intent,
+        reportMetadataValid: plan.reportMetadataValid,
+        ...(plan.reportIntent === undefined ? {} : { reportIntent: plan.reportIntent }),
+        ...(plan.reportDecision === undefined ? {} : { reportDecision: plan.reportDecision }),
         publishedAt: timestamp,
       });
 
@@ -282,16 +334,42 @@ export class PublisherService {
         result,
         payload: plan.payload,
         timestamp,
+        remoteName: input.remoteName,
+        pushBranch: input.pushBranch,
         addPublishingAgentResult: false,
       });
     }
 
-    await this.assertPublishBranchReady({
-      projectRoot: run.projectRoot,
-      sourceBranch: input.sourceBranch,
-      targetBranch: input.targetBranch,
-      ...(input.headSha === undefined ? {} : { headSha: input.headSha }),
-    });
+    try {
+      await this.assertPublishBranchReady({
+        projectRoot: run.projectRoot,
+        sourceBranch: input.sourceBranch,
+        targetBranch: input.targetBranch,
+        ...(input.headSha === undefined || plan.intent === "blocked-diagnostic"
+          ? {}
+          : { headSha: input.headSha }),
+      });
+    } catch (error: unknown) {
+      if (!(error instanceof PublishNoDeltaError)) throw error;
+      const result = noDeltaPublishResult({
+        runId: run.id,
+        target: plan.target,
+        reportArtifactId: plan.payload.reportArtifactId,
+        sourceBranch: error.sourceBranch,
+        targetBranch: error.targetBranch,
+        publishedAt: timestamp,
+      });
+
+      return this.recordPublishResult({
+        runId: run.id,
+        result,
+        payload: plan.payload,
+        timestamp,
+        remoteName: input.remoteName,
+        pushBranch: input.pushBranch,
+        addPublishingAgentResult: false,
+      });
+    }
 
     const result = await this.executePublish({
       run,
@@ -299,32 +377,46 @@ export class PublisherService {
       timestamp,
       pushBranch: input.pushBranch,
       remoteName: input.remoteName,
+      signal: options.signal,
     });
+    options.signal?.throwIfAborted();
 
     return this.recordPublishResult({
       runId: run.id,
       result,
       payload: plan.payload,
       timestamp,
+      remoteName: input.remoteName,
+      pushBranch: input.pushBranch,
       addPublishingAgentResult: result.status === "passed",
     });
   }
 
-  public async updateBody(rawInput: unknown) {
+  public async updateBody(rawInput: unknown, options: { signal?: AbortSignal } = {}) {
     const input = UpdateReviewRequestBodyInputSchema.parse(rawInput);
     const run = await this.runStore.get(input.runId);
     const timestamp = IsoDateTimeSchema.parse(this.now());
     const { allowBlockedBody, confirm, publishMode, requestNumber, ...planInput } = input;
     void confirm;
 
-    const plan = await this.plan(planInput);
-    const blockedBodyUpdateAllowed = allowBlockedBody || publishMode === "blocked-draft-update";
+    const blockedBodyUpdateAllowed =
+      allowBlockedBody ||
+      publishMode === "blocked-draft-update" ||
+      input.intent === "blocked-diagnostic";
+    const plan = await this.plan({
+      ...planInput,
+      ...(blockedBodyUpdateAllowed ? { intent: "blocked-diagnostic" as const } : {}),
+    });
 
-    if (plan.reportDecision === "blocked" && !blockedBodyUpdateAllowed) {
+    if (!plan.willCreateOrUpdate) {
       const result = blockedPublishResult({
         runId: run.id,
         target: plan.target,
         reportArtifactId: plan.payload.reportArtifactId,
+        intent: plan.intent,
+        reportMetadataValid: plan.reportMetadataValid,
+        ...(plan.reportIntent === undefined ? {} : { reportIntent: plan.reportIntent }),
+        ...(plan.reportDecision === undefined ? {} : { reportDecision: plan.reportDecision }),
         publishedAt: timestamp,
       });
 
@@ -333,6 +425,8 @@ export class PublisherService {
         result,
         payload: plan.payload,
         timestamp,
+        remoteName: input.remoteName,
+        pushBranch: input.pushBranch,
         addPublishingAgentResult: false,
       });
     }
@@ -341,13 +435,17 @@ export class PublisherService {
       plan,
       requestNumber,
       timestamp,
+      signal: options.signal,
     });
+    options.signal?.throwIfAborted();
 
     return this.recordPublishResult({
       runId: run.id,
       result,
       payload: plan.payload,
       timestamp,
+      remoteName: input.remoteName,
+      pushBranch: input.pushBranch,
       addPublishingAgentResult: result.status === "passed",
     });
   }
@@ -421,9 +519,7 @@ export class PublisherService {
     ).stdout.trim();
     const ahead = Number.parseInt(aheadText, 10);
     if (!Number.isSafeInteger(ahead) || ahead < 1) {
-      throw new Error(
-        `Draft publication requires at least one committed change on ${input.sourceBranch} beyond ${input.targetBranch}`,
-      );
+      throw new PublishNoDeltaError(input.sourceBranch, input.targetBranch);
     }
   }
 
@@ -464,8 +560,10 @@ export class PublisherService {
     timestamp: string;
     pushBranch: boolean;
     remoteName: string;
+    signal: AbortSignal | undefined;
   }): Promise<PublishResult> {
     try {
+      input.signal?.throwIfAborted();
       const token = readPublisherToken(input.plan.target.host);
 
       if (input.pushBranch) {
@@ -476,6 +574,7 @@ export class PublisherService {
           input.plan.payload.sourceBranch,
         ]);
       }
+      input.signal?.throwIfAborted();
 
       const publisher = this.publishers[input.plan.target.host];
       const prepared = await this.preparePayloadForPublish({
@@ -483,11 +582,13 @@ export class PublisherService {
         plan: input.plan,
         publisher,
         token: token.token,
+        signal: input.signal,
       });
       const existing = await publisher.findExisting({
         target: input.plan.target,
         payload: prepared.payload,
         token: token.token,
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
       });
       if (existing !== undefined && !existing.draft) {
         throw new Error(`Refusing to update non-draft review request ${existing.number}`);
@@ -498,12 +599,14 @@ export class PublisherService {
               target: input.plan.target,
               payload: prepared.payload,
               token: token.token,
+              ...(input.signal === undefined ? {} : { signal: input.signal }),
             })
-          : await publisher.updateBody({
+          : await publisher.update({
               target: input.plan.target,
               requestNumber: existing.number,
-              body: prepared.payload.body,
+              update: reviewRequestUpdateFromPayload(prepared.payload),
               token: token.token,
+              ...(input.signal === undefined ? {} : { signal: input.signal }),
             });
       if (!request.draft) {
         throw new Error(`Review request ${request.number} is not a draft after publication`);
@@ -511,7 +614,7 @@ export class PublisherService {
 
       return PublishResultSchema.parse({
         runId: input.plan.runId,
-        status: "passed",
+        status: input.plan.intent === "blocked-diagnostic" ? "blocked" : "passed",
         target: input.plan.target,
         request,
         reportArtifactId: input.plan.payload.reportArtifactId,
@@ -527,6 +630,7 @@ export class PublisherService {
         publishedAt: input.timestamp,
       });
     } catch (error: unknown) {
+      if (input.signal?.aborted) throw input.signal.reason ?? error;
       return failedPublishResult({
         runId: input.plan.runId,
         target: input.plan.target,
@@ -541,8 +645,10 @@ export class PublisherService {
     plan: z.infer<typeof PublishPlanSchema>;
     requestNumber: string;
     timestamp: string;
+    signal: AbortSignal | undefined;
   }): Promise<PublishResult> {
     try {
+      input.signal?.throwIfAborted();
       const token = readPublisherToken(input.plan.target.host);
       const publisher = this.publishers[input.plan.target.host];
       const run = await this.runStore.get(input.plan.runId);
@@ -551,11 +657,13 @@ export class PublisherService {
         plan: input.plan,
         publisher,
         token: token.token,
+        signal: input.signal,
       });
       const existing = await publisher.findExisting({
         target: input.plan.target,
         payload: prepared.payload,
         token: token.token,
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
       });
       if (existing === undefined || existing.number !== input.requestNumber) {
         throw new Error(`Draft review request ${input.requestNumber} could not be verified`);
@@ -563,11 +671,12 @@ export class PublisherService {
       if (!existing.draft) {
         throw new Error(`Refusing to update non-draft review request ${existing.number}`);
       }
-      const request = await publisher.updateBody({
+      const request = await publisher.update({
         target: input.plan.target,
         requestNumber: input.requestNumber,
-        body: prepared.payload.body,
+        update: reviewRequestUpdateFromPayload(prepared.payload),
         token: token.token,
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
       });
       if (!request.draft) {
         throw new Error(`Review request ${request.number} is not a draft after body update`);
@@ -575,7 +684,7 @@ export class PublisherService {
 
       return PublishResultSchema.parse({
         runId: input.plan.runId,
-        status: "passed",
+        status: input.plan.intent === "blocked-diagnostic" ? "blocked" : "passed",
         target: input.plan.target,
         request,
         reportArtifactId: input.plan.payload.reportArtifactId,
@@ -591,6 +700,7 @@ export class PublisherService {
         publishedAt: input.timestamp,
       });
     } catch (error: unknown) {
+      if (input.signal?.aborted) throw input.signal.reason ?? error;
       return failedPublishResult({
         runId: input.plan.runId,
         target: input.plan.target,
@@ -606,6 +716,7 @@ export class PublisherService {
     plan: z.infer<typeof PublishPlanSchema>;
     publisher: ReviewRequestPublisher;
     token: string;
+    signal: AbortSignal | undefined;
   }): Promise<{
     payload: ReviewRequestPayload;
     publishedAssets: PublishedReviewAsset[];
@@ -641,6 +752,7 @@ export class PublisherService {
         payload: input.plan.payload,
         token: input.token,
         assets,
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -851,9 +963,12 @@ export class PublisherService {
     result: PublishResult;
     payload: ReviewRequestPayload;
     timestamp: string;
+    remoteName: string;
+    pushBranch: boolean;
     addPublishingAgentResult: boolean;
   }) {
-    const run = await this.runStore.get(RunIdSchema.parse(input.runId));
+    let run = await this.runStore.get(RunIdSchema.parse(input.runId));
+    const reportArtifact = requireArtifact(run.artifacts, input.payload.reportArtifactId);
     const publishResultArtifact = await this.writeJsonArtifact({
       label: "publish-result",
       value: input.result,
@@ -869,54 +984,85 @@ export class PublisherService {
         visualPreviewSynced: input.result.visualPreviewSynced,
         featureVideoExpected: input.result.featureVideoExpected,
         featureVideoSynced: input.result.featureVideoSynced,
+        publishIntent: reportArtifact.metadata["reportIntent"],
+        diagnosticReportKey: reportArtifact.metadata["idempotencyKey"],
+        sourceBranch: input.payload.sourceBranch,
+        targetBranch: input.payload.targetBranch,
+        remoteName: input.remoteName,
+        pushBranch: input.pushBranch,
       },
     });
     const shouldAddPublishingAgentResult =
       input.addPublishingAgentResult && publishResultIsFullySynced(input.result);
-    const agentResults = shouldAddPublishingAgentResult
-      ? [
-          ...run.agentResults,
-          AgentResultSchema.parse({
-            schemaVersion: RUNTIME_CONTRACT_VERSION,
-            id: createAgentResultId(),
-            runId: run.id,
-            kind: "publishing",
-            agent: "pr-publisher",
-            status: "passed",
-            baseSha: input.payload.headSha ?? run.baseCommit ?? "0000000",
-            evidenceIds: [],
-            artifactIds: [input.payload.reportArtifactId, publishResultArtifact.id],
-            gapIds: [],
-            checks: [],
-            decisions: [],
-            target: input.result.request?.host,
-            prUrl: input.result.request?.url,
-            prNumber: input.result.request?.number,
-            draft: input.result.request?.draft ?? true,
-            reportArtifactId: input.payload.reportArtifactId,
-            startedAt: input.timestamp,
-            completedAt: input.timestamp,
-          }),
-        ]
-      : run.agentResults;
-    const nextRun = RunManifestSchema.parse({
-      ...run,
-      revision: run.revision + 1,
-      updatedAt: input.timestamp,
-      artifacts: [...run.artifacts, publishResultArtifact],
-      agentResults,
-    });
+    const publishingAgentResult = shouldAddPublishingAgentResult
+      ? AgentResultSchema.parse({
+          schemaVersion: RUNTIME_CONTRACT_VERSION,
+          id: createAgentResultId(),
+          runId: run.id,
+          kind: "publishing",
+          agent: "pr-publisher",
+          status: "passed",
+          baseSha: input.payload.headSha ?? run.baseCommit ?? "0000000",
+          evidenceIds: [],
+          artifactIds: [input.payload.reportArtifactId, publishResultArtifact.id],
+          gapIds: [],
+          checks: [],
+          decisions: [],
+          target: input.result.request?.host,
+          prUrl: input.result.request?.url,
+          prNumber: input.result.request?.number,
+          draft: input.result.request?.draft ?? true,
+          reportArtifactId: input.payload.reportArtifactId,
+          startedAt: input.timestamp,
+          completedAt: input.timestamp,
+        })
+      : undefined;
 
-    await this.runStore.save(nextRun, run.revision);
+    for (let attempt = 0; attempt < MAX_PUBLISH_RESULT_SAVE_ATTEMPTS; attempt += 1) {
+      if (run.artifacts.some((artifact) => artifact.id === publishResultArtifact.id)) {
+        return PublishReviewRequestResultSchema.parse({
+          run: summarizeRun(run),
+          result: input.result,
+          publishResultArtifactId: publishResultArtifact.id,
+          ...(publishingAgentResult === undefined
+            ? {}
+            : { agentResultId: publishingAgentResult.id }),
+        });
+      }
 
-    return PublishReviewRequestResultSchema.parse({
-      run: summarizeRun(nextRun),
-      result: input.result,
-      publishResultArtifactId: publishResultArtifact.id,
-      ...(agentResults.length === run.agentResults.length
-        ? {}
-        : { agentResultId: agentResults.at(-1)?.id }),
-    });
+      const agentResults =
+        publishingAgentResult === undefined ||
+        run.agentResults.some((result) => result.id === publishingAgentResult.id)
+          ? run.agentResults
+          : [...run.agentResults, publishingAgentResult];
+      const nextRun = RunManifestSchema.parse({
+        ...run,
+        revision: run.revision + 1,
+        updatedAt:
+          Date.parse(input.timestamp) >= Date.parse(run.updatedAt)
+            ? input.timestamp
+            : run.updatedAt,
+        artifacts: [...run.artifacts, publishResultArtifact],
+        agentResults,
+      });
+
+      try {
+        await this.runStore.save(nextRun, run.revision);
+        return PublishReviewRequestResultSchema.parse({
+          run: summarizeRun(nextRun),
+          result: input.result,
+          publishResultArtifactId: publishResultArtifact.id,
+          ...(publishingAgentResult === undefined
+            ? {}
+            : { agentResultId: publishingAgentResult.id }),
+        });
+      } catch (error: unknown) {
+        if (!(error instanceof RevisionConflictError)) throw error;
+        run = await this.runStore.get(RunIdSchema.parse(input.runId));
+      }
+    }
+
+    throw new Error(`Could not persist publish result for Run ${input.runId}`);
   }
 
   private async writeJsonArtifact(input: {
@@ -1221,11 +1367,20 @@ function failedPublishResult(input: {
   );
   const preparationDetails =
     input.error instanceof PublishPreparationError ? input.error.details : undefined;
+  const synchronizationDetails =
+    input.error instanceof ReviewRequestSynchronizationError ? input.error : undefined;
+  const partialReasons =
+    synchronizationDetails === undefined
+      ? (preparationDetails?.partialReasons ?? [publishFailureReason(message)])
+      : [
+          `review request ${synchronizationDetails.phase} synchronization failed after host mutation: ${message}`,
+        ];
 
   return PublishResultSchema.parse({
     runId: input.runId,
     status: "failed",
     target: input.target,
+    ...(synchronizationDetails === undefined ? {} : { request: synchronizationDetails.request }),
     reportArtifactId: input.reportArtifactId,
     requestSynced: false,
     visualPreviewExpected: preparationDetails?.visualPreviewExpected ?? false,
@@ -1233,10 +1388,10 @@ function failedPublishResult(input: {
     featureVideoExpected: preparationDetails?.featureVideoExpected ?? false,
     featureVideoSynced: false,
     fallbackMode: "none",
-    partialReasons: preparationDetails?.partialReasons ?? [publishFailureReason(message)],
-    errorCode: "PUBLISH_FAILED",
+    partialReasons,
+    errorCode: synchronizationDetails === undefined ? "PUBLISH_FAILED" : "PUBLISH_PARTIAL_SYNC",
     errorMessage: message,
-    retryable: true,
+    retryable: synchronizationDetails?.phase !== "reviewers",
     publishedAt: input.publishedAt,
   });
 }
@@ -1245,19 +1400,97 @@ function defaultTitle(runId: string): string {
   return `spec-to-pr evidence report for ${runId}`;
 }
 
-function reportDecisionFromArtifact(artifact: ArtifactRef): ReportDecision {
-  return ReportDecisionSchema.catch("blocked").parse(artifact.metadata["decision"]);
+function blockedTitle(runId: string): string {
+  return `[Blocked] SpecToPR Run ${runId}`;
+}
+
+function publishTitle(input: { runId: string; intent: PublishIntent; title?: string }): string {
+  return input.intent === "blocked-diagnostic"
+    ? blockedTitle(input.runId)
+    : (input.title ?? defaultTitle(input.runId));
+}
+
+function publishLabels(labels: string[], intent: PublishIntent): string[] {
+  const readyLabels = labels.filter((label) => label !== "spec-to-pr:blocked");
+  const synchronized = [...new Set(["spec-to-pr", ...readyLabels])];
+
+  return intent === "blocked-diagnostic" ? [...synchronized, "spec-to-pr:blocked"] : synchronized;
+}
+
+function reviewRequestUpdateFromPayload(
+  payload: ReviewRequestPayload,
+): Pick<ReviewRequestPayload, "title" | "body" | "labels"> {
+  return {
+    title: payload.title,
+    body: payload.body,
+    labels: payload.labels,
+  };
+}
+
+type ReportMetadataState = {
+  valid: boolean;
+  reportIntent?: WorkflowReportIntent;
+  reportDecision?: ReportDecision;
+};
+
+function reportMetadataFromArtifact(artifact: ArtifactRef): ReportMetadataState {
+  const reportIntent = WorkflowReportIntentSchema.safeParse(artifact.metadata["reportIntent"]);
+  const reportDecision = ReportDecisionSchema.safeParse(artifact.metadata["decision"]);
+  const combined = WorkflowReportMetadataSchema.safeParse({
+    reportKind: artifact.metadata["reportKind"],
+    reportIntent: artifact.metadata["reportIntent"],
+    decision: artifact.metadata["decision"],
+  });
+
+  return {
+    valid: combined.success,
+    ...(reportIntent.success ? { reportIntent: reportIntent.data } : {}),
+    ...(reportDecision.success ? { reportDecision: reportDecision.data } : {}),
+  };
+}
+
+function reportMatchesPublishIntent(input: {
+  reportMetadataValid: boolean;
+  reportDecision: ReportDecision | undefined;
+  reportIntent: WorkflowReportIntent | undefined;
+  publishIntent: PublishIntent;
+}): boolean {
+  if (!input.reportMetadataValid) return false;
+
+  if (input.publishIntent === "blocked-diagnostic") {
+    return input.reportIntent === "blocked-diagnostic" && input.reportDecision === "blocked";
+  }
+
+  return input.reportIntent === "ready" && input.reportDecision !== "blocked";
 }
 
 function buildPlanWarnings(input: {
   payload: ReviewRequestPayload;
-  reportDecision: ReportDecision;
+  reportMetadataValid: boolean;
+  reportDecision: ReportDecision | undefined;
+  reportIntent: WorkflowReportIntent | undefined;
+  publishIntent: PublishIntent;
 }): string[] {
   const warnings: string[] = [];
 
-  if (input.reportDecision === "blocked") {
+  if (!input.reportMetadataValid) {
     warnings.push(
-      "Report decision is blocked. Publishing is disabled until blockers are resolved.",
+      `Report metadata is invalid: ${reportMetadataDescription(input)}. Publication is disabled.`,
+    );
+  } else if (
+    !reportMatchesPublishIntent({
+      reportMetadataValid: input.reportMetadataValid,
+      reportDecision: input.reportDecision,
+      reportIntent: input.reportIntent,
+      publishIntent: input.publishIntent,
+    })
+  ) {
+    warnings.push(
+      `Report ${reportMetadataDescription(input)} cannot be published with intent ${input.publishIntent}.`,
+    );
+  } else if (input.publishIntent === "blocked-diagnostic") {
+    warnings.push(
+      "Publishing a blocked diagnostic draft does not change the blocked workflow status.",
     );
   } else if (input.reportDecision !== "ready") {
     warnings.push(`Report decision is ${input.reportDecision}. Publish only as a draft.`);
@@ -1270,6 +1503,13 @@ function buildPlanWarnings(input: {
   return warnings;
 }
 
+function reportMetadataDescription(input: {
+  reportIntent: WorkflowReportIntent | undefined;
+  reportDecision: ReportDecision | undefined;
+}): string {
+  return `intent ${input.reportIntent ?? "unknown"} and decision ${input.reportDecision ?? "unknown"}`;
+}
+
 function findingCount(review: Record<string, unknown>): number {
   const findings = review["findings"];
 
@@ -1280,8 +1520,29 @@ function blockedPublishResult(input: {
   runId: string;
   target: PublishTarget;
   reportArtifactId: string;
+  intent: PublishIntent;
+  reportMetadataValid: boolean;
+  reportIntent?: WorkflowReportIntent;
+  reportDecision?: ReportDecision;
   publishedAt: string;
 }): PublishResult {
+  const metadataDescription = reportMetadataDescription({
+    reportIntent: input.reportIntent,
+    reportDecision: input.reportDecision,
+  });
+  const reportIsBlockedForReadyPublish =
+    input.reportMetadataValid && input.intent === "ready" && input.reportDecision === "blocked";
+  const errorCode = !input.reportMetadataValid
+    ? "PUBLISH_REPORT_METADATA_INVALID"
+    : reportIsBlockedForReadyPublish
+      ? "PUBLISH_BLOCKED"
+      : "PUBLISH_INTENT_MISMATCH";
+  const errorMessage = !input.reportMetadataValid
+    ? `Report metadata is invalid: ${metadataDescription}. Publication is disabled.`
+    : reportIsBlockedForReadyPublish
+      ? "Report decision is blocked. Finish required gates or regenerate the report after resolving blockers."
+      : `Publish intent ${input.intent} is incompatible with report ${metadataDescription}.`;
+
   return PublishResultSchema.parse({
     runId: input.runId,
     status: "blocked",
@@ -1293,10 +1554,38 @@ function blockedPublishResult(input: {
     featureVideoExpected: false,
     featureVideoSynced: false,
     fallbackMode: "none",
-    partialReasons: ["Report decision is blocked. Publishing is disabled."],
-    errorCode: "PUBLISH_BLOCKED",
-    errorMessage:
-      "Report decision is blocked. Finish required gates or regenerate the report after resolving blockers.",
+    partialReasons: [errorMessage],
+    errorCode,
+    errorMessage,
+    retryable: false,
+    publishedAt: input.publishedAt,
+  });
+}
+
+function noDeltaPublishResult(input: {
+  runId: string;
+  target: PublishTarget;
+  reportArtifactId: string;
+  sourceBranch: string;
+  targetBranch: string;
+  publishedAt: string;
+}): PublishResult {
+  const message = `No committed delta exists on ${input.sourceBranch} beyond ${input.targetBranch}; no review request was created or updated.`;
+
+  return PublishResultSchema.parse({
+    runId: input.runId,
+    status: "blocked",
+    target: input.target,
+    reportArtifactId: input.reportArtifactId,
+    requestSynced: false,
+    visualPreviewExpected: false,
+    visualPreviewSynced: false,
+    featureVideoExpected: false,
+    featureVideoSynced: false,
+    fallbackMode: "none",
+    partialReasons: [message],
+    errorCode: "PUBLISH_NO_DELTA",
+    errorMessage: message,
     retryable: false,
     publishedAt: input.publishedAt,
   });

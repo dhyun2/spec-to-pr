@@ -21,6 +21,11 @@ const viewports = [
   { name: "desktop", width: 1440, height: 1000 },
   { name: "mobile", width: 390, height: 844 },
 ];
+const comparison = {
+  value: "comparison",
+  ko: "Spec-to-development 비교와 채택 정책",
+  en: "Spec-to-development comparison and adoption policy",
+};
 
 const browser = await chromium.launch({ headless: true });
 try {
@@ -66,6 +71,42 @@ try {
         );
         await page.close();
       }
+    }
+
+    for (const viewport of viewports) {
+      const page = await browser.newPage({ viewport });
+      const errors = [];
+      page.on("console", (message) => {
+        if (message.type() === "error") errors.push(message.text());
+      });
+      page.on("pageerror", (error) => errors.push(error.message));
+
+      await page.goto(`${origin}${locale.prefix}/concepts/${comparison.value}`, {
+        waitUntil: "networkidle",
+      });
+      await page.getByRole("heading", { level: 1, name: comparison[locale.titleKey] }).waitFor();
+      await page.locator("#comparison-matrix").locator("..").waitFor();
+      await page.getByRole("link", { name: "GitHub Spec Kit" }).first().waitFor();
+      await page.getByRole("link", { name: "Chrome DevTools MCP" }).first().waitFor();
+      if (viewport.name === "desktop") {
+        assert.equal(
+          await page.locator('nav.menu a.menu__link[href*="/concepts/"]').count(),
+          2,
+          `${locale.name}:sidebar concept links`,
+        );
+      }
+      assert.ok(
+        (await page
+          .locator(`a[href*="/spec-to-pr${locale.alternativePrefix}/concepts/comparison"]`)
+          .count()) > 0,
+        `${locale.name}:comparison:locale link`,
+      );
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      );
+      assert.ok(overflow <= 1, `${locale.name}:comparison:${viewport.name}:overflow ${overflow}px`);
+      assert.deepEqual(errors, [], `${locale.name}:comparison:${viewport.name}:console errors`);
+      await page.close();
     }
   }
 

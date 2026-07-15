@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { link, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -7,12 +8,14 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildResumeSpecToPrPrompt,
   buildSpecToPrPrompt,
+  inspectBlockedDiagnosticPreflight,
   validateSpecToPrRunInput,
 } from "../../packages/codex-sdk/src/spec-to-pr-runner.js";
 import {
   buildCodexReviewAgentInstructions,
   CODEX_REVIEW_AGENT_PROFILES,
   CODEX_WORKFLOW_TOOL_NAMES,
+  scoutRoutingForWorkload,
 } from "../../packages/codex-sdk/src/workflow-policy.js";
 
 const cliRuns = vi.hoisted(() => ({ inputs: [] as unknown[] }));
@@ -106,6 +109,161 @@ describe("Codex SDK workflow policy", () => {
     expect(prompt).toContain("contractTests");
     expect(prompt).toContain("mocks");
     expect(prompt.indexOf("mocks")).toBeLessThan(prompt.indexOf("UI completion"));
+  });
+
+  it("uses workflow status as a compact action envelope", () => {
+    const prompt = buildSpecToPrPrompt({
+      workingDirectory: "/tmp/project",
+      prompt: "Implement the API-backed settings UI.",
+      publication: "draft",
+      figmaUrl: "https://figma.com/design/example",
+      openApiPath: "docs/openapi.yaml",
+    });
+
+    expect(prompt).toContain("compact action envelope");
+    expect(prompt).toContain("status.nextActions");
+    expect(prompt).toContain("status.blockerDetails");
+    expect(prompt).toContain("status.deliveryProfile.publication");
+    expect(prompt).toContain("status.delegationPolicy");
+    expect(prompt).toContain("status.diagnosticPublication");
+    expect(prompt).toContain("one external action group");
+    expect(prompt).toContain("one implementation context");
+  });
+
+  it("routes only bounded read-only scouts and defers parallel reviewers", () => {
+    expect(scoutRoutingForWorkload("XS")).toEqual({
+      maxReadOnlyScouts: 0,
+      independentReadHeavyOnly: true,
+      allowNested: false,
+      parallelWriters: false,
+      parallelReviewersAfterImplementation: false,
+    });
+    expect(scoutRoutingForWorkload("S").maxReadOnlyScouts).toBe(0);
+    expect(scoutRoutingForWorkload("M").maxReadOnlyScouts).toBe(1);
+    expect(scoutRoutingForWorkload("L").maxReadOnlyScouts).toBe(2);
+    expect(scoutRoutingForWorkload("XL").maxReadOnlyScouts).toBe(2);
+    expect(scoutRoutingForWorkload("L").parallelReviewersAfterImplementation).toBe(true);
+
+    const prompt = buildSpecToPrPrompt({
+      workingDirectory: "/tmp/project",
+      prompt: "Implement the responsive settings UI.",
+    });
+    expect(prompt).toContain("XS/S=0, M<=1, L/XL<=2");
+    expect(prompt).toContain("independent read-heavy discovery");
+    expect(prompt).toContain("no nested scouts or parallel writers");
+    expect(prompt).toContain("only after implementation");
+  });
+
+  it("records optional skills only when they were actually applied", () => {
+    const prompt = buildSpecToPrPrompt({
+      workingDirectory: "/tmp/project",
+      prompt: "Implement the dashboard.",
+      skillHints: ["react-best-practices", "not-installed"],
+    });
+
+    expect(prompt).toContain("guidanceTrace.appliedSkills");
+    expect(prompt).toContain("actually applied");
+    expect(prompt).toContain("Do not copy unused skill hints or recommendations");
+  });
+
+  it("allows blocked diagnostic finalization only from an already publishable git state", async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-sdk-preflight-"));
+    const git = (...args: string[]) =>
+      execFileSync("git", args, {
+        cwd: directory,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
+    try {
+      git("init", "--initial-branch=main");
+      git("config", "user.email", "sdk-test@example.test");
+      git("config", "user.name", "SDK Test");
+      await writeFile(path.join(directory, "app.ts"), "export const value = 1;\n");
+      git("add", "app.ts");
+      git("commit", "-m", "base");
+      git("remote", "add", "origin", "https://github.com/example/repo.git");
+      git("checkout", "-b", "codex/sdk-finalization");
+      await writeFile(path.join(directory, "app.ts"), "export const value = 2;\n");
+      git("add", "app.ts");
+      git("commit", "-m", "feature");
+
+      expect(inspectBlockedDiagnosticPreflight(directory, { GITHUB_TOKEN: "test-token" })).toEqual({
+        eligible: true,
+        sourceBranch: "codex/sdk-finalization",
+        targetBranch: "main",
+        remoteName: "origin",
+      });
+
+      git("remote", "set-url", "origin", "ssh://git@code.example.test/team/repo.git");
+      expect(inspectBlockedDiagnosticPreflight(directory, { GITHUB_TOKEN: "test-token" })).toEqual({
+        eligible: false,
+        reason: "unsupported-remote",
+      });
+      expect(
+        inspectBlockedDiagnosticPreflight(directory, {
+          GITHUB_TOKEN: "test-token",
+          SPEC_TO_PR_GIT_HOST: "github",
+        }),
+      ).toEqual({
+        eligible: true,
+        sourceBranch: "codex/sdk-finalization",
+        targetBranch: "main",
+        remoteName: "origin",
+      });
+
+      git("remote", "set-url", "origin", "https://github.attacker.test/team/repo.git");
+      expect(inspectBlockedDiagnosticPreflight(directory, { GITHUB_TOKEN: "test-token" })).toEqual({
+        eligible: false,
+        reason: "unsupported-remote",
+      });
+      expect(
+        inspectBlockedDiagnosticPreflight(directory, {
+          GITHUB_TOKEN: "test-token",
+          SPEC_TO_PR_GIT_HOST: "github",
+        }),
+      ).toEqual({
+        eligible: true,
+        sourceBranch: "codex/sdk-finalization",
+        targetBranch: "main",
+        remoteName: "origin",
+      });
+
+      git("remote", "set-url", "origin", "git@gitlab.attacker.test:team/repo.git");
+      expect(inspectBlockedDiagnosticPreflight(directory, { GITLAB_TOKEN: "test-token" })).toEqual({
+        eligible: false,
+        reason: "unsupported-remote",
+      });
+      expect(
+        inspectBlockedDiagnosticPreflight(directory, {
+          GITLAB_TOKEN: "test-token",
+          SPEC_TO_PR_GIT_HOST: "gitlab",
+        }),
+      ).toEqual({
+        eligible: true,
+        sourceBranch: "codex/sdk-finalization",
+        targetBranch: "main",
+        remoteName: "origin",
+      });
+
+      git("branch", "-D", "main");
+      expect(
+        inspectBlockedDiagnosticPreflight(directory, {
+          GITLAB_TOKEN: "test-token",
+          SPEC_TO_PR_GIT_HOST: "gitlab",
+        }),
+      ).toEqual({ eligible: false, reason: "target-branch-unavailable" });
+      git("branch", "main", "HEAD~1");
+
+      await writeFile(path.join(directory, "dirty.ts"), "uncommitted\n");
+      expect(
+        inspectBlockedDiagnosticPreflight(directory, {
+          GITLAB_TOKEN: "test-token",
+          SPEC_TO_PR_GIT_HOST: "gitlab",
+        }),
+      ).toEqual({ eligible: false, reason: "working-tree-not-clean" });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("passes explicit brief and legacy delivery profiles to workflow_start", () => {

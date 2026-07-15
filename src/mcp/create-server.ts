@@ -15,6 +15,8 @@ import type { ServicesProvider } from "./run-service-provider.js";
 
 const CONTRACT_VERSION = "2.0.0" as const;
 const SERVER_NAME = "spec-to-pr-kernel" as const;
+const SERVER_INSTRUCTIONS =
+  "Workflow order: intake → contracts → implementation → functional-review/design-review → report → publish → archive. Stop for one external action per boundary. Missing evidence never passes a stage or gate. Use workflow_status to resume the recorded Run; use workflow_publish with blocked-diagnostic only for a currently blocked draft-publication Run.";
 const TOOL_NAMES = [
   "workflow_advance",
   "workflow_archive",
@@ -96,7 +98,10 @@ type DeliveryModeTuple = [
 type StructuredResult = Record<string, unknown>;
 
 export function createKernelServer(servicesProvider: ServicesProvider): McpServer {
-  const server = new McpServer({ name: SERVER_NAME, version: packageJson.version });
+  const server = new McpServer(
+    { name: SERVER_NAME, version: packageJson.version },
+    { instructions: SERVER_INSTRUCTIONS },
+  );
 
   server.registerTool(
     "workflow_info",
@@ -136,7 +141,6 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
       description:
         "Create a Run, capture intake, estimate workload, classify scope, and stop at the next boundary.",
       inputSchema: WorkflowStartInputSchema.shape,
-      outputSchema: WorkflowStatusSchema.shape,
     },
     async (input) => toolResult(await (await servicesProvider()).workflowService.start(input)),
   );
@@ -147,7 +151,6 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
       title: "Advance workflow",
       description: "Run deterministic steps until completion, a blocker, or an external action.",
       inputSchema: WorkflowAdvanceInputSchema.shape,
-      outputSchema: WorkflowStatusSchema.shape,
     },
     async (input) => toolResult(await (await servicesProvider()).workflowService.advance(input)),
   );
@@ -158,7 +161,6 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
       title: "Submit workflow result",
       description: "Record contracts, API readiness, implementation, Figma, or review evidence.",
       inputSchema: WorkflowSubmitInputSchema.shape,
-      outputSchema: WorkflowStatusSchema.shape,
     },
     async (input) => toolResult(await (await servicesProvider()).workflowService.submit(input)),
   );

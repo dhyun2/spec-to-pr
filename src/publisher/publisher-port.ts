@@ -4,6 +4,7 @@ import type {
   PublishTarget,
   ReviewRequestAssetRole,
   ReviewRequestPayload,
+  ReviewRequestUpdate,
 } from "./publish-contracts.js";
 
 export type ReviewRequestAsset = {
@@ -16,24 +17,41 @@ export type ReviewRequestAsset = {
   content: Buffer;
 };
 
+export type ReviewRequestSynchronizationPhase = "labels" | "reviewers";
+
+export class ReviewRequestSynchronizationError extends Error {
+  public override readonly name = "ReviewRequestSynchronizationError";
+
+  public constructor(
+    message: string,
+    public readonly phase: ReviewRequestSynchronizationPhase,
+    public readonly request: PublishedReviewRequest,
+  ) {
+    super(message);
+  }
+}
+
 export interface ReviewRequestPublisher {
   findExisting(input: {
     target: PublishTarget;
     payload: ReviewRequestPayload;
     token: string;
+    signal?: AbortSignal;
   }): Promise<PublishedReviewRequest | undefined>;
 
   create(input: {
     target: PublishTarget;
     payload: ReviewRequestPayload;
     token: string;
+    signal?: AbortSignal;
   }): Promise<PublishedReviewRequest>;
 
-  updateBody(input: {
+  update(input: {
     target: PublishTarget;
     requestNumber: string;
-    body: string;
+    update: ReviewRequestUpdate;
     token: string;
+    signal?: AbortSignal;
   }): Promise<PublishedReviewRequest>;
 
   publishAssets(input: {
@@ -41,5 +59,6 @@ export interface ReviewRequestPublisher {
     payload: ReviewRequestPayload;
     token: string;
     assets: ReviewRequestAsset[];
+    signal?: AbortSignal;
   }): Promise<PublishedReviewAsset[]>;
 }

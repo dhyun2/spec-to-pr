@@ -1,54 +1,54 @@
 ---
 sidebar_position: 1
-title: 스킬 9개
+title: 공개 스킬 8개
 ---
 
 # 스킬 레퍼런스
 
-SpecToPR v2가 유지하는 skill은 정확히 9개입니다.
+현재 저장소가 제공하는 것은 정확히 **8 public marketplace skills**입니다. Release maintenance는 public marketplace workflow 밖의 maintainer concern이며 사용자 Run의 skill 수에 포함하지 않습니다.
 
-| Skill                           | 언제 쓰나                      | 핵심 경계                                                  |
-| ------------------------------- | ------------------------------ | ---------------------------------------------------------- |
-| `/spec-to-pr`                   | 전체 workflow 실행             | delivery profile/workload 하나, public tool 7개만 사용     |
-| `/spec-to-pr:doctor`            | 설치/contract 진단             | `workflow_info`가 v2 표면과 일치해야 함                    |
-| `/spec-to-pr:intake-contracts`  | intake source와 contracts 준비 | real evidence와 숫자 `workloadSignals`로 estimate 정교화   |
-| `/spec-to-pr:implement`         | 계약 기반 구현                 | API·UI 한 context, 80% boundary checkpoint, 필수 검사 유지 |
-| `/spec-to-pr:review-functional` | code scope 독립 검토           | requirement와 required functional gate evidence 확인       |
-| `/spec-to-pr:review-design`     | UI scope 독립 검토             | visual/interaction/design-system/accessibility 확인        |
-| `/spec-to-pr:publish`           | publish-ready Run 발행         | draft PR/MR과 required asset sync만 수행                   |
-| `/spec-to-pr:archive-openspec`  | merge 뒤 archive               | authoritative merge evidence 필수, polling 없음            |
-| `/spec-to-pr:prepare-release`   | plugin 자체 release 준비       | full matrix/archive/package/cross-host checks              |
+| Public skill                                          | 언제 쓰나                        | 핵심 경계                                           |
+| ----------------------------------------------------- | -------------------------------- | --------------------------------------------------- |
+| `/spec-to-pr` (`spec-to-pr`)                          | 전체 workflow 실행               | 하나의 delivery profile, 7개 public tool만 사용     |
+| `/spec-to-pr:doctor` (`doctor`)                       | 설치/contract 진단               | `workflow_info`가 v2 surface와 일치해야 함          |
+| `/spec-to-pr:intake-contracts` (`intake-contracts`)   | source와 contracts 준비          | real evidence와 `workloadSignals`로 estimate 정교화 |
+| `/spec-to-pr:implement` (`implement`)                 | 계약 기반 구현                   | API·UI 한 context, 필수 검사 유지                   |
+| `/spec-to-pr:review-functional` (`review-functional`) | code scope 독립 검토             | requirement와 required functional gate 판정         |
+| `/spec-to-pr:review-design` (`review-design`)         | UI scope 독립 검토               | visual/interaction/design-system/accessibility 판정 |
+| `/spec-to-pr:publish` (`publish`)                     | ready 또는 diagnostic draft 발행 | draft PR/MR과 required asset sync만 수행            |
+| `/spec-to-pr:archive-openspec` (`archive-openspec`)   | merge 뒤 archive                 | authoritative merge evidence와 별도 요청 필수       |
 
 ## Mode routing
 
-오케스트레이터가 `workflow_start`에 delivery profile을 기록합니다. Mode는 납품·증거 동작을 정하고 brief/Figma/OpenAPI/보조 문서/project guidance source는 독립적으로 조합됩니다.
+Mode는 납품·증거 정책이고 source는 조합됩니다. `brief`는 `briefPath`, `legacy`는 concrete delta/focused baseline, `feature`는 changed-feature Playwright E2E와 영상 정확히 1개, `figma`는 `figmaUrl`과 real `figma-bundle`을 요구합니다. `auto`는 mode-specific evidence를 임의로 켜지 않습니다. Mode마다 새 skill/stage/agent lane을 만들지 않습니다.
 
-- `brief`: `briefPath` 필수
-- `legacy`: concrete change request와 focused baseline 필수
-- `feature`: user-facing UI일 때 changed-feature E2E와 영상 정확히 한 개
-- `figma`: `figmaUrl`과 real `figma-bundle` 필수
-- `auto`: mode-specific evidence를 임의로 활성화하지 않음
+## Deterministic recommendation과 적용 trace
 
-네 모드는 같은 `intake-contracts`, `implement`, review, publish skill을 재사용합니다. Mode마다 별도 skill이나 agent lane을 만들지 않습니다.
+Contracts는 source와 scope에서 optional `recommendedSkills`를 deterministic하게 계산합니다: `figmaUrl` → `figma`/`design-system`, `openApiPaths` → `api-generator`, 감지된 React/Next package → `react-best-practices`/`next-best-practices`, `mode: feature` + UI → `playwright`입니다.
 
-## Project guidance와 optional skill routing
+`intake-contracts`, `implement`, `review-functional`, `review-design`, `publish`, `archive-openspec`은 durable action의 public `stageSkillRoute`입니다. 이 action routing은 `deliveryProfile.recommendedSkills`나 optional applied-skill 후보가 아닙니다.
 
-`intake-contracts`는 explicit/discovered guidance를 `guidanceTrace`에 기록하고 scope 분류에서는 제외합니다. `implement`는 React, Next.js, design-system, API-generation hint를 available and applicable할 때만 사용합니다. Project guidance가 generic skill 조언보다 우선합니다. Missing optional skills do not block the Run; 실제 적용한 hint만 contracts와 PR report에 남깁니다.
+`appliedSkills`에는 다음 허용 합집합 중 **available and applicable**하며 실제 사용한 skill만 기록합니다.
 
-`review-functional`은 파일 배치, architecture, API와 framework convention 차원에서 guidance와 적용 skill을 확인합니다. `review-design`은 design-system/UI convention, component mapping, responsive/interaction/accessibility 차원에서 같은 trace를 확인합니다. Reviewer role은 늘 두 개뿐이며 optional skill마다 새 reviewer나 stage를 만들지 않습니다.
+1. SpecToPR가 계산한 `recommendedSkills`
+2. 사용자가 `skillHints`로 요청한 설치 skill
 
-Workload/budget도 별도 skill이 아닙니다. `workflow_status`의 `XS`~`XL` estimate와 전체 `requiredValidations`를 기존 skill들이 읽고, SDK runner가 action turn 경계에서 실제 usage를 집계합니다. Budget이 부족하거나 usage가 누락돼도 reviewer가 required gate/mode evidence를 생략하거나 approval로 바꿀 수 없습니다.
+Missing optional skills do not block the Run. 누락된 hint는 `appliedSkills`에서 제외하되 project guidance와 `requiredValidations`는 그대로 지킵니다. 적용하지 않은 skill을 PR report에 넣거나 임의 경로에서 skill 본문을 읽지 않습니다.
+
+## Project guidance precedence
+
+`intake-contracts`는 explicit/discovered guidance를 `guidanceTrace`에 기록하고 scope 분류에서는 제외합니다. 우선순위는 current user request → explicit `guidancePaths` → automatically discovered project guidance → applicable installed skill → SpecToPR defaults입니다. `implement`와 reviewer는 generic skill 조언보다 project guidance를 우선합니다.
 
 ## Reviewer와 skill의 차이
 
-`review-functional`과 `review-design`은 workflow 지침이고, 실제 독립 role은 각각 `functional-reviewer`와 `design-reviewer`입니다. Reviewer는 implementation을 수정하지 않고 verdict와 evidence를 제출합니다. Design reviewer는 UI scope가 아니면 호출하지 않습니다.
+`review-functional`과 `review-design`은 workflow 지침이고 실제 독립 role은 `functional-reviewer`와 `design-reviewer`입니다. 두 reviewer profile은 workflow-MCP-free, fully read-only입니다. Implementation을 수정하거나 `workflow_*`를 호출하지 않고 immutable status/contracts/diff/evidence packet에 verdict만 반환합니다. Design reviewer는 UI scope가 아니면 호출하지 않습니다.
 
-## Public tool과 skill의 차이
+## Public tool과 browser 경계
 
-Skill은 호스트가 읽는 실행 지침이고, durable 상태 변경은 다음 7개 MCP tool이 담당합니다.
+Durable 상태 변경은 `workflow_info`, `workflow_start`, `workflow_advance`, `workflow_submit`, `workflow_status`, `workflow_publish`, `workflow_archive`만 담당합니다. API-backed UI의 `api-ready`도 같은 `workflow_submit`을 사용하며 새 tool/stage를 추가하지 않습니다.
 
-`workflow_info`, `workflow_start`, `workflow_advance`, `workflow_submit`, `workflow_status`, `workflow_publish`, `workflow_archive`
+Playwright Test/CLI assertion과 structured result가 browser acceptance oracle입니다. Browser MCP는 optional interactive reproduction/inspection, Chrome DevTools MCP는 console/network/performance/memory/live-DOM diagnosis에만 conditional입니다. Screenshot, video, trace, agent observation은 assertion을 대체하지 않으며 required browser proof를 실행할 수 없으면 `BROWSER_NOT_RUN`으로 blocked됩니다. Feature만 changed-feature E2E와 video 정확히 1개를 요구합니다.
 
-삭제된 v1 skill 이름이나 내부 domain service를 직접 호출하는 방식은 지원하지 않습니다.
+## 불확실한 diagnostic publication 복구
 
-API-backed UI의 `api-ready` 제출은 같은 `workflow_submit`을 사용합니다. `artifactPaths`와 `apiArtifacts`의 `types`, `schemas`, `wrappers`, `mocks`, `contractTests`는 물리적으로 서로 다른 비어 있지 않은 project-local 파일을 가리키고, contract-test JSON은 `status: passed`를 보고해야 합니다. Path, symlink, hard link alias는 별도 증거가 아닙니다. `implementationContextId`는 최종 구현과 같아야 합니다. Public tool이나 stage는 추가되지 않습니다.
+`publish` skill은 `diagnostic-publication-uncertain`을 자동 retry하지 않습니다. `recoverUncertain: false`가 기본이며, 먼저 GitHub/GitLab에서 matching draft를 확인하고 사용자에게 결과를 보여준 뒤 명시적 승인으로만 같은 `workflow_publish`를 `recoverUncertain: true`로 호출합니다. 이 옵션은 기존 publish tool/stage 안에 있고 blocked state를 passed로 바꾸지 않으며 SDK가 자동 승인하지 않습니다.

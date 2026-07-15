@@ -95,6 +95,13 @@ const McpConfigSchema = z.object({
 describe("plugin layout", () => {
   const root = process.cwd();
 
+  it("keeps transient agent plans out of the repository", () => {
+    const gitignore = readFileSync(path.join(root, ".gitignore"), "utf8");
+
+    expect(existsSync(path.join(root, "docs", "superpowers"))).toBe(false);
+    expect(gitignore.split(/\r?\n/)).toContain("docs/superpowers/");
+  });
+
   it("keeps runtime dependencies limited to the production bundle", () => {
     const packageJson = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")) as {
       dependencies: Record<string, string>;
@@ -187,13 +194,12 @@ describe("plugin layout", () => {
     }
   });
 
-  it("ships exactly the nine v2 skills and two canonical reviewer roles", () => {
+  it("ships exactly eight public v2 skills, one maintainer skill, and two read-only reviewers", () => {
     const expectedSkills = [
       "archive-openspec",
       "doctor",
       "implement",
       "intake-contracts",
-      "prepare-release",
       "publish",
       "review-design",
       "review-functional",
@@ -213,6 +219,10 @@ describe("plugin layout", () => {
     ).toEqual(expectedSkills);
     expect(readdirSync(path.join(root, "agents")).sort()).toEqual(expectedClaudeAgents);
     expect(readdirSync(path.join(root, ".codex", "agents")).sort()).toEqual(expectedCodexAgents);
+    expect(existsSync(path.join(root, "skills", "prepare-release"))).toBe(false);
+    expect(existsSync(path.join(root, ".agents", "skills", "prepare-release", "SKILL.md"))).toBe(
+      true,
+    );
 
     for (const skill of expectedSkills) {
       const skillPath = path.join(root, "skills", skill, "SKILL.md");
@@ -299,6 +309,12 @@ describe("plugin layout", () => {
       "utf8",
     );
     const designAgent = readFileSync(path.join(root, "agents", "design-reviewer.md"), "utf8");
+    for (const reviewer of [functionalAgent, designAgent]) {
+      expect(reviewer).toContain("tools: Read, Glob, Grep");
+      expect(reviewer).toContain("Read-only reviewer");
+      expect(reviewer).toContain("Never edit implementation");
+      expect(reviewer).toContain("workflow MCP");
+    }
     expect(functionalAgent).toContain("targeted-feature");
     expect(functionalAgent).toContain("full-project E2E");
     expect(functionalAgent).toContain("immutable review packet");
@@ -342,6 +358,8 @@ describe("plugin layout", () => {
       path.join(root, ".codex", "agents", "spec-to-pr-functional-reviewer.toml"),
       "utf8",
     );
+    expect(codexFunctionalAgent).toContain('sandbox_mode = "read-only"');
+    expect(parseEmptyTomlTable(codexFunctionalAgent, "mcp_servers")).toEqual({});
     for (const requirement of [
       "implementationContextId",
       "testCount",
@@ -360,23 +378,25 @@ describe("plugin layout", () => {
       path.join(root, ".codex", "agents", "spec-to-pr-design-reviewer.toml"),
       "utf8",
     );
+    expect(codexDesignAgent).toContain('sandbox_mode = "read-only"');
+    expect(parseEmptyTomlTable(codexDesignAgent, "mcp_servers")).toEqual({});
     expect(codexDesignAgent).toContain("reviewPacketId");
     expect(codexDesignAgent).toContain("Scope splits");
     expect(codexDesignAgent).toContain("guidanceTrace");
     expect(codexDesignAgent).toContain("applied optional skills");
     expect(codexDesignAgent).toContain("design-system and UI conventions");
 
-    const workflowService = readFileSync(
-      path.join(root, "src", "application", "workflow-service.ts"),
+    const reportRenderer = readFileSync(
+      path.join(root, "src", "pr-report", "workflow-report-renderer.ts"),
       "utf8",
     );
-    expect(workflowService).toContain('"## Project guidance"');
-    expect(workflowService).toContain('"### Explicit"');
-    expect(workflowService).toContain('"### Automatically discovered"');
-    expect(workflowService).toContain('"## Applied optional skills"');
-    expect(workflowService).toContain("contracts.guidanceTrace.explicit");
-    expect(workflowService).toContain("contracts.guidanceTrace.discovered");
-    expect(workflowService).toContain("contracts.guidanceTrace.skillHints");
+    expect(reportRenderer).toContain('"## Project guidance"');
+    expect(reportRenderer).toContain('"### Explicit"');
+    expect(reportRenderer).toContain('"### Automatically discovered"');
+    expect(reportRenderer).toContain('"## Applied optional skills"');
+    expect(reportRenderer).toContain("input.guidanceTrace.explicit");
+    expect(reportRenderer).toContain("input.guidanceTrace.discovered");
+    expect(reportRenderer).toContain("input.guidanceTrace.skillHints");
 
     const publish = readFileSync(path.join(root, "skills", "publish", "SKILL.md"), "utf8");
     for (const field of [
@@ -392,6 +412,56 @@ describe("plugin layout", () => {
     expect(publish).toContain("source branch");
     expect(publish).toContain("working tree is clean");
     expect(publish).toContain("at least one commit ahead");
+
+    const descriptions = Object.fromEntries(
+      expectedSkills.map((skill) => {
+        const contents = readFileSync(path.join(root, "skills", skill, "SKILL.md"), "utf8");
+        const description = /^description: (.+)$/mu.exec(contents)?.[1];
+        return [skill, description];
+      }),
+    );
+    expect(descriptions).toEqual({
+      "archive-openspec":
+        "Use when the user explicitly requests post-merge archival for a merged spec-to-pr change with authoritative merge evidence.",
+      doctor:
+        "Use when checking whether the spec-to-pr v2 workflow facade is installed, reachable, and exposing the expected contract.",
+      implement:
+        "Use when the current v2 external action requests same-context implementation from accepted contracts.",
+      "intake-contracts":
+        "Use when the current v2 external action requests intake or contract preparation from supplied sources and repository context.",
+      publish:
+        "Use when the user explicitly requests creating or updating a draft review request for a publish-ready or blocked-diagnostic v2 Run.",
+      "review-design":
+        "Use when applicable UI scope reaches the v2 design-review action for an independent visual, interaction, and accessibility verdict.",
+      "review-functional":
+        "Use when code scope reaches the mandatory v2 functional-review action for an independent evidence-based verdict.",
+      "spec-to-pr":
+        "Use when orchestrating an evidence-driven v2 Run across its stage-specific external actions.",
+    });
+
+    for (const policySource of [intake, implement, functionalReviewSkill]) {
+      expect(policySource).toContain("deliveryProfile.recommendedSkills");
+      expect(policySource).toContain("actually applied");
+    }
+    expect(intake).toContain("`figmaUrl` -> `figma`, `design-system`");
+    expect(intake).toContain("`openApiPaths` -> `api-generator`");
+    expect(intake).toContain("React package evidence -> `react-best-practices`");
+    expect(intake).toContain("Next.js package evidence -> `next-best-practices`");
+    expect(intake).toContain("feature UI -> `playwright`");
+
+    const designReviewSkill = readFileSync(
+      path.join(root, "skills", "review-design", "SKILL.md"),
+      "utf8",
+    );
+    for (const policySource of [implement, functionalReviewSkill, designReviewSkill]) {
+      expect(policySource).toContain("Playwright Test/CLI is the acceptance oracle");
+      expect(policySource).toContain("browser MCP is optional interactive diagnosis");
+      expect(policySource).toContain(
+        "console, network, performance, memory, or live-DOM diagnosis",
+      );
+      expect(policySource).toContain("screenshots and video do not replace assertions");
+      expect(policySource).toContain("BROWSER_NOT_RUN");
+    }
   });
 
   it("keeps v2 definitions host-neutral and limited to the seven workflow tools", () => {
@@ -556,3 +626,13 @@ describe("plugin layout", () => {
     expect(verifyReviewerProfileParity(reviewerFiles)).toEqual([]);
   });
 });
+
+function parseEmptyTomlTable(contents: string, key: string): Record<string, never> {
+  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const assignment = new RegExp(`^${escapedKey}\\s*=\\s*(.+)$`, "mu").exec(contents)?.[1]?.trim();
+
+  if (assignment !== "{}") {
+    throw new Error(`${key} must be an explicit empty TOML inline table`);
+  }
+  return {};
+}

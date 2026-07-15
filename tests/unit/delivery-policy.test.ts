@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildDeliveryProfile } from "../../src/workflow/index.js";
+import { buildDelegationPolicy, buildDeliveryProfile } from "../../src/workflow/index.js";
 
 const uiScope = {
   code: true,
@@ -14,6 +14,25 @@ const uiScope = {
 };
 
 describe("delivery policy", () => {
+  it("derives a strict bounded single-writer delegation policy from workload size", () => {
+    expect(buildDelegationPolicy("XS")).toEqual({
+      singleWriter: true,
+      allowNested: false,
+      maxReadOnlyScouts: 0,
+      parallelReviewers: false,
+    });
+    expect(buildDelegationPolicy("S").maxReadOnlyScouts).toBe(0);
+    expect(buildDelegationPolicy("M").maxReadOnlyScouts).toBeLessThanOrEqual(1);
+    for (const size of ["L", "XL"] as const) {
+      expect(buildDelegationPolicy(size)).toMatchObject({
+        singleWriter: true,
+        allowNested: false,
+        maxReadOnlyScouts: 2,
+        parallelReviewers: true,
+      });
+    }
+  });
+
   it("keeps auto mode lightweight for existing callers", () => {
     expect(
       buildDeliveryProfile({
@@ -24,6 +43,7 @@ describe("delivery policy", () => {
       }),
     ).toMatchObject({
       mode: "auto",
+      recommendedSkills: [],
       requirements: {
         brief: false,
         legacyBaseline: false,
@@ -151,6 +171,7 @@ describe("delivery policy", () => {
         guidancePaths: ["docs/architecture/ARCHITECTURE.md"],
         discoveredGuidancePaths: ["AGENTS.md"],
         skillHints: ["react-best-practices", "api-generator"],
+        recommendedSkills: ["figma", "design-system", "api-generator", "playwright"],
       }),
     ).toMatchObject({
       mode: "feature",
@@ -160,6 +181,7 @@ describe("delivery policy", () => {
       guidancePaths: ["docs/architecture/ARCHITECTURE.md"],
       discoveredGuidancePaths: ["AGENTS.md"],
       skillHints: ["react-best-practices", "api-generator"],
+      recommendedSkills: ["figma", "design-system", "api-generator", "playwright"],
       requirements: {
         brief: true,
         targetedFeatureE2E: true,

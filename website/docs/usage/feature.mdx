@@ -73,6 +73,35 @@ checkout을 end-to-end로 구현해줘. checkout test path/tag/project만 실행
 6. **Targeted feature proof:** 변경 기능을 고르는 Playwright invocation 하나만 실행하고 strict JSON과 유효한 영상 하나를 기록합니다.
 7. **Report / publish:** exact selector, command, result, video path와 모든 verdict를 포함한 draft PR을 발행합니다.
 
+## 실행 정책: stage, agent, skill, tool
+
+| Durable stage       | 이 케이스의 정확한 동작                                                                                                          |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `intake`            | 사용자 journey, UI scope, 모든 source, publication, workload와 `requiredValidations`를 고정합니다.                               |
+| `contracts`         | brief/OpenAPI/docs/Figma contract를 합치고 changed-feature selector와 browser evidence를 확정합니다.                             |
+| `implementation`    | 한 명의 implementation writer가 같은 `implementationContextId`에서 API-ready 뒤 UI를 구현하고 targeted feature proof를 만듭니다. |
+| `functional-review` | read-only `functional-reviewer`가 contract, diff, project checks, targeted E2E를 판정합니다.                                     |
+| `design-review`     | read-only `design-reviewer`가 visual/interaction/responsive/accessibility evidence를 판정합니다.                                 |
+| `report`            | exact selector, structured result, video 하나, reviewer verdict와 risk를 canonical report로 만듭니다.                            |
+| `publish`           | `workflow_publish intent: ready`로 asset을 동기화한 draft PR/MR만 생성·갱신합니다.                                               |
+| `archive`           | merge 후 authoritative evidence와 별도 사용자 요청이 있을 때만 실행합니다.                                                       |
+
+Agent 정책은 XS/S read-only scout 0명, M 최대 1명, L/XL 최대 2명입니다. Scout는 source discovery만 읽고, API와 UI는 한 implementation writer가 함께 편집합니다. **no nesting**, **parallel writer 금지**이며 functional/design reviewer 병렬 실행은 implementation 뒤에만 허용됩니다.
+
+- `stageSkillRoute`: public action은 `intake-contracts` → `implement` → `review-functional`/`review-design` → `publish` 순서입니다. 이 routing은 `deliveryProfile.recommendedSkills`가 아닙니다.
+- `recommendedSkills`: `figmaUrl` → `figma`, `design-system`; `openApiPaths` → `api-generator`; 감지된 React/Next package → `react-best-practices`, `next-best-practices`; `mode: feature` + UI → `playwright` optional candidate입니다.
+- `appliedSkills`: `recommendedSkills`와 실제 available/applicable한 `skillHints`의 optional-skill 허용 합집합만 기록합니다. Missing optional skills가 targeted E2E나 다른 필수 evidence를 약화시키지 않습니다.
+- **workflow MCP:** 필수. **Figma host:** `figmaUrl`이 있을 때 필수. **Playwright Test/CLI:** 변경 기능을 test path/tag/project로 고른 단일 command, retrying assertion, structured result의 acceptance oracle로 필수이며 video는 정확히 1개만 supporting evidence입니다.
+- **Browser MCP:** optional interactive reproduction/inspection. **Chrome DevTools MCP:** console/network/performance/memory/live-DOM 진단에만 conditional입니다. 둘 다 Playwright assertion, positive `testCount`, exact selector를 대체하지 않습니다.
+
+### Ready, blocked diagnostic, resume
+
+정상 결과는 `workflow_publish intent: ready`의 video-linked draft입니다. Required browser evidence가 실행되지 않으면 `BROWSER_NOT_RUN` blocker입니다. 해결되지 않은 blocker는 typed `blockerDetails`와 exact unblock action을 남기고, clean/non-target/authenticated/supported remote, committed delta, target보다 한 commit ahead 조건이 모두 맞을 때만 `workflow_publish intent: blocked-diagnostic` draft를 발행합니다. Diagnostic draft는 계속 `status: blocked`이며 성공이 아닙니다. `PUBLISH_NO_DELTA` 등 preflight 실패면 empty commit/issue fallback 없이 **local blocked report**를 반환합니다.
+
+`diagnostic-publication-uncertain`이면 자동 재발행하지 않습니다. GitHub/GitLab에서 matching draft를 확인해 사용자에게 보여주고, 명시적 승인을 받은 경우에만 같은 `workflow_publish`를 `recoverUncertain: true`로 호출합니다.
+
+복구 뒤에는 **same Run**을 latest status에서 재개하고 E2E/video처럼 실패한 required action만 다시 증명합니다. Diagnostic draft가 있었다면 같은 source/target의 **same draft PR**을 `[Blocked]`에서 정상 ready 제목/본문으로 갱신하고 blocked label을 제거합니다.
+
 ## 증거와 검증 <span id="evidence-feature"></span>
 
 | 증거             | 예상 예시                                         | 필수 조건                                                                  |

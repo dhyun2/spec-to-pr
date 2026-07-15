@@ -1,6 +1,7 @@
 import { z } from "zod";
 
-import { RunIdSchema } from "../runtime/ids.js";
+import { RunStageNameSchema } from "../run/stages.js";
+import { ArtifactIdSchema, RunIdSchema } from "../runtime/ids.js";
 import { GitObjectIdSchema, Sha256DigestSchema } from "../runtime/scalars.js";
 import { WorkloadEstimateSchema, WorkloadSignalsSchema } from "./workload-policy.js";
 
@@ -81,11 +82,109 @@ function uniqueBoundedArray<T extends z.ZodTypeAny>(item: T, label: string, max 
 const NormalizedSourcePathsSchema = uniqueBoundedArray(WorkflowSourcePathSchema, "Source path");
 const NormalizedSkillHintsSchema = uniqueBoundedArray(SkillHintSchema, "Skill hint");
 
+export const BlockerKindSchema = z.enum([
+  "missing-input",
+  "missing-tool",
+  "policy",
+  "verification",
+  "publish-precondition",
+  "budget-split",
+  "unexpected",
+]);
+
+const BlockerTextSchema = z.string().trim().min(1).max(500);
+const SECRET_SHAPED_EVIDENCE_PATH_PATTERNS = [
+  /(?:^|[/?#&;])(?:token|access[_-]?token|refresh[_-]?token|id[_-]?token|github[_-]?token|gitlab[_-]?token|api[_-]?key|authorization|credential|password|passwd|secret|client[_-]?secret|private[_-]?key|aws[_-]?secret[_-]?access[_-]?key)\s*(?:=|:)\s*[^/?#&;\s]+/i,
+  /(?:^|[/])[^/@:\s]+:[^/@\s]+@[^/\s]+/i,
+  /(?:^|[/_.-])(?:gh[pousr]_[a-z0-9]{12,}|github_pat_[a-z0-9_]{12,}|glpat-[a-z0-9_-]{12,}|sk-(?:proj-)?[a-z0-9_-]{12,}|xox[baprs]-[a-z0-9-]{12,}|akia[a-z0-9]{16})(?:$|[./_-])/i,
+  /-----BEGIN(?: [A-Z]+)* PRIVATE KEY-----/i,
+] as const;
+const SAFE_EVIDENCE_PATH_GRAMMAR = /^(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+$/;
+const BENIGN_SENSITIVE_EVIDENCE_SEGMENTS = new Set([
+  "token-validation.json",
+  "credential-rotation-guide.md",
+  "authorization-errors.json",
+]);
+const SENSITIVE_EVIDENCE_SEGMENT_PATTERN =
+  /(?:^|[._-])(?:tokens?|passwords?|passwd|secrets?|credentials?|auth|authentication|authorization|api[._-]?keys?|private[._-]?keys?)(?:$|[._-])/i;
+
+function decodeAsciiPercentEscapesToFixedPoint(value: string): string {
+  let current = value;
+  for (let iteration = 0; iteration <= value.length; iteration += 1) {
+    let changed = false;
+    const next = current.replace(/%([0-9a-f]{2})/gi, (encoded, hex: string) => {
+      const codePoint = Number.parseInt(hex, 16);
+      if (codePoint > 0x7f) return encoded;
+      changed = true;
+      return String.fromCharCode(codePoint);
+    });
+    if (!changed || next === current) return current;
+    current = next;
+  }
+  return current;
+}
+
+export function isSafeDurableEvidencePath(rawValue: string): boolean {
+  const value = rawValue.trim();
+  if (value.length === 0 || value.length > 1_000) return false;
+  const decoded = decodeAsciiPercentEscapesToFixedPoint(value);
+  const candidates = new Set([value, decoded]);
+
+  return [...candidates].every((candidate) => {
+    const segments = candidate.split("/");
+    return (
+      SAFE_EVIDENCE_PATH_GRAMMAR.test(candidate) &&
+      segments.every((segment) => segment !== "." && segment !== "..") &&
+      segments.every((segment, index) => {
+        if (!SENSITIVE_EVIDENCE_SEGMENT_PATTERN.test(segment)) return true;
+        return (
+          index === segments.length - 1 &&
+          BENIGN_SENSITIVE_EVIDENCE_SEGMENTS.has(segment.toLowerCase())
+        );
+      }) &&
+      !SECRET_SHAPED_EVIDENCE_PATH_PATTERNS.some((pattern) => pattern.test(candidate))
+    );
+  });
+}
+
+const BlockerEvidencePathSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(1_000)
+  .refine(isSafeDurableEvidencePath, "Blocker evidence paths must be safe project-relative paths");
+
+export const WorkflowBlockerSchema = z
+  .object({
+    stage: RunStageNameSchema,
+    code: z.string().trim().min(1).max(100),
+    kind: BlockerKindSchema,
+    summary: BlockerTextSchema,
+    retryable: z.boolean(),
+    resumable: z.boolean(),
+    completedWork: z.array(BlockerTextSchema).max(20),
+    evidencePaths: z.array(BlockerEvidencePathSchema).max(50),
+    attemptedRecovery: z.array(BlockerTextSchema).max(20),
+    unrunValidations: z.array(z.string().trim().min(1).max(200)).max(20),
+    exactUnblockAction: z.string().trim().min(1).max(1_000),
+  })
+  .strict();
+
+export const DelegationPolicySchema = z
+  .object({
+    singleWriter: z.literal(true),
+    allowNested: z.literal(false),
+    maxReadOnlyScouts: z.number().int().min(0).max(2),
+    parallelReviewers: z.boolean(),
+  })
+  .strict();
+
 export const GuidanceTraceSchema = z
   .object({
     explicit: NormalizedSourcePathsSchema.default([]),
     discovered: NormalizedSourcePathsSchema.default([]),
     skillHints: NormalizedSkillHintsSchema.default([]),
+    appliedSkills: NormalizedSkillHintsSchema.default([]),
   })
   .strict()
   .superRefine((trace, context) => {
@@ -110,6 +209,7 @@ export const DeliveryProfileSchema = z
     guidancePaths: NormalizedSourcePathsSchema.default([]),
     discoveredGuidancePaths: NormalizedSourcePathsSchema.default([]),
     skillHints: NormalizedSkillHintsSchema.default([]),
+    recommendedSkills: NormalizedSkillHintsSchema.default([]),
     requirements: z
       .object({
         brief: z.boolean(),
@@ -260,9 +360,24 @@ export const ReviewSubmissionSchema = z
     requirements: z.array(ReviewRequirementSchema).default([]),
     artifactPaths: z.array(z.string().trim().min(1)).default([]),
     gateResults: z.array(ReviewGateResultSchema).default([]),
+    blocker: WorkflowBlockerSchema.optional(),
   })
   .strict()
   .superRefine((review, context) => {
+    if (review.verdict === "approved" && review.blocker !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["blocker"],
+        message: "Approved reviews cannot report a blocker",
+      });
+    }
+    if (review.blocker !== undefined && review.blocker.stage !== review.kind) {
+      context.addIssue({
+        code: "custom",
+        path: ["blocker", "stage"],
+        message: "Review blockers must identify the submitted review stage",
+      });
+    }
     if (review.verdict !== "approved") {
       return;
     }
@@ -356,10 +471,26 @@ export const ContractsSubmissionSchema = z
       explicit: [],
       discovered: [],
       skillHints: [],
+      appliedSkills: [],
     }),
+    blocker: WorkflowBlockerSchema.optional(),
   })
   .strict()
   .superRefine((submission, context) => {
+    if (submission.status === "passed" && submission.blocker !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["blocker"],
+        message: "Passed contracts cannot report a blocker",
+      });
+    }
+    if (submission.blocker !== undefined && submission.blocker.stage !== "contracts") {
+      context.addIssue({
+        code: "custom",
+        path: ["blocker", "stage"],
+        message: "Contract blockers must identify the contracts stage",
+      });
+    }
     if (submission.status === "passed" && submission.artifactPaths.length === 0) {
       context.addIssue({
         code: "custom",
@@ -503,9 +634,24 @@ export const ImplementationSubmissionSchema = z
     changedFiles: z.array(z.string().trim().min(1)).default([]),
     artifactPaths: z.array(z.string().trim().min(1)).default([]),
     featureEvidence: FeatureEvidenceSchema.optional(),
+    blocker: WorkflowBlockerSchema.optional(),
   })
   .strict()
   .superRefine((submission, context) => {
+    if (submission.status === "passed" && submission.blocker !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["blocker"],
+        message: "Passed implementations cannot report a blocker",
+      });
+    }
+    if (submission.blocker !== undefined && submission.blocker.stage !== "implementation") {
+      context.addIssue({
+        code: "custom",
+        path: ["blocker", "stage"],
+        message: "Implementation blockers must identify the implementation stage",
+      });
+    }
     if (submission.status === "passed" && submission.artifactPaths.length === 0) {
       context.addIssue({
         code: "custom",
@@ -661,6 +807,20 @@ export const WorkflowResumeContextSchema = z
   })
   .strict();
 
+export const DiagnosticPublicationSchema = z
+  .object({
+    host: z.enum(["github", "gitlab"]),
+    url: z.string().url(),
+    number: z.string().trim().min(1).max(100),
+    created: z.boolean(),
+    updated: z.boolean(),
+    publishResultArtifactId: ArtifactIdSchema,
+  })
+  .strict()
+  .refine((publication) => publication.created || publication.updated, {
+    message: "Diagnostic publication evidence must record a created or updated request",
+  });
+
 export const WorkflowStatusSchema = z
   .object({
     runId: RunIdSchema,
@@ -669,6 +829,7 @@ export const WorkflowStatusSchema = z
     scope: WorkflowScopeSchema,
     deliveryProfile: DeliveryProfileSchema,
     workload: WorkloadEstimateSchema,
+    delegationPolicy: DelegationPolicySchema,
     requiredValidations: z.array(z.string().trim().min(1)).superRefine((items, context) => {
       if (new Set(items).size !== items.length) {
         context.addIssue({ code: "custom", message: "Required validations must be unique" });
@@ -677,6 +838,8 @@ export const WorkflowStatusSchema = z
     stages: z.array(WorkflowStageSummarySchema),
     nextActions: z.array(WorkflowActionSchema),
     blockers: z.array(z.string().trim().min(1)),
+    blockerDetails: z.array(WorkflowBlockerSchema),
+    diagnosticPublication: DiagnosticPublicationSchema.optional(),
     resumeContext: WorkflowResumeContextSchema,
   })
   .strict();
@@ -686,6 +849,9 @@ export type DeliveryMode = z.infer<typeof DeliveryModeSchema>;
 export type ChangeKind = z.infer<typeof ChangeKindSchema>;
 export type DeliveryProfile = z.infer<typeof DeliveryProfileSchema>;
 export type GuidanceTrace = z.infer<typeof GuidanceTraceSchema>;
+export type WorkflowBlocker = z.infer<typeof WorkflowBlockerSchema>;
+export type DiagnosticPublication = z.infer<typeof DiagnosticPublicationSchema>;
+export type DelegationPolicy = z.infer<typeof DelegationPolicySchema>;
 export type ReviewVerdict = z.infer<typeof ReviewVerdictSchema>;
 export type ImplementationReviewPacket = z.infer<typeof ImplementationReviewPacketSchema>;
 export type WorkflowSubmission = z.infer<typeof WorkflowSubmissionSchema>;

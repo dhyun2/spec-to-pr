@@ -32,7 +32,7 @@ The orchestrator owns exactly eight durable stages:
 7. `publish`
 8. `archive`
 
-The installed plugin exposes nine skills: `spec-to-pr`, `doctor`, `intake-contracts`, `implement`, `review-functional`, `review-design`, `publish`, `archive-openspec`, and `prepare-release`.
+The installed plugin exposes eight public marketplace skills: `spec-to-pr`, `doctor`, `intake-contracts`, `implement`, `review-functional`, `review-design`, `publish`, and `archive-openspec`. Release maintenance stays outside the public user workflow.
 
 Implementation uses one context. For API-backed UI, distinct physical non-empty types, schemas, wrappers, mocks, and a passing JSON contract-test result are submitted with a stable `implementationContextId` through the existing `workflow_submit` boundary as an explicit `api-ready` checkpoint. Path, symlink, and hard-link aliases are rejected. Final implementation must repeat the ID before UI completion evidence is accepted. A final boolean claim cannot replace that evidence. There are no separate API/UI implementation lanes and no integration worktree lane.
 
@@ -43,9 +43,13 @@ Review is deliberately split into only two independent roles:
 
 The orchestrator calls `workflow_status` and freezes its snapshot with accepted contracts, the diff, and evidence paths before dispatch. Reviewers consume that immutable packet and return literal schema-shaped verdicts; they do not call workflow tools or mutate implementation.
 
+Read-only discovery is workload-gated: zero scouts for XS/S, at most one for M, and at most two for L/XL. Scouts handle only independent read-heavy discovery. Agents do not nest, implementation has one writer, and only the post-implementation functional/design reviewers may run in parallel. Both reviewer profiles are fully read-only and workflow-MCP-free.
+
 The default gates are proportional to the change. Missing optional scripts are not applicable; missing or failed required evidence blocks. Full matrices, tracked-archive integrity, package verification, and cross-host checks are release-only.
 
-Publication only creates or updates a draft PR/MR. It never merges, approves, closes, or marks a review request ready. Archive is a separate, explicit post-merge action supported by authoritative merge evidence; the runtime does not poll for merge state.
+Publication only creates or updates a draft PR/MR. `intent: ready` is the normal evidence-backed result. `intent: blocked-diagnostic` may create a diagnostic draft only when publication preflight is already satisfied; it remains `status: blocked`. Otherwise the workflow returns a redacted local blocked report with an exact unblock action, never an empty commit or issue fallback. Resume continues the same Run and, when present, updates the same source/target draft from blocked to ready. Publication never merges, approves, closes, or marks a review request ready. Archive is a separate, explicit post-merge action supported by authoritative merge evidence; the runtime does not poll for merge state.
+
+Playwright Test/CLI assertions and structured results are the browser acceptance oracle. Browser MCP is optional interaction and Chrome DevTools MCP is conditional diagnosis for console, network, performance, memory, or live DOM. Screenshots, video, traces, and agent observation cannot replace required assertions. Only the `feature` delivery profile requires changed-feature E2E plus exactly one video.
 
 ## Consequences
 

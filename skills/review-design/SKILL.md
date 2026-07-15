@@ -1,6 +1,6 @@
 ---
 name: review-design
-description: Use when applicable UI scope reaches the v2 design review action and needs independent visual, interaction, and accessibility assessment.
+description: Use when applicable UI scope reaches the v2 design-review action for an independent visual, interaction, and accessibility verdict.
 ---
 
 # Review Design
@@ -11,8 +11,12 @@ Return a literal JSON-compatible object shaped as `{kind:"design-review", review
 
 Use Figma screenshots or an explicit legacy screenshot as the visual baseline. A feature E2E video demonstrates interaction but does not become a visual baseline or replace accessibility evidence.
 
+Playwright Test/CLI is the acceptance oracle. The browser MCP is optional interactive diagnosis, and CDP is only for console, network, performance, memory, or live-DOM diagnosis. Captured screenshots and video do not replace assertions. Missing required browser evidence is `BROWSER_NOT_RUN` and blocks approval.
+
 Inspect `guidanceTrace`. Verify every explicit and discovered project-guidance path and the applied optional skills in the design dimension: design-system and UI conventions, component mapping, responsive states, interaction, and accessibility. An unavailable optional hint that was not applied is not a blocker.
 
 Budget pressure never makes visual, interaction, or accessibility evidence optional when those gates are required. A split must remain independently design-verifiable; otherwise return changes-requested or blocked.
+
+Return only portable project-relative, `/`-separated safe names in `artifactPaths` and gate evidence paths. Reject absolute, traversal, control-character, backslash/non-portable, or secret-shaped paths, and never embed token, password, secret, or credential values. A descriptive path such as `evidence/token-validation.json` remains valid.
 
 Do not repair the UI while reviewing.

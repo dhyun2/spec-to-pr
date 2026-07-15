@@ -1,14 +1,23 @@
 import {
   PublishedReviewAssetSchema,
   PublishedReviewRequestSchema,
+  ReviewRequestUpdateSchema,
   type PublishedReviewAsset,
   type PublishedReviewRequest,
   type PublishTarget,
   type ReviewRequestPayload,
+  type ReviewRequestUpdate,
 } from "./publish-contracts.js";
-import type { ReviewRequestAsset, ReviewRequestPublisher } from "./publisher-port.js";
+import {
+  ReviewRequestSynchronizationError,
+  type ReviewRequestAsset,
+  type ReviewRequestPublisher,
+} from "./publisher-port.js";
 
 type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
+type AbortableRequestInit = Omit<RequestInit, "signal"> & {
+  signal?: AbortSignal | undefined;
+};
 
 export class GitHubPublisherAdapter implements ReviewRequestPublisher {
   public constructor(private readonly fetchImpl: FetchLike = fetch) {}
@@ -17,6 +26,7 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
     target: PublishTarget;
     payload: ReviewRequestPayload;
     token: string;
+    signal?: AbortSignal | undefined;
   }): Promise<PublishedReviewRequest | undefined> {
     assertGitHub(input.target);
 
@@ -30,6 +40,7 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
 
     const response = await this.githubFetch(url.toString(), input.token, {
       method: "GET",
+      signal: input.signal,
     });
 
     if (!response.ok) {
@@ -50,6 +61,7 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
     target: PublishTarget;
     payload: ReviewRequestPayload;
     token: string;
+    signal?: AbortSignal | undefined;
   }): Promise<PublishedReviewRequest> {
     assertGitHub(input.target);
 
@@ -58,6 +70,7 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
       input.token,
       {
         method: "POST",
+        signal: input.signal,
         body: JSON.stringify({
           title: input.payload.title,
           head: input.payload.sourceBranch,
@@ -74,46 +87,69 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
     }
 
     const pr = (await response.json()) as Record<string, unknown>;
+    const request = normalizeGitHubPr(pr, true, false, input.payload);
 
     await this.applyIssueMetadata({
       target: input.target,
-      issueNumber: String(pr["number"]),
+      request,
       payload: input.payload,
       token: input.token,
+      signal: input.signal,
     });
 
-    return normalizeGitHubPr(pr, true, false, input.payload);
+    return request;
   }
 
-  public async updateBody(input: {
+  public async update(input: {
     target: PublishTarget;
     requestNumber: string;
-    body: string;
+    update: ReviewRequestUpdate;
     token: string;
+    signal?: AbortSignal | undefined;
   }): Promise<PublishedReviewRequest> {
     assertGitHub(input.target);
+    const update = ReviewRequestUpdateSchema.parse(input.update);
 
     const response = await this.githubFetch(
       `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}/pulls/${input.requestNumber}`,
       input.token,
       {
         method: "PATCH",
+        signal: input.signal,
         body: JSON.stringify({
-          body: input.body,
+          title: update.title,
+          body: update.body,
         }),
       },
     );
 
     if (!response.ok) {
-      throw new Error(`GitHub update PR body failed: ${response.status} ${await response.text()}`);
+      throw new Error(`GitHub update PR failed: ${response.status} ${await response.text()}`);
     }
 
     const pr = (await response.json()) as Record<string, unknown>;
-
-    return normalizeGitHubPr(pr, false, true, {
+    const request = normalizeGitHubPr(pr, false, true, {
       sourceBranch: String((pr["head"] as Record<string, unknown>)?.["ref"] ?? ""),
       targetBranch: String((pr["base"] as Record<string, unknown>)?.["ref"] ?? ""),
     });
+    const labelsResponse = await this.githubFetch(
+      `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}/issues/${input.requestNumber}/labels`,
+      input.token,
+      {
+        method: "PUT",
+        signal: input.signal,
+        body: JSON.stringify({ labels: update.labels }),
+      },
+    );
+    if (!labelsResponse.ok) {
+      throw new ReviewRequestSynchronizationError(
+        `GitHub synchronize PR labels failed: ${labelsResponse.status} ${await labelsResponse.text()}`,
+        "labels",
+        request,
+      );
+    }
+
+    return request;
   }
 
   public async publishAssets(input: {
@@ -121,6 +157,7 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
     payload: ReviewRequestPayload;
     token: string;
     assets: ReviewRequestAsset[];
+    signal?: AbortSignal | undefined;
   }): Promise<PublishedReviewAsset[]> {
     assertGitHub(input.target);
 
@@ -128,7 +165,11 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
 
     // Private repositories cannot render raw.githubusercontent.com images without
     // auth, so we detect visibility once and fall back to plain links for them.
-    const isPrivate = await this.isPrivateRepo({ target: input.target, token: input.token });
+    const isPrivate = await this.isPrivateRepo({
+      target: input.target,
+      token: input.token,
+      signal: input.signal,
+    });
 
     for (const asset of input.assets) {
       const assetPath = [
@@ -143,12 +184,14 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
         path: assetPath,
         branch: input.payload.sourceBranch,
         token: input.token,
+        signal: input.signal,
       });
       const response = await this.githubFetch(
         `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}/contents/${encodePath(assetPath)}`,
         input.token,
         {
           method: "PUT",
+          signal: input.signal,
           body: JSON.stringify({
             message: `chore(spec-to-pr): publish review evidence ${asset.artifactId}`,
             content: asset.content.toString("base64"),
@@ -198,11 +241,12 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
   private async isPrivateRepo(input: {
     target: PublishTarget & { owner: string; repo: string };
     token: string;
+    signal?: AbortSignal | undefined;
   }): Promise<boolean> {
     const response = await this.githubFetch(
       `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}`,
       input.token,
-      { method: "GET" },
+      { method: "GET", signal: input.signal },
     );
 
     if (!response.ok) {
@@ -218,46 +262,69 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
 
   private async applyIssueMetadata(input: {
     target: PublishTarget & { owner: string; repo: string };
-    issueNumber: string;
+    request: PublishedReviewRequest;
     payload: ReviewRequestPayload;
     token: string;
+    signal?: AbortSignal | undefined;
   }): Promise<void> {
     if (input.payload.labels.length > 0) {
-      await this.githubFetch(
-        `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}/issues/${input.issueNumber}/labels`,
+      const response = await this.githubFetch(
+        `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}/issues/${input.request.number}/labels`,
         input.token,
         {
           method: "POST",
+          signal: input.signal,
           body: JSON.stringify({
             labels: input.payload.labels,
           }),
         },
       );
+      if (!response.ok) {
+        throw new ReviewRequestSynchronizationError(
+          `GitHub synchronize PR labels failed: ${response.status} ${await response.text()}`,
+          "labels",
+          input.request,
+        );
+      }
     }
 
     if (input.payload.reviewers.length > 0) {
-      await this.githubFetch(
-        `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}/pulls/${input.issueNumber}/requested_reviewers`,
+      const response = await this.githubFetch(
+        `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}/pulls/${input.request.number}/requested_reviewers`,
         input.token,
         {
           method: "POST",
+          signal: input.signal,
           body: JSON.stringify({
             reviewers: input.payload.reviewers,
           }),
         },
       );
+      if (!response.ok) {
+        throw new ReviewRequestSynchronizationError(
+          `GitHub synchronize PR reviewers failed: ${response.status} ${await response.text()}`,
+          "reviewers",
+          input.request,
+        );
+      }
     }
   }
 
-  private async githubFetch(url: string, token: string, init: RequestInit): Promise<Response> {
+  private async githubFetch(
+    url: string,
+    token: string,
+    init: AbortableRequestInit,
+  ): Promise<Response> {
+    const { signal, ...requestInit } = init;
     return this.fetchImpl(url, {
-      ...init,
+      ...requestInit,
+      ...(signal === undefined ? {} : { signal }),
       headers: {
         Accept: "application/vnd.github+json",
         Authorization: `Bearer ${token}`,
         "X-GitHub-Api-Version": "2022-11-28",
         "Content-Type": "application/json",
-        ...init.headers,
+        ...requestInit.headers,
       },
     });
   }
@@ -267,6 +334,7 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
     path: string;
     branch: string;
     token: string;
+    signal?: AbortSignal | undefined;
   }): Promise<string | undefined> {
     const url = new URL(
       `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}/contents/${encodePath(input.path)}`,
@@ -276,6 +344,7 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
 
     const response = await this.githubFetch(url.toString(), input.token, {
       method: "GET",
+      signal: input.signal,
     });
 
     if (response.status === 404) {

@@ -7,6 +7,25 @@ export type BoundaryWorkflowStatus = {
     stages: unknown[];
     nextActions: unknown[];
     blockers: string[];
+    blockerDetails: BoundaryWorkflowBlocker[];
+    deliveryProfile: {
+        publication: "draft" | "none";
+        recommendedSkills: string[];
+    };
+    delegationPolicy: {
+        singleWriter: true;
+        allowNested: false;
+        maxReadOnlyScouts: 0 | 1 | 2;
+        parallelReviewers: boolean;
+    };
+    diagnosticPublication?: {
+        host: "github" | "gitlab";
+        url: string;
+        number: string;
+        created: boolean;
+        updated: boolean;
+        publishResultArtifactId: string;
+    };
     resumeContext: {
         goal: string;
         evidencePaths: string[];
@@ -32,6 +51,19 @@ export type BoundaryWorkflowStatus = {
         };
     };
 };
+export type BoundaryWorkflowBlocker = {
+    stage: string;
+    code: string;
+    kind: "missing-input" | "missing-tool" | "policy" | "verification" | "publish-precondition" | "budget-split" | "unexpected";
+    summary: string;
+    retryable: boolean;
+    resumable: boolean;
+    completedWork: string[];
+    evidencePaths: string[];
+    attemptedRecovery: string[];
+    unrunValidations: string[];
+    exactUnblockAction: string;
+};
 export type BoundaryThread = {
     readonly id: string | null;
     run(prompt: string, options?: {
@@ -41,6 +73,15 @@ export type BoundaryThread = {
 export type BoundaryClient = {
     startThread(): BoundaryThread;
     resumeThread(threadId: string): BoundaryThread;
+};
+export type BlockedDiagnosticPreflight = {
+    eligible: true;
+    sourceBranch: string;
+    targetBranch: string;
+    remoteName: string;
+} | {
+    eligible: false;
+    reason: string;
 };
 export type BoundaryRunState = "completed" | "blocked" | "split-required" | "run-mismatch" | "usage-unavailable" | "status-unavailable" | "turn-limit";
 export declare function executeBudgetedBoundaryTurns(input: {
@@ -53,6 +94,7 @@ export declare function executeBudgetedBoundaryTurns(input: {
     workloadHardLimits?: Partial<Record<WorkloadSize, number>>;
     requiredValidations: readonly string[];
     maxTurns: number;
+    inspectBlockedDiagnosticPreflight?: () => BlockedDiagnosticPreflight | Promise<BlockedDiagnosticPreflight>;
 }): Promise<{
     threadId: string | null;
     finalResponse: string;
@@ -77,3 +119,6 @@ export declare function buildBoundaryContinuationPrompt(status: BoundaryWorkflow
     hardLimitTokens: number;
 }): string;
 export declare function buildFinalResponsePrompt(status: BoundaryWorkflowStatus): string;
+export declare function buildBlockedDiagnosticFinalizationPrompt(status: BoundaryWorkflowStatus, preflight?: Extract<BlockedDiagnosticPreflight, {
+    eligible: true;
+}>): string;

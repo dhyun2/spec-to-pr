@@ -41,6 +41,9 @@ artifacts/
 tmp/
 temp/
 
+# Agent working notes (keep plans and specs outside the repository)
+docs/superpowers/
+
 # Environment
 .env
 .env.*

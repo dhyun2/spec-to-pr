@@ -6,6 +6,25 @@ export const ReportLocaleSchema = z.enum(["ko", "en"]);
 
 export const ReportDecisionSchema = z.enum(["blocked", "draft", "ready-after-review", "ready"]);
 
+export const WorkflowReportIntentSchema = z.enum(["ready", "blocked-diagnostic"]);
+
+export const WorkflowReportMetadataSchema = z.discriminatedUnion("reportIntent", [
+  z
+    .object({
+      reportKind: z.literal("pr-body-markdown"),
+      reportIntent: z.literal("ready"),
+      decision: z.literal("ready"),
+    })
+    .strict(),
+  z
+    .object({
+      reportKind: z.literal("pr-body-markdown"),
+      reportIntent: z.literal("blocked-diagnostic"),
+      decision: z.literal("blocked"),
+    })
+    .strict(),
+]);
+
 export const ReportSectionStatusSchema = z.enum([
   "pass",
   "fail",
@@ -148,6 +167,8 @@ export const PrReportViewModelSchema = z
   .strict();
 
 export type ReportDecision = z.infer<typeof ReportDecisionSchema>;
+export type WorkflowReportIntent = z.infer<typeof WorkflowReportIntentSchema>;
+export type WorkflowReportMetadata = z.infer<typeof WorkflowReportMetadataSchema>;
 export type ReportLocale = z.infer<typeof ReportLocaleSchema>;
 export type ReportSectionStatus = z.infer<typeof ReportSectionStatusSchema>;
 export type ReportCheckSummary = z.infer<typeof ReportCheckSummarySchema>;

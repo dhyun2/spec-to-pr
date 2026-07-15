@@ -14,17 +14,20 @@ describe("GitLabPublisherAdapter", () => {
       }),
     );
     const adapter = new GitLabPublisherAdapter(fetchMock);
+    const controller = new AbortController();
 
     const result = await adapter.create({
       target: gitlabTarget(),
       payload: payload(),
       token: "glpat-example",
+      signal: controller.signal,
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
       "https://gitlab.com/api/v4/projects/acme%2Fplatform%2Fspec-to-pr/merge_requests",
       expect.objectContaining({
         method: "POST",
+        signal: controller.signal,
         headers: expect.objectContaining({
           "PRIVATE-TOKEN": "glpat-example",
         }),
@@ -40,6 +43,73 @@ describe("GitLabPublisherAdapter", () => {
       number: "7",
       draft: true,
       created: true,
+    });
+  });
+
+  it("updates draft merge request title, description, and labels", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse({
+        web_url: "https://gitlab.com/acme/spec-to-pr/-/merge_requests/7",
+        iid: 7,
+        id: 70,
+        title: "Draft: [Blocked] SpecToPR Run run_11111111111111111111111111111111",
+        source_branch: "spec-to-pr/run-1",
+        target_branch: "main",
+      }),
+    );
+    const adapter = new GitLabPublisherAdapter(fetchMock);
+
+    const result = await adapter.update({
+      target: gitlabTarget(),
+      requestNumber: "7",
+      update: {
+        title: "[Blocked] SpecToPR Run run_11111111111111111111111111111111",
+        body: "# Blocked diagnostic",
+        labels: ["spec-to-pr", "spec-to-pr:blocked"],
+      },
+      token: "glpat-example",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://gitlab.com/api/v4/projects/acme%2Fplatform%2Fspec-to-pr/merge_requests/7",
+      expect.objectContaining({ method: "PUT" }),
+    );
+    expect(JSON.parse(String(fetchMock.mock.calls[0]![1]!.body))).toEqual({
+      title: "Draft: [Blocked] SpecToPR Run run_11111111111111111111111111111111",
+      description: "# Blocked diagnostic",
+      labels: "spec-to-pr,spec-to-pr:blocked",
+    });
+    expect(result).toMatchObject({ number: "7", draft: true, updated: true });
+  });
+
+  it("recovers a blocked draft by replacing labels with the ready label set", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse({
+        web_url: "https://gitlab.com/acme/spec-to-pr/-/merge_requests/7",
+        iid: 7,
+        id: 70,
+        title: "Draft: spec-to-pr evidence report for run_11111111111111111111111111111111",
+        source_branch: "spec-to-pr/run-1",
+        target_branch: "main",
+      }),
+    );
+    const adapter = new GitLabPublisherAdapter(fetchMock);
+
+    await adapter.update({
+      target: gitlabTarget(),
+      requestNumber: "7",
+      update: {
+        title: "spec-to-pr evidence report for run_11111111111111111111111111111111",
+        body: "# Ready report",
+        labels: ["spec-to-pr"],
+      },
+      token: "glpat-example",
+    });
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]![1]!.body))).toEqual({
+      title: "Draft: spec-to-pr evidence report for run_11111111111111111111111111111111",
+      description: "# Ready report",
+      labels: "spec-to-pr",
     });
   });
 

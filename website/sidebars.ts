@@ -23,7 +23,7 @@ const sidebars: SidebarsConfig = {
       type: "category",
       label: "핵심 개념",
       collapsed: false,
-      items: ["concepts/pipeline"],
+      items: ["concepts/pipeline", "concepts/comparison"],
     },
     {
       type: "category",

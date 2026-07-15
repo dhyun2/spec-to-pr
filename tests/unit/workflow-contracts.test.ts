@@ -12,16 +12,163 @@ import {
 } from "../../src/runtime/constants.js";
 import { canonicalizeFileContent } from "../../src/source-registry/canonical-content.js";
 import {
+  BlockerKindSchema,
   ReviewSubmissionSchema,
   ContractsSubmissionSchema,
   DeliveryProfileSchema,
   GuidanceTraceSchema,
   ImplementationReviewPacketSchema,
+  WorkflowBlockerSchema,
   WorkflowResumeContextSchema,
   WorkflowSubmissionSchema,
 } from "../../src/workflow/index.js";
 
 describe("workflow v2 contracts", () => {
+  it("defines the bounded strict workflow blocker contract", () => {
+    const blocker = {
+      stage: "implementation",
+      code: "MISSING_BROWSER",
+      kind: "missing-tool",
+      summary: "A browser runtime is unavailable.",
+      retryable: false,
+      resumable: true,
+      completedWork: ["Contracts were accepted."],
+      evidencePaths: ["test-results/browser-check.json"],
+      attemptedRecovery: ["Checked the project-local browser installation."],
+      unrunValidations: ["targeted-feature-e2e"],
+      exactUnblockAction: "Install the project browser runtime and resume implementation.",
+    } as const;
+
+    expect(BlockerKindSchema.options).toEqual([
+      "missing-input",
+      "missing-tool",
+      "policy",
+      "verification",
+      "publish-precondition",
+      "budget-split",
+      "unexpected",
+    ]);
+    expect(WorkflowBlockerSchema.parse(blocker)).toEqual(blocker);
+    expect(WorkflowBlockerSchema.safeParse({ ...blocker, secret: "do not store" }).success).toBe(
+      false,
+    );
+    expect(
+      WorkflowBlockerSchema.safeParse({ ...blocker, transcript: ["raw prompt"] }).success,
+    ).toBe(false);
+    expect(
+      WorkflowBlockerSchema.safeParse({
+        ...blocker,
+        completedWork: Array.from({ length: 21 }, (_, index) => `step ${index}`),
+      }).success,
+    ).toBe(false);
+    expect(
+      WorkflowBlockerSchema.safeParse({
+        ...blocker,
+        evidencePaths: ["/Users/private/project/result.json"],
+      }).success,
+    ).toBe(false);
+    for (const unsafePath of [
+      String.raw`C:\private\result.json`,
+      "C:relative-result.json",
+      String.raw`\rooted\result.json`,
+      String.raw`\\server\share\result.json`,
+      "../outside.json",
+      "test-results/token=ghp_1234567890abcdef.json",
+      String.raw`proof\GITHUB_TOKEN=ghp_1234567890abcdef.txt`,
+      "proof/GITHUB_TOKEN%253Dghp_1234567890abcdef.txt",
+      "proof/x-GITHUB_TOKEN=ghp_1234567890abcdef.txt",
+      "proof/(GITHUB_TOKEN=ghp_1234567890abcdef).txt",
+      "proof/GITHUB_TOKEN%2525253Dghp_1234567890abcdef.txt",
+      "proof/GITHUB_TOKEN-abcdef1234567890.txt",
+      "proof/password-supersecretvalue.txt",
+      "proof/token-abcdef1234567890.txt",
+      "token-validation.json/leak.txt",
+      "logs/Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.log",
+      "reports/https://user:password@example.com/result.json",
+      "evidence/github_pat_11AA22BB33CC44DD55EE66FF77GG88HH99II00JJ.txt",
+    ]) {
+      expect(
+        WorkflowBlockerSchema.safeParse({ ...blocker, evidencePaths: [unsafePath] }).success,
+      ).toBe(false);
+    }
+    for (const safePath of [
+      "test-results/token-validation.json",
+      "docs/credential-rotation-guide.md",
+      "reports/authorization-errors.json",
+      "artifacts/.coverage-summary.json",
+    ]) {
+      expect(
+        WorkflowBlockerSchema.safeParse({ ...blocker, evidencePaths: [safePath] }).success,
+      ).toBe(true);
+    }
+    expect(
+      WorkflowBlockerSchema.safeParse({ ...blocker, exactUnblockAction: "x".repeat(1_001) })
+        .success,
+    ).toBe(false);
+  });
+
+  it("accepts optional typed blockers only for unsuccessful stage submissions", () => {
+    const blocker = {
+      stage: "contracts",
+      code: "MISSING_APPROVAL",
+      kind: "missing-input",
+      summary: "A required approval is missing.",
+      retryable: false,
+      resumable: true,
+      completedWork: [],
+      evidencePaths: [],
+      attemptedRecovery: [],
+      unrunValidations: ["functional"],
+      exactUnblockAction: "Provide the approval and resubmit contracts.",
+    } as const;
+    const failedContracts = {
+      kind: "contracts",
+      status: "blocked",
+      summary: "Waiting for approval.",
+      blocker,
+    } as const;
+
+    expect(WorkflowSubmissionSchema.safeParse(failedContracts).success).toBe(true);
+    expect(
+      WorkflowSubmissionSchema.safeParse({
+        kind: "contracts",
+        status: "blocked",
+        summary: "Older payload without a typed blocker.",
+      }).success,
+    ).toBe(true);
+    expect(
+      WorkflowSubmissionSchema.safeParse({
+        kind: "contracts",
+        status: "passed",
+        summary: "Contracts passed.",
+        artifactPaths: ["contracts/requirements.json"],
+        requirementManifest: [
+          { id: "approval", title: "Approval", acceptanceCriteria: ["Approval is recorded."] },
+        ],
+        blocker,
+      }).success,
+    ).toBe(false);
+    expect(
+      WorkflowSubmissionSchema.safeParse({
+        kind: "implementation",
+        status: "failed",
+        summary: "Implementation failed.",
+        apiReady: false,
+        uiChanged: false,
+        blocker: { ...blocker, stage: "implementation", kind: "unexpected" },
+      }).success,
+    ).toBe(true);
+    expect(
+      WorkflowSubmissionSchema.safeParse({
+        kind: "functional-review",
+        reviewPacketId: `packet_${"a".repeat(64)}`,
+        verdict: "blocked",
+        summary: "Verification is blocked.",
+        blocker: { ...blocker, stage: "functional-review", kind: "verification" },
+      }).success,
+    ).toBe(true);
+  });
+
   it("bounds composable source arrays and preserves legacy singular source inputs", () => {
     const base = {
       projectRoot: "/tmp/example",
@@ -157,6 +304,7 @@ describe("workflow v2 contracts", () => {
     };
 
     expect(DeliveryProfileSchema.safeParse(profile).success).toBe(true);
+    expect(DeliveryProfileSchema.parse(profile).recommendedSkills).toEqual([]);
     expect(
       DeliveryProfileSchema.safeParse({
         ...profile,
@@ -191,6 +339,9 @@ describe("workflow v2 contracts", () => {
         skillHints: [],
       }).success,
     ).toBe(false);
+    expect(
+      GuidanceTraceSchema.parse({ explicit: [], discovered: [], skillHints: [] }).appliedSkills,
+    ).toEqual([]);
   });
 
   it("requires a structured requirement manifest and focused legacy baseline evidence", () => {

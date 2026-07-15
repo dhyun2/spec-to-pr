@@ -1,15 +1,20 @@
 import {
   PublishedReviewAssetSchema,
   PublishedReviewRequestSchema,
+  ReviewRequestUpdateSchema,
   type PublishedReviewAsset,
   type PublishedReviewRequest,
   type PublishTarget,
   type ReviewRequestPayload,
+  type ReviewRequestUpdate,
 } from "./publish-contracts.js";
 import type { ReviewRequestAsset, ReviewRequestPublisher } from "./publisher-port.js";
 import { encodeGitLabProjectId } from "./review-host.js";
 
 type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
+type AbortableRequestInit = Omit<RequestInit, "signal"> & {
+  signal?: AbortSignal | undefined;
+};
 
 export class GitLabPublisherAdapter implements ReviewRequestPublisher {
   public constructor(private readonly fetchImpl: FetchLike = fetch) {}
@@ -18,6 +23,7 @@ export class GitLabPublisherAdapter implements ReviewRequestPublisher {
     target: PublishTarget;
     payload: ReviewRequestPayload;
     token: string;
+    signal?: AbortSignal | undefined;
   }): Promise<PublishedReviewRequest | undefined> {
     assertGitLab(input.target);
 
@@ -30,6 +36,7 @@ export class GitLabPublisherAdapter implements ReviewRequestPublisher {
 
     const response = await this.gitlabFetch(url.toString(), input.token, {
       method: "GET",
+      signal: input.signal,
     });
 
     if (!response.ok) {
@@ -50,20 +57,19 @@ export class GitLabPublisherAdapter implements ReviewRequestPublisher {
     target: PublishTarget;
     payload: ReviewRequestPayload;
     token: string;
+    signal?: AbortSignal | undefined;
   }): Promise<PublishedReviewRequest> {
     assertGitLab(input.target);
 
     const project = encodeGitLabProjectId(input.target.projectId ?? input.target.projectPath);
-    const title =
-      input.payload.mode === "draft" && !/^draft:/i.test(input.payload.title)
-        ? `Draft: ${input.payload.title}`
-        : input.payload.title;
+    const title = draftTitle(input.payload.title);
 
     const response = await this.gitlabFetch(
       `${input.target.apiBaseUrl}/projects/${project}/merge_requests`,
       input.token,
       {
         method: "POST",
+        signal: input.signal,
         body: JSON.stringify({
           source_branch: input.payload.sourceBranch,
           target_branch: input.payload.targetBranch,
@@ -83,13 +89,15 @@ export class GitLabPublisherAdapter implements ReviewRequestPublisher {
     return normalizeGitLabMr(mr, true, false, input.payload);
   }
 
-  public async updateBody(input: {
+  public async update(input: {
     target: PublishTarget;
     requestNumber: string;
-    body: string;
+    update: ReviewRequestUpdate;
     token: string;
+    signal?: AbortSignal | undefined;
   }): Promise<PublishedReviewRequest> {
     assertGitLab(input.target);
+    const update = ReviewRequestUpdateSchema.parse(input.update);
 
     const project = encodeGitLabProjectId(input.target.projectId ?? input.target.projectPath);
     const response = await this.gitlabFetch(
@@ -97,8 +105,11 @@ export class GitLabPublisherAdapter implements ReviewRequestPublisher {
       input.token,
       {
         method: "PUT",
+        signal: input.signal,
         body: JSON.stringify({
-          description: input.body,
+          title: draftTitle(update.title),
+          description: update.body,
+          labels: update.labels.join(","),
         }),
       },
     );
@@ -120,6 +131,7 @@ export class GitLabPublisherAdapter implements ReviewRequestPublisher {
     payload: ReviewRequestPayload;
     token: string;
     assets: ReviewRequestAsset[];
+    signal?: AbortSignal | undefined;
   }): Promise<PublishedReviewAsset[]> {
     assertGitLab(input.target);
 
@@ -136,6 +148,7 @@ export class GitLabPublisherAdapter implements ReviewRequestPublisher {
         input.token,
         {
           method: "POST",
+          signal: input.signal,
           body: form,
         },
       );
@@ -169,18 +182,28 @@ export class GitLabPublisherAdapter implements ReviewRequestPublisher {
     return published;
   }
 
-  private async gitlabFetch(url: string, token: string, init: RequestInit): Promise<Response> {
+  private async gitlabFetch(
+    url: string,
+    token: string,
+    init: AbortableRequestInit,
+  ): Promise<Response> {
     const headers: Record<string, string> = {
       "PRIVATE-TOKEN": token,
       ...(init.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
       ...(init.headers as Record<string, string> | undefined),
     };
 
+    const { signal, ...requestInit } = init;
     return this.fetchImpl(url, {
-      ...init,
+      ...requestInit,
+      ...(signal === undefined ? {} : { signal }),
       headers,
     });
   }
+}
+
+function draftTitle(title: string): string {
+  return /^draft:/i.test(title) ? title : `Draft: ${title}`;
 }
 
 function assertGitLab(target: PublishTarget): asserts target is PublishTarget & {

@@ -38,34 +38,24 @@ describe("remote detector", () => {
     });
   });
 
-  it("detects self-hosted GitLab by hostname heuristic", () => {
-    const target = detectPublishTargetFromRemote({
-      name: "origin",
-      url: "git@gitlab.company.com:team/app.git",
-    });
-
-    expect(target).toMatchObject({
-      host: "gitlab",
-      webBaseUrl: "https://gitlab.company.com",
-      apiBaseUrl: "https://gitlab.company.com/api/v4",
-      projectPath: "team/app",
-    });
-  });
-
-  it("detects GitHub Enterprise with the /api/v3 base", () => {
-    const target = detectPublishTargetFromRemote({
-      name: "origin",
-      url: "https://github.enterprise.io/acme/app.git",
-    });
-
-    expect(target).toMatchObject({
-      host: "github",
-      webBaseUrl: "https://github.enterprise.io",
-      apiBaseUrl: "https://github.enterprise.io/api/v3",
-      owner: "acme",
-      repo: "app",
-    });
-  });
+  it.each(["https://github.attacker.test/acme/app.git", "git@gitlab.attacker.test:team/app.git"])(
+    "rejects provider-lookalike remotes without an explicit override: %s",
+    (url) => {
+      const previous = process.env["SPEC_TO_PR_GIT_HOST"];
+      delete process.env["SPEC_TO_PR_GIT_HOST"];
+      try {
+        expect(() =>
+          detectPublishTargetFromRemote({
+            name: "origin",
+            url,
+          }),
+        ).toThrow(/Unsupported Git remote host/);
+      } finally {
+        if (previous === undefined) delete process.env["SPEC_TO_PR_GIT_HOST"];
+        else process.env["SPEC_TO_PR_GIT_HOST"] = previous;
+      }
+    },
+  );
 
   it("honors SPEC_TO_PR_GIT_HOST override for unknown hosts", () => {
     const prev = process.env["SPEC_TO_PR_GIT_HOST"];
@@ -77,7 +67,12 @@ describe("remote detector", () => {
         url: "git@scm.internal:team/app.git",
       });
 
-      expect(target).toMatchObject({ host: "gitlab", projectPath: "team/app" });
+      expect(target).toMatchObject({
+        host: "gitlab",
+        webBaseUrl: "https://scm.internal",
+        apiBaseUrl: "https://scm.internal/api/v4",
+        projectPath: "team/app",
+      });
     } finally {
       if (prev === undefined) {
         delete process.env["SPEC_TO_PR_GIT_HOST"];

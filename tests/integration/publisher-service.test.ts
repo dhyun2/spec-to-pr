@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ArtifactBlobStore } from "../../src/artifact-registry/artifact-blob-store.js";
 import { PublisherService } from "../../src/application/publisher-service.js";
@@ -14,8 +14,11 @@ import type {
   PublishTarget,
   ReviewRequestPayload,
   ReviewRequestPublisher,
+  ReviewRequestUpdate,
 } from "../../src/publisher/index.js";
+import { GitHubPublisherAdapter } from "../../src/publisher/index.js";
 import { SqliteRunStore } from "../../src/store/sqlite-run-store.js";
+import type { RunStore } from "../../src/store/run-store.js";
 
 let directory: string;
 let projectRoot: string;
@@ -102,6 +105,114 @@ afterEach(async () => {
 });
 
 describe("PublisherService", () => {
+  it("rejects a lookalike remote before any provider request", async () => {
+    const previousHostOverride = process.env["SPEC_TO_PR_GIT_HOST"];
+    delete process.env["SPEC_TO_PR_GIT_HOST"];
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    const fetchMock = vi.fn();
+    const lookalikeService = new PublisherService(
+      store,
+      artifactStore,
+      () => "2026-06-23T00:00:02.000Z",
+      { github: new GitHubPublisherAdapter(fetchMock), gitlab: gitlabPublisher },
+      async (_cwd, args) => {
+        if (args[0] === "status") return { stdout: "", stderr: "" };
+        if (args[0] === "rev-list") return { stdout: "1\n", stderr: "" };
+        if (args[0] === "symbolic-ref") {
+          return { stdout: "spec-to-pr/run-1\n", stderr: "" };
+        }
+        if (args[0] === "rev-parse") return { stdout: `${gitHead}\n`, stderr: "" };
+        return { stdout: "https://github.attacker.test/acme/spec-to-pr.git\n", stderr: "" };
+      },
+    );
+
+    try {
+      await expect(
+        lookalikeService.publish({
+          runId: run.id,
+          reportArtifactId: report.markdownArtifactId,
+          sourceBranch: "spec-to-pr/run-1",
+          targetBranch: "main",
+          pushBranch: false,
+          confirm: true,
+        }),
+      ).rejects.toThrow(/Unsupported Git remote host/);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(githubPublisher.createdPayloads).toHaveLength(0);
+    } finally {
+      if (previousHostOverride === undefined) delete process.env["SPEC_TO_PR_GIT_HOST"];
+      else process.env["SPEC_TO_PR_GIT_HOST"] = previousHostOverride;
+    }
+  });
+
+  it("retries publish-result persistence after a concurrent Run revision", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    let injectedConflict = false;
+    const conflictingStore: RunStore = {
+      create: (manifest) => store.create(manifest),
+      get: (runId) => store.get(runId),
+      list: (filter) => store.list(filter),
+      close: async () => {},
+      save: async (manifest, expectedRevision) => {
+        if (
+          !injectedConflict &&
+          manifest.artifacts.some(
+            (artifact) => artifact.metadata["reportKind"] === "publish-result",
+          )
+        ) {
+          injectedConflict = true;
+          const current = await store.get(manifest.id);
+          await store.save(
+            {
+              ...current,
+              revision: current.revision + 1,
+              updatedAt: "2026-06-23T00:00:01.500Z",
+            },
+            current.revision,
+          );
+        }
+        return store.save(manifest, expectedRevision);
+      },
+    };
+    const concurrentPublisherService = new PublisherService(
+      conflictingStore,
+      artifactStore,
+      () => "2026-06-23T00:00:02.000Z",
+      { github: githubPublisher, gitlab: gitlabPublisher },
+      async (_cwd, args) => {
+        if (args[0] === "status") return { stdout: "", stderr: "" };
+        if (args[0] === "rev-list") return { stdout: "1\n", stderr: "" };
+        if (args[0] === "symbolic-ref") {
+          return { stdout: "spec-to-pr/run-1\n", stderr: "" };
+        }
+        if (args[0] === "rev-parse") return { stdout: `${gitHead}\n`, stderr: "" };
+        return { stdout: "https://github.com/acme/spec-to-pr.git\n", stderr: "" };
+      },
+    );
+
+    const published = await concurrentPublisherService.publish({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      pushBranch: false,
+      confirm: true,
+    });
+
+    expect(injectedConflict).toBe(true);
+    expect(githubPublisher.createdPayloads).toHaveLength(1);
+    expect(
+      (await store.get(run.id)).artifacts.filter(
+        (artifact) => artifact.metadata["reportKind"] === "publish-result",
+      ),
+    ).toHaveLength(1);
+    expect(published.publishResultArtifactId).toMatch(/^art_/);
+  });
+
   it("plans publishes records result and stores publisher review", async () => {
     const run = await runService.createRun({
       projectRoot,
@@ -134,16 +245,21 @@ describe("PublisherService", () => {
       repo: "spec-to-pr",
     });
     expect(plan.payload.mode).toBe("draft");
+    expect(plan.intent).toBe("ready");
     expect(plan.payload.body).toBe(reportBody.markdown);
 
-    const published = await publisherService.publish({
-      runId: run.id,
-      reportArtifactId: report.markdownArtifactId,
-      sourceBranch: "spec-to-pr/run-1",
-      targetBranch: "main",
-      pushBranch: false,
-      confirm: true,
-    });
+    const controller = new AbortController();
+    const published = await publisherService.publish(
+      {
+        runId: run.id,
+        reportArtifactId: report.markdownArtifactId,
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        pushBranch: false,
+        confirm: true,
+      },
+      { signal: controller.signal },
+    );
 
     expect(published.result).toMatchObject({
       status: "passed",
@@ -158,6 +274,7 @@ describe("PublisherService", () => {
       },
     });
     expect(published.agentResultId).toMatch(/^ar_/);
+    expect(githubPublisher.receivedSignals).toContain(controller.signal);
     expect(githubPublisher.createdPayloads[0]?.body).toContain("## 시각 증거 미리보기");
     expect(githubPublisher.createdPayloads[0]?.body).toContain(
       "https://github.example/assets/figma.png",
@@ -228,7 +345,7 @@ describe("PublisherService", () => {
     ]);
   });
 
-  it("refuses publication without committed source-branch changes", async () => {
+  it("requires a clean tree and returns a typed result without committed source-branch changes", async () => {
     const run = await runService.createRun({ projectRoot });
     await markRunReadyForPublish(run.id);
     const report = await prReportService.generatePrReport({ runId: run.id });
@@ -264,9 +381,13 @@ describe("PublisherService", () => {
     await expect(createService(" M src/page.tsx\n", "1\n").publish(input)).rejects.toThrow(
       /clean working tree/i,
     );
-    await expect(createService("", "0\n").publish(input)).rejects.toThrow(
-      /at least one committed change/i,
-    );
+    await expect(createService("", "0\n").publish(input)).resolves.toMatchObject({
+      result: {
+        status: "blocked",
+        errorCode: "PUBLISH_NO_DELTA",
+        requestSynced: false,
+      },
+    });
   });
 
   it("binds publication to the checked-out source branch and its exact head", async () => {
@@ -423,6 +544,482 @@ describe("PublisherService", () => {
     expect(loadedRun.agentResults.some((result) => result.kind === "publishing")).toBe(false);
   });
 
+  it("creates a synchronized blocked diagnostic draft without requiring a reviewed head SHA", async () => {
+    const run = await runService.createRun({ projectRoot });
+    const report = await prReportService.generatePrReport({
+      runId: run.id,
+      metadata: {
+        reportKind: "pr-body-markdown",
+        reportIntent: "blocked-diagnostic",
+        decision: "blocked",
+        idempotencyKey: "contracts:0:MISSING_INPUT",
+      },
+    });
+
+    const plan = await publisherService.plan({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      headSha: "b".repeat(40),
+      intent: "blocked-diagnostic",
+      pushBranch: false,
+    });
+    expect(plan).toMatchObject({
+      intent: "blocked-diagnostic",
+      reportDecision: "blocked",
+      willCreateOrUpdate: true,
+      payload: {
+        title: `[Blocked] SpecToPR Run ${run.id}`,
+        labels: ["spec-to-pr", "spec-to-pr:blocked"],
+      },
+    });
+
+    const published = await publisherService.publish({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      headSha: "b".repeat(40),
+      intent: "blocked-diagnostic",
+      pushBranch: false,
+      confirm: true,
+    });
+
+    expect(published.result).toMatchObject({
+      status: "blocked",
+      requestSynced: true,
+      request: { number: "123", draft: true, created: true },
+    });
+    expect(published.result.errorCode).toBeUndefined();
+    expect(published.agentResultId).toBeUndefined();
+    expect(githubPublisher.createdPayloads[0]).toMatchObject({
+      title: `[Blocked] SpecToPR Run ${run.id}`,
+      labels: ["spec-to-pr", "spec-to-pr:blocked"],
+    });
+    expect(gitCalls).toContainEqual(["rev-list", "--count", "main..spec-to-pr/run-1"]);
+
+    const publishedRun = await store.get(run.id);
+    const publishResultArtifact = publishedRun.artifacts.find(
+      (artifact) => artifact.id === published.publishResultArtifactId,
+    );
+    expect(publishResultArtifact?.metadata).toMatchObject({
+      publishIntent: "blocked-diagnostic",
+      diagnosticReportKey: "contracts:0:MISSING_INPUT",
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      remoteName: "origin",
+      pushBranch: false,
+    });
+  });
+
+  it("updates the same source-target diagnostic draft instead of creating another", async () => {
+    const run = await runService.createRun({ projectRoot });
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    const input = {
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      intent: "blocked-diagnostic" as const,
+      pushBranch: false,
+      confirm: true as const,
+    };
+
+    const first = await publisherService.publish(input);
+    githubPublisher.existingRequest = {
+      ...first.result.request!,
+      created: false,
+      updated: false,
+    };
+    const second = await publisherService.publish(input);
+
+    expect(second.result).toMatchObject({
+      status: "blocked",
+      requestSynced: true,
+      request: { number: "123", created: false, updated: true },
+    });
+    expect(githubPublisher.createdPayloads).toHaveLength(1);
+    expect(githubPublisher.updatedMetadata).toContainEqual({
+      title: `[Blocked] SpecToPR Run ${run.id}`,
+      body: expect.stringContaining("blocked"),
+      labels: ["spec-to-pr", "spec-to-pr:blocked"],
+    });
+  });
+
+  it("records partial GitHub create and update mutations and completes labels on retry", async () => {
+    const run = await runService.createRun({ projectRoot });
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    const pull = {
+      html_url: "https://github.com/acme/spec-to-pr/pull/126",
+      number: 126,
+      id: 459,
+      draft: true,
+      head: { ref: "spec-to-pr/run-1" },
+      base: { ref: "main" },
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse(pull))
+      .mockResolvedValueOnce(new Response("labels unavailable", { status: 503 }))
+      .mockResolvedValueOnce(jsonResponse([pull]))
+      .mockResolvedValueOnce(jsonResponse(pull))
+      .mockResolvedValueOnce(new Response("labels still unavailable", { status: 503 }))
+      .mockResolvedValueOnce(jsonResponse([pull]))
+      .mockResolvedValueOnce(jsonResponse(pull))
+      .mockResolvedValueOnce(jsonResponse([{ name: "spec-to-pr" }]));
+    const realAdapterService = new PublisherService(
+      store,
+      artifactStore,
+      () => "2026-06-23T00:00:02.000Z",
+      {
+        github: new GitHubPublisherAdapter(fetchMock),
+        gitlab: gitlabPublisher,
+      },
+      async (_cwd, args) => {
+        if (args[0] === "status") return { stdout: "", stderr: "" };
+        if (args[0] === "rev-list") return { stdout: "1\n", stderr: "" };
+        if (args[0] === "symbolic-ref") {
+          return { stdout: "spec-to-pr/run-1\n", stderr: "" };
+        }
+        if (args[0] === "rev-parse") return { stdout: `${gitHead}\n`, stderr: "" };
+        return { stdout: "https://github.com/acme/spec-to-pr.git\n", stderr: "" };
+      },
+    );
+    const input = {
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      intent: "blocked-diagnostic" as const,
+      pushBranch: false,
+      confirm: true as const,
+    };
+
+    const partial = await realAdapterService.publish(input);
+    expect(partial.result).toMatchObject({
+      status: "failed",
+      errorCode: "PUBLISH_PARTIAL_SYNC",
+      retryable: true,
+      requestSynced: false,
+      request: {
+        number: "126",
+        created: true,
+        updated: false,
+      },
+    });
+    expect(partial.result.partialReasons.join("\n")).toMatch(/labels.*503/i);
+    expect(partial.agentResultId).toBeUndefined();
+
+    const updatePartial = await realAdapterService.publish(input);
+    expect(updatePartial.result).toMatchObject({
+      status: "failed",
+      errorCode: "PUBLISH_PARTIAL_SYNC",
+      retryable: true,
+      requestSynced: false,
+      request: {
+        number: "126",
+        created: false,
+        updated: true,
+      },
+    });
+    expect(updatePartial.result.partialReasons.join("\n")).toMatch(/labels.*503/i);
+    expect(updatePartial.agentResultId).toBeUndefined();
+
+    const recovered = await realAdapterService.publish(input);
+    expect(recovered.result).toMatchObject({
+      status: "blocked",
+      requestSynced: true,
+      request: {
+        number: "126",
+        created: false,
+        updated: true,
+      },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(9);
+    expect(fetchMock.mock.calls.filter((call) => call[1]?.method === "POST")).toHaveLength(2);
+    expect(JSON.parse(String(fetchMock.mock.calls[8]![1]!.body))).toEqual({
+      labels: ["spec-to-pr", "spec-to-pr:blocked"],
+    });
+  });
+
+  it("marks reviewer partial synchronization non-retryable while preserving the draft", async () => {
+    const run = await runService.createRun({ projectRoot });
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    const pull = {
+      html_url: "https://github.com/acme/spec-to-pr/pull/127",
+      number: 127,
+      id: 460,
+      draft: true,
+      head: { ref: "spec-to-pr/run-1" },
+      base: { ref: "main" },
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse(pull))
+      .mockResolvedValueOnce(jsonResponse([{ name: "spec-to-pr" }]))
+      .mockResolvedValueOnce(new Response("reviewers unavailable", { status: 503 }));
+    const realAdapterService = new PublisherService(
+      store,
+      artifactStore,
+      () => "2026-06-23T00:00:02.000Z",
+      {
+        github: new GitHubPublisherAdapter(fetchMock),
+        gitlab: gitlabPublisher,
+      },
+      async (_cwd, args) => {
+        if (args[0] === "status") return { stdout: "", stderr: "" };
+        if (args[0] === "rev-list") return { stdout: "1\n", stderr: "" };
+        if (args[0] === "symbolic-ref") {
+          return { stdout: "spec-to-pr/run-1\n", stderr: "" };
+        }
+        if (args[0] === "rev-parse") return { stdout: `${gitHead}\n`, stderr: "" };
+        return { stdout: "https://github.com/acme/spec-to-pr.git\n", stderr: "" };
+      },
+    );
+
+    const partial = await realAdapterService.publish({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      intent: "blocked-diagnostic",
+      reviewers: ["octocat"],
+      pushBranch: false,
+      confirm: true,
+    });
+
+    expect(partial.result).toMatchObject({
+      status: "failed",
+      errorCode: "PUBLISH_PARTIAL_SYNC",
+      retryable: false,
+      requestSynced: false,
+      request: {
+        number: "127",
+        created: true,
+        updated: false,
+      },
+    });
+    expect(partial.result.partialReasons.join("\n")).toMatch(/reviewers.*503/i);
+    expect(partial.agentResultId).toBeUndefined();
+  });
+
+  it("recovers a blocked diagnostic by updating the same draft to ready metadata", async () => {
+    const run = await runService.createRun({ projectRoot });
+    const blockedReport = await prReportService.generatePrReport({ runId: run.id });
+    const blocked = await publisherService.publish({
+      runId: run.id,
+      reportArtifactId: blockedReport.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      intent: "blocked-diagnostic",
+      pushBranch: false,
+      confirm: true,
+    });
+    githubPublisher.existingRequest = {
+      ...blocked.result.request!,
+      created: false,
+      updated: false,
+    };
+
+    await markRunReadyForPublish(run.id);
+    const readyReport = await prReportService.generatePrReport({ runId: run.id });
+    const ready = await publisherService.publish({
+      runId: run.id,
+      reportArtifactId: readyReport.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      intent: "ready",
+      pushBranch: false,
+      confirm: true,
+    });
+
+    expect(ready.result).toMatchObject({
+      status: "passed",
+      requestSynced: true,
+      request: { number: "123", created: false, updated: true },
+    });
+    expect(githubPublisher.createdPayloads).toHaveLength(1);
+    expect(githubPublisher.updatedMetadata.at(-1)).toEqual({
+      title: `spec-to-pr evidence report for ${run.id}`,
+      body: expect.stringContaining("ready"),
+      labels: ["spec-to-pr"],
+    });
+  });
+
+  it("returns PUBLISH_NO_DELTA without creating a review request", async () => {
+    const run = await runService.createRun({ projectRoot });
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    const noDeltaService = new PublisherService(
+      store,
+      artifactStore,
+      () => "2026-06-23T00:00:02.000Z",
+      { github: githubPublisher, gitlab: gitlabPublisher },
+      async (_cwd, args) => ({
+        stdout:
+          args[0] === "status"
+            ? ""
+            : args[0] === "symbolic-ref"
+              ? "spec-to-pr/run-1\n"
+              : args[0] === "rev-parse"
+                ? `${gitHead}\n`
+                : args[0] === "rev-list"
+                  ? "0\n"
+                  : "https://github.com/acme/spec-to-pr.git\n",
+        stderr: "",
+      }),
+    );
+
+    const published = await noDeltaService.publish({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      intent: "blocked-diagnostic",
+      pushBranch: true,
+      confirm: true,
+    });
+
+    expect(published.result).toMatchObject({
+      status: "blocked",
+      errorCode: "PUBLISH_NO_DELTA",
+      requestSynced: false,
+      retryable: false,
+    });
+    expect(githubPublisher.createdPayloads).toHaveLength(0);
+    expect(githubPublisher.updatedMetadata).toHaveLength(0);
+  });
+
+  it("does not let compatibility flags mutate a ready report as a blocked diagnostic", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    githubPublisher.existingRequest = existingDraftRequest("473");
+
+    const updated = await publisherService.updateBody({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      requestNumber: "473",
+      allowBlockedBody: true,
+      pushBranch: false,
+      confirm: true,
+    });
+
+    expect(updated.result).toMatchObject({
+      status: "blocked",
+      errorCode: "PUBLISH_INTENT_MISMATCH",
+      requestSynced: false,
+    });
+    expect(updated.agentResultId).toBeUndefined();
+    expect(githubPublisher.updatedMetadata).toHaveLength(0);
+  });
+
+  it.each([
+    {
+      name: "missing",
+      metadata: { reportKind: "pr-body-markdown", decision: "blocked" },
+    },
+    {
+      name: "malformed",
+      metadata: {
+        reportKind: "pr-body-markdown",
+        reportIntent: "diagnostic",
+        decision: "blocked",
+      },
+    },
+  ])(
+    "does not publish $name report metadata through compatibility update",
+    async ({ metadata }) => {
+      const run = await runService.createRun({ projectRoot });
+      const report = await generatePrReport({ runId: run.id, metadata });
+      githubPublisher.existingRequest = existingDraftRequest("472");
+
+      const plan = await publisherService.plan({
+        runId: run.id,
+        reportArtifactId: report.markdownArtifactId,
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        intent: "blocked-diagnostic",
+        pushBranch: false,
+      });
+      expect(plan).toMatchObject({
+        reportMetadataValid: false,
+        reportDecision: "blocked",
+        willCreateOrUpdate: false,
+      });
+      expect(plan.reportIntent).toBeUndefined();
+      expect(plan.warnings.join("\n")).toMatch(/report metadata.*invalid.*decision blocked/i);
+
+      const updated = await publisherService.updateBody({
+        runId: run.id,
+        reportArtifactId: report.markdownArtifactId,
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        requestNumber: "472",
+        allowBlockedBody: true,
+        pushBranch: false,
+        confirm: true,
+      });
+      expect(updated.result).toMatchObject({
+        status: "blocked",
+        errorCode: "PUBLISH_REPORT_METADATA_INVALID",
+        requestSynced: false,
+      });
+      expect(updated.result.errorMessage).toMatch(/intent unknown.*decision blocked/i);
+      expect(githubPublisher.updatedMetadata).toHaveLength(0);
+    },
+  );
+
+  it("rejects crossed report metadata and reports both known values", async () => {
+    const run = await runService.createRun({ projectRoot });
+    const report = await generatePrReport({
+      runId: run.id,
+      metadata: {
+        reportKind: "pr-body-markdown",
+        reportIntent: "ready",
+        decision: "blocked",
+      },
+    });
+
+    const plan = await publisherService.plan({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      intent: "blocked-diagnostic",
+      pushBranch: false,
+    });
+    expect(plan).toMatchObject({
+      reportMetadataValid: false,
+      reportIntent: "ready",
+      reportDecision: "blocked",
+      willCreateOrUpdate: false,
+    });
+    expect(plan.warnings.join("\n")).toMatch(/intent ready.*decision blocked/i);
+
+    const published = await publisherService.publish({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      intent: "blocked-diagnostic",
+      pushBranch: false,
+      confirm: true,
+    });
+    expect(published.result).toMatchObject({
+      status: "blocked",
+      errorCode: "PUBLISH_REPORT_METADATA_INVALID",
+      requestSynced: false,
+    });
+    expect(published.result.errorMessage).toMatch(/intent ready.*decision blocked/i);
+    expect(githubPublisher.createdPayloads).toHaveLength(0);
+    expect(githubPublisher.updatedMetadata).toHaveLength(0);
+  });
+
   it("can sync a blocked report into an existing review request body when explicitly allowed", async () => {
     const run = await runService.createRun({
       projectRoot,
@@ -446,13 +1043,14 @@ describe("PublisherService", () => {
     });
 
     expect(updated.result).toMatchObject({
-      status: "passed",
+      status: "blocked",
+      requestSynced: true,
       request: {
         number: "474",
         updated: true,
       },
     });
-    expect(updated.agentResultId).toMatch(/^ar_/);
+    expect(updated.agentResultId).toBeUndefined();
     expect(githubPublisher.updatedBodies[0]).toContain("# 요약");
     expect(githubPublisher.updatedBodies[0]).toContain("## 결정");
   });
@@ -478,7 +1076,8 @@ describe("PublisherService", () => {
     });
 
     expect(updated.result).toMatchObject({
-      status: "passed",
+      status: "blocked",
+      requestSynced: true,
       request: {
         number: "475",
         updated: true,
@@ -866,7 +1465,7 @@ async function markRunReadyForPublish(runId: string): Promise<void> {
   );
 }
 
-async function generatePrReport(input: { runId: string }) {
+async function generatePrReport(input: { runId: string; metadata?: Record<string, unknown> }) {
   const run = await store.get(input.runId);
   const timestamp = "2026-06-23T00:00:01.000Z";
   const decision = run.agentResults.some(
@@ -899,8 +1498,9 @@ async function generatePrReport(input: { runId: string }) {
     producedBy: "orchestrator",
     evidenceIds: [],
     createdAt: timestamp,
-    metadata: {
+    metadata: input.metadata ?? {
       reportKind: "pr-body-markdown",
+      reportIntent: decision === "ready" ? "ready" : "blocked-diagnostic",
       decision,
     },
   });
@@ -1142,7 +1742,9 @@ async function writeArtifact(input: {
 class FakePublisher implements ReviewRequestPublisher {
   public readonly createdPayloads: ReviewRequestPayload[] = [];
   public readonly updatedBodies: string[] = [];
+  public readonly updatedMetadata: ReviewRequestUpdate[] = [];
   public readonly uploadedAssets: Array<Array<{ role: string }>> = [];
+  public readonly receivedSignals: Array<AbortSignal | undefined> = [];
   public failCreate = false;
   public failAssetUpload = false;
   public existingRequest: PublishedReviewRequest | undefined;
@@ -1150,7 +1752,10 @@ class FakePublisher implements ReviewRequestPublisher {
 
   public constructor(private readonly host: "github" | "gitlab") {}
 
-  public async findExisting(): Promise<PublishedReviewRequest | undefined> {
+  public async findExisting(input: {
+    signal?: AbortSignal;
+  }): Promise<PublishedReviewRequest | undefined> {
+    this.receivedSignals.push(input.signal);
     return this.existingRequest;
   }
 
@@ -1200,13 +1805,14 @@ class FakePublisher implements ReviewRequestPublisher {
     };
   }
 
-  public async updateBody(input: {
+  public async update(input: {
     target: PublishTarget;
     requestNumber: string;
-    body: string;
+    update: ReviewRequestUpdate;
     token: string;
   }): Promise<PublishedReviewRequest> {
-    this.updatedBodies.push(input.body);
+    this.updatedMetadata.push(input.update);
+    this.updatedBodies.push(input.update.body);
 
     return {
       host: this.host,
@@ -1237,4 +1843,11 @@ function existingDraftRequest(number: string): PublishedReviewRequest {
     created: false,
     updated: false,
   };
+}
+
+function jsonResponse(value: unknown): Response {
+  return new Response(JSON.stringify(value), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
 }

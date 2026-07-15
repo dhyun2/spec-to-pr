@@ -69,6 +69,36 @@ POST /payments/:id/retry가 409를 반환할 때 notification row가 두 개 생
 5. **Independent reviews:** functional review는 항상, design review는 UI delta일 때만 실행합니다.
 6. **Report / publish:** baseline과 after 결과, 위험, rollback 정보를 포함해 draft PR을 만듭니다.
 
+## 실행 정책: stage, agent, skill, tool
+
+| Durable stage       | 이 케이스의 정확한 동작                                                                      |
+| ------------------- | -------------------------------------------------------------------------------------------- |
+| `intake`            | current/desired behavior, affected entry point, scope, publication과 workload를 기록합니다.  |
+| `contracts`         | 편집 전 focused baseline, 보존 동작, 좁은 delta와 `requiredValidations`를 확정합니다.        |
+| `implementation`    | 한 명의 implementation writer가 unrelated code를 보존하며 최소 delta만 편집합니다.           |
+| `functional-review` | read-only `functional-reviewer`가 before/after evidence와 affected regression을 판정합니다.  |
+| `design-review`     | UI delta일 때만 read-only `design-reviewer`가 적용되고 non-UI면 not applicable입니다.        |
+| `report`            | baseline, delta, checks, rollback, reviewer verdict와 blocker를 canonical report로 만듭니다. |
+| `publish`           | ready이고 `publication: draft`일 때만 draft PR/MR을 생성·갱신합니다.                         |
+| `archive`           | merge가 확인된 뒤 별도 사용자 action으로만 실행합니다.                                       |
+
+Agent 정책은 XS/S read-only scout 0명, M 최대 1명, L/XL 최대 2명이며 큰 legacy discovery도 독립적인 read-heavy 범위로 제한합니다. 한 implementation writer만 편집하고 **no nesting**, **parallel writer 금지**입니다. Reviewer 병렬 실행은 implementation 뒤 UI scope일 때만 가능합니다.
+
+- `stageSkillRoute`: public action은 `intake-contracts` → `implement` → `review-functional` 순서이며 UI delta면 `review-design`, draft면 `publish`로 이어집니다. 이 routing은 `deliveryProfile.recommendedSkills`가 아닙니다.
+- `recommendedSkills`: `figmaUrl` → `figma`, `design-system`; `openApiPaths` → `api-generator`; 감지된 React/Next package → `react-best-practices`, `next-best-practices` optional candidate입니다.
+- Legacy UI라는 이유만으로 `playwright`를 추천하지 않습니다. `mode: feature` + UI mapping만 해당 candidate를 추가합니다.
+- `appliedSkills`: `recommendedSkills`와 실제 available/applicable한 `skillHints`의 optional-skill 허용 합집합만 기록합니다. Missing optional skills로 baseline이나 필수 회귀 검증을 생략하지 않습니다.
+- **workflow MCP:** durable Run에 필수. **Figma host:** `figmaUrl`이 있을 때만 필수. **Playwright Test/CLI:** affected browser regression이 required일 때 focused selector와 structured assertion을 사용하며 full-project E2E나 영상은 요구하지 않습니다.
+- **Browser MCP:** optional interactive reproduction. **Chrome DevTools MCP:** console/network/performance/memory/live-DOM 원인 진단에만 conditional이며 acceptance oracle가 아닙니다.
+
+### Ready, blocked diagnostic, resume
+
+정상 경로는 `workflow_publish intent: ready`로 evidence-backed draft를 만듭니다. 해결되지 않은 baseline/verification blocker는 redacted `blockerDetails`와 exact unblock action을 남기며, preflight를 통과할 때만 `workflow_publish intent: blocked-diagnostic` diagnostic draft를 냅니다. 결과는 계속 `status: blocked`이고 성공 verdict가 아닙니다. Clean tree, non-target branch, 인증, 지원 remote, committed delta, target보다 한 commit ahead가 없거나 `PUBLISH_NO_DELTA`면 empty commit과 issue fallback 없이 **local blocked report**만 반환합니다.
+
+`diagnostic-publication-uncertain`이면 자동 재발행하지 않습니다. GitHub/GitLab에서 matching draft를 확인해 사용자에게 보여주고, 명시적 승인을 받은 경우에만 같은 `workflow_publish`를 `recoverUncertain: true`로 호출합니다.
+
+입력·환경을 고친 뒤 **same Run**의 latest status에서 재개합니다. Diagnostic draft가 있었다면 같은 source/target의 **same draft PR**을 `[Blocked]`에서 정상 `intent: ready` 제목/본문으로 갱신하고 blocked label을 제거합니다.
+
 ## 증거와 검증 <span id="evidence-legacy"></span>
 
 | 증거            | 예상 예시                                   | 통과 기준                                   |

@@ -19,8 +19,11 @@ import {
   recordCalibrationBestEffort,
 } from "../../packages/codex-sdk/src/usage-calibration.js";
 import {
+  buildBlockedDiagnosticFinalizationPrompt,
   buildCompactCheckpointPrompt,
   executeBudgetedBoundaryTurns,
+  extractWorkflowStatus,
+  type BoundaryWorkflowStatus,
 } from "../../packages/codex-sdk/src/boundary-runner.js";
 
 describe("Codex SDK workload budget", () => {
@@ -596,6 +599,321 @@ describe("Codex SDK workload budget", () => {
     expect(prompt).toContain('"hardLimitTokens":180000');
     expect(prompt).not.toContain("promptText");
   });
+
+  it("projects blocker, publication, delegation, and diagnostic publication status", () => {
+    const status = workflowStatus("blocked", undefined, {
+      publication: "draft",
+      blockerKind: "verification",
+      diagnosticPublication: {
+        host: "github",
+        url: "https://github.com/example/repo/pull/42",
+        number: "42",
+        created: true,
+        updated: false,
+        publishResultArtifactId: "artifact_publish_12345678",
+      },
+    });
+
+    expect(extractWorkflowStatus(turnResult(1_000, status).items)).toMatchObject({
+      deliveryProfile: { publication: "draft" },
+      delegationPolicy: {
+        singleWriter: true,
+        allowNested: false,
+        maxReadOnlyScouts: 1,
+        parallelReviewers: false,
+      },
+      blockerDetails: [{ kind: "verification", retryable: false }],
+      diagnosticPublication: {
+        host: "github",
+        number: "42",
+      },
+    });
+  });
+
+  it("gives a blocked draft Run at most one bounded diagnostic-finalization turn", async () => {
+    const prompts: string[] = [];
+    let calls = 0;
+    const initialBlockedStatus = workflowStatus("blocked", undefined, {
+      publication: "draft",
+      blockerKind: "verification",
+    });
+    const client = {
+      startThread: () => ({
+        id: "thread-1",
+        run: async (prompt: string) => {
+          prompts.push(prompt);
+          calls += 1;
+          return turnResult(
+            1_000,
+            calls === 1
+              ? initialBlockedStatus
+              : workflowStatus("blocked", undefined, {
+                  publication: "draft",
+                  blockerKind: "verification",
+                  diagnosticPublication: {
+                    host: "github" as const,
+                    url: "https://github.com/example/repo/pull/42",
+                    number: "42",
+                    created: true,
+                    updated: false,
+                    publishResultArtifactId: "artifact_publish_12345678",
+                  },
+                }),
+          );
+        },
+      }),
+      resumeThread: () => {
+        throw new Error("not expected");
+      },
+    };
+
+    const result = await executeBudgetedBoundaryTurns({
+      client,
+      initialPrompt: "implement",
+      hardLimitTokens: 100_000,
+      workloadSize: "M",
+      requiredValidations: ["functional"],
+      maxTurns: 8,
+      inspectBlockedDiagnosticPreflight: () => ({
+        eligible: true,
+        sourceBranch: "codex/checkout",
+        targetBranch: "main",
+        remoteName: "origin",
+      }),
+    });
+
+    expect(result.state).toBe("blocked");
+    expect(result.turnCount).toBe(2);
+    expect(calls).toBe(2);
+    expect(prompts[1]).toBe(
+      buildBlockedDiagnosticFinalizationPrompt(initialBlockedStatus, {
+        eligible: true,
+        sourceBranch: "codex/checkout",
+        targetBranch: "main",
+        remoteName: "origin",
+      }),
+    );
+    expect(prompts[1]).toContain('intent: "blocked-diagnostic"');
+    expect(prompts[1]).toContain("committed delta");
+    expect(prompts[1]).toContain("clean branch");
+    expect(prompts[1]).toContain("supported remote");
+    expect(prompts[1]).toContain("credentials");
+    expect(prompts[1]).toContain('sourceBranch: "codex/checkout"');
+  });
+
+  it("preserves the local diagnostic when git or credential preflight is not already ready", async () => {
+    let calls = 0;
+    const client = {
+      startThread: () => ({
+        id: "thread-1",
+        run: async () => {
+          calls += 1;
+          return turnResult(
+            1_000,
+            workflowStatus("blocked", undefined, {
+              publication: "draft",
+              blockerKind: "verification",
+            }),
+          );
+        },
+      }),
+      resumeThread: () => {
+        throw new Error("not expected");
+      },
+    };
+
+    const result = await executeBudgetedBoundaryTurns({
+      client,
+      initialPrompt: "implement",
+      hardLimitTokens: 100_000,
+      workloadSize: "M",
+      requiredValidations: ["functional"],
+      maxTurns: 8,
+      inspectBlockedDiagnosticPreflight: () => ({
+        eligible: false,
+        reason: "working-tree-not-clean",
+      }),
+    });
+
+    expect(result.state).toBe("blocked");
+    expect(result.turnCount).toBe(1);
+    expect(calls).toBe(1);
+  });
+
+  it("does not add a diagnostic-finalization turn for publication none", async () => {
+    let calls = 0;
+    let inspections = 0;
+    const client = {
+      startThread: () => ({
+        id: "thread-1",
+        run: async () => {
+          calls += 1;
+          return turnResult(
+            1_000,
+            workflowStatus("blocked", undefined, {
+              publication: "none",
+              blockerKind: "verification",
+            }),
+          );
+        },
+      }),
+      resumeThread: () => {
+        throw new Error("not expected");
+      },
+    };
+
+    const result = await executeBudgetedBoundaryTurns({
+      client,
+      initialPrompt: "implement",
+      hardLimitTokens: 100_000,
+      workloadSize: "M",
+      requiredValidations: ["functional"],
+      maxTurns: 8,
+      inspectBlockedDiagnosticPreflight: () => {
+        inspections += 1;
+        return {
+          eligible: true,
+          sourceBranch: "codex/checkout",
+          targetBranch: "main",
+          remoteName: "origin",
+        };
+      },
+    });
+
+    expect(result.state).toBe("blocked");
+    expect(result.turnCount).toBe(1);
+    expect(calls).toBe(1);
+    expect(inspections).toBe(0);
+  });
+
+  it("does not recurse on a publish-precondition blocker", async () => {
+    let calls = 0;
+    let inspections = 0;
+    const client = {
+      startThread: () => ({
+        id: "thread-1",
+        run: async () => {
+          calls += 1;
+          return turnResult(
+            1_000,
+            workflowStatus("blocked", undefined, {
+              publication: "draft",
+              blockerKind: "publish-precondition",
+            }),
+          );
+        },
+      }),
+      resumeThread: () => {
+        throw new Error("not expected");
+      },
+    };
+
+    const result = await executeBudgetedBoundaryTurns({
+      client,
+      initialPrompt: "implement",
+      hardLimitTokens: 100_000,
+      workloadSize: "M",
+      requiredValidations: ["functional"],
+      maxTurns: 8,
+      inspectBlockedDiagnosticPreflight: () => {
+        inspections += 1;
+        return {
+          eligible: true,
+          sourceBranch: "codex/checkout",
+          targetBranch: "main",
+          remoteName: "origin",
+        };
+      },
+    });
+
+    expect(result.state).toBe("blocked");
+    expect(result.turnCount).toBe(1);
+    expect(calls).toBe(1);
+    expect(inspections).toBe(0);
+  });
+
+  it("does not inspect or finalize after the hard token limit is reached", async () => {
+    let calls = 0;
+    let inspections = 0;
+    const client = {
+      startThread: () => ({
+        id: "thread-1",
+        run: async () => {
+          calls += 1;
+          return turnResult(
+            100_000,
+            workflowStatus("blocked", undefined, {
+              publication: "draft",
+              blockerKind: "verification",
+            }),
+          );
+        },
+      }),
+      resumeThread: () => {
+        throw new Error("not expected");
+      },
+    };
+
+    const result = await executeBudgetedBoundaryTurns({
+      client,
+      initialPrompt: "implement",
+      hardLimitTokens: 100_000,
+      workloadSize: "M",
+      requiredValidations: ["functional"],
+      maxTurns: 8,
+      inspectBlockedDiagnosticPreflight: () => {
+        inspections += 1;
+        return {
+          eligible: true,
+          sourceBranch: "codex/checkout",
+          targetBranch: "main",
+          remoteName: "origin",
+        };
+      },
+    });
+
+    expect(result.state).toBe("blocked");
+    expect(result.turnCount).toBe(1);
+    expect(calls).toBe(1);
+    expect(inspections).toBe(0);
+  });
+
+  it("never exceeds maxTurns to finalize or format a blocked Run", async () => {
+    let calls = 0;
+    const client = {
+      startThread: () => ({
+        id: "thread-1",
+        run: async () => {
+          calls += 1;
+          return turnResult(
+            99_999,
+            workflowStatus("blocked", undefined, {
+              publication: "draft",
+              blockerKind: "verification",
+            }),
+          );
+        },
+      }),
+      resumeThread: () => {
+        throw new Error("not expected");
+      },
+    };
+
+    const result = await executeBudgetedBoundaryTurns({
+      client,
+      initialPrompt: "implement",
+      outputSchema: { type: "object" },
+      hardLimitTokens: 100_000,
+      workloadSize: "M",
+      requiredValidations: ["functional"],
+      maxTurns: 1,
+    });
+
+    expect(result.state).toBe("blocked");
+    expect(result.turnCount).toBe(1);
+    expect(result.outputFormatting).toBe("budget-skipped");
+    expect(calls).toBe(1);
+  });
 });
 
 describe("usage calibration", () => {
@@ -799,15 +1117,32 @@ describe("usage calibration", () => {
 });
 
 function workflowStatus(
-  status: "running" | "completed",
+  status: "running" | "blocked" | "completed",
   nextKind?: string,
   options: {
     runId?: string;
     size?: "XS" | "S" | "M" | "L" | "XL";
     hardLimitTokens?: number;
     requiredValidations?: string[];
+    publication?: "draft" | "none";
+    blockerKind?:
+      | "missing-input"
+      | "missing-tool"
+      | "policy"
+      | "verification"
+      | "publish-precondition"
+      | "budget-split"
+      | "unexpected";
+    diagnosticPublication?: {
+      host: "github" | "gitlab";
+      url: string;
+      number: string;
+      created: boolean;
+      updated: boolean;
+      publishResultArtifactId: string;
+    };
   } = {},
-) {
+): BoundaryWorkflowStatus {
   const size = options.size ?? "M";
   const hardLimitTokens = options.hardLimitTokens ?? 180_000;
   return {
@@ -816,7 +1151,38 @@ function workflowStatus(
     ...(status === "completed" ? {} : { currentStage: "contracts" }),
     stages: [{ name: "intake", status: "passed" }],
     nextActions: nextKind === undefined ? [] : [{ kind: nextKind, runId: "run_12345678" }],
-    blockers: [],
+    deliveryProfile: {
+      publication: options.publication ?? "draft",
+      recommendedSkills: [],
+    },
+    delegationPolicy: {
+      singleWriter: true as const,
+      allowNested: false as const,
+      maxReadOnlyScouts: size === "M" ? 1 : size === "L" || size === "XL" ? 2 : 0,
+      parallelReviewers: size === "L" || size === "XL",
+    },
+    blockers: options.blockerKind === undefined ? [] : ["Workflow blocked"],
+    blockerDetails:
+      options.blockerKind === undefined
+        ? []
+        : [
+            {
+              stage: "implementation",
+              code: "BLOCKED_TEST",
+              kind: options.blockerKind,
+              summary: "Workflow blocked",
+              retryable: false,
+              resumable: true,
+              completedWork: ["Contracts accepted"],
+              evidencePaths: ["contracts/requirements.json"],
+              attemptedRecovery: ["Retried once"],
+              unrunValidations: ["functional"],
+              exactUnblockAction: "Provide the missing verification dependency.",
+            },
+          ],
+    ...(options.diagnosticPublication === undefined
+      ? {}
+      : { diagnosticPublication: options.diagnosticPublication }),
     requiredValidations: options.requiredValidations ?? ["functional"],
     resumeContext: {
       goal: "Implement the checkout selector",

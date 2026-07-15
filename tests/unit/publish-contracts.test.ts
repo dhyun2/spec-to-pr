@@ -2,13 +2,58 @@ import { describe, expect, it } from "vitest";
 
 import { PublishReviewRequestInputSchema } from "../../src/application/publisher-service.js";
 import {
+  PublishIntentSchema,
   PublishedReviewAssetSchema,
   PublishResultSchema,
   PublishTargetSchema,
+  ReviewRequestUpdateSchema,
   ReviewRequestPayloadSchema,
 } from "../../src/publisher/publish-contracts.js";
 
 describe("publish contracts", () => {
+  it("accepts ready and blocked-diagnostic publish intents", () => {
+    expect(PublishIntentSchema.options).toEqual(["ready", "blocked-diagnostic"]);
+    expect(
+      PublishReviewRequestInputSchema.parse({
+        runId: "run_11111111111111111111111111111111",
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        confirm: true,
+      }).intent,
+    ).toBe("ready");
+    expect(
+      PublishReviewRequestInputSchema.parse({
+        runId: "run_11111111111111111111111111111111",
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        intent: "blocked-diagnostic",
+        confirm: true,
+      }).intent,
+    ).toBe("blocked-diagnostic");
+  });
+
+  it("requires strict title, body, and label metadata for review request updates", () => {
+    expect(
+      ReviewRequestUpdateSchema.parse({
+        title: "[Blocked] SpecToPR Run run_11111111111111111111111111111111",
+        body: "# Blocked diagnostic",
+        labels: ["spec-to-pr", "spec-to-pr:blocked"],
+      }),
+    ).toEqual({
+      title: "[Blocked] SpecToPR Run run_11111111111111111111111111111111",
+      body: "# Blocked diagnostic",
+      labels: ["spec-to-pr", "spec-to-pr:blocked"],
+    });
+    expect(
+      ReviewRequestUpdateSchema.safeParse({
+        title: "SpecToPR",
+        body: "# Ready",
+        labels: ["spec-to-pr"],
+        reviewers: ["octocat"],
+      }).success,
+    ).toBe(false);
+  });
+
   it("requires a source branch different from the target", () => {
     expect(
       PublishReviewRequestInputSchema.safeParse({

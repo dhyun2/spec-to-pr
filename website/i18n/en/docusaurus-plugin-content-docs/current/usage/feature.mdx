@@ -73,6 +73,35 @@ Implement checkout end to end. Run only the checkout test path, tag, or project 
 6. **Targeted feature proof:** Run one Playwright invocation selecting the changed feature and record strict JSON plus one valid video.
 7. **Report / publish:** Publish a draft PR with the exact selector, command, result, video path, and every verdict.
 
+## Execution policy: stages, agents, skills, and tools
+
+| Durable stage       | Exact behavior for this case                                                                                                   |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `intake`            | Fix the user journey, UI scope, all sources, publication, workload, and `requiredValidations`.                                 |
+| `contracts`         | Reconcile brief/OpenAPI/docs/Figma contracts and fix the changed-feature selector and browser evidence.                        |
+| `implementation`    | One implementation writer uses one `implementationContextId`, submits API-ready before UI, and creates targeted feature proof. |
+| `functional-review` | The read-only `functional-reviewer` judges contracts, diff, project checks, and targeted E2E.                                  |
+| `design-review`     | The read-only `design-reviewer` judges visual, interaction, responsive, and accessibility evidence.                            |
+| `report`            | Build the canonical exact-selector, structured-result, one-video, review, and risk report.                                     |
+| `publish`           | Use `workflow_publish intent: ready` to sync assets and create/update a draft only.                                            |
+| `archive`           | Run only after merge, authoritative evidence, and a separate request.                                                          |
+
+Agent policy allows zero read-only scout workers for XS/S, at most one for M, and at most two for L/XL. Scouts only read sources; one implementation writer owns API and UI. There is **no nesting** and no **parallel writer**. Functional/design reviewer parallelism starts only after implementation.
+
+- `stageSkillRoute`: public actions route `intake-contracts` → `implement` → `review-functional`/`review-design` → `publish`. This routing is not `deliveryProfile.recommendedSkills`.
+- `recommendedSkills`: `figmaUrl` → `figma`, `design-system`; `openApiPaths` → `api-generator`; detected React/Next packages → `react-best-practices`, `next-best-practices`; `mode: feature` + UI → `playwright` optional candidates.
+- `appliedSkills`: record only the allowed union of `recommendedSkills` and actually available/applicable optional `skillHints`. Missing optional skills never weaken targeted E2E or other required evidence.
+- **workflow MCP:** required. **Figma host:** required with `figmaUrl`. **Playwright Test/CLI:** required as the acceptance oracle using one changed-feature test path/tag/project command, retrying assertions, structured results, and exactly one supporting video.
+- **Browser MCP:** optional interactive reproduction/inspection. **Chrome DevTools MCP:** conditional for console/network/performance/memory/live-DOM diagnosis. Neither replaces the exact Playwright selector, assertions, or positive `testCount`.
+
+### Ready, blocked diagnostic, and resume
+
+The normal result is a video-linked draft from `workflow_publish intent: ready`. Browser evidence not run is a `BROWSER_NOT_RUN` blocker. An unresolved blocker records typed `blockerDetails` and the exact unblock action; only a clean non-target branch with supported authenticated remote, committed delta, and a one-commit lead may create a `workflow_publish intent: blocked-diagnostic` draft. It stays `status: blocked`. `PUBLISH_NO_DELTA` and other preflight failures return a **local blocked report** without empty commits or issue fallback.
+
+For `diagnostic-publication-uncertain`, never publish automatically. Inspect GitHub/GitLab for a matching draft, show the result to the user, and call the same `workflow_publish` action with `recoverUncertain: true` only after explicit approval.
+
+After recovery, resume the **same Run** and repeat only the failed required proof such as E2E/video. If a diagnostic draft exists, update the same source/target **same draft PR** from `[Blocked]` to the normal ready title/body and remove its blocked label.
+
 ## Evidence and validation <span id="evidence-feature"></span>
 
 | Evidence        | Illustrative path                                 | Required condition                                                                  |

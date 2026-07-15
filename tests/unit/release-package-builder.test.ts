@@ -44,6 +44,7 @@ describe("release package builder", () => {
       ".claude-plugin/marketplace.json",
       ".claude-plugin/plugin.json",
       ".codex-plugin/plugin.json",
+      ".codex/agents/spec-to-pr-design-reviewer.toml",
       ".codex/agents/spec-to-pr-functional-reviewer.toml",
       ".mcp.json",
       "CHANGELOG.md",
@@ -53,8 +54,12 @@ describe("release package builder", () => {
       "packages/codex-sdk/README.md",
       "packages/codex-sdk/package.json",
       "schemas/runtime/run-summary.schema.json",
-      "skills/prepare-release/SKILL.md",
     ]);
+    expect(first.includedFiles).not.toContain("skills/prepare-release/SKILL.md");
+    expect(first.includedFiles).not.toContain(".agents/skills/prepare-release/SKILL.md");
+    expect(
+      (await readFile(first.packagePath)).toString("utf8").match(/mcp_servers = \{\}/g),
+    ).toHaveLength(2);
     expect(first.sha256).toBe(second.sha256);
     expect(first.gitCommit).toMatch(/^[a-f0-9]{40}$/);
     await expect(readFile(first.packagePath)).resolves.toEqual(await readFile(second.packagePath));
@@ -101,7 +106,14 @@ async function writeFixtureProject(root: string): Promise<void> {
   const files = new Map<string, string>([
     [".claude-plugin/marketplace.json", "{}\n"],
     [".claude-plugin/plugin.json", "{}\n"],
-    [".codex/agents/spec-to-pr-functional-reviewer.toml", 'name = "functional-reviewer"\n'],
+    [
+      ".codex/agents/spec-to-pr-design-reviewer.toml",
+      'name = "design-reviewer"\nsandbox_mode = "read-only"\nmcp_servers = {}\n',
+    ],
+    [
+      ".codex/agents/spec-to-pr-functional-reviewer.toml",
+      'name = "functional-reviewer"\nsandbox_mode = "read-only"\nmcp_servers = {}\n',
+    ],
     [".codex-plugin/plugin.json", "{}\n"],
     [".agents/plugins/marketplace.json", "{}\n"],
     [".mcp.json", "{}\n"],
@@ -116,7 +128,8 @@ async function writeFixtureProject(root: string): Promise<void> {
     ["packages/codex-sdk/src/workflow-policy.ts", "export {};\n"],
     ["packages/codex-sdk/tsconfig.json", "{}\n"],
     ["scripts/validate-codex-plugin.ts", "export {};\n"],
-    ["skills/prepare-release/SKILL.md", "# Skill\n"],
+    ["skills/prepare-release/SKILL.md", "# Stale public skill\n"],
+    [".agents/skills/prepare-release/SKILL.md", "# Maintainer-only skill\n"],
     ["agents/design-reviewer.md", "# Design Reviewer\n"],
     ["schemas/runtime/run-summary.schema.json", "{}\n"],
     ["node_modules/pkg/index.js", "bad\n"],

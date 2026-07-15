@@ -69,6 +69,36 @@ Run only affected payment retry checks. Do not perform a full inventory, migrati
 5. **Independent reviews:** Always run functional review; run design review only for a UI delta.
 6. **Report / publish:** Include before/after evidence, risk, rollback notes, and the draft PR.
 
+## Execution policy: stages, agents, skills, and tools
+
+| Durable stage       | Exact behavior for this case                                                                          |
+| ------------------- | ----------------------------------------------------------------------------------------------------- |
+| `intake`            | Record current/desired behavior, affected entry point, scope, publication, and workload.              |
+| `contracts`         | Establish the pre-edit focused baseline, preserved behavior, narrow delta, and `requiredValidations`. |
+| `implementation`    | One implementation writer preserves unrelated code and edits only the minimum delta.                  |
+| `functional-review` | The read-only `functional-reviewer` judges before/after evidence and affected regressions.            |
+| `design-review`     | The read-only `design-reviewer` applies only to a UI delta; otherwise it is not applicable.           |
+| `report`            | Build the canonical baseline, delta, checks, rollback, review, and blocker report.                    |
+| `publish`           | Create/update a draft only when ready and `publication: draft`.                                       |
+| `archive`           | Run only after verified merge and a separate user action.                                             |
+
+Agent policy allows zero read-only scout workers for XS/S, at most one for M, and at most two for L/XL; even large legacy discovery stays independent and read-heavy. One implementation writer edits. There is **no nesting**, no **parallel writer**, and reviewer parallelism is post-implementation and UI-conditional.
+
+- `stageSkillRoute`: public actions route `intake-contracts` → `implement` → `review-functional`, adding `review-design` for a UI delta and `publish` for draft delivery. This routing is not `deliveryProfile.recommendedSkills`.
+- `recommendedSkills`: `figmaUrl` → `figma`, `design-system`; `openApiPaths` → `api-generator`; detected React/Next packages → `react-best-practices`, `next-best-practices` optional candidates.
+- Legacy UI alone does not recommend `playwright`; only the `mode: feature` + UI mapping adds that candidate.
+- `appliedSkills`: record only the allowed union of `recommendedSkills` and actually available/applicable optional `skillHints`. Missing optional skills never remove baseline or regression evidence.
+- **workflow MCP:** required. **Figma host:** required only with `figmaUrl`. **Playwright Test/CLI:** use a focused selector and structured assertions when an affected browser regression is required; never imply full-project E2E or video.
+- **Browser MCP:** optional interactive reproduction. **Chrome DevTools MCP:** conditional for console/network/performance/memory/live-DOM diagnosis, never the acceptance oracle.
+
+### Ready, blocked diagnostic, and resume
+
+The normal path uses `workflow_publish intent: ready`. An unresolved baseline or verification blocker records redacted `blockerDetails` and an exact unblock action; only a passing preflight may create a `workflow_publish intent: blocked-diagnostic` draft. It remains `status: blocked`, not a success verdict. A dirty/target branch, missing auth, unsupported remote, missing committed delta/one-commit lead, or `PUBLISH_NO_DELTA` returns a **local blocked report** without empty commits or issue fallback.
+
+For `diagnostic-publication-uncertain`, never publish automatically. Inspect GitHub/GitLab for a matching draft, show the result to the user, and call the same `workflow_publish` action with `recoverUncertain: true` only after explicit approval.
+
+Correct the input/environment and resume the **same Run** at its latest status. If a diagnostic draft exists, update the same source/target **same draft PR** from `[Blocked]` to the normal `intent: ready` title/body and remove the blocked label.
+
 ## Evidence and validation <span id="evidence-legacy"></span>
 
 | Evidence        | Illustrative path                           | Passing condition                                               |

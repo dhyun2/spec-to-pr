@@ -50,6 +50,13 @@ describe("spec-to-pr MCP workflow facade", () => {
     client = new Client({ name: "spec-to-pr-test-client", version: "0.2.0" });
     await client.connect(transport);
 
+    const instructionHead = client.getInstructions()?.slice(0, 512) ?? "";
+    expect(instructionHead).toContain(
+      "intake → contracts → implementation → functional-review/design-review → report → publish → archive",
+    );
+    expect(instructionHead).toContain("one external action per boundary");
+    expect(instructionHead).toContain("Missing evidence never passes");
+
     const listed = await client.listTools();
 
     expect(listed.tools.map((tool) => tool.name).sort()).toEqual(EXPECTED_TOOLS);

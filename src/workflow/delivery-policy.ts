@@ -1,10 +1,24 @@
 import {
+  DelegationPolicySchema,
   DeliveryProfileSchema,
   type ChangeKind,
+  type DelegationPolicy,
   type DeliveryMode,
   type DeliveryProfile,
   type WorkflowScope,
 } from "./workflow-contracts.js";
+import type { WorkloadSize } from "./workload-policy.js";
+
+export function buildDelegationPolicy(size: WorkloadSize): DelegationPolicy {
+  const maxReadOnlyScouts = size === "XS" || size === "S" ? 0 : size === "M" ? 1 : 2;
+
+  return DelegationPolicySchema.parse({
+    singleWriter: true,
+    allowNested: false,
+    maxReadOnlyScouts,
+    parallelReviewers: size === "L" || size === "XL",
+  });
+}
 
 export function buildDeliveryProfile(input: {
   mode: DeliveryMode;
@@ -18,6 +32,7 @@ export function buildDeliveryProfile(input: {
   guidancePaths?: string[];
   discoveredGuidancePaths?: string[];
   skillHints?: string[];
+  recommendedSkills?: string[];
 }): DeliveryProfile {
   if (input.mode === "brief" && input.briefPath === undefined) {
     throw new Error("brief mode requires briefPath");
@@ -42,6 +57,7 @@ export function buildDeliveryProfile(input: {
     guidancePaths: input.guidancePaths ?? [],
     discoveredGuidancePaths: input.discoveredGuidancePaths ?? [],
     skillHints: input.skillHints ?? [],
+    recommendedSkills: input.recommendedSkills ?? [],
     requirements: {
       brief: input.briefPath !== undefined,
       legacyBaseline: input.mode === "legacy",

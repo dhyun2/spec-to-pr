@@ -71,6 +71,36 @@ node 12:345의 desktop/mobile과 loading/error/success 상태를 기존 컴포�
 5. **Reviews:** 관련 기능 검증과 독립 design review로 시각 충실도, accessibility, interaction을 판정합니다.
 6. **Report / optional publish:** `publication: none`이면 보고서에서 끝나고, 명시적 `draft`일 때만 발행 preflight와 PR을 수행합니다.
 
+## 실행 정책: stage, agent, skill, tool
+
+| Durable stage       | 이 케이스의 정확한 동작                                                                                    |
+| ------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `intake`            | Figma file/node, UI 상태·반응형 범위, publication과 workload를 고정합니다.                                 |
+| `contracts`         | connected host에서 실제 node/variables/assets/screenshot을 읽고 strict `figma-bundle`을 제출합니다.        |
+| `implementation`    | 한 명의 implementation writer가 기존 design system에 매핑하고 같은 context에서 필요한 API/UI를 구현합니다. |
+| `functional-review` | read-only `functional-reviewer`가 상태 동작과 관련 project check를 판정합니다.                             |
+| `design-review`     | read-only `design-reviewer`가 Figma 대비 visual/interaction/responsive/accessibility를 판정합니다.         |
+| `report`            | provenance, 구현 차이, validation, reviewer verdict와 blocker를 local/canonical report로 만듭니다.         |
+| `publish`           | 기본 `publication: none`이면 skipped; `draft`를 명시하고 ready일 때만 draft를 만듭니다.                    |
+| `archive`           | 발행한 draft가 merge된 뒤 authoritative evidence와 별도 요청으로만 실행합니다.                             |
+
+Agent 정책은 XS/S read-only scout 0명, M 최대 1명, L/XL 최대 2명입니다. Scout는 큰 Figma/repository mapping의 독립적인 read-heavy discovery만 수행합니다. 한 implementation writer만 편집하며 **no nesting**, **parallel writer 금지**입니다. 두 reviewer는 implementation 뒤에만 병렬일 수 있습니다.
+
+- `stageSkillRoute`: public action은 `intake-contracts` → `implement` → `review-functional`/`review-design` 순서이며 draft면 `publish`로 이어집니다. 이 routing은 `deliveryProfile.recommendedSkills`가 아닙니다.
+- `recommendedSkills`: `figmaUrl` → `figma`, `design-system`; `openApiPaths` → `api-generator`; 감지된 React/Next package → `react-best-practices`, `next-best-practices` optional candidate입니다.
+- Figma UI라는 이유만으로 `playwright`를 추천하지 않습니다. `mode: feature` + UI mapping만 해당 candidate를 추가합니다.
+- `appliedSkills`: `recommendedSkills`와 available/applicable한 `skillHints`의 optional-skill 허용 합집합만 기록합니다. Missing optional skill은 blocker가 아니지만 real Figma evidence는 선택이 아닙니다.
+- **workflow MCP:** 필수. **Figma host:** URL의 file/node를 읽는 데 필수이며 runtime polling으로 대체할 수 없습니다. **Playwright Test/CLI:** runtime UI assertion이 `requiredValidations`에 있으면 focused check로 사용하지만 feature E2E나 video는 요구하지 않습니다.
+- **Browser MCP:** optional interactive visual inspection. **Chrome DevTools MCP:** console/network/performance/memory/live-DOM 진단에만 conditional입니다. Screenshot/DevTools 관찰은 Playwright assertion을 대신하지 않습니다.
+
+### Ready, blocked diagnostic, resume
+
+`publication: none`의 정상 결과는 reviewed local report이고, draft를 요청했다면 `workflow_publish intent: ready`가 evidence-backed draft를 만듭니다. Figma/browser required evidence가 없으면 `BROWSER_NOT_RUN` 같은 typed `blockerDetails`와 exact unblock action을 남깁니다. Preflight가 허용할 때만 `workflow_publish intent: blocked-diagnostic` draft를 만들며 계속 `status: blocked`입니다. 기본 none이거나 clean/non-target/authenticated/supported remote, committed delta, target보다 한 commit ahead 조건이 없거나 `PUBLISH_NO_DELTA`면 empty commit/issue fallback 없이 **local blocked report**를 반환합니다.
+
+명시적으로 draft를 요청한 실행이 `diagnostic-publication-uncertain`이면 자동 재발행하지 않습니다. GitHub/GitLab에서 matching draft를 확인해 사용자에게 보여주고, 명시적 승인을 받은 경우에만 같은 `workflow_publish`를 `recoverUncertain: true`로 호출합니다.
+
+권한·node·evidence를 고친 뒤 **same Run**의 latest status에서 재개합니다. Diagnostic draft가 있었다면 같은 source/target의 **same draft PR**을 `[Blocked]`에서 정상 `intent: ready` 제목/본문으로 갱신하고 blocked label을 제거합니다.
+
 ## 증거와 검증 <span id="evidence-figma"></span>
 
 | 증거                   | 예상 예시                                                            | 통과 기준                                                                                   |

@@ -9,33 +9,45 @@ import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 
 import type { ArtifactBlobStore } from "../artifact-registry/artifact-blob-store.js";
+import { WorkflowReportMetadataSchema } from "../pr-report/pr-report-model.js";
+import {
+  renderBlockedWorkflowReport,
+  renderReadyWorkflowReport,
+} from "../pr-report/workflow-report-renderer.js";
+import { PublishIntentSchema, PublishResultSchema } from "../publisher/index.js";
 import { ArtifactRefSchema, type ArtifactRef } from "../runtime/artifact.js";
 import { createArtifactId } from "../runtime/id-factory.js";
 import { ArtifactIdSchema, RunIdSchema } from "../runtime/ids.js";
-import type { RunManifest } from "../run/run.js";
+import { summarizeRun, type RunManifest } from "../run/index.js";
 import type { RunStageName, StageState } from "../run/stages.js";
 import type { RunStore } from "../store/run-store.js";
+import { RevisionConflictError } from "../store/errors.js";
 import {
   ReviewSubmissionSchema,
   ImplementationReviewPacketSchema,
   ChangeKindSchema,
   DeliveryModeSchema,
   DeliveryProfileSchema,
+  DiagnosticPublicationSchema,
   FigmaFileUrlSchema,
   ImplementationContextIdSchema,
   PublicationIntentSchema,
   SkillHintSchema,
+  WorkflowBlockerSchema,
   WorkflowSourcePathSchema,
   WorkflowActionSchema,
   WorkflowScopeSchema,
   WorkflowStatusSchema,
   WorkflowSubmissionSchema,
   WorkloadEstimateSchema,
+  buildDelegationPolicy,
   buildGatePlan,
   buildDeliveryProfile,
   classifyWorkflowScope,
   estimateWorkload,
+  isSafeDurableEvidencePath,
   type WorkflowScope,
+  type WorkflowBlocker,
   type DeliveryProfile,
   type ImplementationReviewPacket,
   type WorkloadEstimate,
@@ -54,6 +66,7 @@ const WORKER_ID = "workflow-orchestrator" as const;
 const execFileAsync = promisify(execFile);
 const DEFAULT_EXTERNAL_LEASE_TTL_MS = 15 * 60 * 1000;
 const DEFAULT_EXTERNAL_HEARTBEAT_MS = 60 * 1000;
+const MAX_DIAGNOSTIC_CLAIM_ATTEMPTS = 8;
 const MAX_COMPOSABLE_SOURCE_PATHS = 20;
 const MAX_INTAKE_SOURCE_CHARS = 200_000;
 const MAX_OPENAPI_OPERATIONS = 1_000;
@@ -209,12 +222,14 @@ export const WorkflowStatusInputSchema = z.object({ runId: RunIdSchema }).strict
 export const WorkflowPublishInputSchema = z
   .object({
     runId: RunIdSchema,
+    intent: PublishIntentSchema.default("ready"),
     mode: z.enum(["preview", "execute"]),
     sourceBranch: z.string().trim().min(1),
     targetBranch: z.string().trim().min(1).default("main"),
     title: z.string().trim().min(1).optional(),
     remoteName: z.string().trim().min(1).default("origin"),
     pushBranch: z.boolean().default(true),
+    recoverUncertain: z.boolean().default(false),
     confirm: z.boolean().default(false),
   })
   .strict()
@@ -231,6 +246,16 @@ export const WorkflowPublishInputSchema = z
         code: "custom",
         path: ["confirm"],
         message: "Executing publication requires confirm=true",
+      });
+    }
+    if (
+      input.recoverUncertain &&
+      (input.intent !== "blocked-diagnostic" || input.mode !== "execute" || !input.confirm)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["recoverUncertain"],
+        message: "recoverUncertain=true requires confirmed blocked-diagnostic execute publication",
       });
     }
   });
@@ -284,6 +309,7 @@ export class WorkflowService {
   private readonly now: () => string;
   private readonly externalLeaseTtlMs: number;
   private readonly externalHeartbeatMs: number;
+  private readonly diagnosticPublishFlights = new Map<string, Promise<unknown>>();
 
   public constructor(private readonly dependencies: WorkflowServiceDependencies) {
     this.now = dependencies.now ?? (() => new Date().toISOString());
@@ -365,6 +391,12 @@ export class WorkflowService {
       specification: classifiedScope.specification || sources.openApi.length > 0,
     });
     const gatePlan = buildGatePlan(scope);
+    const recommendedSkills = await recommendedSkillsForIntake({
+      projectRoot: input.projectRoot,
+      ...(figmaUrl === undefined ? {} : { figmaUrl }),
+      hasOpenApi: sources.openApi.length > 0,
+      featureUi: scope.ui && (input.mode === "feature" || input.changeKind === "feature"),
+    });
     const deliveryProfile = buildDeliveryProfile({
       mode: input.mode,
       changeKind: input.changeKind,
@@ -379,6 +411,7 @@ export class WorkflowService {
       guidancePaths: normalizedProfilePaths.guidancePaths,
       discoveredGuidancePaths: normalizedProfilePaths.discoveredGuidancePaths,
       skillHints: sources.skillHints,
+      recommendedSkills,
     });
     const workload = estimateWorkload({
       phase: "intake",
@@ -497,8 +530,18 @@ export class WorkflowService {
       stageName,
       workerId: WORKER_ID,
     });
+    const activeRun = await this.dependencies.runStore.get(run.id);
+    const runWithEvidence = {
+      ...activeRun,
+      artifacts: [...activeRun.artifacts, ...evidenceArtifacts],
+    };
+    const rawBlocker = blockerFromSubmission(submission);
+    const typedBlocker =
+      rawBlocker === undefined
+        ? undefined
+        : reconstructWorkflowBlocker(runWithEvidence, rawBlocker, started.stage);
     const artifact = await this.recordSubmissionArtifact(
-      await this.dependencies.runStore.get(run.id),
+      activeRun,
       submission,
       evidenceArtifacts,
       reviewPacket,
@@ -511,8 +554,22 @@ export class WorkflowService {
       submission.verdict === "changes-requested"
     ) {
       const current = await this.dependencies.runStore.get(run.id);
-      const reopened = reopenImplementationForReviewChanges(current, submission.summary, this.now);
-      await this.dependencies.runStore.save(reopened, current.revision);
+      const reopened = reopenImplementationForReviewChanges(
+        current,
+        typedBlocker?.summary ?? genericBlockerSummary(submission.kind, "unexpected"),
+        this.now,
+      );
+      await this.dependencies.runStore.save(
+        {
+          ...reopened,
+          stages: reopened.stages.map((item) =>
+            item.name === "implementation"
+              ? { ...item, artifactIds: [...new Set([...item.artifactIds, artifact.id])] }
+              : item,
+          ),
+        },
+        current.revision,
+      );
       return this.status({ runId: run.id });
     }
 
@@ -550,9 +607,13 @@ export class WorkflowService {
         leaseId: started.stage.lease!.id,
         artifactIds,
         error: {
-          code: outcome === "blocked" ? "WORKFLOW_BLOCKED" : "CHANGES_REQUESTED",
-          message: submission.summary,
-          retryable: outcome !== "blocked",
+          code:
+            typedBlocker?.code ??
+            (outcome === "blocked" ? "WORKFLOW_BLOCKED" : "CHANGES_REQUESTED"),
+          message:
+            typedBlocker?.summary ??
+            `${stageName} stage reported ${outcome === "blocked" ? "a blocker" : "a failure"}.`,
+          retryable: typedBlocker?.retryable ?? outcome !== "blocked",
         },
       });
     }
@@ -567,11 +628,13 @@ export class WorkflowService {
     const deliveryProfile = deliveryProfileFromRun(run);
     const workload = workloadFromRun(run, scope, deliveryProfile);
     const nextActions = actionsForRun(run, scope, deliveryProfile);
+    const requiredValidations = requiredValidationsForRun(scope, deliveryProfile);
     const currentStage = run.stages.find(
       (item) => !["passed", "skipped", "waived"].includes(item.status),
     );
-    const blockers = run.stages.flatMap((item) =>
-      item.error === undefined || item.error.retryable ? [] : [item.error.message],
+    const blockerDetails = await this.blockerDetailsForRun(run, requiredValidations);
+    const blockers = blockerDetails.flatMap((blocker) =>
+      blocker.retryable ? [] : [blocker.summary],
     );
     const reportPassed = stage(run, "report").status === "passed";
     const publishPassed = stage(run, "publish").status === "passed";
@@ -587,6 +650,11 @@ export class WorkflowService {
           : nextActions.length > 0
             ? "needs-external-action"
             : "running";
+    const currentBlocker = blockerDetails.find((blocker) => !blocker.retryable);
+    const diagnosticPublication =
+      status === "blocked" && currentBlocker !== undefined
+        ? await this.diagnosticPublicationForRun(run, currentBlocker)
+        : undefined;
 
     return WorkflowStatusSchema.parse({
       runId: run.id,
@@ -595,7 +663,8 @@ export class WorkflowService {
       scope,
       deliveryProfile,
       workload,
-      requiredValidations: requiredValidationsForRun(scope, deliveryProfile),
+      delegationPolicy: buildDelegationPolicy(workload.size),
+      requiredValidations,
       stages: run.stages.map((item) => ({
         name: item.name,
         status: item.status,
@@ -605,8 +674,97 @@ export class WorkflowService {
       })),
       nextActions,
       blockers,
+      blockerDetails,
+      ...(diagnosticPublication === undefined ? {} : { diagnosticPublication }),
       resumeContext: resumeContextForRun(run),
     });
+  }
+
+  public async ensureBlockedDiagnosticReport(rawInput: unknown): Promise<ArtifactRef> {
+    const input = WorkflowStatusInputSchema.parse(rawInput);
+    const run = await this.dependencies.runStore.get(input.runId);
+    const blocker = (
+      await this.blockerDetailsForRun(
+        run,
+        requiredValidationsForRun(scopeFromRun(run), deliveryProfileFromRun(run)),
+      )
+    ).find((item) => !item.retryable);
+    if (blocker === undefined) {
+      throw new Error(`Run ${run.id} has no current non-retryable blocker`);
+    }
+
+    const blockedStageAttempt = stage(run, blocker.stage).attempt;
+    const idempotencyKey = blockedDiagnosticReportKey(run, blocker);
+    const existing = [...run.artifacts]
+      .reverse()
+      .find(
+        (artifact) =>
+          artifact.kind === "pr-report" &&
+          artifact.metadata["reportIntent"] === "blocked-diagnostic" &&
+          artifact.metadata["idempotencyKey"] === idempotencyKey,
+      );
+    if (existing !== undefined) return existing;
+
+    const timestamp = this.now();
+    const sourceRunRevision = run.revision;
+    const markdown = renderBlockedWorkflowReport({
+      runId: run.id,
+      projectRoot: run.projectRoot,
+      blocker,
+    });
+    const blob = await this.dependencies.artifactStore.writeBlob({
+      content: Buffer.from(markdown, "utf8"),
+      mediaType: "text/markdown",
+      storedAt: timestamp,
+      label: "pr-report.md",
+    });
+    const artifact = ArtifactRefSchema.parse({
+      id: createArtifactId(),
+      kind: "pr-report",
+      uri: blob.uri,
+      mediaType: "text/markdown",
+      digest: blob.digest,
+      producedBy: "orchestrator",
+      evidenceIds: [],
+      createdAt: timestamp,
+      metadata: {
+        adapter: "workflow-v2",
+        ...WorkflowReportMetadataSchema.parse({
+          reportKind: "pr-body-markdown",
+          reportIntent: "blocked-diagnostic",
+          decision: "blocked",
+        }),
+        locale: "en",
+        blockedStage: blocker.stage,
+        errorCode: blocker.code,
+        blockedStageAttempt,
+        sourceRunRevision,
+        idempotencyKey,
+      },
+    });
+
+    try {
+      await this.dependencies.runStore.save(
+        {
+          ...run,
+          revision: run.revision + 1,
+          updatedAt: timestamp,
+          artifacts: [...run.artifacts, artifact],
+        },
+        run.revision,
+      );
+    } catch (error: unknown) {
+      if (!(error instanceof RevisionConflictError)) throw error;
+      const winner = (await this.dependencies.runStore.get(run.id)).artifacts.find(
+        (item) =>
+          item.kind === "pr-report" &&
+          item.metadata["reportIntent"] === "blocked-diagnostic" &&
+          item.metadata["idempotencyKey"] === idempotencyKey,
+      );
+      if (winner === undefined) throw error;
+      return winner;
+    }
+    return artifact;
   }
 
   public async publish(rawInput: unknown): Promise<unknown> {
@@ -621,10 +779,36 @@ export class WorkflowService {
     if (deliveryProfileFromRun(run).publication !== "draft") {
       throw new Error("Draft publication was not requested for this workflow");
     }
-    const reportArtifact = latestArtifact(run, "pr-report", "pr-body-markdown");
-    const reviewedHeadSha = reviewPacketFromRun(run)?.headSha;
+    if (input.intent === "blocked-diagnostic") {
+      return this.publishBlockedDiagnostic(input, run, publisher);
+    }
+    if (stage(run, "report").status !== "passed") {
+      throw new Error("Ready publication requires a passed report stage");
+    }
+    if (reviewPacketFromRun(run) === undefined) {
+      throw new Error("Ready publication requires the current implementation review packet");
+    }
+    await assertReviewPacketFresh(run);
+    const packet = reviewPacketFromRun(run)!;
+    const reportArtifact = readyReportArtifactForPacket(run, packet.id);
+    if (reportArtifact === undefined) {
+      throw new Error("Ready publication requires a ready report for the current review packet");
+    }
+    const reportMetadata = WorkflowReportMetadataSchema.safeParse({
+      reportKind: reportArtifact.metadata["reportKind"],
+      reportIntent: reportArtifact.metadata["reportIntent"],
+      decision: reportArtifact.metadata["decision"],
+    });
+    if (
+      !reportMetadata.success ||
+      reportMetadata.data.reportIntent !== "ready" ||
+      reportArtifact.metadata["reviewPacketId"] !== packet.id
+    ) {
+      throw new Error("Ready publication requires a ready report for the current review packet");
+    }
     const baseInput = {
       runId: run.id,
+      intent: input.intent,
       reportArtifactId: reportArtifact.id,
       sourceBranch: input.sourceBranch,
       targetBranch: input.targetBranch,
@@ -635,9 +819,7 @@ export class WorkflowService {
       labels: ["spec-to-pr"],
       reviewers: [],
       assignees: [],
-      ...(reviewedHeadSha === null || reviewedHeadSha === undefined
-        ? {}
-        : { headSha: reviewedHeadSha }),
+      ...(packet.headSha === null ? {} : { headSha: packet.headSha }),
     };
 
     if (input.mode === "preview") {
@@ -693,6 +875,166 @@ export class WorkflowService {
     }
 
     return { result, status: await this.status({ runId: run.id }) };
+  }
+
+  private async publishBlockedDiagnostic(
+    input: z.infer<typeof WorkflowPublishInputSchema>,
+    run: RunManifest,
+    publisher: PublisherService,
+  ): Promise<unknown> {
+    const workflowStatus = await this.status({ runId: run.id });
+    const blocker = workflowStatus.blockerDetails.find((item) => !item.retryable);
+    if (workflowStatus.status !== "blocked" || blocker === undefined) {
+      throw new Error("Blocked diagnostic publication requires a currently blocked Run");
+    }
+    if (input.mode === "preview") {
+      const skipped = blocker.kind === "publish-precondition";
+      return {
+        runId: run.id,
+        intent: input.intent,
+        mode: input.mode,
+        sourceBranch: input.sourceBranch,
+        targetBranch: input.targetBranch,
+        willEnsureReport: true,
+        eligibleForPublication: !skipped,
+        preflightPending: !skipped,
+        skipped,
+        blocker: {
+          stage: blocker.stage,
+          code: blocker.code,
+          kind: blocker.kind,
+          exactUnblockAction: blocker.exactUnblockAction,
+        },
+      };
+    }
+
+    const executionIdentity = diagnosticExecutionIdentity(run, blocker, input);
+    const executionKey = JSON.stringify(executionIdentity);
+    const inFlight = this.diagnosticPublishFlights.get(executionKey);
+    if (inFlight !== undefined) return inFlight;
+    const flight = this.executeBlockedDiagnostic(
+      input,
+      run,
+      publisher,
+      blocker,
+      executionIdentity,
+    ).finally(() => {
+      if (this.diagnosticPublishFlights.get(executionKey) === flight) {
+        this.diagnosticPublishFlights.delete(executionKey);
+      }
+    });
+    this.diagnosticPublishFlights.set(executionKey, flight);
+    return flight;
+  }
+
+  private async executeBlockedDiagnostic(
+    input: z.infer<typeof WorkflowPublishInputSchema>,
+    run: RunManifest,
+    publisher: PublisherService,
+    blocker: WorkflowBlocker,
+    executionIdentity: DiagnosticExecutionIdentity,
+  ): Promise<unknown> {
+    const reportArtifact = await this.ensureBlockedDiagnosticReport({ runId: run.id });
+    const actualReportKey = reportArtifact.metadata["idempotencyKey"];
+    if (
+      reportArtifact.metadata["reportIntent"] !== "blocked-diagnostic" ||
+      actualReportKey !== executionIdentity.reportKey
+    ) {
+      const stopped: DiagnosticContextChangedResult = {
+        intent: "blocked-diagnostic",
+        skipped: true,
+        reason: "diagnostic-context-changed",
+        retryable: true,
+        expectedReportKey: executionIdentity.reportKey,
+        actualReportKey: typeof actualReportKey === "string" ? actualReportKey : null,
+        diagnosticReport: { artifactId: reportArtifact.id, path: reportArtifact.uri },
+        status: await this.status({ runId: run.id }),
+      };
+      return stopped;
+    }
+    if (blocker.kind === "publish-precondition") {
+      return {
+        intent: input.intent,
+        skipped: true,
+        reason: "publish-precondition",
+        localReportPath: reportArtifact.uri,
+        diagnosticReport: { artifactId: reportArtifact.id, path: reportArtifact.uri },
+        exactUnblockAction: blocker.exactUnblockAction,
+        status: await this.status({ runId: run.id }),
+      };
+    }
+    const runWithReport = await this.dependencies.runStore.get(run.id);
+    const synchronized = await this.synchronizedDiagnosticPublishResultForRun(
+      runWithReport,
+      reportArtifact.id,
+      executionIdentity,
+    );
+    if (synchronized !== undefined) {
+      return { result: synchronized, status: await this.status({ runId: run.id }) };
+    }
+    const claim = await this.acquireDiagnosticPublishClaim(
+      run.id,
+      reportArtifact.id,
+      executionIdentity,
+      input.recoverUncertain,
+    );
+    if (claim.state === "synchronized") {
+      return { result: claim.result, status: await this.status({ runId: run.id }) };
+    }
+    if (claim.state === "in-progress") {
+      return {
+        intent: "blocked-diagnostic",
+        skipped: true,
+        reason: "diagnostic-publication-in-progress",
+        retryable: true,
+        retryAfter: claim.expiresAt,
+        diagnosticReport: { artifactId: reportArtifact.id, path: reportArtifact.uri },
+        status: await this.status({ runId: run.id }),
+      };
+    }
+    if (claim.state === "uncertain") {
+      return diagnosticPublicationUncertainResult(
+        reportArtifact,
+        await this.status({ runId: run.id }),
+      );
+    }
+    const baseInput = {
+      runId: run.id,
+      intent: input.intent,
+      reportArtifactId: reportArtifact.id,
+      sourceBranch: input.sourceBranch,
+      targetBranch: input.targetBranch,
+      remoteName: input.remoteName,
+      mode: "draft" as const,
+      pushBranch: input.pushBranch,
+      labels: ["spec-to-pr"],
+      reviewers: [],
+      assignees: [],
+    };
+    try {
+      const result = await this.withDiagnosticPublishClaimHeartbeat(
+        run.id,
+        claim.executionKey,
+        claim.ownerClaimId,
+        (signal) => publisher.publish({ ...baseInput, confirm: true }, { signal }),
+      );
+      await this.releaseDiagnosticPublishClaim(run.id, claim.executionKey, claim.ownerClaimId);
+      return { result, status: await this.status({ runId: run.id }) };
+    } catch (error: unknown) {
+      if (error instanceof DiagnosticPublishClaimUncertainError) {
+        await this.markDiagnosticPublishClaimUncertainBestEffort(
+          run.id,
+          claim.executionKey,
+          claim.ownerClaimId,
+        );
+        return diagnosticPublicationUncertainResult(
+          reportArtifact,
+          await this.status({ runId: run.id }),
+        );
+      }
+      await this.releaseDiagnosticPublishClaim(run.id, claim.executionKey, claim.ownerClaimId);
+      throw error;
+    }
   }
 
   public async archive(rawInput: unknown): Promise<unknown> {
@@ -782,7 +1124,16 @@ export class WorkflowService {
     reviewPacket?: ImplementationReviewPacket,
   ): Promise<ArtifactRef> {
     const timestamp = this.now();
-    const content = `${JSON.stringify(submission, null, 2)}\n`;
+    const persistedSubmission = reconstructFailedSubmissionForPersistence(
+      { ...run, artifacts: [...run.artifacts, ...evidenceArtifacts] },
+      submission,
+    );
+    const failureContext = failureContextForSubmission(run, submission);
+    const persistedSummary =
+      persistedSubmission.kind === "figma-bundle"
+        ? "Accepted host-connected Figma bundle."
+        : persistedSubmission.summary;
+    const content = `${JSON.stringify(persistedSubmission, null, 2)}\n`;
     const blob = await this.dependencies.artifactStore.writeBlob({
       content: Buffer.from(content, "utf8"),
       mediaType: "application/json",
@@ -802,10 +1153,11 @@ export class WorkflowService {
         adapter: "workflow-v2",
         workflowSubmissionKind: submission.kind,
         ...(submission.kind === "figma-bundle"
-          ? { summary: "Accepted host-connected Figma bundle.", status: "passed" }
-          : { summary: submission.summary }),
+          ? { summary: persistedSummary, status: "passed" }
+          : { summary: persistedSummary }),
         ...("verdict" in submission ? { verdict: submission.verdict } : {}),
         ...("status" in submission ? { status: submission.status } : {}),
+        ...(failureContext === undefined ? {} : failureContext),
         evidenceArtifactIds: evidenceArtifacts.map((item) => item.id),
         ...(submission.kind !== "contracts"
           ? {}
@@ -977,11 +1329,22 @@ export class WorkflowService {
     const timestamp = this.now();
     const artifacts: ArtifactRef[] = [];
     const apiPhysicalFiles = new Map<string, string>();
+    const preparedEvidencePaths: Array<{
+      evidencePath: string;
+      resolvedPath: string;
+      projectRelativePath: string;
+    }> = [];
 
     for (const evidencePath of submission.artifactPaths) {
-      const requestedPath = path.isAbsolute(evidencePath)
-        ? path.normalize(evidencePath)
-        : path.resolve(root, evidencePath);
+      if (path.isAbsolute(evidencePath)) {
+        throw new Error(
+          "Evidence path must be a project-relative durable evidence path within the project root",
+        );
+      }
+      if (!isSafeDurableEvidencePath(evidencePath)) {
+        throw new Error("Evidence path must be a safe durable evidence path");
+      }
+      const requestedPath = path.resolve(root, evidencePath);
       assertWithinProjectRoot(root, requestedPath, evidencePath);
 
       let resolvedPath: string;
@@ -991,7 +1354,14 @@ export class WorkflowService {
         throw new Error(`Evidence file does not exist: ${evidencePath}`);
       }
       assertWithinProjectRoot(root, resolvedPath, evidencePath);
+      const projectRelativePath = path.relative(root, resolvedPath).split(path.sep).join("/");
+      if (!isSafeDurableEvidencePath(projectRelativePath)) {
+        throw new Error("Evidence path must be a safe durable evidence path");
+      }
+      preparedEvidencePaths.push({ evidencePath, resolvedPath, projectRelativePath });
+    }
 
+    for (const { evidencePath, resolvedPath, projectRelativePath } of preparedEvidencePaths) {
       const details = await stat(resolvedPath);
       if (!details.isFile()) {
         throw new Error(`Evidence path must reference a file: ${evidencePath}`);
@@ -1060,7 +1430,7 @@ export class WorkflowService {
         content,
         mediaType,
         storedAt: timestamp,
-        label: path.basename(resolvedPath),
+        label: path.posix.basename(projectRelativePath),
       });
       artifacts.push(
         ArtifactRefSchema.parse({
@@ -1074,7 +1444,7 @@ export class WorkflowService {
           createdAt: timestamp,
           metadata: {
             adapter: "workflow-v2-evidence",
-            projectRelativePath: path.relative(root, resolvedPath),
+            projectRelativePath,
             byteLength: details.size,
             workflowSubmissionKind: submission.kind,
             ...(featureEvidenceRole === undefined ? {} : { featureEvidenceRole }),
@@ -1120,105 +1490,23 @@ export class WorkflowService {
     if (unreviewed.length > 0) {
       throw new Error(`PR report requires review coverage for: ${unreviewed.join(", ")}`);
     }
-    const verdictFor = (requirementId: string) =>
-      reviews
-        .flatMap((review) => review.requirements)
-        .filter((requirement) => requirement.id === requirementId)
-        .map((requirement) => requirement.verdict)
-        .join(", ");
     const evidencePaths = [
       ...new Set([contracts, implementation, ...reviews].flatMap((item) => item.artifactPaths)),
     ];
-    const gateLines = reviews.flatMap((review) =>
-      review.gateResults.map(
-        (gate) => `- ${review.kind}/${gate.id}: ${gate.status} (${gate.evidencePaths.join(", ")})`,
-      ),
-    );
-    const riskLines = reviews.flatMap((review) =>
-      review.findings.map((finding) => `- ${finding.severity}: ${finding.title}`),
-    );
-    const markdown = [
-      `# SpecToPR Run ${run.id}`,
-      "",
-      "## Decision",
-      "",
-      "Ready for draft review.",
-      "",
-      "## Review packet",
-      "",
-      `- ID: ${packet.id}`,
-      `- Revision: ${packet.revision}`,
-      `- Base: ${packet.baseSha ?? "unavailable"}`,
-      `- Head: ${packet.headSha ?? "unavailable"}`,
-      `- Evidence digest: ${packet.evidenceDigest}`,
-      `- Diff digest: ${packet.diffDigest}`,
-      "",
-      "## Project guidance",
-      "",
-      "### Explicit",
-      "",
-      ...(contracts.guidanceTrace.explicit.length === 0
-        ? ["- None."]
-        : contracts.guidanceTrace.explicit.map(
-            (guidancePath) => `- ${markdownListValue(guidancePath)}`,
-          )),
-      "",
-      "### Automatically discovered",
-      "",
-      ...(contracts.guidanceTrace.discovered.length === 0
-        ? ["- None."]
-        : contracts.guidanceTrace.discovered.map(
-            (guidancePath) => `- ${markdownListValue(guidancePath)}`,
-          )),
-      "",
-      "## Applied optional skills",
-      "",
-      ...(contracts.guidanceTrace.skillHints.length === 0
-        ? ["- None."]
-        : contracts.guidanceTrace.skillHints.map((skillHint) => `- ${skillHint}`)),
-      "",
-      "## Requirement traceability",
-      "",
-      "| Requirement | Acceptance criteria | Review verdict |",
-      "| --- | --- | --- |",
-      ...contracts.requirementManifest.map(
-        (requirement) =>
-          `| ${markdownTableCell(`${requirement.id}: ${requirement.title}`)} | ${markdownTableCell(requirement.acceptanceCriteria.join("\n"))} | ${markdownTableCell(verdictFor(requirement.id))} |`,
-      ),
+    const markdown = renderReadyWorkflowReport({
+      runId: run.id,
+      reviewPacket: packet,
+      guidanceTrace: contracts.guidanceTrace,
+      requirementManifest: contracts.requirementManifest,
       ...(contracts.legacyBaseline === undefined
-        ? []
-        : [
-            "",
-            "## Focused legacy baseline",
-            "",
-            `- Scope: ${contracts.legacyBaseline.scope}`,
-            ...contracts.legacyBaseline.checks.map(
-              (check) => `- ${check.status}: \`${check.command}\` → ${check.resultPath}`,
-            ),
-          ]),
-      "",
-      "## Changed files",
-      "",
-      ...(packet.changedFiles.length === 0
-        ? ["- No changed files declared."]
-        : packet.changedFiles.map((file) => `- ${file}`)),
-      "",
-      "## Evidence",
-      "",
-      ...evidencePaths.map((evidencePath) => `- ${evidencePath}`),
-      "",
-      "## Validation gates",
-      "",
-      ...(gateLines.length === 0 ? ["- No gates recorded."] : gateLines),
-      "",
-      "## Risks",
-      "",
-      ...(riskLines.length === 0 ? ["- No known review findings."] : riskLines),
+        ? {}
+        : { legacyBaseline: contracts.legacyBaseline }),
+      evidencePaths,
+      reviews,
       ...(implementation.featureEvidence === undefined
-        ? []
-        : ["", "## Feature E2E video", "", `- ${implementation.featureEvidence.videoPath}`]),
-      "",
-    ].join("\n");
+        ? {}
+        : { featureVideoPath: implementation.featureEvidence.videoPath }),
+    });
     const blob = await this.dependencies.artifactStore.writeBlob({
       content: Buffer.from(markdown, "utf8"),
       mediaType: "text/markdown",
@@ -1236,8 +1524,11 @@ export class WorkflowService {
       createdAt: timestamp,
       metadata: {
         adapter: "workflow-v2",
-        reportKind: "pr-body-markdown",
-        decision: "ready",
+        ...WorkflowReportMetadataSchema.parse({
+          reportKind: "pr-body-markdown",
+          reportIntent: "ready",
+          decision: "ready",
+        }),
         locale: "ko",
         reviewPacketId: packet.id,
       },
@@ -1278,6 +1569,437 @@ export class WorkflowService {
     return submissions;
   }
 
+  private async diagnosticPublicationForRun(run: RunManifest, blocker: WorkflowBlocker) {
+    const reportKey = blockedDiagnosticReportKey(run, blocker);
+    const blockedStageAttempt = stage(run, blocker.stage).attempt;
+    for (const artifact of [...run.artifacts].reverse()) {
+      if (artifact.metadata["reportKind"] !== "publish-result") continue;
+
+      let parsed: ReturnType<typeof PublishResultSchema.safeParse>;
+      try {
+        parsed = PublishResultSchema.safeParse(
+          JSON.parse(
+            (await this.dependencies.artifactStore.readContent(artifact.digest)).toString("utf8"),
+          ),
+        );
+      } catch {
+        continue;
+      }
+      if (!parsed.success || parsed.data.request === undefined) continue;
+      const reportArtifact = run.artifacts.find(
+        (candidate) => candidate.id === parsed.data.reportArtifactId,
+      );
+      if (
+        reportArtifact?.metadata["reportIntent"] !== "blocked-diagnostic" ||
+        reportArtifact.metadata["idempotencyKey"] !== reportKey ||
+        reportArtifact.metadata["blockedStage"] !== blocker.stage ||
+        reportArtifact.metadata["errorCode"] !== blocker.code ||
+        reportArtifact.metadata["blockedStageAttempt"] !== blockedStageAttempt
+      ) {
+        continue;
+      }
+
+      const request = parsed.data.request;
+      const summary = DiagnosticPublicationSchema.safeParse({
+        host: request.host,
+        url: request.url,
+        number: request.number,
+        created: request.created,
+        updated: request.updated,
+        publishResultArtifactId: artifact.id,
+      });
+      if (summary.success) return summary.data;
+    }
+    return undefined;
+  }
+
+  private async synchronizedDiagnosticPublishResultForRun(
+    run: RunManifest,
+    reportArtifactId: string,
+    executionIdentity: DiagnosticExecutionIdentity,
+  ) {
+    for (const artifact of [...run.artifacts].reverse()) {
+      if (artifact.metadata["reportKind"] !== "publish-result") continue;
+      let parsed: ReturnType<typeof PublishResultSchema.safeParse>;
+      try {
+        parsed = PublishResultSchema.safeParse(
+          JSON.parse(
+            (await this.dependencies.artifactStore.readContent(artifact.digest)).toString("utf8"),
+          ),
+        );
+      } catch {
+        continue;
+      }
+      if (
+        !parsed.success ||
+        parsed.data.reportArtifactId !== reportArtifactId ||
+        artifact.metadata["diagnosticReportKey"] !== executionIdentity.reportKey ||
+        artifact.metadata["sourceBranch"] !== executionIdentity.sourceBranch ||
+        artifact.metadata["targetBranch"] !== executionIdentity.targetBranch ||
+        artifact.metadata["remoteName"] !== executionIdentity.remoteName ||
+        artifact.metadata["pushBranch"] !== executionIdentity.pushBranch ||
+        !diagnosticPublishResultIsFullySynced(parsed.data)
+      ) {
+        continue;
+      }
+      return {
+        run: summarizeRun(run),
+        result: parsed.data,
+        publishResultArtifactId: artifact.id,
+      };
+    }
+    return undefined;
+  }
+
+  private async acquireDiagnosticPublishClaim(
+    runId: string,
+    reportArtifactId: string,
+    executionIdentity: DiagnosticExecutionIdentity,
+    recoverUncertain: boolean,
+  ) {
+    const executionKey = diagnosticClaimFenceKey(executionIdentity);
+
+    for (let attempt = 0; attempt < MAX_DIAGNOSTIC_CLAIM_ATTEMPTS; attempt += 1) {
+      const run = await this.dependencies.runStore.get(RunIdSchema.parse(runId));
+      const synchronized = await this.synchronizedDiagnosticPublishResultForRun(
+        run,
+        reportArtifactId,
+        executionIdentity,
+      );
+      if (synchronized !== undefined) {
+        return { state: "synchronized" as const, result: synchronized };
+      }
+
+      const timestamp = this.now();
+      const activeClaim = latestDiagnosticPublishClaimEvent(run, executionKey);
+      if (diagnosticPublishClaimIsActive(activeClaim, timestamp)) {
+        return {
+          state: "in-progress" as const,
+          expiresAt: activeClaim?.metadata["expiresAt"] as string,
+        };
+      }
+      if (
+        activeClaim !== undefined &&
+        (activeClaim.metadata["claimState"] === "uncertain" ||
+          activeClaim.metadata["claimState"] === "active") &&
+        !recoverUncertain
+      ) {
+        return { state: "uncertain" as const };
+      }
+
+      const ownerClaimId = createArtifactId();
+      const expiresAt = new Date(Date.parse(timestamp) + this.externalLeaseTtlMs).toISOString();
+      const artifact = await this.writeDiagnosticPublishClaimEvent({
+        artifactId: ownerClaimId,
+        executionKey,
+        ownerClaimId,
+        state: "active",
+        timestamp,
+        expiresAt,
+      });
+      try {
+        await this.dependencies.runStore.save(
+          {
+            ...run,
+            revision: run.revision + 1,
+            updatedAt: timestamp,
+            artifacts: [...run.artifacts, artifact],
+          },
+          run.revision,
+        );
+        return { state: "acquired" as const, executionKey, ownerClaimId };
+      } catch (error: unknown) {
+        if (!(error instanceof RevisionConflictError)) throw error;
+      }
+    }
+
+    throw new Error(`Could not acquire blocked-diagnostic publication claim for Run ${runId}`);
+  }
+
+  private async withDiagnosticPublishClaimHeartbeat<T>(
+    runId: string,
+    executionKey: string,
+    ownerClaimId: string,
+    operation: (signal: AbortSignal) => Promise<T>,
+  ): Promise<T> {
+    const controller = new AbortController();
+    let ownershipFailure: DiagnosticPublishClaimUncertainError | undefined;
+    let rejectOwnershipLoss!: (error: DiagnosticPublishClaimUncertainError) => void;
+    const ownershipLoss = new Promise<never>((_resolve, reject) => {
+      rejectOwnershipLoss = reject;
+    });
+    let heartbeatChain = Promise.resolve();
+    const loseOwnership = (error: unknown) => {
+      if (ownershipFailure !== undefined) return;
+      ownershipFailure = new DiagnosticPublishClaimUncertainError(
+        "Blocked-diagnostic publication ownership became uncertain.",
+        error,
+      );
+      controller.abort(ownershipFailure);
+      rejectOwnershipLoss(ownershipFailure);
+    };
+    const timer = setInterval(() => {
+      heartbeatChain = heartbeatChain
+        .then(async () => {
+          if (ownershipFailure !== undefined) return;
+          const renewed = await this.renewDiagnosticPublishClaim(runId, executionKey, ownerClaimId);
+          if (!renewed) {
+            throw new Error("Blocked-diagnostic publication claim ownership was lost");
+          }
+        })
+        .catch((error: unknown) => {
+          loseOwnership(error);
+        });
+    }, this.externalHeartbeatMs);
+    timer.unref();
+
+    const operationPromise = operation(controller.signal);
+    try {
+      const result = await Promise.race([operationPromise, ownershipLoss]);
+      clearInterval(timer);
+      await heartbeatChain;
+      if (ownershipFailure !== undefined) throw ownershipFailure;
+      return result;
+    } catch (error: unknown) {
+      clearInterval(timer);
+      if (ownershipFailure !== undefined) {
+        void operationPromise.catch(() => undefined);
+        throw ownershipFailure;
+      }
+      await heartbeatChain;
+      if (ownershipFailure !== undefined) {
+        void operationPromise.catch(() => undefined);
+        throw ownershipFailure;
+      }
+      throw error;
+    }
+  }
+
+  private async renewDiagnosticPublishClaim(
+    runId: string,
+    executionKey: string,
+    ownerClaimId: string,
+  ): Promise<boolean> {
+    for (let attempt = 0; attempt < MAX_DIAGNOSTIC_CLAIM_ATTEMPTS; attempt += 1) {
+      const run = await this.dependencies.runStore.get(RunIdSchema.parse(runId));
+      const latest = latestDiagnosticPublishClaimEvent(run, executionKey);
+      if (
+        latest?.metadata["claimState"] !== "active" ||
+        latest.metadata["ownerClaimId"] !== ownerClaimId
+      ) {
+        return false;
+      }
+
+      const timestamp = this.now();
+      const expiresAt = new Date(Date.parse(timestamp) + this.externalLeaseTtlMs).toISOString();
+      const artifact = await this.writeDiagnosticPublishClaimEvent({
+        artifactId: createArtifactId(),
+        executionKey,
+        ownerClaimId,
+        state: "active",
+        timestamp,
+        expiresAt,
+      });
+      try {
+        await this.dependencies.runStore.save(
+          {
+            ...run,
+            revision: run.revision + 1,
+            updatedAt: timestamp,
+            artifacts: [...run.artifacts, artifact],
+          },
+          run.revision,
+        );
+        return true;
+      } catch (error: unknown) {
+        if (!(error instanceof RevisionConflictError)) throw error;
+      }
+    }
+
+    throw new Error(`Could not renew blocked-diagnostic publication claim for Run ${runId}`);
+  }
+
+  private async releaseDiagnosticPublishClaim(
+    runId: string,
+    executionKey: string,
+    ownerClaimId: string,
+  ): Promise<void> {
+    for (let attempt = 0; attempt < MAX_DIAGNOSTIC_CLAIM_ATTEMPTS; attempt += 1) {
+      const run = await this.dependencies.runStore.get(RunIdSchema.parse(runId));
+      const latest = latestDiagnosticPublishClaimEvent(run, executionKey);
+      if (
+        latest?.metadata["claimState"] !== "active" ||
+        latest.metadata["ownerClaimId"] !== ownerClaimId
+      ) {
+        return;
+      }
+
+      const timestamp = this.now();
+      const artifact = await this.writeDiagnosticPublishClaimEvent({
+        artifactId: createArtifactId(),
+        executionKey,
+        ownerClaimId,
+        state: "released",
+        timestamp,
+      });
+      try {
+        await this.dependencies.runStore.save(
+          {
+            ...run,
+            revision: run.revision + 1,
+            updatedAt: timestamp,
+            artifacts: [...run.artifacts, artifact],
+          },
+          run.revision,
+        );
+        return;
+      } catch (error: unknown) {
+        if (!(error instanceof RevisionConflictError)) throw error;
+      }
+    }
+
+    throw new Error(`Could not release blocked-diagnostic publication claim for Run ${runId}`);
+  }
+
+  private async markDiagnosticPublishClaimUncertainBestEffort(
+    runId: string,
+    executionKey: string,
+    ownerClaimId: string,
+  ): Promise<void> {
+    try {
+      for (let attempt = 0; attempt < MAX_DIAGNOSTIC_CLAIM_ATTEMPTS; attempt += 1) {
+        const run = await this.dependencies.runStore.get(RunIdSchema.parse(runId));
+        const latest = latestDiagnosticPublishClaimEvent(run, executionKey);
+        if (
+          latest?.metadata["ownerClaimId"] !== ownerClaimId ||
+          latest.metadata["claimState"] === "released"
+        ) {
+          return;
+        }
+        if (latest.metadata["claimState"] === "uncertain") return;
+
+        const timestamp = this.now();
+        const artifact = await this.writeDiagnosticPublishClaimEvent({
+          artifactId: createArtifactId(),
+          executionKey,
+          ownerClaimId,
+          state: "uncertain",
+          timestamp,
+        });
+        try {
+          await this.dependencies.runStore.save(
+            {
+              ...run,
+              revision: run.revision + 1,
+              updatedAt: timestamp,
+              artifacts: [...run.artifacts, artifact],
+            },
+            run.revision,
+          );
+          return;
+        } catch (error: unknown) {
+          if (!(error instanceof RevisionConflictError)) return;
+        }
+      }
+    } catch {
+      // The expired active claim still fences automatic takeover if this best-effort marker fails.
+    }
+  }
+
+  private async writeDiagnosticPublishClaimEvent(input: {
+    artifactId: string;
+    executionKey: string;
+    ownerClaimId: string;
+    state: "active" | "released" | "uncertain";
+    timestamp: string;
+    expiresAt?: string;
+  }): Promise<ArtifactRef> {
+    const value = {
+      event:
+        input.state === "active" ? "claim" : input.state === "released" ? "release" : "uncertain",
+      executionKey: input.executionKey,
+      ownerClaimId: input.ownerClaimId,
+      ...(input.expiresAt === undefined ? {} : { expiresAt: input.expiresAt }),
+    };
+    const blob = await this.dependencies.artifactStore.writeBlob({
+      content: Buffer.from(`${JSON.stringify(value)}\n`, "utf8"),
+      mediaType: "application/json",
+      storedAt: input.timestamp,
+      label: "diagnostic-publish-claim.json",
+    });
+    return ArtifactRefSchema.parse({
+      id: input.artifactId,
+      kind: "agent-result-report",
+      uri: blob.uri,
+      mediaType: "application/json",
+      digest: blob.digest,
+      producedBy: "orchestrator",
+      evidenceIds: [],
+      createdAt: input.timestamp,
+      metadata: {
+        adapter: "workflow-v2",
+        reportKind: "diagnostic-publish-claim",
+        diagnosticExecutionKey: input.executionKey,
+        claimState: input.state,
+        ownerClaimId: input.ownerClaimId,
+        ...(input.expiresAt === undefined ? {} : { expiresAt: input.expiresAt }),
+      },
+    });
+  }
+
+  private async blockerDetailsForRun(
+    run: RunManifest,
+    requiredValidations: string[],
+  ): Promise<WorkflowBlocker[]> {
+    const blockers: WorkflowBlocker[] = [];
+    for (const item of run.stages) {
+      if (item.error === undefined) continue;
+      const submission = await this.causativeWorkflowSubmission(run, item);
+      const blocker = submission === undefined ? undefined : blockerFromSubmission(submission);
+      blockers.push(
+        blocker === undefined
+          ? deriveWorkflowBlocker(
+              run,
+              item,
+              requiredValidations,
+              submission === undefined ? undefined : "unexpected",
+            )
+          : reconstructWorkflowBlocker(run, blocker, item),
+      );
+    }
+    return blockers;
+  }
+
+  private async causativeWorkflowSubmission(
+    run: RunManifest,
+    failedStage: StageState,
+  ): Promise<WorkflowSubmission | undefined> {
+    const artifacts = new Map(run.artifacts.map((artifact) => [artifact.id, artifact]));
+    for (const artifactId of [...failedStage.artifactIds].reverse()) {
+      const artifact = artifacts.get(artifactId);
+      if (
+        artifact?.metadata["adapter"] !== "workflow-v2" ||
+        artifact.metadata["workflowFailureStage"] !== failedStage.name ||
+        artifact.metadata["workflowFailureAttempt"] !== failedStage.attempt
+      ) {
+        continue;
+      }
+      const parsed = WorkflowSubmissionSchema.safeParse(
+        JSON.parse(
+          (await this.dependencies.artifactStore.readContent(artifact.digest)).toString("utf8"),
+        ),
+      );
+      if (
+        parsed.success &&
+        parsed.data.kind !== "figma-bundle" &&
+        submissionOutcome(parsed.data) !== "passed"
+      ) {
+        return parsed.data;
+      }
+    }
+    return undefined;
+  }
+
   private async completeStage(
     runId: string,
     stageName: RunStageName,
@@ -1314,10 +2036,123 @@ export class WorkflowService {
 }
 
 type PublisherResult = Awaited<ReturnType<PublisherService["publish"]>>["result"];
+type DiagnosticExecutionIdentity = {
+  runId: string;
+  reportKey: string;
+  sourceBranch: string;
+  targetBranch: string;
+  remoteName: string;
+  pushBranch: boolean;
+};
+type DiagnosticClaimFenceIdentity = Pick<
+  DiagnosticExecutionIdentity,
+  "runId" | "reportKey" | "sourceBranch" | "targetBranch"
+>;
+type DiagnosticContextChangedResult = {
+  intent: "blocked-diagnostic";
+  skipped: true;
+  reason: "diagnostic-context-changed";
+  retryable: true;
+  expectedReportKey: string;
+  actualReportKey: string | null;
+  diagnosticReport: { artifactId: string; path: string };
+  status: WorkflowStatus;
+};
+
+class DiagnosticPublishClaimUncertainError extends Error {
+  public override readonly name = "DiagnosticPublishClaimUncertainError";
+
+  public constructor(
+    message: string,
+    public readonly ownershipCause: unknown,
+  ) {
+    super(message);
+  }
+}
+
+const DIAGNOSTIC_RECOVERY_INSTRUCTION =
+  "Inspect the matching provider draft and durable publish result, then retry workflow_publish with recoverUncertain=true only after confirming no publication is still active.";
+
+function diagnosticPublicationUncertainResult(reportArtifact: ArtifactRef, status: WorkflowStatus) {
+  return {
+    intent: "blocked-diagnostic" as const,
+    skipped: true as const,
+    reason: "diagnostic-publication-uncertain" as const,
+    retryable: false as const,
+    exactRecoveryInstruction: DIAGNOSTIC_RECOVERY_INSTRUCTION,
+    diagnosticReport: { artifactId: reportArtifact.id, path: reportArtifact.uri },
+    status,
+  };
+}
+
+function blockedDiagnosticReportKey(run: RunManifest, blocker: WorkflowBlocker): string {
+  return `${blocker.stage}:${stage(run, blocker.stage).attempt}:${blocker.code}`;
+}
+
+function diagnosticExecutionIdentity(
+  run: RunManifest,
+  blocker: WorkflowBlocker,
+  input: z.infer<typeof WorkflowPublishInputSchema>,
+): DiagnosticExecutionIdentity {
+  return {
+    runId: run.id,
+    reportKey: blockedDiagnosticReportKey(run, blocker),
+    sourceBranch: input.sourceBranch,
+    targetBranch: input.targetBranch,
+    remoteName: input.remoteName,
+    pushBranch: input.pushBranch,
+  };
+}
+
+function diagnosticClaimFenceKey(identity: DiagnosticExecutionIdentity): string {
+  const fenceIdentity: DiagnosticClaimFenceIdentity = {
+    runId: identity.runId,
+    reportKey: identity.reportKey,
+    sourceBranch: identity.sourceBranch,
+    targetBranch: identity.targetBranch,
+  };
+  return createHash("sha256").update(JSON.stringify(fenceIdentity)).digest("hex");
+}
+
+function latestDiagnosticPublishClaimEvent(
+  run: RunManifest,
+  executionKey: string,
+): ArtifactRef | undefined {
+  return [...run.artifacts]
+    .reverse()
+    .find(
+      (artifact) =>
+        artifact.metadata["reportKind"] === "diagnostic-publish-claim" &&
+        artifact.metadata["diagnosticExecutionKey"] === executionKey,
+    );
+}
+
+function diagnosticPublishClaimIsActive(
+  artifact: ArtifactRef | undefined,
+  timestamp: string,
+): boolean {
+  const expiresAt = artifact?.metadata["expiresAt"];
+  return (
+    artifact?.metadata["claimState"] === "active" &&
+    typeof expiresAt === "string" &&
+    Date.parse(expiresAt) > Date.parse(timestamp)
+  );
+}
 
 function publishResultIsFullySynced(result: PublisherResult): boolean {
   return (
     result.status === "passed" &&
+    result.requestSynced &&
+    result.request?.draft === true &&
+    (!result.visualPreviewExpected || result.visualPreviewSynced) &&
+    (!result.featureVideoExpected || result.featureVideoSynced) &&
+    result.partialReasons.length === 0
+  );
+}
+
+function diagnosticPublishResultIsFullySynced(result: PublisherResult): boolean {
+  return (
+    result.status === "blocked" &&
     result.requestSynced &&
     result.request?.draft === true &&
     (!result.visualPreviewExpected || result.visualPreviewSynced) &&
@@ -1337,6 +2172,310 @@ function publishStageError(result: PublisherResult) {
     message: result.errorMessage ?? (result.partialReasons.join("; ") || fallbackMessage),
     retryable: partial || (result.status === "failed" && result.retryable),
   };
+}
+
+function blockerFromSubmission(submission: WorkflowSubmission): WorkflowBlocker | undefined {
+  return "blocker" in submission ? submission.blocker : undefined;
+}
+
+function reconstructFailedSubmissionForPersistence(
+  run: RunManifest,
+  submission: WorkflowSubmission,
+): WorkflowSubmission {
+  if (submission.kind === "figma-bundle" || submission.kind === "api-ready") return submission;
+  const successful =
+    "verdict" in submission ? submission.verdict === "approved" : submission.status === "passed";
+  if (successful) return submission;
+
+  const rawBlocker = blockerFromSubmission(submission);
+  const blocker =
+    rawBlocker === undefined
+      ? undefined
+      : reconstructWorkflowBlocker(run, rawBlocker, stage(run, rawBlocker.stage));
+  return {
+    ...submission,
+    summary: blocker?.summary ?? genericBlockerSummary(submission.kind, "unexpected"),
+    ...(blocker === undefined ? {} : { blocker }),
+  };
+}
+
+function failureContextForSubmission(
+  run: RunManifest,
+  submission: WorkflowSubmission,
+):
+  | {
+      workflowStageName: RunStageName;
+      workflowStageAttempt: number;
+      workflowFailureStage: RunStageName;
+      workflowFailureAttempt: number;
+    }
+  | undefined {
+  if (submission.kind === "figma-bundle" || submission.kind === "api-ready") return undefined;
+  const successful =
+    "verdict" in submission ? submission.verdict === "approved" : submission.status === "passed";
+  if (successful) return undefined;
+
+  const submissionStage = stageForSubmission(submission);
+  const failureStage =
+    (submission.kind === "functional-review" || submission.kind === "design-review") &&
+    submission.verdict === "changes-requested"
+      ? "implementation"
+      : submissionStage;
+  return {
+    workflowStageName: submissionStage,
+    workflowStageAttempt: stage(run, submissionStage).attempt,
+    workflowFailureStage: failureStage,
+    workflowFailureAttempt: stage(run, failureStage).attempt,
+  };
+}
+
+function reconstructWorkflowBlocker(
+  run: RunManifest,
+  blocker: WorkflowBlocker,
+  failedStage: StageState,
+): WorkflowBlocker {
+  const requiredValidations = requiredValidationsForRun(
+    scopeFromRun(run),
+    deliveryProfileFromRun(run),
+  );
+  const trustedEvidencePaths = new Set(
+    run.artifacts.flatMap((artifact) => {
+      const projectPath = artifact.metadata["projectRelativePath"];
+      return typeof projectPath === "string" && isSafeDurableEvidencePath(projectPath)
+        ? [projectPath]
+        : [];
+    }),
+  );
+  return WorkflowBlockerSchema.parse({
+    stage: blocker.stage,
+    code: blockerCodeForKind(blocker.kind),
+    kind: blocker.kind,
+    summary: genericBlockerSummary(blocker.stage, blocker.kind),
+    retryable: blocker.retryable,
+    resumable: blocker.resumable,
+    completedWork: completedWorkForRun(run),
+    evidencePaths: blocker.evidencePaths.filter(
+      (evidencePath) =>
+        isSafeDurableEvidencePath(evidencePath) && trustedEvidencePaths.has(evidencePath),
+    ),
+    attemptedRecovery: attemptedRecoveryForStage(failedStage),
+    unrunValidations: remainingValidationsForRun(run, requiredValidations),
+    exactUnblockAction: genericUnblockAction(blocker.stage, blocker.kind),
+  });
+}
+
+function blockerCodeForKind(kind: WorkflowBlocker["kind"]): string {
+  if (kind === "missing-input") return "MISSING_INPUT";
+  if (kind === "missing-tool") return "MISSING_TOOL";
+  if (kind === "policy") return "POLICY_BLOCKER";
+  if (kind === "verification") return "VERIFICATION_BLOCKED";
+  if (kind === "publish-precondition") return "PUBLISH_PRECONDITION";
+  if (kind === "budget-split") return "BUDGET_SPLIT_REQUIRED";
+  return "UNEXPECTED_BLOCKER";
+}
+
+function completedWorkForRun(run: RunManifest): string[] {
+  return run.stages
+    .filter((item) => ["passed", "skipped", "waived"].includes(item.status))
+    .map((item) => `${item.name} stage ${item.status}.`);
+}
+
+function attemptedRecoveryForStage(failedStage: StageState): string[] {
+  const executionCount = failedStage.attempt + 1;
+  return executionCount <= 1
+    ? []
+    : [`The ${failedStage.name} stage was attempted ${executionCount} times.`];
+}
+
+function deriveWorkflowBlocker(
+  run: RunManifest,
+  failedStage: StageState,
+  requiredValidations: string[],
+  kindOverride?: WorkflowBlocker["kind"],
+): WorkflowBlocker {
+  if (failedStage.error === undefined) {
+    throw new Error(`Cannot derive a blocker for ${failedStage.name} without a stage error`);
+  }
+  const kind = kindOverride ?? blockerKindForStageError(failedStage.name, failedStage.error.code);
+  const code = canonicalDurableBlockerCode(kind, failedStage.error.code);
+  const evidencePaths = [
+    ...new Set(
+      run.artifacts.flatMap((artifact) => {
+        const projectPath = artifact.metadata["projectRelativePath"];
+        if (typeof projectPath !== "string" || !isSafeDurableEvidencePath(projectPath)) return [];
+        return [projectPath];
+      }),
+    ),
+  ].slice(-50);
+
+  return WorkflowBlockerSchema.parse({
+    stage: failedStage.name,
+    code,
+    kind,
+    summary: genericBlockerSummary(failedStage.name, kind),
+    retryable: failedStage.error.retryable,
+    resumable: true,
+    completedWork: completedWorkForRun(run),
+    evidencePaths,
+    attemptedRecovery: attemptedRecoveryForStage(failedStage),
+    unrunValidations: remainingValidationsForRun(run, requiredValidations),
+    exactUnblockAction: genericUnblockAction(failedStage.name, kind),
+  });
+}
+
+function remainingValidationsForRun(run: RunManifest, requiredValidations: string[]): string[] {
+  const completed = completedValidationsForRun(run);
+  return [...new Set(requiredValidations)]
+    .filter((validation) => !completed.has(validation))
+    .slice(0, 20);
+}
+
+function completedValidationsForRun(run: RunManifest): Set<string> {
+  const completed = new Set<string>();
+  const artifacts = new Map(run.artifacts.map((artifact) => [artifact.id, artifact]));
+  const latestStageSubmission = (stageName: "contracts" | "functional-review" | "design-review") =>
+    [...stage(run, stageName).artifactIds]
+      .reverse()
+      .map((artifactId) => artifacts.get(artifactId))
+      .find(
+        (artifact) =>
+          artifact?.metadata["adapter"] === "workflow-v2" &&
+          artifact.metadata["workflowSubmissionKind"] === stageName,
+      );
+
+  for (const reviewStage of ["functional-review", "design-review"] as const) {
+    const gateResults = latestStageSubmission(reviewStage)?.metadata["gateResults"];
+    if (!Array.isArray(gateResults)) continue;
+    for (const result of gateResults) {
+      if (
+        typeof result === "object" &&
+        result !== null &&
+        "id" in result &&
+        "status" in result &&
+        typeof result.id === "string" &&
+        result.status === "passed"
+      ) {
+        completed.add(result.id);
+      }
+    }
+  }
+
+  if (stage(run, "contracts").status === "passed") {
+    const legacyBaseline = latestStageSubmission("contracts")?.metadata["legacyBaseline"];
+    if (
+      typeof legacyBaseline === "object" &&
+      legacyBaseline !== null &&
+      "checks" in legacyBaseline &&
+      Array.isArray(legacyBaseline.checks) &&
+      legacyBaseline.checks.length > 0 &&
+      legacyBaseline.checks.every(
+        (check) =>
+          typeof check === "object" &&
+          check !== null &&
+          "status" in check &&
+          check.status === "passed",
+      )
+    ) {
+      completed.add("legacy-baseline");
+    }
+  }
+
+  const implementation = stage(run, "implementation");
+  if (implementation.status === "passed") {
+    for (const artifactId of implementation.artifactIds) {
+      const role = artifacts.get(artifactId)?.metadata["featureEvidenceRole"];
+      if (role === "result") completed.add("targeted-feature-e2e");
+      if (role === "video") completed.add("feature-video");
+    }
+  }
+  if (implementation.checkpoint?.data["apiReady"] === true) completed.add("api-ready");
+
+  if (
+    run.artifacts.some(
+      (artifact) =>
+        artifact.metadata["adapter"] === "workflow-v2" &&
+        artifact.metadata["workflowSubmissionKind"] === "figma-bundle" &&
+        artifact.metadata["status"] === "passed",
+    )
+  ) {
+    completed.add("figma-bundle");
+  }
+
+  if (
+    stage(run, "publish").artifactIds.some(
+      (artifactId) => artifacts.get(artifactId)?.metadata["reportKind"] === "publish-result",
+    )
+  ) {
+    completed.add("draft-publication-preflight");
+  }
+
+  return completed;
+}
+
+const KNOWN_DURABLE_BLOCKER_CODES = new Set([
+  "WORKFLOW_BLOCKED",
+  "CHANGES_REQUESTED",
+  "REVIEW_CHANGES_REQUESTED",
+  "PUBLISH_PARTIAL",
+  "PUBLISH_FAILED",
+  "PUBLISH_BLOCKED",
+  "PUBLISH_PRECONDITION",
+  "PUBLISH_UNEXPECTED_ERROR",
+  "ARCHIVE_FAILED",
+  "ARCHIVE_UNEXPECTED_ERROR",
+]);
+
+function canonicalDurableBlockerCode(kind: WorkflowBlocker["kind"], rawCode: string): string {
+  return KNOWN_DURABLE_BLOCKER_CODES.has(rawCode) ? rawCode : blockerCodeForKind(kind);
+}
+
+function blockerKindForStageError(stageName: RunStageName, code: string): WorkflowBlocker["kind"] {
+  if (/UNEXPECTED/.test(code)) return "unexpected";
+  if (code === "WORKFLOW_BLOCKED") return "unexpected";
+  if (code === "REVIEW_CHANGES_REQUESTED") return "unexpected";
+  if (/BUDGET|TOKEN_LIMIT|CONTEXT_LIMIT/.test(code)) return "budget-split";
+  if (/MISSING_(?:INPUT|CONTEXT|APPROVAL|EVIDENCE)/.test(code)) return "missing-input";
+  if (/MISSING_TOOL|TOOL_UNAVAILABLE|RUNTIME_UNAVAILABLE/.test(code)) return "missing-tool";
+  if (stageName === "publish" || /^PUBLISH_/.test(code)) return "publish-precondition";
+  if (/POLICY|PRECONDITION/.test(code)) return "policy";
+  if (
+    stageName === "functional-review" ||
+    stageName === "design-review" ||
+    /REVIEW|VERIFY|VALIDATION|TEST/.test(code)
+  ) {
+    return "verification";
+  }
+  return "unexpected";
+}
+
+function genericBlockerSummary(stageName: RunStageName, kind: WorkflowBlocker["kind"]): string {
+  const reason =
+    kind === "missing-input"
+      ? "required input is missing"
+      : kind === "missing-tool"
+        ? "a required tool is unavailable"
+        : kind === "policy"
+          ? "a policy condition is unmet"
+          : kind === "verification"
+            ? "verification requires attention"
+            : kind === "publish-precondition"
+              ? "a publication precondition is unmet"
+              : kind === "budget-split"
+                ? "the remaining work must be split"
+                : "an unexpected condition requires attention";
+  return `The ${stageName} stage stopped because ${reason}.`;
+}
+
+function genericUnblockAction(stageName: RunStageName, kind: WorkflowBlocker["kind"]): string {
+  if (kind === "missing-input") return `Provide the missing input and resume ${stageName}.`;
+  if (kind === "missing-tool") return `Enable the required tool and resume ${stageName}.`;
+  if (kind === "policy") return `Resolve the policy condition and retry ${stageName}.`;
+  if (kind === "verification") return `Address the verification result and rerun ${stageName}.`;
+  if (kind === "publish-precondition") {
+    return `Satisfy the publication precondition and retry ${stageName}.`;
+  }
+  if (kind === "budget-split") return `Split the remaining work before resuming ${stageName}.`;
+  return `Inspect sanitized diagnostics and retry ${stageName} when safe.`;
 }
 
 function scopeFromRun(run: RunManifest): WorkflowScope {
@@ -1432,7 +2571,9 @@ function resumeContextForRun(run: RunManifest): WorkflowStatus["resumeContext"] 
     ...new Set(
       run.artifacts.flatMap((artifact) => {
         const projectPath = artifact.metadata["projectRelativePath"];
-        return typeof projectPath === "string" && projectPath.trim() !== "" ? [projectPath] : [];
+        return typeof projectPath === "string" && isSafeDurableEvidencePath(projectPath)
+          ? [projectPath]
+          : [];
       }),
     ),
   ].filter((projectPath) => projectPath.length <= 1_000);
@@ -1564,6 +2705,17 @@ function assertSubmissionPrerequisites(run: RunManifest, submission: WorkflowSub
     submission.guidanceTrace.skillHints.some((skillHint) => !profile.skillHints.includes(skillHint))
   ) {
     throw new Error("Every applied skill hint must be requested in the delivery profile");
+  }
+  if (submission.kind === "contracts" && submission.status === "passed") {
+    const allowedSkills = new Set([...profile.skillHints, ...profile.recommendedSkills]);
+    const unapprovedSkills = submission.guidanceTrace.appliedSkills.filter(
+      (skill) => !allowedSkills.has(skill),
+    );
+    if (unapprovedSkills.length > 0) {
+      throw new Error(
+        `Every applied skill must be explicitly hinted or deterministically recommended: ${unapprovedSkills.join(", ")}`,
+      );
+    }
   }
   if (
     submission.kind === "contracts" &&
@@ -2208,6 +3360,44 @@ function isMissingFileError(error: unknown): boolean {
   );
 }
 
+async function recommendedSkillsForIntake(input: {
+  projectRoot: string;
+  figmaUrl?: string;
+  hasOpenApi: boolean;
+  featureUi: boolean;
+}): Promise<string[]> {
+  const skills: string[] = [];
+  if (input.figmaUrl !== undefined) skills.push("figma", "design-system");
+  if (input.hasOpenApi) skills.push("api-generator");
+
+  const packages = await declaredPackageNames(input.projectRoot);
+  if (packages.has("react")) skills.push("react-best-practices");
+  if (packages.has("next")) skills.push("next-best-practices");
+  if (input.featureUi) skills.push("playwright");
+  return [...new Set(skills)];
+}
+
+async function declaredPackageNames(projectRoot: string): Promise<Set<string>> {
+  try {
+    const content = await readFile(path.join(projectRoot, "package.json"), "utf8");
+    const parsed = JSON.parse(content) as Record<string, unknown>;
+    const packages = new Set<string>();
+    for (const field of [
+      "dependencies",
+      "devDependencies",
+      "peerDependencies",
+      "optionalDependencies",
+    ]) {
+      const values = parsed[field];
+      if (typeof values !== "object" || values === null || Array.isArray(values)) continue;
+      Object.keys(values).forEach((packageName) => packages.add(packageName));
+    }
+    return packages;
+  } catch {
+    return new Set();
+  }
+}
+
 async function countDeclaredWorkspacePackages(projectRoot: string): Promise<number> {
   const patterns = new Set<string>();
   try {
@@ -2410,47 +3600,6 @@ async function hasPackageManifest(packageRoot: string): Promise<boolean> {
   }
 }
 
-function markdownTableCell(value: string): string {
-  return value.replaceAll("\\", "\\\\").replaceAll("|", "\\|").replace(/\r?\n/g, "<br>");
-}
-
-const MARKDOWN_LIST_CONTROL_CHARACTERS = new Set([
-  "\\",
-  "`",
-  "*",
-  "_",
-  "{",
-  "}",
-  "[",
-  "]",
-  "(",
-  ")",
-  "#",
-  "+",
-  "-",
-  "!",
-  "|",
-  ">",
-  "<",
-  "&",
-  "~",
-  '"',
-  "'",
-  "=",
-]);
-
-function markdownListValue(value: string): string {
-  return [...value]
-    .map((character) => {
-      if (character === "\r") return "&#92;r";
-      if (character === "\n") return "&#92;n";
-      return MARKDOWN_LIST_CONTROL_CHARACTERS.has(character)
-        ? `&#${character.charCodeAt(0)};`
-        : character;
-    })
-    .join("");
-}
-
 async function currentGitHead(projectRoot: string): Promise<string | null> {
   try {
     const { stdout } = await execFileAsync("git", ["rev-parse", "--verify", "HEAD"], {
@@ -2481,4 +3630,22 @@ function latestArtifact(
   }
 
   return artifact;
+}
+
+function readyReportArtifactForPacket(
+  run: RunManifest,
+  reviewPacketId: string,
+): ArtifactRef | undefined {
+  const artifacts = new Map(run.artifacts.map((artifact) => [artifact.id, artifact]));
+  return [...stage(run, "report").artifactIds]
+    .reverse()
+    .map((artifactId) => artifacts.get(artifactId))
+    .find(
+      (artifact): artifact is ArtifactRef =>
+        artifact?.kind === "pr-report" &&
+        artifact.metadata["reportKind"] === "pr-body-markdown" &&
+        artifact.metadata["reportIntent"] === "ready" &&
+        artifact.metadata["decision"] === "ready" &&
+        artifact.metadata["reviewPacketId"] === reviewPacketId,
+    );
 }

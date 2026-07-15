@@ -76,7 +76,6 @@ export const REQUIRED_RELEASE_SKILLS = [
   "skills/doctor/SKILL.md",
   "skills/implement/SKILL.md",
   "skills/intake-contracts/SKILL.md",
-  "skills/prepare-release/SKILL.md",
   "skills/publish/SKILL.md",
   "skills/review-design/SKILL.md",
   "skills/review-functional/SKILL.md",
@@ -111,6 +110,9 @@ export function verifyReleasePackageFiles(files: string[]): ReleaseVerificationR
   const normalizedFiles = files.map((file) => file.split("\\").join("/")).sort();
 
   for (const file of normalizedFiles) {
+    if (file.startsWith(".agents/skills/") || file.startsWith("skills/prepare-release/")) {
+      failures.push(`Maintainer-only skill included: ${file}`);
+    }
     for (const pattern of RELEASE_FORBIDDEN_PATTERNS) {
       if (file.includes(pattern)) {
         failures.push(`Forbidden file included: ${file}`);
@@ -310,7 +312,11 @@ export function verifyReviewerProfileParity(files: ReadonlyMap<string, Buffer>):
         "every reviewed requirement",
         "playwright",
         "25 mb",
+        "read-only",
+        "never edit implementation",
+        "workflow mcp",
       ],
+      codexAssignments: ["mcp_servers = {}"],
     },
     {
       label: "design reviewer",
@@ -323,7 +329,11 @@ export function verifyReviewerProfileParity(files: ReadonlyMap<string, Buffer>):
         "every required design gate",
         "every reviewed requirement",
         "visual baseline",
+        "read-only",
+        "never edit implementation",
+        "workflow mcp",
       ],
+      codexAssignments: ["mcp_servers = {}"],
     },
   ] as const;
 
@@ -339,6 +349,12 @@ export function verifyReviewerProfileParity(files: ReadonlyMap<string, Buffer>):
     for (const marker of pair.markers) {
       if (!markdown.includes(marker) || !codex.includes(marker)) {
         failures.push(`Reviewer profile parity missing '${marker}' for ${pair.label}.`);
+      }
+    }
+    const codexLines = codex.split(/\r?\n/u).map((line) => line.trim());
+    for (const assignment of pair.codexAssignments) {
+      if (!codexLines.includes(assignment)) {
+        failures.push(`Reviewer Codex profile missing '${assignment}' for ${pair.label}.`);
       }
     }
   }

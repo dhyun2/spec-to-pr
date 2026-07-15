@@ -40,12 +40,19 @@ describe("release verifier", () => {
       (file) => file !== "skills/review-design/SKILL.md",
     );
     const withObsoleteAgent = [...requiredReleaseInventory(), "agents/review-council.md"];
+    const withMaintainerSkill = [
+      ...requiredReleaseInventory(),
+      ".agents/skills/prepare-release/SKILL.md",
+    ];
 
     expect(verifyReleasePackageFiles(withoutSkill).failures).toContain(
       "Required skill missing: skills/review-design/SKILL.md",
     );
     expect(verifyReleasePackageFiles(withObsoleteAgent).failures).toContain(
       "Unexpected Markdown agent included: agents/review-council.md",
+    );
+    expect(verifyReleasePackageFiles(withMaintainerSkill).failures).toContain(
+      "Maintainer-only skill included: .agents/skills/prepare-release/SKILL.md",
     );
   });
 
@@ -142,6 +149,26 @@ describe("release verifier", () => {
     );
   });
 
+  it("requires both Codex reviewers to disable inherited MCP servers", () => {
+    const functionalMarkers =
+      "immutable review packet token pressure scope split every required functional gate every reviewed requirement playwright 25 mb read-only never edit implementation workflow mcp mcp_servers = {}";
+    const designMarkers =
+      "immutable review packet token pressure scope split every required design gate every reviewed requirement visual baseline read-only never edit implementation workflow mcp mcp_servers = {}";
+    const files = new Map<string, Buffer>([
+      ["agents/design-reviewer.md", Buffer.from(designMarkers)],
+      [".codex/agents/spec-to-pr-design-reviewer.toml", Buffer.from(designMarkers)],
+      ["agents/functional-reviewer.md", Buffer.from(functionalMarkers)],
+      [
+        ".codex/agents/spec-to-pr-functional-reviewer.toml",
+        Buffer.from(functionalMarkers.replace(" mcp_servers = {}", "")),
+      ],
+    ]);
+
+    expect(verifyReviewerProfileParity(files)).toContain(
+      "Reviewer Codex profile missing 'mcp_servers = {}' for functional reviewer.",
+    );
+  });
+
   it("rejects forbidden files", () => {
     const result = verifyReleasePackageFiles([
       ...requiredReleaseInventory(),
@@ -194,7 +221,6 @@ function requiredReleaseInventory(): string[] {
     "skills/doctor/SKILL.md",
     "skills/implement/SKILL.md",
     "skills/intake-contracts/SKILL.md",
-    "skills/prepare-release/SKILL.md",
     "skills/publish/SKILL.md",
     "skills/review-design/SKILL.md",
     "skills/review-functional/SKILL.md",

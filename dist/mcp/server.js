@@ -41722,6 +41722,377 @@ var init_ids = __esm({
   }
 });
 
+// src/pr-report/pr-report-model.ts
+var ReportLocaleSchema, ReportDecisionSchema, WorkflowReportIntentSchema, WorkflowReportMetadataSchema, ReportSectionStatusSchema, ReportLinkSchema, ReportCheckSummarySchema, ReportGapSummarySchema, ReportGateRowSchema, ReportArtifactSummaryRowSchema, ReviewScorecardReportRowSchema, RequirementTraceRowSchema, VisualComparisonRowSchema, PerformanceMetricRowSchema, PrReportViewModelSchema;
+var init_pr_report_model = __esm({
+  "src/pr-report/pr-report-model.ts"() {
+    "use strict";
+    init_zod();
+    init_ids();
+    ReportLocaleSchema = external_exports.enum(["ko", "en"]);
+    ReportDecisionSchema = external_exports.enum(["blocked", "draft", "ready-after-review", "ready"]);
+    WorkflowReportIntentSchema = external_exports.enum(["ready", "blocked-diagnostic"]);
+    WorkflowReportMetadataSchema = external_exports.discriminatedUnion("reportIntent", [
+      external_exports.object({
+        reportKind: external_exports.literal("pr-body-markdown"),
+        reportIntent: external_exports.literal("ready"),
+        decision: external_exports.literal("ready")
+      }).strict(),
+      external_exports.object({
+        reportKind: external_exports.literal("pr-body-markdown"),
+        reportIntent: external_exports.literal("blocked-diagnostic"),
+        decision: external_exports.literal("blocked")
+      }).strict()
+    ]);
+    ReportSectionStatusSchema = external_exports.enum([
+      "pass",
+      "fail",
+      "warning",
+      "not-run",
+      "skipped",
+      "not-applicable"
+    ]);
+    ReportLinkSchema = external_exports.object({
+      label: external_exports.string().trim().min(1),
+      uri: external_exports.string().trim().min(1)
+    }).strict();
+    ReportCheckSummarySchema = external_exports.object({
+      name: external_exports.string().trim().min(1),
+      kind: external_exports.string().trim().min(1),
+      status: ReportSectionStatusSchema,
+      command: external_exports.string().optional(),
+      exitCode: external_exports.number().int().optional(),
+      reportArtifactId: ArtifactIdSchema.optional(),
+      summary: external_exports.string().trim().min(1)
+    }).strict();
+    ReportGapSummarySchema = external_exports.object({
+      id: GapIdSchema,
+      category: external_exports.string(),
+      severity: external_exports.string(),
+      status: external_exports.string(),
+      title: external_exports.string(),
+      impact: external_exports.string()
+    }).strict();
+    ReportGateRowSchema = external_exports.object({
+      gate: external_exports.string().trim().min(1),
+      required: external_exports.boolean(),
+      status: ReportSectionStatusSchema,
+      evidence: external_exports.array(external_exports.string().trim().min(1)).default([]),
+      notes: external_exports.string().trim().min(1)
+    }).strict();
+    ReportArtifactSummaryRowSchema = external_exports.object({
+      item: external_exports.string().trim().min(1),
+      status: ReportSectionStatusSchema,
+      artifacts: external_exports.array(ArtifactIdSchema).default([]),
+      notes: external_exports.string().trim().min(1)
+    }).strict();
+    ReviewScorecardReportRowSchema = external_exports.object({
+      id: external_exports.string().trim().min(1),
+      label: external_exports.string().trim().min(1),
+      score: external_exports.number().min(0).max(10),
+      threshold: external_exports.number().min(0).max(10),
+      status: ReportSectionStatusSchema,
+      notes: external_exports.string().trim().min(1),
+      evidence: external_exports.array(external_exports.string().trim().min(1)).default([]),
+      nextRepairTarget: external_exports.boolean().default(false)
+    }).strict();
+    RequirementTraceRowSchema = external_exports.object({
+      requirementId: external_exports.string().trim().min(1),
+      title: external_exports.string().trim().min(1),
+      status: external_exports.string().trim().min(1),
+      briefEvidence: external_exports.array(external_exports.string()).default([]),
+      figmaEvidence: external_exports.array(external_exports.string()).default([]),
+      openApiEvidence: external_exports.array(external_exports.string()).default([]),
+      scenarios: external_exports.array(external_exports.string()).default([]),
+      checks: external_exports.array(external_exports.string()).default([]),
+      gaps: external_exports.array(GapIdSchema).default([])
+    }).strict();
+    VisualComparisonRowSchema = external_exports.object({
+      state: external_exports.string().trim().min(1),
+      figmaArtifactId: ArtifactIdSchema.optional(),
+      browserArtifactId: ArtifactIdSchema.optional(),
+      diffArtifactId: ArtifactIdSchema.optional(),
+      exactMatch: external_exports.number().min(0).max(100).optional(),
+      reviewMatch: external_exports.number().min(0).max(100).optional(),
+      result: ReportSectionStatusSchema,
+      notes: external_exports.string().optional()
+    }).strict();
+    PerformanceMetricRowSchema = external_exports.object({
+      metric: external_exports.string().trim().min(1),
+      value: external_exports.string().trim().min(1),
+      budget: external_exports.string().optional(),
+      result: ReportSectionStatusSchema,
+      source: external_exports.string().trim().min(1)
+    }).strict();
+    PrReportViewModelSchema = external_exports.object({
+      schemaVersion: external_exports.literal("pr-report-v1"),
+      locale: ReportLocaleSchema.default("en"),
+      runId: RunIdSchema,
+      generatedAt: external_exports.string().datetime({ offset: true }),
+      decision: ReportDecisionSchema,
+      title: external_exports.string().trim().min(1),
+      summaryBullets: external_exports.array(external_exports.string().trim().min(1)).default([]),
+      runMetadata: external_exports.record(external_exports.string(), external_exports.string()).default({}),
+      reviewGuide: external_exports.array(external_exports.string().trim().min(1)).default([]),
+      gateRows: external_exports.array(ReportGateRowSchema).default([]),
+      scorecardRows: external_exports.array(ReviewScorecardReportRowSchema).default([]),
+      specificationLinks: external_exports.array(ReportLinkSchema).default([]),
+      traceabilityRows: external_exports.array(RequirementTraceRowSchema).default([]),
+      traceabilityRowCount: external_exports.number().int().nonnegative().default(0),
+      changeScopeRows: external_exports.array(external_exports.record(external_exports.string(), external_exports.string())).default([]),
+      apiRows: external_exports.array(external_exports.record(external_exports.string(), external_exports.string())).default([]),
+      functionalChecks: external_exports.array(ReportCheckSummarySchema).default([]),
+      designChecks: external_exports.array(ReportCheckSummarySchema).default([]),
+      figmaProviderRows: external_exports.array(ReportArtifactSummaryRowSchema).default([]),
+      figmaInventoryRows: external_exports.array(ReportArtifactSummaryRowSchema).default([]),
+      visualRows: external_exports.array(VisualComparisonRowSchema).default([]),
+      accessibilityChecks: external_exports.array(ReportCheckSummarySchema).default([]),
+      performanceRows: external_exports.array(PerformanceMetricRowSchema).default([]),
+      observabilityChecks: external_exports.array(ReportCheckSummarySchema).default([]),
+      runtimeChecks: external_exports.array(ReportCheckSummarySchema).default([]),
+      gapSummaries: external_exports.array(ReportGapSummarySchema).default([]),
+      archivePlan: external_exports.array(external_exports.string()).default([]),
+      reportArtifactIds: external_exports.array(ArtifactIdSchema).default([])
+    }).strict();
+  }
+});
+
+// src/pr-report/workflow-report-renderer.ts
+function renderReadyWorkflowReport(input) {
+  const verdictFor = (requirementId) => input.reviews.flatMap((review) => review.requirements).filter((requirement) => requirement.id === requirementId).map((requirement) => requirement.verdict).join(", ");
+  const gateLines = input.reviews.flatMap(
+    (review) => review.gateResults.map(
+      (gate2) => `- ${review.kind}/${gate2.id}: ${gate2.status} (${gate2.evidencePaths.join(", ")})`
+    )
+  );
+  const riskLines = input.reviews.flatMap(
+    (review) => review.findings.map((finding) => `- ${finding.severity}: ${finding.title}`)
+  );
+  const appliedSkills = uniqueValues([
+    ...input.guidanceTrace.skillHints,
+    ...input.guidanceTrace.appliedSkills
+  ]);
+  return [
+    `# SpecToPR Run ${input.runId}`,
+    "",
+    "## Decision",
+    "",
+    "Ready for draft review.",
+    "",
+    "## Review packet",
+    "",
+    `- ID: ${input.reviewPacket.id}`,
+    `- Revision: ${input.reviewPacket.revision}`,
+    `- Base: ${input.reviewPacket.baseSha ?? "unavailable"}`,
+    `- Head: ${input.reviewPacket.headSha ?? "unavailable"}`,
+    `- Evidence digest: ${input.reviewPacket.evidenceDigest}`,
+    `- Diff digest: ${input.reviewPacket.diffDigest}`,
+    "",
+    "## Project guidance",
+    "",
+    "### Explicit",
+    "",
+    ...input.guidanceTrace.explicit.length === 0 ? ["- None."] : input.guidanceTrace.explicit.map((guidancePath) => `- ${markdownListValue(guidancePath)}`),
+    "",
+    "### Automatically discovered",
+    "",
+    ...input.guidanceTrace.discovered.length === 0 ? ["- None."] : input.guidanceTrace.discovered.map(
+      (guidancePath) => `- ${markdownListValue(guidancePath)}`
+    ),
+    "",
+    "## Applied optional skills",
+    "",
+    ...appliedSkills.length === 0 ? ["- None."] : appliedSkills.map((skill) => `- ${skill}`),
+    "",
+    "## Requirement traceability",
+    "",
+    "| Requirement | Acceptance criteria | Review verdict |",
+    "| --- | --- | --- |",
+    ...input.requirementManifest.map(
+      (requirement) => `| ${markdownTableCell(`${requirement.id}: ${requirement.title}`)} | ${markdownTableCell(requirement.acceptanceCriteria.join("\n"))} | ${markdownTableCell(verdictFor(requirement.id))} |`
+    ),
+    ...input.legacyBaseline === void 0 ? [] : [
+      "",
+      "## Focused legacy baseline",
+      "",
+      `- Scope: ${input.legacyBaseline.scope}`,
+      ...input.legacyBaseline.checks.map(
+        (check2) => `- ${check2.status}: \`${check2.command}\` \u2192 ${check2.resultPath}`
+      )
+    ],
+    "",
+    "## Changed files",
+    "",
+    ...input.reviewPacket.changedFiles.length === 0 ? ["- No changed files declared."] : input.reviewPacket.changedFiles.map((file2) => `- ${file2}`),
+    "",
+    "## Evidence",
+    "",
+    ...input.evidencePaths.map((evidencePath) => `- ${evidencePath}`),
+    "",
+    "## Validation gates",
+    "",
+    ...gateLines.length === 0 ? ["- No gates recorded."] : gateLines,
+    "",
+    "## Risks",
+    "",
+    ...riskLines.length === 0 ? ["- No known review findings."] : riskLines,
+    ...input.featureVideoPath === void 0 ? [] : ["", "## Feature E2E video", "", `- ${input.featureVideoPath}`],
+    ""
+  ].join("\n");
+}
+function renderBlockedWorkflowReport(input) {
+  const sanitizeIdentifier = (value) => markdownInlineValue(redactDiagnosticValue(value, input.projectRoot));
+  const sanitizeFreeText = (value) => markdownNeutralValue(redactDiagnosticValue(value, input.projectRoot));
+  const list = (values) => values.length === 0 ? ["- None recorded."] : values.map((value) => `- ${sanitizeFreeText(value)}`);
+  return [
+    `# SpecToPR Run ${sanitizeIdentifier(input.runId)}`,
+    "",
+    "## Decision",
+    "",
+    "Blocked. Diagnostic report only.",
+    "",
+    "## Blocker",
+    "",
+    `- Stage: ${sanitizeIdentifier(input.blocker.stage)}`,
+    `- Kind: ${sanitizeIdentifier(input.blocker.kind)}`,
+    `- Code: ${sanitizeIdentifier(input.blocker.code)}`,
+    `- Retryable: ${input.blocker.retryable ? "yes" : "no"}`,
+    `- Resumable: ${input.blocker.resumable ? "yes" : "no"}`,
+    `- Summary: ${sanitizeFreeText(input.blocker.summary)}`,
+    "",
+    "## Completed work",
+    "",
+    ...list(input.blocker.completedWork),
+    "",
+    "## Evidence",
+    "",
+    ...list(input.blocker.evidencePaths),
+    "",
+    "## Attempted recovery",
+    "",
+    ...list(input.blocker.attemptedRecovery),
+    "",
+    "## Unrun validations",
+    "",
+    ...list(input.blocker.unrunValidations),
+    "",
+    "## Exact unblock action",
+    "",
+    sanitizeFreeText(input.blocker.exactUnblockAction),
+    ""
+  ].join("\n");
+}
+function markdownTableCell(value) {
+  return value.replaceAll("\\", "\\\\").replaceAll("|", "\\|").replace(/\r?\n/g, "<br>");
+}
+function markdownListValue(value) {
+  return [...value].map((character) => {
+    if (character === "\r") return "&#92;r";
+    if (character === "\n") return "&#92;n";
+    return MARKDOWN_LIST_CONTROL_CHARACTERS.has(character) ? `&#${character.charCodeAt(0)};` : character;
+  }).join("");
+}
+function uniqueValues(values) {
+  return [...new Set(values)];
+}
+function redactDiagnosticValue(value, projectRoot) {
+  let redacted = value;
+  const rootVariants = [
+    projectRoot,
+    projectRoot.replaceAll("\\", "/"),
+    projectRoot.replaceAll("/", "\\")
+  ].filter(Boolean).sort((left, right) => right.length - left.length);
+  for (const root of new Set(rootVariants)) {
+    redacted = redacted.replaceAll(root, "[project-root]");
+  }
+  redacted = redacted.replace(/\b(authorization)\s*[:=]\s*[^\r\n]*/gi, "$1: [REDACTED]");
+  redacted = redacted.replace(
+    /\b((?:[A-Za-z0-9]+[-_])*(?:api[-_]?key|token|secret|password|passwd|credential|private[-_]?key)(?:[-_][A-Za-z0-9]+)*)\s*([:=])\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi,
+    "$1$2[REDACTED]"
+  );
+  redacted = redacted.replace(
+    /\b(?:github_pat_[A-Za-z0-9_]{16,}|gh[pousr]_[A-Za-z0-9]{16,}|sk-[A-Za-z0-9_-]{16,}|xox[baprs]-[A-Za-z0-9-]{16,}|AKIA[A-Z0-9]{16})\b/g,
+    "[REDACTED]"
+  );
+  return redacted.replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/]+@/gi, "$1[REDACTED]@");
+}
+function markdownInlineValue(value) {
+  return value.replaceAll("\r", "&#92;r").replaceAll("\n", "&#92;n");
+}
+function markdownNeutralValue(value) {
+  const characters = [...value];
+  const firstNonWhitespace = characters.findIndex((character) => !/\s/.test(character));
+  const orderedListMatch = value.match(/^(\s*\d+)([.)])(?=\s)/);
+  const orderedListDelimiter = orderedListMatch?.[1]?.length;
+  const neutral = characters.map((character, index) => {
+    if (character === "\r") return "&#92;r";
+    if (character === "\n") return "&#92;n";
+    const codePoint = character.codePointAt(0);
+    if (codePoint < 32 || codePoint === 127) return `&#${codePoint};`;
+    if ((character === "-" || character === "+") && index === firstNonWhitespace) {
+      return `&#${codePoint};`;
+    }
+    if (character === "." && index === orderedListDelimiter) return "&#46;";
+    if (character === "_") {
+      const previous = characters[index - 1] ?? "";
+      const next = characters[index + 1] ?? "";
+      if (/[A-Za-z0-9]/.test(previous) && /[A-Za-z0-9]/.test(next)) return character;
+      return "&#95;";
+    }
+    return BLOCKED_MARKDOWN_CONTROL_CHARACTERS.has(character) ? `&#${codePoint};` : character;
+  }).join("");
+  return neutral.replaceAll("&#91;REDACTED&#93;", "[REDACTED]").replaceAll("&#91;project-root&#93;", "[project-root]");
+}
+var MARKDOWN_LIST_CONTROL_CHARACTERS, BLOCKED_MARKDOWN_CONTROL_CHARACTERS;
+var init_workflow_report_renderer = __esm({
+  "src/pr-report/workflow-report-renderer.ts"() {
+    "use strict";
+    MARKDOWN_LIST_CONTROL_CHARACTERS = /* @__PURE__ */ new Set([
+      "\\",
+      "`",
+      "*",
+      "_",
+      "{",
+      "}",
+      "[",
+      "]",
+      "(",
+      ")",
+      "#",
+      "+",
+      "-",
+      "!",
+      "|",
+      ">",
+      "<",
+      "&",
+      "~",
+      '"',
+      "'",
+      "="
+    ]);
+    BLOCKED_MARKDOWN_CONTROL_CHARACTERS = /* @__PURE__ */ new Set([
+      "\\",
+      "`",
+      "*",
+      "{",
+      "}",
+      "[",
+      "]",
+      "(",
+      ")",
+      "#",
+      "!",
+      "|",
+      ">",
+      "<",
+      "&",
+      "~",
+      "="
+    ]);
+  }
+});
+
 // src/runtime/constants.ts
 var RUNTIME_CONTRACT_VERSION, AGENT_ROLES, IMPLEMENTATION_AGENT_ROLES, VERIFICATION_AGENT_ROLES, PUBLISHING_AGENT_ROLES, RESULT_STATUSES;
 var init_constants = __esm({
@@ -41767,6 +42138,774 @@ var init_scalars = __esm({
     VerificationAgentRoleSchema = external_exports.enum(VERIFICATION_AGENT_ROLES);
     PublishingAgentRoleSchema = external_exports.enum(PUBLISHING_AGENT_ROLES);
     ResultStatusSchema = external_exports.enum(RESULT_STATUSES);
+  }
+});
+
+// src/publisher/publish-contracts.ts
+var ReviewHostSchema, PublishModeSchema, PublishIntentSchema, PublishTargetSchema, ReviewRequestPayloadSchema, ReviewRequestUpdateSchema, ReviewRequestAssetRoleSchema, PublishedReviewAssetSchema, PublishPlanSchema, PublishedReviewRequestSchema, PublishResultSchema;
+var init_publish_contracts = __esm({
+  "src/publisher/publish-contracts.ts"() {
+    "use strict";
+    init_zod();
+    init_pr_report_model();
+    init_ids();
+    init_scalars();
+    ReviewHostSchema = external_exports.enum(["github", "gitlab"]);
+    PublishModeSchema = external_exports.literal("draft");
+    PublishIntentSchema = external_exports.enum(["ready", "blocked-diagnostic"]);
+    PublishTargetSchema = external_exports.object({
+      host: ReviewHostSchema,
+      webBaseUrl: external_exports.string().url(),
+      apiBaseUrl: external_exports.string().url(),
+      owner: external_exports.string().trim().min(1).optional(),
+      repo: external_exports.string().trim().min(1).optional(),
+      projectPath: external_exports.string().trim().min(1).optional(),
+      projectId: external_exports.string().trim().min(1).optional()
+    }).strict().superRefine((target, context) => {
+      if (target.host === "github") {
+        if (target.owner === void 0 || target.repo === void 0) {
+          context.addIssue({
+            code: "custom",
+            message: "GitHub publish target requires owner and repo",
+            path: ["owner"]
+          });
+        }
+      }
+      if (target.host === "gitlab") {
+        if (target.projectPath === void 0 && target.projectId === void 0) {
+          context.addIssue({
+            code: "custom",
+            message: "GitLab publish target requires projectPath or projectId",
+            path: ["projectPath"]
+          });
+        }
+      }
+    });
+    ReviewRequestPayloadSchema = external_exports.object({
+      runId: RunIdSchema,
+      title: external_exports.string().trim().min(1).max(250),
+      body: external_exports.string().min(1),
+      sourceBranch: external_exports.string().trim().min(1),
+      targetBranch: external_exports.string().trim().min(1),
+      headSha: GitObjectIdSchema.optional(),
+      mode: PublishModeSchema.default("draft"),
+      labels: external_exports.array(external_exports.string().trim().min(1)).default([]),
+      reviewers: external_exports.array(external_exports.string().trim().min(1)).default([]),
+      assignees: external_exports.array(external_exports.string().trim().min(1)).default([]),
+      reportArtifactId: ArtifactIdSchema
+    }).strict();
+    ReviewRequestUpdateSchema = external_exports.object({
+      title: external_exports.string().trim().min(1).max(250),
+      body: external_exports.string().min(1),
+      labels: external_exports.array(external_exports.string().trim().min(1))
+    }).strict();
+    ReviewRequestAssetRoleSchema = external_exports.enum([
+      "figma",
+      "browser",
+      "diff",
+      "overlay",
+      "e2e-video"
+    ]);
+    PublishedReviewAssetSchema = external_exports.object({
+      artifactId: ArtifactIdSchema,
+      targetId: external_exports.string().trim().min(1),
+      role: ReviewRequestAssetRoleSchema,
+      label: external_exports.string().trim().min(1),
+      url: external_exports.string().trim().min(1),
+      // Whether `url` renders as an inline <img> in the review host.
+      // GitHub private-repo raw URLs require auth and cannot be embedded, so the
+      // review body falls back to a plain link for those assets.
+      embeddable: external_exports.boolean().default(true)
+    }).strict();
+    PublishPlanSchema = external_exports.object({
+      runId: RunIdSchema,
+      intent: PublishIntentSchema,
+      target: PublishTargetSchema,
+      payload: ReviewRequestPayloadSchema,
+      reportIntent: PublishIntentSchema.optional(),
+      reportDecision: ReportDecisionSchema.optional(),
+      reportMetadataValid: external_exports.boolean(),
+      requiredTokenEnv: external_exports.string().trim().min(1),
+      willPushBranch: external_exports.boolean(),
+      willCreateOrUpdate: external_exports.boolean(),
+      warnings: external_exports.array(external_exports.string()).default([]),
+      plannedAt: IsoDateTimeSchema
+    }).strict();
+    PublishedReviewRequestSchema = external_exports.object({
+      host: ReviewHostSchema,
+      url: external_exports.string().url(),
+      number: external_exports.string().trim().min(1),
+      id: external_exports.string().trim().min(1).optional(),
+      iid: external_exports.string().trim().min(1).optional(),
+      draft: external_exports.boolean(),
+      sourceBranch: external_exports.string().trim().min(1),
+      targetBranch: external_exports.string().trim().min(1),
+      created: external_exports.boolean(),
+      updated: external_exports.boolean()
+    }).strict();
+    PublishResultSchema = external_exports.object({
+      runId: RunIdSchema,
+      status: external_exports.enum(["passed", "failed", "blocked"]),
+      target: PublishTargetSchema.optional(),
+      request: PublishedReviewRequestSchema.optional(),
+      reportArtifactId: ArtifactIdSchema.optional(),
+      publishedAssets: external_exports.array(PublishedReviewAssetSchema).default([]),
+      requestSynced: external_exports.boolean().default(false),
+      visualPreviewExpected: external_exports.boolean().default(false),
+      visualPreviewSynced: external_exports.boolean().default(false),
+      featureVideoExpected: external_exports.boolean().default(false),
+      featureVideoSynced: external_exports.boolean().default(false),
+      fallbackMode: external_exports.enum(["none", "gitlab-push-option"]).default("none"),
+      partialReasons: external_exports.array(external_exports.string().trim().min(1)).default([]),
+      errorCode: external_exports.string().trim().min(1).optional(),
+      errorMessage: external_exports.string().trim().min(1).optional(),
+      retryable: external_exports.boolean().default(false),
+      publishedAt: IsoDateTimeSchema
+    }).strict();
+  }
+});
+
+// src/publisher/remote-detector.ts
+function detectPublishTargetFromRemote(remote) {
+  const normalized = normalizeGitRemoteUrl(remote.url);
+  const kind = resolveHostKind(normalized.host);
+  if (kind === "github") {
+    const [owner, repo] = normalized.pathParts;
+    if (owner === void 0 || repo === void 0) {
+      throw new Error(`Cannot parse GitHub remote URL: ${remote.url}`);
+    }
+    const enterprise = normalized.host !== "github.com";
+    return PublishTargetSchema.parse({
+      host: "github",
+      webBaseUrl: envUrl("SPEC_TO_PR_WEB_BASE_URL") ?? `https://${normalized.host}`,
+      // github.com uses api.github.com; GitHub Enterprise uses https://<host>/api/v3.
+      apiBaseUrl: envUrl("SPEC_TO_PR_API_BASE_URL") ?? (enterprise ? `https://${normalized.host}/api/v3` : "https://api.github.com"),
+      owner,
+      repo
+    });
+  }
+  if (kind === "gitlab") {
+    if (normalized.pathParts.length < 2) {
+      throw new Error(`Cannot parse GitLab remote URL: ${remote.url}`);
+    }
+    return PublishTargetSchema.parse({
+      host: "gitlab",
+      webBaseUrl: envUrl("SPEC_TO_PR_WEB_BASE_URL") ?? `https://${normalized.host}`,
+      apiBaseUrl: envUrl("SPEC_TO_PR_API_BASE_URL") ?? `https://${normalized.host}/api/v4`,
+      projectPath: normalized.pathParts.join("/")
+    });
+  }
+  throw new Error(
+    `Unsupported Git remote host: ${normalized.host}. Set SPEC_TO_PR_GIT_HOST=github|gitlab (optionally with SPEC_TO_PR_API_BASE_URL and SPEC_TO_PR_WEB_BASE_URL) to publish to a self-hosted instance.`
+  );
+}
+function resolveHostKind(host) {
+  const override = process.env["SPEC_TO_PR_GIT_HOST"]?.trim().toLowerCase();
+  if (override === "github" || override === "gitlab") {
+    return override;
+  }
+  if (host === "github.com") return "github";
+  if (host === "gitlab.com") return "gitlab";
+  return void 0;
+}
+function envUrl(name) {
+  const value = process.env[name]?.trim();
+  return value !== void 0 && value.length > 0 ? value : void 0;
+}
+function normalizeGitRemoteUrl(rawUrl) {
+  const trimmed = rawUrl.trim();
+  const sshMatch = /^git@([^:]+):(.+)$/.exec(trimmed);
+  if (sshMatch !== null) {
+    return {
+      host: sshMatch[1].toLowerCase(),
+      pathParts: splitRepoPath(sshMatch[2])
+    };
+  }
+  const sshUrlMatch = /^ssh:\/\/git@([^/]+)\/(.+)$/.exec(trimmed);
+  if (sshUrlMatch !== null) {
+    return {
+      host: sshUrlMatch[1].toLowerCase(),
+      pathParts: splitRepoPath(sshUrlMatch[2])
+    };
+  }
+  const url2 = new URL(trimmed);
+  return {
+    host: url2.hostname.toLowerCase(),
+    pathParts: splitRepoPath(url2.pathname.replace(/^\/+/, ""))
+  };
+}
+function splitRepoPath(value) {
+  return value.replace(/\.git$/i, "").split("/").filter(Boolean);
+}
+var GitRemoteInfoSchema;
+var init_remote_detector = __esm({
+  "src/publisher/remote-detector.ts"() {
+    "use strict";
+    init_zod();
+    init_publish_contracts();
+    GitRemoteInfoSchema = external_exports.object({
+      name: external_exports.string().trim().min(1),
+      url: external_exports.string().trim().min(1)
+    }).strict();
+  }
+});
+
+// src/publisher/token-provider.ts
+import { execFileSync } from "child_process";
+function readPublisherToken(host) {
+  const config2 = HOST_CONFIG[host];
+  const fromEnv = readEnvToken(config2.envNames);
+  if (fromEnv !== void 0) {
+    return fromEnv;
+  }
+  const fromCli = readCliToken(config2.cli);
+  if (fromCli !== void 0) {
+    return fromCli;
+  }
+  throw new Error(
+    `${config2.label} token is not configured. Set one of: ${config2.envNames.join(", ")}, or authenticate the ${config2.cli.command} CLI (${config2.cli.command} ${config2.cli.args.join(" ")}).`
+  );
+}
+function readEnvToken(names) {
+  for (const name of names) {
+    const value = process.env[name];
+    if (value !== void 0 && value.trim().length > 0) {
+      return { token: value, source: name };
+    }
+  }
+  return void 0;
+}
+function readCliToken(cli) {
+  try {
+    const output = execFileSync(cli.command, cli.args, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 1e4
+    }).trim();
+    if (output.length > 0) {
+      return { token: output, source: `${cli.command} ${cli.args.join(" ")}` };
+    }
+  } catch {
+  }
+  return void 0;
+}
+var HOST_CONFIG;
+var init_token_provider = __esm({
+  "src/publisher/token-provider.ts"() {
+    "use strict";
+    HOST_CONFIG = {
+      github: {
+        label: "GitHub",
+        envNames: ["GITHUB_TOKEN", "GH_TOKEN"],
+        cli: { command: "gh", args: ["auth", "token"] }
+      },
+      gitlab: {
+        label: "GitLab",
+        envNames: ["GITLAB_TOKEN", "GITLAB_PRIVATE_TOKEN"],
+        cli: { command: "glab", args: ["auth", "token"] }
+      }
+    };
+  }
+});
+
+// src/publisher/publish-redaction.ts
+function redactSecrets(input) {
+  return input.replace(/ghp_[A-Za-z0-9_]+/g, "[REDACTED_GITHUB_TOKEN]").replace(/github_pat_[A-Za-z0-9_]+/g, "[REDACTED_GITHUB_TOKEN]").replace(/glpat-[A-Za-z0-9_-]+/g, "[REDACTED_GITLAB_TOKEN]").replace(/Bearer\s+[A-Za-z0-9._~-]+/gi, "Bearer [REDACTED]").replace(/PRIVATE-TOKEN:\s*[A-Za-z0-9._~-]+/gi, "PRIVATE-TOKEN: [REDACTED]");
+}
+var init_publish_redaction = __esm({
+  "src/publisher/publish-redaction.ts"() {
+    "use strict";
+  }
+});
+
+// src/publisher/publisher-port.ts
+var ReviewRequestSynchronizationError;
+var init_publisher_port = __esm({
+  "src/publisher/publisher-port.ts"() {
+    "use strict";
+    ReviewRequestSynchronizationError = class extends Error {
+      constructor(message, phase, request) {
+        super(message);
+        this.phase = phase;
+        this.request = request;
+      }
+      phase;
+      request;
+      name = "ReviewRequestSynchronizationError";
+    };
+  }
+});
+
+// src/publisher/review-host.ts
+function encodeGitLabProjectId(projectPathOrId) {
+  if (/^\d+$/.test(projectPathOrId)) {
+    return projectPathOrId;
+  }
+  return encodeURIComponent(projectPathOrId);
+}
+var init_review_host = __esm({
+  "src/publisher/review-host.ts"() {
+    "use strict";
+  }
+});
+
+// src/publisher/github-publisher.ts
+function assertGitHub(target) {
+  if (target.host !== "github" || target.owner === void 0 || target.repo === void 0) {
+    throw new Error("Expected GitHub publish target");
+  }
+}
+function normalizeGitHubPr(pr, created, updated, payload) {
+  return PublishedReviewRequestSchema.parse({
+    host: "github",
+    url: String(pr["html_url"]),
+    number: String(pr["number"]),
+    id: String(pr["id"]),
+    draft: pr["draft"] === true,
+    sourceBranch: payload.sourceBranch,
+    targetBranch: payload.targetBranch,
+    created,
+    updated
+  });
+}
+function encodePath(path10) {
+  return path10.split("/").map(encodeURIComponent).join("/");
+}
+function safePathSegment(value) {
+  const safe = value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+  return safe === "" ? "target" : safe;
+}
+var GitHubPublisherAdapter;
+var init_github_publisher = __esm({
+  "src/publisher/github-publisher.ts"() {
+    "use strict";
+    init_publish_contracts();
+    init_publisher_port();
+    GitHubPublisherAdapter = class {
+      constructor(fetchImpl = fetch) {
+        this.fetchImpl = fetchImpl;
+      }
+      fetchImpl;
+      async findExisting(input) {
+        assertGitHub(input.target);
+        const url2 = new URL(
+          `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}/pulls`
+        );
+        url2.searchParams.set("head", `${input.target.owner}:${input.payload.sourceBranch}`);
+        url2.searchParams.set("base", input.payload.targetBranch);
+        url2.searchParams.set("state", "open");
+        const response = await this.githubFetch(url2.toString(), input.token, {
+          method: "GET",
+          signal: input.signal
+        });
+        if (!response.ok) {
+          throw new Error(`GitHub list PRs failed: ${response.status} ${await response.text()}`);
+        }
+        const pulls = await response.json();
+        const first = pulls[0];
+        if (first === void 0) {
+          return void 0;
+        }
+        return normalizeGitHubPr(first, false, true, input.payload);
+      }
+      async create(input) {
+        assertGitHub(input.target);
+        const response = await this.githubFetch(
+          `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}/pulls`,
+          input.token,
+          {
+            method: "POST",
+            signal: input.signal,
+            body: JSON.stringify({
+              title: input.payload.title,
+              head: input.payload.sourceBranch,
+              base: input.payload.targetBranch,
+              body: input.payload.body,
+              draft: input.payload.mode === "draft",
+              maintainer_can_modify: true
+            })
+          }
+        );
+        if (!response.ok) {
+          throw new Error(`GitHub create PR failed: ${response.status} ${await response.text()}`);
+        }
+        const pr = await response.json();
+        const request = normalizeGitHubPr(pr, true, false, input.payload);
+        await this.applyIssueMetadata({
+          target: input.target,
+          request,
+          payload: input.payload,
+          token: input.token,
+          signal: input.signal
+        });
+        return request;
+      }
+      async update(input) {
+        assertGitHub(input.target);
+        const update = ReviewRequestUpdateSchema.parse(input.update);
+        const response = await this.githubFetch(
+          `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}/pulls/${input.requestNumber}`,
+          input.token,
+          {
+            method: "PATCH",
+            signal: input.signal,
+            body: JSON.stringify({
+              title: update.title,
+              body: update.body
+            })
+          }
+        );
+        if (!response.ok) {
+          throw new Error(`GitHub update PR failed: ${response.status} ${await response.text()}`);
+        }
+        const pr = await response.json();
+        const request = normalizeGitHubPr(pr, false, true, {
+          sourceBranch: String(pr["head"]?.["ref"] ?? ""),
+          targetBranch: String(pr["base"]?.["ref"] ?? "")
+        });
+        const labelsResponse = await this.githubFetch(
+          `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}/issues/${input.requestNumber}/labels`,
+          input.token,
+          {
+            method: "PUT",
+            signal: input.signal,
+            body: JSON.stringify({ labels: update.labels })
+          }
+        );
+        if (!labelsResponse.ok) {
+          throw new ReviewRequestSynchronizationError(
+            `GitHub synchronize PR labels failed: ${labelsResponse.status} ${await labelsResponse.text()}`,
+            "labels",
+            request
+          );
+        }
+        return request;
+      }
+      async publishAssets(input) {
+        assertGitHub(input.target);
+        const published = [];
+        const isPrivate = await this.isPrivateRepo({
+          target: input.target,
+          token: input.token,
+          signal: input.signal
+        });
+        for (const asset of input.assets) {
+          const assetPath = [
+            ".spec-to-pr",
+            asset.role === "e2e-video" ? "feature-evidence" : "visual-assets",
+            input.payload.runId,
+            safePathSegment(asset.targetId),
+            asset.filename
+          ].join("/");
+          const existingSha = await this.findContentSha({
+            target: input.target,
+            path: assetPath,
+            branch: input.payload.sourceBranch,
+            token: input.token,
+            signal: input.signal
+          });
+          const response = await this.githubFetch(
+            `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}/contents/${encodePath(assetPath)}`,
+            input.token,
+            {
+              method: "PUT",
+              signal: input.signal,
+              body: JSON.stringify({
+                message: `chore(spec-to-pr): publish review evidence ${asset.artifactId}`,
+                content: asset.content.toString("base64"),
+                branch: input.payload.sourceBranch,
+                ...existingSha === void 0 ? {} : { sha: existingSha }
+              })
+            }
+          );
+          if (!response.ok) {
+            throw new Error(
+              `GitHub upload review asset failed: ${response.status} ${await response.text()}`
+            );
+          }
+          const uploaded = await response.json();
+          const content = uploaded["content"];
+          const commit = uploaded["commit"];
+          const commitSha = typeof commit?.["sha"] === "string" ? commit["sha"] : void 0;
+          const embeddable = !isPrivate && asset.role !== "e2e-video";
+          const url2 = isPrivate ? String(content?.["html_url"] ?? content?.["download_url"] ?? "") : commitSha !== void 0 ? `https://raw.githubusercontent.com/${input.target.owner}/${input.target.repo}/${commitSha}/${assetPath}` : String(content?.["download_url"] ?? content?.["html_url"] ?? "");
+          published.push(
+            PublishedReviewAssetSchema.parse({
+              artifactId: asset.artifactId,
+              targetId: asset.targetId,
+              role: asset.role,
+              label: asset.label,
+              url: url2,
+              embeddable
+            })
+          );
+        }
+        return published;
+      }
+      async isPrivateRepo(input) {
+        const response = await this.githubFetch(
+          `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}`,
+          input.token,
+          { method: "GET", signal: input.signal }
+        );
+        if (!response.ok) {
+          return true;
+        }
+        const repo = await response.json();
+        return repo["private"] === true;
+      }
+      async applyIssueMetadata(input) {
+        if (input.payload.labels.length > 0) {
+          const response = await this.githubFetch(
+            `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}/issues/${input.request.number}/labels`,
+            input.token,
+            {
+              method: "POST",
+              signal: input.signal,
+              body: JSON.stringify({
+                labels: input.payload.labels
+              })
+            }
+          );
+          if (!response.ok) {
+            throw new ReviewRequestSynchronizationError(
+              `GitHub synchronize PR labels failed: ${response.status} ${await response.text()}`,
+              "labels",
+              input.request
+            );
+          }
+        }
+        if (input.payload.reviewers.length > 0) {
+          const response = await this.githubFetch(
+            `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}/pulls/${input.request.number}/requested_reviewers`,
+            input.token,
+            {
+              method: "POST",
+              signal: input.signal,
+              body: JSON.stringify({
+                reviewers: input.payload.reviewers
+              })
+            }
+          );
+          if (!response.ok) {
+            throw new ReviewRequestSynchronizationError(
+              `GitHub synchronize PR reviewers failed: ${response.status} ${await response.text()}`,
+              "reviewers",
+              input.request
+            );
+          }
+        }
+      }
+      async githubFetch(url2, token, init) {
+        const { signal, ...requestInit } = init;
+        return this.fetchImpl(url2, {
+          ...requestInit,
+          ...signal === void 0 ? {} : { signal },
+          headers: {
+            Accept: "application/vnd.github+json",
+            Authorization: `Bearer ${token}`,
+            "X-GitHub-Api-Version": "2022-11-28",
+            "Content-Type": "application/json",
+            ...requestInit.headers
+          }
+        });
+      }
+      async findContentSha(input) {
+        const url2 = new URL(
+          `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}/contents/${encodePath(input.path)}`
+        );
+        url2.searchParams.set("ref", input.branch);
+        const response = await this.githubFetch(url2.toString(), input.token, {
+          method: "GET",
+          signal: input.signal
+        });
+        if (response.status === 404) {
+          return void 0;
+        }
+        if (!response.ok) {
+          throw new Error(
+            `GitHub inspect visual asset failed: ${response.status} ${await response.text()}`
+          );
+        }
+        const body = await response.json();
+        const sha = body["sha"];
+        return typeof sha === "string" && sha.length > 0 ? sha : void 0;
+      }
+    };
+  }
+});
+
+// src/publisher/gitlab-publisher.ts
+function draftTitle(title) {
+  return /^draft:/i.test(title) ? title : `Draft: ${title}`;
+}
+function assertGitLab(target) {
+  if (target.host !== "gitlab" || target.projectPath === void 0 && target.projectId === void 0) {
+    throw new Error("Expected GitLab publish target");
+  }
+}
+function normalizeGitLabMr(mr, created, updated, payload) {
+  return PublishedReviewRequestSchema.parse({
+    host: "gitlab",
+    url: String(mr["web_url"]),
+    number: String(mr["iid"]),
+    id: String(mr["id"]),
+    iid: String(mr["iid"]),
+    draft: String(mr["title"] ?? "").toLowerCase().startsWith("draft:"),
+    sourceBranch: payload.sourceBranch,
+    targetBranch: payload.targetBranch,
+    created,
+    updated
+  });
+}
+var GitLabPublisherAdapter;
+var init_gitlab_publisher = __esm({
+  "src/publisher/gitlab-publisher.ts"() {
+    "use strict";
+    init_publish_contracts();
+    init_review_host();
+    GitLabPublisherAdapter = class {
+      constructor(fetchImpl = fetch) {
+        this.fetchImpl = fetchImpl;
+      }
+      fetchImpl;
+      async findExisting(input) {
+        assertGitLab(input.target);
+        const project = encodeGitLabProjectId(input.target.projectId ?? input.target.projectPath);
+        const url2 = new URL(`${input.target.apiBaseUrl}/projects/${project}/merge_requests`);
+        url2.searchParams.set("source_branch", input.payload.sourceBranch);
+        url2.searchParams.set("target_branch", input.payload.targetBranch);
+        url2.searchParams.set("state", "opened");
+        const response = await this.gitlabFetch(url2.toString(), input.token, {
+          method: "GET",
+          signal: input.signal
+        });
+        if (!response.ok) {
+          throw new Error(`GitLab list MRs failed: ${response.status} ${await response.text()}`);
+        }
+        const mergeRequests = await response.json();
+        const first = mergeRequests[0];
+        if (first === void 0) {
+          return void 0;
+        }
+        return normalizeGitLabMr(first, false, true, input.payload);
+      }
+      async create(input) {
+        assertGitLab(input.target);
+        const project = encodeGitLabProjectId(input.target.projectId ?? input.target.projectPath);
+        const title = draftTitle(input.payload.title);
+        const response = await this.gitlabFetch(
+          `${input.target.apiBaseUrl}/projects/${project}/merge_requests`,
+          input.token,
+          {
+            method: "POST",
+            signal: input.signal,
+            body: JSON.stringify({
+              source_branch: input.payload.sourceBranch,
+              target_branch: input.payload.targetBranch,
+              title,
+              description: input.payload.body,
+              labels: input.payload.labels.join(",")
+            })
+          }
+        );
+        if (!response.ok) {
+          throw new Error(`GitLab create MR failed: ${response.status} ${await response.text()}`);
+        }
+        const mr = await response.json();
+        return normalizeGitLabMr(mr, true, false, input.payload);
+      }
+      async update(input) {
+        assertGitLab(input.target);
+        const update = ReviewRequestUpdateSchema.parse(input.update);
+        const project = encodeGitLabProjectId(input.target.projectId ?? input.target.projectPath);
+        const response = await this.gitlabFetch(
+          `${input.target.apiBaseUrl}/projects/${project}/merge_requests/${input.requestNumber}`,
+          input.token,
+          {
+            method: "PUT",
+            signal: input.signal,
+            body: JSON.stringify({
+              title: draftTitle(update.title),
+              description: update.body,
+              labels: update.labels.join(",")
+            })
+          }
+        );
+        if (!response.ok) {
+          throw new Error(`GitLab update MR failed: ${response.status} ${await response.text()}`);
+        }
+        const mr = await response.json();
+        return normalizeGitLabMr(mr, false, true, {
+          sourceBranch: String(mr["source_branch"] ?? ""),
+          targetBranch: String(mr["target_branch"] ?? "")
+        });
+      }
+      async publishAssets(input) {
+        assertGitLab(input.target);
+        const project = encodeGitLabProjectId(input.target.projectId ?? input.target.projectPath);
+        const published = [];
+        for (const asset of input.assets) {
+          const form = new FormData();
+          form.append("file", new Blob([asset.content], { type: asset.mediaType }), asset.filename);
+          const response = await this.gitlabFetch(
+            `${input.target.apiBaseUrl}/projects/${project}/uploads`,
+            input.token,
+            {
+              method: "POST",
+              signal: input.signal,
+              body: form
+            }
+          );
+          if (!response.ok) {
+            throw new Error(
+              `GitLab upload review asset failed: ${response.status} ${await response.text()}`
+            );
+          }
+          const uploaded = await response.json();
+          const uploadPath = String(uploaded["full_path"] ?? uploaded["url"] ?? "");
+          published.push(
+            PublishedReviewAssetSchema.parse({
+              artifactId: asset.artifactId,
+              targetId: asset.targetId,
+              role: asset.role,
+              label: asset.label,
+              url: uploadPath,
+              embeddable: asset.role !== "e2e-video"
+            })
+          );
+        }
+        return published;
+      }
+      async gitlabFetch(url2, token, init) {
+        const headers = {
+          "PRIVATE-TOKEN": token,
+          ...init.body instanceof FormData ? {} : { "Content-Type": "application/json" },
+          ...init.headers
+        };
+        const { signal, ...requestInit } = init;
+        return this.fetchImpl(url2, {
+          ...requestInit,
+          ...signal === void 0 ? {} : { signal },
+          headers
+        });
+      }
+    };
+  }
+});
+
+// src/publisher/index.ts
+var init_publisher = __esm({
+  "src/publisher/index.ts"() {
+    "use strict";
+    init_publish_contracts();
+    init_remote_detector();
+    init_token_provider();
+    init_publish_redaction();
+    init_publisher_port();
+    init_review_host();
+    init_github_publisher();
+    init_gitlab_publisher();
   }
 });
 
@@ -41868,897 +43007,144 @@ var init_id_factory = __esm({
   }
 });
 
-// src/workflow/workload-policy.ts
-function estimateWorkload(input) {
-  const signals = WorkloadSignalsSchema.parse(input.signals);
-  const score = Math.ceil(
-    (signals.requirements ?? 0) * 2 + (signals.relevantFiles ?? 0) + (signals.apiOperations ?? 0) * 3 + (signals.uiSurfaces ?? 0) * 4 + Math.min(signals.figmaNodes ?? 0, 40) * 0.5 + (signals.testTargets ?? 0) * 2 + Math.min(signals.workspacePackages ?? 0, 20) * 4 + (signals.uncertainty ?? 2) * 4 + MODE_WEIGHT[input.mode] + (input.scope.code ? 2 : 0) + (input.scope.api ? 3 : 0) + (input.scope.ui ? 4 : 0)
+// src/run/stages.ts
+function createInitialStageStates() {
+  return RUN_STAGE_NAMES.map(
+    (name) => StageStateSchema.parse({
+      name,
+      status: "pending",
+      attempt: 0,
+      maxAttempts: 3,
+      artifactIds: [],
+      gapIds: []
+    })
   );
-  const size = sizeForScore(score);
-  const tokenRange = TOKEN_RANGES[size];
-  const observedFields = Object.keys(signals).filter((key) => key !== "uncertainty").length;
-  const confidence = input.phase === "intake" ? "low" : (signals.uncertainty ?? 1) === 0 && observedFields >= 5 ? "high" : (signals.uncertainty ?? 1) <= 2 && observedFields >= 3 ? "medium" : "low";
-  const reasons = [
-    `${input.phase} signals score ${score}`,
-    `${input.mode} delivery profile`,
-    input.scope.ui ? "UI scope included" : "No UI scope",
-    input.scope.api ? "API scope included" : "No API scope"
-  ];
-  return WorkloadEstimateSchema.parse({
-    size,
-    score,
-    confidence,
-    source: input.phase,
-    tokenRange,
-    budget: {
-      checkpointPercent: 80,
-      checkpointAtTokens: Math.floor(tokenRange.max * 0.8),
-      hardLimitTokens: tokenRange.max
-    },
-    sampleCount: 0,
-    reasons
-  });
 }
-function sizeForScore(score) {
-  if (score <= 8) return "XS";
-  if (score <= 24) return "S";
-  if (score <= 50) return "M";
-  if (score <= 90) return "L";
-  return "XL";
-}
-var WorkloadSizeSchema, WorkloadConfidenceSchema, WorkloadSignalsSchema, WorkloadEstimateSchema, TOKEN_RANGES, MODE_WEIGHT;
-var init_workload_policy = __esm({
-  "src/workflow/workload-policy.ts"() {
-    "use strict";
-    init_zod();
-    WorkloadSizeSchema = external_exports.enum(["XS", "S", "M", "L", "XL"]);
-    WorkloadConfidenceSchema = external_exports.enum(["low", "medium", "high"]);
-    WorkloadSignalsSchema = external_exports.object({
-      requirements: external_exports.number().int().nonnegative().optional(),
-      relevantFiles: external_exports.number().int().nonnegative().optional(),
-      apiOperations: external_exports.number().int().nonnegative().optional(),
-      uiSurfaces: external_exports.number().int().nonnegative().optional(),
-      figmaNodes: external_exports.number().int().nonnegative().optional(),
-      testTargets: external_exports.number().int().nonnegative().optional(),
-      workspacePackages: external_exports.number().int().nonnegative().optional(),
-      uncertainty: external_exports.number().int().min(0).max(5).optional()
-    }).strict().refine(
-      (signals) => Object.keys(signals).some((key) => key !== "uncertainty"),
-      "At least one observed workload signal is required"
-    );
-    WorkloadEstimateSchema = external_exports.object({
-      size: WorkloadSizeSchema,
-      score: external_exports.number().int().nonnegative(),
-      confidence: WorkloadConfidenceSchema,
-      source: external_exports.enum(["intake", "contracts", "calibrated"]),
-      tokenRange: external_exports.object({
-        min: external_exports.number().int().positive(),
-        max: external_exports.number().int().positive()
-      }).strict().refine((range) => range.min < range.max, "Token range min must be below max"),
-      budget: external_exports.object({
-        checkpointPercent: external_exports.literal(80),
-        checkpointAtTokens: external_exports.number().int().positive(),
-        hardLimitTokens: external_exports.number().int().positive()
-      }).strict(),
-      sampleCount: external_exports.number().int().nonnegative(),
-      reasons: external_exports.array(external_exports.string().trim().min(1)).min(1)
-    }).strict().superRefine((estimate, context) => {
-      if (estimate.budget.hardLimitTokens !== estimate.tokenRange.max) {
-        context.addIssue({
-          code: "custom",
-          path: ["budget", "hardLimitTokens"],
-          message: "Workload hard limit must equal the token range maximum"
-        });
-      }
-      if (estimate.budget.checkpointAtTokens !== Math.floor(estimate.budget.hardLimitTokens * 0.8)) {
-        context.addIssue({
-          code: "custom",
-          path: ["budget", "checkpointAtTokens"],
-          message: "Workload checkpoint must equal 80% of the hard limit"
-        });
-      }
-    });
-    TOKEN_RANGES = {
-      XS: { min: 2e4, max: 5e4 },
-      S: { min: 45e3, max: 1e5 },
-      M: { min: 9e4, max: 18e4 },
-      L: { min: 16e4, max: 32e4 },
-      XL: { min: 28e4, max: 6e5 }
-    };
-    MODE_WEIGHT = {
-      auto: 0,
-      brief: 4,
-      legacy: 8,
-      feature: 6,
-      figma: 5
-    };
-  }
-});
-
-// src/workflow/workflow-contracts.ts
-function uniqueBoundedArray(item, label, max = 20) {
-  return external_exports.array(item).max(max).superRefine((items, context) => {
-    const seen = /* @__PURE__ */ new Set();
-    items.forEach((item2, index) => {
-      const key = String(item2);
-      if (seen.has(key)) {
-        context.addIssue({
-          code: "custom",
-          path: [index],
-          message: `${label} entries must be unique`
-        });
-      }
-      seen.add(key);
-    });
-  });
-}
-function isTargetedPlaywrightCommand(command, selector) {
-  if (/(?:&&|\|\||[;&|`\n\r]|\$\()/.test(command)) return false;
-  const tokens = tokenizeCommand(command);
-  if (tokens === void 0) return false;
-  let index = 0;
-  if (["npx", "bunx", "yarn"].includes(tokens[index] ?? "")) index += 1;
-  if (tokens[index] === "pnpm") {
-    index += 1;
-    if (tokens[index] === "exec") index += 1;
-  }
-  if (!["playwright", "./node_modules/.bin/playwright"].includes(tokens[index] ?? "")) {
-    return false;
-  }
-  if (tokens[index + 1] !== "test") return false;
-  const args = tokens.slice(index + 2);
-  const parsed = parsePlaywrightArguments(args);
-  if (parsed === void 0) return false;
-  if (/^@/.test(selector)) {
-    return parsed.positionals.length === 0 && parsed.grep.length === 1 && parsed.grep[0] === selector;
-  }
-  if (/^--project(?:=|\s+)/.test(selector)) {
-    const project = selector.replace(/^--project(?:=|\s+)/, "");
-    return parsed.positionals.length === 0 && parsed.projects.length === 1 && parsed.projects[0] === project;
-  }
-  return parsed.positionals.length === 1 && parsed.positionals[0] === selector;
-}
-function tokenizeCommand(command) {
-  const tokens = [];
-  let token = "";
-  let quote;
-  let escaped = false;
-  for (const character of command.trim()) {
-    if (escaped) {
-      token += character;
-      escaped = false;
-    } else if (character === "\\" && quote !== "'") {
-      escaped = true;
-    } else if (quote !== void 0) {
-      if (character === quote) quote = void 0;
-      else token += character;
-    } else if (character === "'" || character === '"') {
-      quote = character;
-    } else if (/\s/.test(character)) {
-      if (token.length > 0) {
-        tokens.push(token);
-        token = "";
-      }
-    } else {
-      token += character;
-    }
-  }
-  if (escaped || quote !== void 0) return void 0;
-  if (token.length > 0) tokens.push(token);
-  return tokens;
-}
-function parsePlaywrightArguments(args) {
-  const positionals = [];
-  const grep = [];
-  const projects = [];
-  const forbiddenOptions = /* @__PURE__ */ new Set(["--list", "--pass-with-no-tests"]);
-  const optionsWithValues = /* @__PURE__ */ new Set([
-    "--config",
-    "--grep-invert",
-    "--output",
-    "--reporter",
-    "--repeat-each",
-    "--retries",
-    "--shard",
-    "--timeout",
-    "--trace",
-    "--workers"
-  ]);
-  for (let index = 0; index < args.length; index += 1) {
-    const argument = args[index];
-    if (argument === "--" || /^-[^-]/.test(argument)) return void 0;
-    if (forbiddenOptions.has(argument)) return void 0;
-    if (argument.startsWith("--grep=")) {
-      grep.push(argument.slice("--grep=".length));
-    } else if (argument === "--grep") {
-      const value = args[++index];
-      if (value === void 0 || value.startsWith("-")) return void 0;
-      grep.push(value);
-    } else if (argument.startsWith("--project=")) {
-      projects.push(argument.slice("--project=".length));
-    } else if (argument === "--project") {
-      const value = args[++index];
-      if (value === void 0 || value.startsWith("-")) return void 0;
-      projects.push(value);
-    } else if (optionsWithValues.has(argument)) {
-      const value = args[++index];
-      if (value === void 0 || value.startsWith("-")) return void 0;
-    } else if (argument.startsWith("--")) {
-      continue;
-    } else {
-      positionals.push(argument);
-    }
-  }
-  return { positionals, grep, projects };
-}
-var WorkflowScopeSchema, DeliveryModeSchema, ChangeKindSchema, PublicationIntentSchema, FigmaFileUrlSchema, ImplementationContextIdSchema, WorkflowSourcePathSchema, SkillHintSchema, NormalizedSourcePathsSchema, NormalizedSkillHintsSchema, GuidanceTraceSchema, DeliveryProfileSchema, ReviewVerdictSchema, ReviewFindingSeveritySchema, RequirementVerdictSchema, WorkflowGateIdSchema, ReviewPacketIdSchema, ImplementationReviewPacketSchema, RequirementContractSchema, LegacyBaselineSchema, ReviewFindingSchema, ReviewRequirementSchema, ReviewGateResultSchema, ReviewSubmissionSchema, ContractsSubmissionSchema, ApiArtifactsSchema, ApiReadySubmissionSchema, FeatureEvidenceSchema, ImplementationSubmissionSchema, FigmaBundleSubmissionSchema, WorkflowSubmissionSchema, WorkflowActionSchema, WorkflowStageSummarySchema, WorkflowResumeContextSchema, WorkflowStatusSchema;
-var init_workflow_contracts = __esm({
-  "src/workflow/workflow-contracts.ts"() {
+var RUN_STAGE_NAMES, RunStageNameSchema, StageStatusSchema, LeaseIdSchema, WorkerIdSchema, StageLeaseSchema, StageCheckpointSchema, StageErrorSchema, StageStateSchema;
+var init_stages = __esm({
+  "src/run/stages.ts"() {
     "use strict";
     init_zod();
     init_ids();
     init_scalars();
-    init_workload_policy();
-    WorkflowScopeSchema = external_exports.object({
-      code: external_exports.boolean(),
-      ui: external_exports.boolean(),
-      api: external_exports.boolean(),
-      specification: external_exports.boolean(),
-      hasVisualBaseline: external_exports.boolean(),
-      securitySensitive: external_exports.boolean(),
-      performanceSensitive: external_exports.boolean(),
-      observabilityRequested: external_exports.boolean()
-    }).strict();
-    DeliveryModeSchema = external_exports.enum(["auto", "brief", "legacy", "feature", "figma"]);
-    ChangeKindSchema = external_exports.enum([
-      "auto",
-      "feature",
-      "fix",
-      "refactor",
-      "migration",
-      "design",
-      "docs"
+    RUN_STAGE_NAMES = [
+      "intake",
+      "contracts",
+      "implementation",
+      "functional-review",
+      "design-review",
+      "report",
+      "publish",
+      "archive"
+    ];
+    RunStageNameSchema = external_exports.enum(RUN_STAGE_NAMES);
+    StageStatusSchema = external_exports.enum([
+      "pending",
+      "running",
+      "passed",
+      "failed",
+      "blocked",
+      "waived",
+      "skipped"
     ]);
-    PublicationIntentSchema = external_exports.enum(["draft", "none"]);
-    FigmaFileUrlSchema = external_exports.string().url().refine((value) => {
-      const parsed = new URL(value);
-      const host = parsed.hostname.toLowerCase();
-      return (host === "figma.com" || host === "www.figma.com") && /^\/(?:design|file|proto)\//i.test(parsed.pathname);
-    }, "Figma URL must be a figma.com design, file, or prototype URL");
-    ImplementationContextIdSchema = external_exports.string().trim().min(8).max(128).regex(/^[a-z0-9][a-z0-9._:-]+$/i, "Implementation context ID contains unsupported characters");
-    WorkflowSourcePathSchema = external_exports.string().trim().min(1).max(1e3);
-    SkillHintSchema = external_exports.string().trim().min(1).max(128).regex(
-      /^[a-z0-9][a-z0-9._ -]*(?::[a-z0-9][a-z0-9._ -]*)?$/i,
-      "Skill hint must be a skill name, not a filesystem path"
-    );
-    NormalizedSourcePathsSchema = uniqueBoundedArray(WorkflowSourcePathSchema, "Source path");
-    NormalizedSkillHintsSchema = uniqueBoundedArray(SkillHintSchema, "Skill hint");
-    GuidanceTraceSchema = external_exports.object({
-      explicit: NormalizedSourcePathsSchema.default([]),
-      discovered: NormalizedSourcePathsSchema.default([]),
-      skillHints: NormalizedSkillHintsSchema.default([])
-    }).strict().superRefine((trace, context) => {
-      if (trace.explicit.length + trace.discovered.length > 20) {
+    LeaseIdSchema = external_exports.string().regex(/^lease_[a-f0-9]{32}$/, "Expected lease_<32 lowercase hex characters>");
+    WorkerIdSchema = external_exports.string().trim().min(1).max(200).regex(/^[A-Za-z0-9._:-]+$/, "Worker id contains unsupported characters");
+    StageLeaseSchema = external_exports.object({
+      id: LeaseIdSchema,
+      workerId: WorkerIdSchema,
+      acquiredAt: IsoDateTimeSchema,
+      heartbeatAt: IsoDateTimeSchema,
+      expiresAt: IsoDateTimeSchema
+    }).strict().superRefine((lease, context) => {
+      if (Date.parse(lease.heartbeatAt) < Date.parse(lease.acquiredAt)) {
         context.addIssue({
           code: "custom",
-          path: ["discovered"],
-          message: "Combined explicit and discovered guidance cannot exceed 20 files"
+          message: "heartbeatAt must be after acquiredAt",
+          path: ["heartbeatAt"]
+        });
+      }
+      if (Date.parse(lease.expiresAt) <= Date.parse(lease.heartbeatAt)) {
+        context.addIssue({
+          code: "custom",
+          message: "expiresAt must be after heartbeatAt",
+          path: ["expiresAt"]
         });
       }
     });
-    DeliveryProfileSchema = external_exports.object({
-      mode: DeliveryModeSchema,
-      changeKind: ChangeKindSchema,
-      publication: PublicationIntentSchema,
-      briefPath: WorkflowSourcePathSchema.optional(),
-      figmaUrl: FigmaFileUrlSchema.optional(),
-      docsPaths: NormalizedSourcePathsSchema.default([]),
-      openApiPaths: NormalizedSourcePathsSchema.default([]),
-      guidancePaths: NormalizedSourcePathsSchema.default([]),
-      discoveredGuidancePaths: NormalizedSourcePathsSchema.default([]),
-      skillHints: NormalizedSkillHintsSchema.default([]),
-      requirements: external_exports.object({
-        brief: external_exports.boolean(),
-        legacyBaseline: external_exports.boolean(),
-        targetedFeatureE2E: external_exports.boolean(),
-        featureVideo: external_exports.boolean(),
-        figmaBundle: external_exports.boolean()
-      }).strict()
-    }).strict().superRefine((profile, context) => {
-      const classifiedSources = /* @__PURE__ */ new Map();
-      for (const field of ["docsPaths", "openApiPaths"]) {
-        profile[field].forEach((sourcePath, index) => {
-          const previous = classifiedSources.get(sourcePath);
-          if (previous !== void 0 && previous !== field) {
-            context.addIssue({
-              code: "custom",
-              path: [field, index],
-              message: `Source path conflicts with ${previous}: ${sourcePath}`
-            });
-          }
-          classifiedSources.set(sourcePath, field);
-        });
-      }
-      const explicitGuidance = new Set(profile.guidancePaths);
-      for (const field of ["guidancePaths", "discoveredGuidancePaths"]) {
-        profile[field].forEach((sourcePath, index) => {
-          const previous = classifiedSources.get(sourcePath);
-          if (previous !== void 0) {
-            context.addIssue({
-              code: "custom",
-              path: [field, index],
-              message: `Guidance path conflicts with ${previous}: ${sourcePath}`
-            });
-          }
-        });
-      }
-      profile.discoveredGuidancePaths.forEach((sourcePath, index) => {
-        if (explicitGuidance.has(sourcePath)) {
-          context.addIssue({
-            code: "custom",
-            path: ["discoveredGuidancePaths", index],
-            message: `Discovered guidance duplicates explicit guidance: ${sourcePath}`
-          });
-        }
-      });
-      if (profile.guidancePaths.length + profile.discoveredGuidancePaths.length > 20) {
+    StageCheckpointSchema = external_exports.object({
+      name: external_exports.string().trim().min(1).max(200),
+      data: external_exports.record(external_exports.string(), external_exports.unknown()).default({}),
+      updatedAt: IsoDateTimeSchema
+    }).strict();
+    StageErrorSchema = external_exports.object({
+      code: external_exports.string().trim().min(1).max(100),
+      message: external_exports.string().trim().min(1).max(2e3),
+      retryable: external_exports.boolean()
+    }).strict();
+    StageStateSchema = external_exports.object({
+      name: RunStageNameSchema,
+      status: StageStatusSchema,
+      attempt: external_exports.number().int().nonnegative(),
+      maxAttempts: external_exports.number().int().positive().default(3),
+      owner: AgentRoleSchema.optional(),
+      startedAt: IsoDateTimeSchema.optional(),
+      completedAt: IsoDateTimeSchema.optional(),
+      lease: StageLeaseSchema.optional(),
+      checkpoint: StageCheckpointSchema.optional(),
+      artifactIds: external_exports.array(ArtifactIdSchema).default([]),
+      gapIds: external_exports.array(GapIdSchema).default([]),
+      error: StageErrorSchema.optional()
+    }).strict().superRefine((stage2, context) => {
+      if (stage2.startedAt !== void 0 && stage2.completedAt !== void 0 && Date.parse(stage2.completedAt) < Date.parse(stage2.startedAt)) {
         context.addIssue({
           code: "custom",
-          path: ["discoveredGuidancePaths"],
-          message: "Combined explicit and discovered guidance cannot exceed 20 files"
+          message: "completedAt must be after startedAt",
+          path: ["completedAt"]
+        });
+      }
+      if (stage2.status === "running" && stage2.lease === void 0) {
+        context.addIssue({
+          code: "custom",
+          message: "Running stages require a lease",
+          path: ["lease"]
+        });
+      }
+      if (stage2.status !== "running" && stage2.lease !== void 0) {
+        context.addIssue({
+          code: "custom",
+          message: "Only running stages may include a lease",
+          path: ["lease"]
+        });
+      }
+      if (stage2.error !== void 0 && !["failed", "blocked"].includes(stage2.status)) {
+        context.addIssue({
+          code: "custom",
+          message: "Only failed or blocked stages may include error",
+          path: ["error"]
+        });
+      }
+      if (stage2.status === "failed" && stage2.error === void 0) {
+        context.addIssue({
+          code: "custom",
+          message: "Failed stages require error information",
+          path: ["error"]
+        });
+      }
+      if (stage2.status === "blocked" && stage2.gapIds.length === 0) {
+        context.addIssue({
+          code: "custom",
+          message: "Blocked stages must reference at least one gap",
+          path: ["gapIds"]
+        });
+      }
+      if (stage2.attempt > stage2.maxAttempts) {
+        context.addIssue({
+          code: "custom",
+          message: "attempt cannot exceed maxAttempts",
+          path: ["attempt"]
         });
       }
     });
-    ReviewVerdictSchema = external_exports.enum(["approved", "changes-requested", "blocked"]);
-    ReviewFindingSeveritySchema = external_exports.enum(["minor", "major", "blocker"]);
-    RequirementVerdictSchema = external_exports.enum(["accepted", "rejected", "blocked"]);
-    WorkflowGateIdSchema = external_exports.enum([
-      "functional",
-      "openspec",
-      "architecture",
-      "security",
-      "visual",
-      "accessibility",
-      "performance",
-      "observability",
-      "release"
-    ]);
-    ReviewPacketIdSchema = external_exports.string().regex(/^packet_[a-f0-9]{64}$/, "Expected packet_<64 lowercase hex characters>");
-    ImplementationReviewPacketSchema = external_exports.object({
-      id: ReviewPacketIdSchema,
-      runId: RunIdSchema,
-      revision: external_exports.number().int().positive(),
-      baseSha: GitObjectIdSchema,
-      headSha: GitObjectIdSchema,
-      evidenceDigest: Sha256DigestSchema,
-      diffDigest: Sha256DigestSchema,
-      changedFiles: external_exports.array(external_exports.string().trim().min(1)).max(1e4)
-    }).strict();
-    RequirementContractSchema = external_exports.object({
-      id: external_exports.string().trim().min(1).max(200),
-      title: external_exports.string().trim().min(1).max(500),
-      acceptanceCriteria: external_exports.array(external_exports.string().trim().min(1).max(2e3)).min(1).max(50)
-    }).strict();
-    LegacyBaselineSchema = external_exports.object({
-      scope: external_exports.string().trim().min(1).max(2e3),
-      evidencePaths: external_exports.array(external_exports.string().trim().min(1)).min(1),
-      checks: external_exports.array(
-        external_exports.object({
-          command: external_exports.string().trim().min(1).max(2e3),
-          resultPath: external_exports.string().trim().min(1),
-          status: external_exports.enum(["passed", "failed"])
-        }).strict()
-      ).min(1).max(50)
-    }).strict();
-    ReviewFindingSchema = external_exports.object({
-      severity: ReviewFindingSeveritySchema,
-      title: external_exports.string().trim().min(1).max(500),
-      evidence: external_exports.array(external_exports.string().trim().min(1)).default([])
-    }).strict();
-    ReviewRequirementSchema = external_exports.object({
-      id: external_exports.string().trim().min(1).max(200),
-      verdict: RequirementVerdictSchema
-    }).strict();
-    ReviewGateResultSchema = external_exports.object({
-      id: WorkflowGateIdSchema,
-      status: external_exports.enum(["passed", "failed", "blocked"]),
-      evidencePaths: external_exports.array(external_exports.string().trim().min(1)).min(1)
-    }).strict();
-    ReviewSubmissionSchema = external_exports.object({
-      kind: external_exports.enum(["functional-review", "design-review"]),
-      reviewPacketId: ReviewPacketIdSchema,
-      verdict: ReviewVerdictSchema,
-      summary: external_exports.string().trim().min(1).max(4e3),
-      findings: external_exports.array(ReviewFindingSchema).default([]),
-      requirements: external_exports.array(ReviewRequirementSchema).default([]),
-      artifactPaths: external_exports.array(external_exports.string().trim().min(1)).default([]),
-      gateResults: external_exports.array(ReviewGateResultSchema).default([])
-    }).strict().superRefine((review, context) => {
-      if (review.verdict !== "approved") {
-        return;
-      }
-      if (review.artifactPaths.length === 0) {
-        context.addIssue({
-          code: "custom",
-          path: ["artifactPaths"],
-          message: "Approved reviews require concrete evidence artifacts"
-        });
-      }
-      if (review.requirements.length === 0) {
-        context.addIssue({
-          code: "custom",
-          path: ["requirements"],
-          message: "Approved reviews require at least one reviewed requirement"
-        });
-      }
-      if (review.gateResults.length === 0) {
-        context.addIssue({
-          code: "custom",
-          path: ["gateResults"],
-          message: "Approved reviews require structured gate results"
-        });
-      }
-      const seenGateIds = /* @__PURE__ */ new Set();
-      review.gateResults.forEach((gate2, index) => {
-        if (seenGateIds.has(gate2.id)) {
-          context.addIssue({
-            code: "custom",
-            path: ["gateResults", index, "id"],
-            message: `Duplicate gate result ${gate2.id}`
-          });
-        }
-        seenGateIds.add(gate2.id);
-        if (gate2.status !== "passed") {
-          context.addIssue({
-            code: "custom",
-            path: ["gateResults", index, "status"],
-            message: "Approved reviews require every reported gate to pass"
-          });
-        }
-        gate2.evidencePaths.forEach((evidencePath, evidenceIndex) => {
-          if (!review.artifactPaths.includes(evidencePath)) {
-            context.addIssue({
-              code: "custom",
-              path: ["gateResults", index, "evidencePaths", evidenceIndex],
-              message: "Gate evidence must be included in artifactPaths"
-            });
-          }
-        });
-      });
-      review.findings.forEach((finding, index) => {
-        if (finding.severity === "major" || finding.severity === "blocker") {
-          context.addIssue({
-            code: "custom",
-            path: ["findings", index, "severity"],
-            message: "Approved reviews cannot contain major or blocker findings"
-          });
-        }
-      });
-      review.requirements.forEach((requirement, index) => {
-        if (requirement.verdict !== "accepted") {
-          context.addIssue({
-            code: "custom",
-            path: ["requirements", index, "verdict"],
-            message: "Approved reviews require every reviewed requirement to be accepted"
-          });
-        }
-      });
-    });
-    ContractsSubmissionSchema = external_exports.object({
-      kind: external_exports.literal("contracts"),
-      status: external_exports.enum(["passed", "failed", "blocked"]),
-      summary: external_exports.string().trim().min(1).max(4e3),
-      artifactPaths: external_exports.array(external_exports.string().trim().min(1)).default([]),
-      baselinePaths: external_exports.array(external_exports.string().trim().min(1)).default([]),
-      requirementManifest: external_exports.array(RequirementContractSchema).default([]),
-      legacyBaseline: LegacyBaselineSchema.optional(),
-      workloadSignals: WorkloadSignalsSchema.optional(),
-      guidanceTrace: GuidanceTraceSchema.default({
-        explicit: [],
-        discovered: [],
-        skillHints: []
-      })
-    }).strict().superRefine((submission, context) => {
-      if (submission.status === "passed" && submission.artifactPaths.length === 0) {
-        context.addIssue({
-          code: "custom",
-          path: ["artifactPaths"],
-          message: "Passed contracts require generated contract artifacts"
-        });
-      }
-      if (submission.status === "passed" && submission.requirementManifest.length === 0) {
-        context.addIssue({
-          code: "custom",
-          path: ["requirementManifest"],
-          message: "Passed contracts require structured requirements and acceptance criteria"
-        });
-      }
-      const requirementIds = /* @__PURE__ */ new Set();
-      submission.requirementManifest.forEach((requirement, index) => {
-        if (requirementIds.has(requirement.id)) {
-          context.addIssue({
-            code: "custom",
-            path: ["requirementManifest", index, "id"],
-            message: `Duplicate requirement ${requirement.id}`
-          });
-        }
-        requirementIds.add(requirement.id);
-      });
-      submission.baselinePaths.forEach((baselinePath, index) => {
-        if (!submission.artifactPaths.includes(baselinePath)) {
-          context.addIssue({
-            code: "custom",
-            path: ["baselinePaths", index],
-            message: "Every baseline must be included in artifactPaths"
-          });
-        }
-      });
-      submission.legacyBaseline?.evidencePaths.forEach((baselinePath, index) => {
-        if (!submission.artifactPaths.includes(baselinePath)) {
-          context.addIssue({
-            code: "custom",
-            path: ["legacyBaseline", "evidencePaths", index],
-            message: "Every focused legacy baseline must be included in artifactPaths"
-          });
-        }
-      });
-      submission.legacyBaseline?.checks.forEach((check2, index) => {
-        if (!submission.legacyBaseline?.evidencePaths.includes(check2.resultPath)) {
-          context.addIssue({
-            code: "custom",
-            path: ["legacyBaseline", "checks", index, "resultPath"],
-            message: "Legacy baseline check results must be declared as baseline evidence"
-          });
-        }
-        if (submission.status === "passed" && check2.status !== "passed") {
-          context.addIssue({
-            code: "custom",
-            path: ["legacyBaseline", "checks", index, "status"],
-            message: "Passed contracts require every focused legacy baseline check to pass"
-          });
-        }
-      });
-    });
-    ApiArtifactsSchema = external_exports.object({
-      types: external_exports.array(external_exports.string().trim().min(1)).min(1),
-      schemas: external_exports.array(external_exports.string().trim().min(1)).min(1),
-      wrappers: external_exports.array(external_exports.string().trim().min(1)).min(1),
-      mocks: external_exports.array(external_exports.string().trim().min(1)).min(1),
-      contractTests: external_exports.array(external_exports.string().trim().min(1)).min(1)
-    }).strict();
-    ApiReadySubmissionSchema = external_exports.object({
-      kind: external_exports.literal("api-ready"),
-      status: external_exports.literal("passed"),
-      summary: external_exports.string().trim().min(1).max(4e3),
-      implementationContextId: ImplementationContextIdSchema,
-      artifactPaths: external_exports.array(external_exports.string().trim().min(1)).min(1),
-      apiArtifacts: ApiArtifactsSchema
-    }).strict().superRefine((submission, context) => {
-      const categorizedPaths = /* @__PURE__ */ new Set();
-      for (const [group, paths] of Object.entries(submission.apiArtifacts)) {
-        paths.forEach((artifactPath, index) => {
-          if (!submission.artifactPaths.includes(artifactPath)) {
-            context.addIssue({
-              code: "custom",
-              path: ["apiArtifacts", group, index],
-              message: "Every API-ready artifact must be included in artifactPaths"
-            });
-          }
-          if (categorizedPaths.has(artifactPath)) {
-            context.addIssue({
-              code: "custom",
-              path: ["apiArtifacts", group, index],
-              message: "API-ready artifact categories must use distinct evidence files"
-            });
-          }
-          categorizedPaths.add(artifactPath);
-        });
-      }
-    });
-    FeatureEvidenceSchema = external_exports.object({
-      scope: external_exports.literal("targeted-feature"),
-      testSelector: external_exports.string().trim().min(3).max(500).refine(
-        (selector) => /(?:^|[/\\])[^/\\]+\.(?:spec|test)\.[cm]?[jt]sx?$/i.test(selector) || /^@[a-z0-9][a-z0-9._-]+$/i.test(selector) || /^--project(?:=|\s+)[a-z0-9][a-z0-9._-]+$/i.test(selector),
-        "Feature E2E selector must be a specific test file, @tag, or --project value"
-      ),
-      testCommand: external_exports.string().trim().min(1).max(2e3),
-      resultPath: external_exports.string().trim().min(1),
-      videoPath: external_exports.string().trim().regex(/\.(?:webm|mp4)$/i, "Feature video must be .webm or .mp4")
-    }).strict();
-    ImplementationSubmissionSchema = external_exports.object({
-      kind: external_exports.literal("implementation"),
-      status: external_exports.enum(["passed", "failed", "blocked"]),
-      summary: external_exports.string().trim().min(1).max(4e3),
-      apiReady: external_exports.boolean(),
-      implementationContextId: ImplementationContextIdSchema.optional(),
-      uiChanged: external_exports.boolean(),
-      changedFiles: external_exports.array(external_exports.string().trim().min(1)).default([]),
-      artifactPaths: external_exports.array(external_exports.string().trim().min(1)).default([]),
-      featureEvidence: FeatureEvidenceSchema.optional()
-    }).strict().superRefine((submission, context) => {
-      if (submission.status === "passed" && submission.artifactPaths.length === 0) {
-        context.addIssue({
-          code: "custom",
-          path: ["artifactPaths"],
-          message: "Passed implementation requires executable evidence artifacts"
-        });
-      }
-      if (submission.featureEvidence !== void 0) {
-        const evidence = submission.featureEvidence;
-        if (submission.implementationContextId === void 0) {
-          context.addIssue({
-            code: "custom",
-            path: ["implementationContextId"],
-            message: "Feature evidence requires an implementationContextId"
-          });
-        }
-        if (!isTargetedPlaywrightCommand(evidence.testCommand, evidence.testSelector)) {
-          context.addIssue({
-            code: "custom",
-            path: ["featureEvidence", "testCommand"],
-            message: "Targeted E2E command must be one unchained Playwright invocation with the declared selector as an argument"
-          });
-        }
-        for (const [key, evidencePath] of [
-          ["resultPath", evidence.resultPath],
-          ["videoPath", evidence.videoPath]
-        ]) {
-          if (!submission.artifactPaths.includes(evidencePath)) {
-            context.addIssue({
-              code: "custom",
-              path: ["featureEvidence", key],
-              message: `${key} must be included in artifactPaths`
-            });
-          }
-        }
-        const videos = submission.artifactPaths.filter(
-          (artifactPath) => /\.(?:webm|mp4)$/i.test(artifactPath)
-        );
-        if (videos.length !== 1 || videos[0] !== evidence.videoPath) {
-          context.addIssue({
-            code: "custom",
-            path: ["artifactPaths"],
-            message: "Feature evidence requires exactly one declared video"
-          });
-        }
-      }
-    });
-    FigmaBundleSubmissionSchema = external_exports.object({
-      kind: external_exports.literal("figma-bundle"),
-      provider: external_exports.literal("host-connected-figma"),
-      capturedAt: external_exports.string().datetime({ offset: true }),
-      fileUrl: FigmaFileUrlSchema,
-      nodeIds: external_exports.array(external_exports.string().trim().min(1)).min(1),
-      manifestPath: external_exports.string().trim().regex(/\.json$/i, "Figma manifest must be a JSON file"),
-      artifactPaths: external_exports.array(external_exports.string().trim().min(1)).min(1)
-    }).strict().superRefine((submission, context) => {
-      if (!submission.artifactPaths.includes(submission.manifestPath)) {
-        context.addIssue({
-          code: "custom",
-          path: ["manifestPath"],
-          message: "Figma manifest must be included in artifactPaths"
-        });
-      }
-      if (new Set(submission.artifactPaths).size !== submission.artifactPaths.length) {
-        context.addIssue({
-          code: "custom",
-          path: ["artifactPaths"],
-          message: "Figma bundle artifact paths must be unique"
-        });
-      }
-      const visualPaths = submission.artifactPaths.filter(
-        (artifactPath) => artifactPath !== submission.manifestPath
-      );
-      if (visualPaths.length === 0 || visualPaths.some((artifactPath) => !/\.png$/i.test(artifactPath))) {
-        context.addIssue({
-          code: "custom",
-          path: ["artifactPaths"],
-          message: "Figma bundle requires one JSON manifest and one or more PNG visuals"
-        });
-      }
-    });
-    WorkflowSubmissionSchema = external_exports.union([
-      ContractsSubmissionSchema,
-      ApiReadySubmissionSchema,
-      ImplementationSubmissionSchema,
-      ReviewSubmissionSchema,
-      FigmaBundleSubmissionSchema
-    ]);
-    WorkflowActionSchema = external_exports.discriminatedUnion("kind", [
-      external_exports.object({ kind: external_exports.literal("prepare-contracts"), runId: RunIdSchema }).strict(),
-      external_exports.object({
-        kind: external_exports.literal("implement"),
-        runId: RunIdSchema,
-        requireApiReady: external_exports.boolean()
-      }).strict(),
-      external_exports.object({
-        kind: external_exports.literal("review-functional"),
-        runId: RunIdSchema,
-        reviewPacketId: ReviewPacketIdSchema
-      }).strict(),
-      external_exports.object({
-        kind: external_exports.literal("review-design"),
-        runId: RunIdSchema,
-        reviewPacketId: ReviewPacketIdSchema
-      }).strict(),
-      external_exports.object({ kind: external_exports.literal("publish-draft"), runId: RunIdSchema }).strict(),
-      external_exports.object({ kind: external_exports.literal("archive-after-merge"), runId: RunIdSchema }).strict()
-    ]);
-    WorkflowStageSummarySchema = external_exports.object({
-      name: external_exports.string().trim().min(1),
-      status: external_exports.enum(["pending", "running", "passed", "failed", "blocked", "skipped", "waived"]),
-      checkpoint: external_exports.string().trim().min(1).optional()
-    }).strict();
-    WorkflowResumeContextSchema = external_exports.object({
-      goal: external_exports.string().trim().min(1).max(4e3),
-      evidencePaths: external_exports.array(external_exports.string().trim().min(1).max(1e3)).max(200),
-      submissions: external_exports.array(
-        external_exports.object({
-          kind: external_exports.string().trim().min(1),
-          summary: external_exports.string().trim().min(1).max(500),
-          outcome: external_exports.string().trim().min(1)
-        }).strict()
-      ).max(16)
-    }).strict();
-    WorkflowStatusSchema = external_exports.object({
-      runId: RunIdSchema,
-      status: external_exports.enum(["running", "needs-external-action", "blocked", "publish-ready", "completed"]),
-      currentStage: external_exports.string().trim().min(1).optional(),
-      scope: WorkflowScopeSchema,
-      deliveryProfile: DeliveryProfileSchema,
-      workload: WorkloadEstimateSchema,
-      requiredValidations: external_exports.array(external_exports.string().trim().min(1)).superRefine((items, context) => {
-        if (new Set(items).size !== items.length) {
-          context.addIssue({ code: "custom", message: "Required validations must be unique" });
-        }
-      }),
-      stages: external_exports.array(WorkflowStageSummarySchema),
-      nextActions: external_exports.array(WorkflowActionSchema),
-      blockers: external_exports.array(external_exports.string().trim().min(1)),
-      resumeContext: WorkflowResumeContextSchema
-    }).strict();
-  }
-});
-
-// src/workflow/gate-policy.ts
-function classifyWorkflowScope(input) {
-  const text = input.requestText.toLowerCase();
-  const figmaUrls = input.figmaUrls ?? [];
-  const explicit = input.explicitScope ?? "auto";
-  const hasUiTerms = /\b(ui|ux|screen|page|component|frontend|figma|visual|design|css|react|vue)\b/i.test(text) || /(화면|디자인|프론트엔드|컴포넌트)/.test(text);
-  const ui = explicit === "ui" || explicit === "auto" && (figmaUrls.length > 0 || hasUiTerms);
-  const code = explicit !== "docs";
-  return WorkflowScopeSchema.parse({
-    code,
-    ui,
-    api: /\b(api|openapi|swagger|endpoint|contract|mock|schema)\b/i.test(text) || /(스키마|엔드포인트|계약|목업)/.test(text),
-    specification: /\b(spec|brief|requirement|openspec|gherkin)\b/i.test(text) || /(기획|요구사항)/.test(text),
-    hasVisualBaseline: figmaUrls.length > 0 || /\b(visual baseline|legacy screenshot)\b/i.test(text),
-    securitySensitive: /\b(auth|secret|token|storage|navigation|network|dependency)\b/i.test(text) || /보안/.test(text),
-    performanceSensitive: /\b(performance|lighthouse|web vitals|bundle|latency)\b/i.test(text) || /성능/.test(text),
-    observabilityRequested: /\b(observability|telemetry|trace|tracing|log correlation)\b/i.test(text) || /(관측|텔레메트리|추적)/.test(text)
-  });
-}
-function buildGatePlan(scope) {
-  return [
-    gate(
-      "functional",
-      scope.code ? "required" : "not-applicable",
-      "Code changes require executable verification."
-    ),
-    gate(
-      "openspec",
-      scope.specification ? "conditional" : "not-applicable",
-      "Specification validation applies only to specification-backed scope."
-    ),
-    gate(
-      "architecture",
-      scope.code ? "conditional" : "not-applicable",
-      "Architecture checks apply when changed boundaries support them."
-    ),
-    gate(
-      "security",
-      scope.securitySensitive ? "required" : scope.code ? "conditional" : "not-applicable",
-      "Targeted security checks follow auth, secret, storage, navigation, network, and dependency risk."
-    ),
-    gate(
-      "visual",
-      scope.ui && scope.hasVisualBaseline ? "required" : "not-applicable",
-      "Visual comparison requires both UI scope and a baseline."
-    ),
-    gate(
-      "accessibility",
-      scope.ui ? "required" : "not-applicable",
-      "Changed interactive UI states require accessibility evidence."
-    ),
-    gate(
-      "performance",
-      scope.performanceSensitive ? "required" : scope.ui ? "conditional" : "opt-in",
-      "Performance runs for sensitive routes or explicit intent."
-    ),
-    gate(
-      "observability",
-      scope.observabilityRequested ? "required" : "opt-in",
-      "Observability is generated only when explicitly requested."
-    ),
-    gate(
-      "release",
-      "release-only",
-      "Full archive integrity and package verification run only for releases."
-    )
-  ];
-}
-function gate(id, applicability, reason) {
-  return WorkflowGateSchema.parse({ id, applicability, reason });
-}
-var GateApplicabilitySchema, WorkflowGateSchema;
-var init_gate_policy = __esm({
-  "src/workflow/gate-policy.ts"() {
-    "use strict";
-    init_zod();
-    init_workflow_contracts();
-    GateApplicabilitySchema = external_exports.enum([
-      "required",
-      "conditional",
-      "opt-in",
-      "release-only",
-      "not-applicable"
-    ]);
-    WorkflowGateSchema = external_exports.object({
-      id: WorkflowGateIdSchema,
-      applicability: GateApplicabilitySchema,
-      reason: external_exports.string().trim().min(1)
-    }).strict();
-  }
-});
-
-// src/workflow/delivery-policy.ts
-function buildDeliveryProfile(input) {
-  if (input.mode === "brief" && input.briefPath === void 0) {
-    throw new Error("brief mode requires briefPath");
-  }
-  if (input.mode === "figma" && input.figmaUrl === void 0) {
-    throw new Error("figma mode requires figmaUrl");
-  }
-  if ((input.mode === "feature" || input.mode === "figma") && !input.scope.ui) {
-    throw new Error(`${input.mode} mode requires UI scope`);
-  }
-  const userFacingFeature = input.mode === "feature" && input.scope.ui;
-  return DeliveryProfileSchema.parse({
-    mode: input.mode,
-    changeKind: input.changeKind,
-    publication: input.publication,
-    ...input.briefPath === void 0 ? {} : { briefPath: input.briefPath },
-    ...input.figmaUrl === void 0 ? {} : { figmaUrl: input.figmaUrl },
-    docsPaths: input.docsPaths ?? [],
-    openApiPaths: input.openApiPaths ?? [],
-    guidancePaths: input.guidancePaths ?? [],
-    discoveredGuidancePaths: input.discoveredGuidancePaths ?? [],
-    skillHints: input.skillHints ?? [],
-    requirements: {
-      brief: input.briefPath !== void 0,
-      legacyBaseline: input.mode === "legacy",
-      targetedFeatureE2E: userFacingFeature,
-      featureVideo: userFacingFeature,
-      figmaBundle: input.figmaUrl !== void 0
-    }
-  });
-}
-var init_delivery_policy = __esm({
-  "src/workflow/delivery-policy.ts"() {
-    "use strict";
-    init_workflow_contracts();
-  }
-});
-
-// src/workflow/index.ts
-var init_workflow = __esm({
-  "src/workflow/index.ts"() {
-    "use strict";
-    init_workflow_contracts();
-    init_gate_policy();
-    init_delivery_policy();
-    init_workload_policy();
   }
 });
 
@@ -43310,147 +43696,6 @@ var init_runtime = __esm({
   }
 });
 
-// src/run/stages.ts
-function createInitialStageStates() {
-  return RUN_STAGE_NAMES.map(
-    (name) => StageStateSchema.parse({
-      name,
-      status: "pending",
-      attempt: 0,
-      maxAttempts: 3,
-      artifactIds: [],
-      gapIds: []
-    })
-  );
-}
-var RUN_STAGE_NAMES, RunStageNameSchema, StageStatusSchema, LeaseIdSchema, WorkerIdSchema, StageLeaseSchema, StageCheckpointSchema, StageErrorSchema, StageStateSchema;
-var init_stages = __esm({
-  "src/run/stages.ts"() {
-    "use strict";
-    init_zod();
-    init_ids();
-    init_scalars();
-    RUN_STAGE_NAMES = [
-      "intake",
-      "contracts",
-      "implementation",
-      "functional-review",
-      "design-review",
-      "report",
-      "publish",
-      "archive"
-    ];
-    RunStageNameSchema = external_exports.enum(RUN_STAGE_NAMES);
-    StageStatusSchema = external_exports.enum([
-      "pending",
-      "running",
-      "passed",
-      "failed",
-      "blocked",
-      "waived",
-      "skipped"
-    ]);
-    LeaseIdSchema = external_exports.string().regex(/^lease_[a-f0-9]{32}$/, "Expected lease_<32 lowercase hex characters>");
-    WorkerIdSchema = external_exports.string().trim().min(1).max(200).regex(/^[A-Za-z0-9._:-]+$/, "Worker id contains unsupported characters");
-    StageLeaseSchema = external_exports.object({
-      id: LeaseIdSchema,
-      workerId: WorkerIdSchema,
-      acquiredAt: IsoDateTimeSchema,
-      heartbeatAt: IsoDateTimeSchema,
-      expiresAt: IsoDateTimeSchema
-    }).strict().superRefine((lease, context) => {
-      if (Date.parse(lease.heartbeatAt) < Date.parse(lease.acquiredAt)) {
-        context.addIssue({
-          code: "custom",
-          message: "heartbeatAt must be after acquiredAt",
-          path: ["heartbeatAt"]
-        });
-      }
-      if (Date.parse(lease.expiresAt) <= Date.parse(lease.heartbeatAt)) {
-        context.addIssue({
-          code: "custom",
-          message: "expiresAt must be after heartbeatAt",
-          path: ["expiresAt"]
-        });
-      }
-    });
-    StageCheckpointSchema = external_exports.object({
-      name: external_exports.string().trim().min(1).max(200),
-      data: external_exports.record(external_exports.string(), external_exports.unknown()).default({}),
-      updatedAt: IsoDateTimeSchema
-    }).strict();
-    StageErrorSchema = external_exports.object({
-      code: external_exports.string().trim().min(1).max(100),
-      message: external_exports.string().trim().min(1).max(2e3),
-      retryable: external_exports.boolean()
-    }).strict();
-    StageStateSchema = external_exports.object({
-      name: RunStageNameSchema,
-      status: StageStatusSchema,
-      attempt: external_exports.number().int().nonnegative(),
-      maxAttempts: external_exports.number().int().positive().default(3),
-      owner: AgentRoleSchema.optional(),
-      startedAt: IsoDateTimeSchema.optional(),
-      completedAt: IsoDateTimeSchema.optional(),
-      lease: StageLeaseSchema.optional(),
-      checkpoint: StageCheckpointSchema.optional(),
-      artifactIds: external_exports.array(ArtifactIdSchema).default([]),
-      gapIds: external_exports.array(GapIdSchema).default([]),
-      error: StageErrorSchema.optional()
-    }).strict().superRefine((stage2, context) => {
-      if (stage2.startedAt !== void 0 && stage2.completedAt !== void 0 && Date.parse(stage2.completedAt) < Date.parse(stage2.startedAt)) {
-        context.addIssue({
-          code: "custom",
-          message: "completedAt must be after startedAt",
-          path: ["completedAt"]
-        });
-      }
-      if (stage2.status === "running" && stage2.lease === void 0) {
-        context.addIssue({
-          code: "custom",
-          message: "Running stages require a lease",
-          path: ["lease"]
-        });
-      }
-      if (stage2.status !== "running" && stage2.lease !== void 0) {
-        context.addIssue({
-          code: "custom",
-          message: "Only running stages may include a lease",
-          path: ["lease"]
-        });
-      }
-      if (stage2.error !== void 0 && !["failed", "blocked"].includes(stage2.status)) {
-        context.addIssue({
-          code: "custom",
-          message: "Only failed or blocked stages may include error",
-          path: ["error"]
-        });
-      }
-      if (stage2.status === "failed" && stage2.error === void 0) {
-        context.addIssue({
-          code: "custom",
-          message: "Failed stages require error information",
-          path: ["error"]
-        });
-      }
-      if (stage2.status === "blocked" && stage2.gapIds.length === 0) {
-        context.addIssue({
-          code: "custom",
-          message: "Blocked stages must reference at least one gap",
-          path: ["gapIds"]
-        });
-      }
-      if (stage2.attempt > stage2.maxAttempts) {
-        context.addIssue({
-          code: "custom",
-          message: "attempt cannot exceed maxAttempts",
-          path: ["attempt"]
-        });
-      }
-    });
-  }
-});
-
 // src/run/run.ts
 function createInitialRun(rawInput, options) {
   const input = CreateInitialRunInputSchema.parse(rawInput);
@@ -43746,9 +43991,1088 @@ var init_run = __esm({
   }
 });
 
+// src/run/index.ts
+var init_run2 = __esm({
+  "src/run/index.ts"() {
+    "use strict";
+    init_stages();
+    init_run();
+  }
+});
+
+// src/store/errors.ts
+var RunStoreError, RunAlreadyExistsError, RunNotFoundError, RevisionConflictError;
+var init_errors4 = __esm({
+  "src/store/errors.ts"() {
+    "use strict";
+    RunStoreError = class extends Error {
+      constructor(message) {
+        super(message);
+        this.name = new.target.name;
+      }
+    };
+    RunAlreadyExistsError = class extends RunStoreError {
+      constructor(runId) {
+        super(`Run already exists: ${runId}`);
+      }
+    };
+    RunNotFoundError = class extends RunStoreError {
+      constructor(runId) {
+        super(`Run not found: ${runId}`);
+      }
+    };
+    RevisionConflictError = class extends RunStoreError {
+      constructor(runId, expectedRevision, actualRevision) {
+        super(`Revision conflict for ${runId}: expected ${expectedRevision}, actual ${actualRevision}`);
+        this.expectedRevision = expectedRevision;
+        this.actualRevision = actualRevision;
+      }
+      expectedRevision;
+      actualRevision;
+    };
+  }
+});
+
+// src/workflow/workload-policy.ts
+function estimateWorkload(input) {
+  const signals = WorkloadSignalsSchema.parse(input.signals);
+  const score = Math.ceil(
+    (signals.requirements ?? 0) * 2 + (signals.relevantFiles ?? 0) + (signals.apiOperations ?? 0) * 3 + (signals.uiSurfaces ?? 0) * 4 + Math.min(signals.figmaNodes ?? 0, 40) * 0.5 + (signals.testTargets ?? 0) * 2 + Math.min(signals.workspacePackages ?? 0, 20) * 4 + (signals.uncertainty ?? 2) * 4 + MODE_WEIGHT[input.mode] + (input.scope.code ? 2 : 0) + (input.scope.api ? 3 : 0) + (input.scope.ui ? 4 : 0)
+  );
+  const size = sizeForScore(score);
+  const tokenRange = TOKEN_RANGES[size];
+  const observedFields = Object.keys(signals).filter((key) => key !== "uncertainty").length;
+  const confidence = input.phase === "intake" ? "low" : (signals.uncertainty ?? 1) === 0 && observedFields >= 5 ? "high" : (signals.uncertainty ?? 1) <= 2 && observedFields >= 3 ? "medium" : "low";
+  const reasons = [
+    `${input.phase} signals score ${score}`,
+    `${input.mode} delivery profile`,
+    input.scope.ui ? "UI scope included" : "No UI scope",
+    input.scope.api ? "API scope included" : "No API scope"
+  ];
+  return WorkloadEstimateSchema.parse({
+    size,
+    score,
+    confidence,
+    source: input.phase,
+    tokenRange,
+    budget: {
+      checkpointPercent: 80,
+      checkpointAtTokens: Math.floor(tokenRange.max * 0.8),
+      hardLimitTokens: tokenRange.max
+    },
+    sampleCount: 0,
+    reasons
+  });
+}
+function sizeForScore(score) {
+  if (score <= 8) return "XS";
+  if (score <= 24) return "S";
+  if (score <= 50) return "M";
+  if (score <= 90) return "L";
+  return "XL";
+}
+var WorkloadSizeSchema, WorkloadConfidenceSchema, WorkloadSignalsSchema, WorkloadEstimateSchema, TOKEN_RANGES, MODE_WEIGHT;
+var init_workload_policy = __esm({
+  "src/workflow/workload-policy.ts"() {
+    "use strict";
+    init_zod();
+    WorkloadSizeSchema = external_exports.enum(["XS", "S", "M", "L", "XL"]);
+    WorkloadConfidenceSchema = external_exports.enum(["low", "medium", "high"]);
+    WorkloadSignalsSchema = external_exports.object({
+      requirements: external_exports.number().int().nonnegative().optional(),
+      relevantFiles: external_exports.number().int().nonnegative().optional(),
+      apiOperations: external_exports.number().int().nonnegative().optional(),
+      uiSurfaces: external_exports.number().int().nonnegative().optional(),
+      figmaNodes: external_exports.number().int().nonnegative().optional(),
+      testTargets: external_exports.number().int().nonnegative().optional(),
+      workspacePackages: external_exports.number().int().nonnegative().optional(),
+      uncertainty: external_exports.number().int().min(0).max(5).optional()
+    }).strict().refine(
+      (signals) => Object.keys(signals).some((key) => key !== "uncertainty"),
+      "At least one observed workload signal is required"
+    );
+    WorkloadEstimateSchema = external_exports.object({
+      size: WorkloadSizeSchema,
+      score: external_exports.number().int().nonnegative(),
+      confidence: WorkloadConfidenceSchema,
+      source: external_exports.enum(["intake", "contracts", "calibrated"]),
+      tokenRange: external_exports.object({
+        min: external_exports.number().int().positive(),
+        max: external_exports.number().int().positive()
+      }).strict().refine((range) => range.min < range.max, "Token range min must be below max"),
+      budget: external_exports.object({
+        checkpointPercent: external_exports.literal(80),
+        checkpointAtTokens: external_exports.number().int().positive(),
+        hardLimitTokens: external_exports.number().int().positive()
+      }).strict(),
+      sampleCount: external_exports.number().int().nonnegative(),
+      reasons: external_exports.array(external_exports.string().trim().min(1)).min(1)
+    }).strict().superRefine((estimate, context) => {
+      if (estimate.budget.hardLimitTokens !== estimate.tokenRange.max) {
+        context.addIssue({
+          code: "custom",
+          path: ["budget", "hardLimitTokens"],
+          message: "Workload hard limit must equal the token range maximum"
+        });
+      }
+      if (estimate.budget.checkpointAtTokens !== Math.floor(estimate.budget.hardLimitTokens * 0.8)) {
+        context.addIssue({
+          code: "custom",
+          path: ["budget", "checkpointAtTokens"],
+          message: "Workload checkpoint must equal 80% of the hard limit"
+        });
+      }
+    });
+    TOKEN_RANGES = {
+      XS: { min: 2e4, max: 5e4 },
+      S: { min: 45e3, max: 1e5 },
+      M: { min: 9e4, max: 18e4 },
+      L: { min: 16e4, max: 32e4 },
+      XL: { min: 28e4, max: 6e5 }
+    };
+    MODE_WEIGHT = {
+      auto: 0,
+      brief: 4,
+      legacy: 8,
+      feature: 6,
+      figma: 5
+    };
+  }
+});
+
+// src/workflow/workflow-contracts.ts
+function uniqueBoundedArray(item, label, max = 20) {
+  return external_exports.array(item).max(max).superRefine((items, context) => {
+    const seen = /* @__PURE__ */ new Set();
+    items.forEach((item2, index) => {
+      const key = String(item2);
+      if (seen.has(key)) {
+        context.addIssue({
+          code: "custom",
+          path: [index],
+          message: `${label} entries must be unique`
+        });
+      }
+      seen.add(key);
+    });
+  });
+}
+function decodeAsciiPercentEscapesToFixedPoint(value) {
+  let current = value;
+  for (let iteration = 0; iteration <= value.length; iteration += 1) {
+    let changed = false;
+    const next = current.replace(/%([0-9a-f]{2})/gi, (encoded, hex3) => {
+      const codePoint = Number.parseInt(hex3, 16);
+      if (codePoint > 127) return encoded;
+      changed = true;
+      return String.fromCharCode(codePoint);
+    });
+    if (!changed || next === current) return current;
+    current = next;
+  }
+  return current;
+}
+function isSafeDurableEvidencePath(rawValue) {
+  const value = rawValue.trim();
+  if (value.length === 0 || value.length > 1e3) return false;
+  const decoded = decodeAsciiPercentEscapesToFixedPoint(value);
+  const candidates = /* @__PURE__ */ new Set([value, decoded]);
+  return [...candidates].every((candidate) => {
+    const segments = candidate.split("/");
+    return SAFE_EVIDENCE_PATH_GRAMMAR.test(candidate) && segments.every((segment) => segment !== "." && segment !== "..") && segments.every((segment, index) => {
+      if (!SENSITIVE_EVIDENCE_SEGMENT_PATTERN.test(segment)) return true;
+      return index === segments.length - 1 && BENIGN_SENSITIVE_EVIDENCE_SEGMENTS.has(segment.toLowerCase());
+    }) && !SECRET_SHAPED_EVIDENCE_PATH_PATTERNS.some((pattern) => pattern.test(candidate));
+  });
+}
+function isTargetedPlaywrightCommand(command, selector) {
+  if (/(?:&&|\|\||[;&|`\n\r]|\$\()/.test(command)) return false;
+  const tokens = tokenizeCommand(command);
+  if (tokens === void 0) return false;
+  let index = 0;
+  if (["npx", "bunx", "yarn"].includes(tokens[index] ?? "")) index += 1;
+  if (tokens[index] === "pnpm") {
+    index += 1;
+    if (tokens[index] === "exec") index += 1;
+  }
+  if (!["playwright", "./node_modules/.bin/playwright"].includes(tokens[index] ?? "")) {
+    return false;
+  }
+  if (tokens[index + 1] !== "test") return false;
+  const args = tokens.slice(index + 2);
+  const parsed = parsePlaywrightArguments(args);
+  if (parsed === void 0) return false;
+  if (/^@/.test(selector)) {
+    return parsed.positionals.length === 0 && parsed.grep.length === 1 && parsed.grep[0] === selector;
+  }
+  if (/^--project(?:=|\s+)/.test(selector)) {
+    const project = selector.replace(/^--project(?:=|\s+)/, "");
+    return parsed.positionals.length === 0 && parsed.projects.length === 1 && parsed.projects[0] === project;
+  }
+  return parsed.positionals.length === 1 && parsed.positionals[0] === selector;
+}
+function tokenizeCommand(command) {
+  const tokens = [];
+  let token = "";
+  let quote;
+  let escaped = false;
+  for (const character of command.trim()) {
+    if (escaped) {
+      token += character;
+      escaped = false;
+    } else if (character === "\\" && quote !== "'") {
+      escaped = true;
+    } else if (quote !== void 0) {
+      if (character === quote) quote = void 0;
+      else token += character;
+    } else if (character === "'" || character === '"') {
+      quote = character;
+    } else if (/\s/.test(character)) {
+      if (token.length > 0) {
+        tokens.push(token);
+        token = "";
+      }
+    } else {
+      token += character;
+    }
+  }
+  if (escaped || quote !== void 0) return void 0;
+  if (token.length > 0) tokens.push(token);
+  return tokens;
+}
+function parsePlaywrightArguments(args) {
+  const positionals = [];
+  const grep = [];
+  const projects = [];
+  const forbiddenOptions = /* @__PURE__ */ new Set(["--list", "--pass-with-no-tests"]);
+  const optionsWithValues = /* @__PURE__ */ new Set([
+    "--config",
+    "--grep-invert",
+    "--output",
+    "--reporter",
+    "--repeat-each",
+    "--retries",
+    "--shard",
+    "--timeout",
+    "--trace",
+    "--workers"
+  ]);
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === "--" || /^-[^-]/.test(argument)) return void 0;
+    if (forbiddenOptions.has(argument)) return void 0;
+    if (argument.startsWith("--grep=")) {
+      grep.push(argument.slice("--grep=".length));
+    } else if (argument === "--grep") {
+      const value = args[++index];
+      if (value === void 0 || value.startsWith("-")) return void 0;
+      grep.push(value);
+    } else if (argument.startsWith("--project=")) {
+      projects.push(argument.slice("--project=".length));
+    } else if (argument === "--project") {
+      const value = args[++index];
+      if (value === void 0 || value.startsWith("-")) return void 0;
+      projects.push(value);
+    } else if (optionsWithValues.has(argument)) {
+      const value = args[++index];
+      if (value === void 0 || value.startsWith("-")) return void 0;
+    } else if (argument.startsWith("--")) {
+      continue;
+    } else {
+      positionals.push(argument);
+    }
+  }
+  return { positionals, grep, projects };
+}
+var WorkflowScopeSchema, DeliveryModeSchema, ChangeKindSchema, PublicationIntentSchema, FigmaFileUrlSchema, ImplementationContextIdSchema, WorkflowSourcePathSchema, SkillHintSchema, NormalizedSourcePathsSchema, NormalizedSkillHintsSchema, BlockerKindSchema, BlockerTextSchema, SECRET_SHAPED_EVIDENCE_PATH_PATTERNS, SAFE_EVIDENCE_PATH_GRAMMAR, BENIGN_SENSITIVE_EVIDENCE_SEGMENTS, SENSITIVE_EVIDENCE_SEGMENT_PATTERN, BlockerEvidencePathSchema, WorkflowBlockerSchema, DelegationPolicySchema, GuidanceTraceSchema, DeliveryProfileSchema, ReviewVerdictSchema, ReviewFindingSeveritySchema, RequirementVerdictSchema, WorkflowGateIdSchema, ReviewPacketIdSchema, ImplementationReviewPacketSchema, RequirementContractSchema, LegacyBaselineSchema, ReviewFindingSchema, ReviewRequirementSchema, ReviewGateResultSchema, ReviewSubmissionSchema, ContractsSubmissionSchema, ApiArtifactsSchema, ApiReadySubmissionSchema, FeatureEvidenceSchema, ImplementationSubmissionSchema, FigmaBundleSubmissionSchema, WorkflowSubmissionSchema, WorkflowActionSchema, WorkflowStageSummarySchema, WorkflowResumeContextSchema, DiagnosticPublicationSchema, WorkflowStatusSchema;
+var init_workflow_contracts = __esm({
+  "src/workflow/workflow-contracts.ts"() {
+    "use strict";
+    init_zod();
+    init_stages();
+    init_ids();
+    init_scalars();
+    init_workload_policy();
+    WorkflowScopeSchema = external_exports.object({
+      code: external_exports.boolean(),
+      ui: external_exports.boolean(),
+      api: external_exports.boolean(),
+      specification: external_exports.boolean(),
+      hasVisualBaseline: external_exports.boolean(),
+      securitySensitive: external_exports.boolean(),
+      performanceSensitive: external_exports.boolean(),
+      observabilityRequested: external_exports.boolean()
+    }).strict();
+    DeliveryModeSchema = external_exports.enum(["auto", "brief", "legacy", "feature", "figma"]);
+    ChangeKindSchema = external_exports.enum([
+      "auto",
+      "feature",
+      "fix",
+      "refactor",
+      "migration",
+      "design",
+      "docs"
+    ]);
+    PublicationIntentSchema = external_exports.enum(["draft", "none"]);
+    FigmaFileUrlSchema = external_exports.string().url().refine((value) => {
+      const parsed = new URL(value);
+      const host = parsed.hostname.toLowerCase();
+      return (host === "figma.com" || host === "www.figma.com") && /^\/(?:design|file|proto)\//i.test(parsed.pathname);
+    }, "Figma URL must be a figma.com design, file, or prototype URL");
+    ImplementationContextIdSchema = external_exports.string().trim().min(8).max(128).regex(/^[a-z0-9][a-z0-9._:-]+$/i, "Implementation context ID contains unsupported characters");
+    WorkflowSourcePathSchema = external_exports.string().trim().min(1).max(1e3);
+    SkillHintSchema = external_exports.string().trim().min(1).max(128).regex(
+      /^[a-z0-9][a-z0-9._ -]*(?::[a-z0-9][a-z0-9._ -]*)?$/i,
+      "Skill hint must be a skill name, not a filesystem path"
+    );
+    NormalizedSourcePathsSchema = uniqueBoundedArray(WorkflowSourcePathSchema, "Source path");
+    NormalizedSkillHintsSchema = uniqueBoundedArray(SkillHintSchema, "Skill hint");
+    BlockerKindSchema = external_exports.enum([
+      "missing-input",
+      "missing-tool",
+      "policy",
+      "verification",
+      "publish-precondition",
+      "budget-split",
+      "unexpected"
+    ]);
+    BlockerTextSchema = external_exports.string().trim().min(1).max(500);
+    SECRET_SHAPED_EVIDENCE_PATH_PATTERNS = [
+      /(?:^|[/?#&;])(?:token|access[_-]?token|refresh[_-]?token|id[_-]?token|github[_-]?token|gitlab[_-]?token|api[_-]?key|authorization|credential|password|passwd|secret|client[_-]?secret|private[_-]?key|aws[_-]?secret[_-]?access[_-]?key)\s*(?:=|:)\s*[^/?#&;\s]+/i,
+      /(?:^|[/])[^/@:\s]+:[^/@\s]+@[^/\s]+/i,
+      /(?:^|[/_.-])(?:gh[pousr]_[a-z0-9]{12,}|github_pat_[a-z0-9_]{12,}|glpat-[a-z0-9_-]{12,}|sk-(?:proj-)?[a-z0-9_-]{12,}|xox[baprs]-[a-z0-9-]{12,}|akia[a-z0-9]{16})(?:$|[./_-])/i,
+      /-----BEGIN(?: [A-Z]+)* PRIVATE KEY-----/i
+    ];
+    SAFE_EVIDENCE_PATH_GRAMMAR = /^(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+$/;
+    BENIGN_SENSITIVE_EVIDENCE_SEGMENTS = /* @__PURE__ */ new Set([
+      "token-validation.json",
+      "credential-rotation-guide.md",
+      "authorization-errors.json"
+    ]);
+    SENSITIVE_EVIDENCE_SEGMENT_PATTERN = /(?:^|[._-])(?:tokens?|passwords?|passwd|secrets?|credentials?|auth|authentication|authorization|api[._-]?keys?|private[._-]?keys?)(?:$|[._-])/i;
+    BlockerEvidencePathSchema = external_exports.string().trim().min(1).max(1e3).refine(isSafeDurableEvidencePath, "Blocker evidence paths must be safe project-relative paths");
+    WorkflowBlockerSchema = external_exports.object({
+      stage: RunStageNameSchema,
+      code: external_exports.string().trim().min(1).max(100),
+      kind: BlockerKindSchema,
+      summary: BlockerTextSchema,
+      retryable: external_exports.boolean(),
+      resumable: external_exports.boolean(),
+      completedWork: external_exports.array(BlockerTextSchema).max(20),
+      evidencePaths: external_exports.array(BlockerEvidencePathSchema).max(50),
+      attemptedRecovery: external_exports.array(BlockerTextSchema).max(20),
+      unrunValidations: external_exports.array(external_exports.string().trim().min(1).max(200)).max(20),
+      exactUnblockAction: external_exports.string().trim().min(1).max(1e3)
+    }).strict();
+    DelegationPolicySchema = external_exports.object({
+      singleWriter: external_exports.literal(true),
+      allowNested: external_exports.literal(false),
+      maxReadOnlyScouts: external_exports.number().int().min(0).max(2),
+      parallelReviewers: external_exports.boolean()
+    }).strict();
+    GuidanceTraceSchema = external_exports.object({
+      explicit: NormalizedSourcePathsSchema.default([]),
+      discovered: NormalizedSourcePathsSchema.default([]),
+      skillHints: NormalizedSkillHintsSchema.default([]),
+      appliedSkills: NormalizedSkillHintsSchema.default([])
+    }).strict().superRefine((trace, context) => {
+      if (trace.explicit.length + trace.discovered.length > 20) {
+        context.addIssue({
+          code: "custom",
+          path: ["discovered"],
+          message: "Combined explicit and discovered guidance cannot exceed 20 files"
+        });
+      }
+    });
+    DeliveryProfileSchema = external_exports.object({
+      mode: DeliveryModeSchema,
+      changeKind: ChangeKindSchema,
+      publication: PublicationIntentSchema,
+      briefPath: WorkflowSourcePathSchema.optional(),
+      figmaUrl: FigmaFileUrlSchema.optional(),
+      docsPaths: NormalizedSourcePathsSchema.default([]),
+      openApiPaths: NormalizedSourcePathsSchema.default([]),
+      guidancePaths: NormalizedSourcePathsSchema.default([]),
+      discoveredGuidancePaths: NormalizedSourcePathsSchema.default([]),
+      skillHints: NormalizedSkillHintsSchema.default([]),
+      recommendedSkills: NormalizedSkillHintsSchema.default([]),
+      requirements: external_exports.object({
+        brief: external_exports.boolean(),
+        legacyBaseline: external_exports.boolean(),
+        targetedFeatureE2E: external_exports.boolean(),
+        featureVideo: external_exports.boolean(),
+        figmaBundle: external_exports.boolean()
+      }).strict()
+    }).strict().superRefine((profile, context) => {
+      const classifiedSources = /* @__PURE__ */ new Map();
+      for (const field of ["docsPaths", "openApiPaths"]) {
+        profile[field].forEach((sourcePath, index) => {
+          const previous = classifiedSources.get(sourcePath);
+          if (previous !== void 0 && previous !== field) {
+            context.addIssue({
+              code: "custom",
+              path: [field, index],
+              message: `Source path conflicts with ${previous}: ${sourcePath}`
+            });
+          }
+          classifiedSources.set(sourcePath, field);
+        });
+      }
+      const explicitGuidance = new Set(profile.guidancePaths);
+      for (const field of ["guidancePaths", "discoveredGuidancePaths"]) {
+        profile[field].forEach((sourcePath, index) => {
+          const previous = classifiedSources.get(sourcePath);
+          if (previous !== void 0) {
+            context.addIssue({
+              code: "custom",
+              path: [field, index],
+              message: `Guidance path conflicts with ${previous}: ${sourcePath}`
+            });
+          }
+        });
+      }
+      profile.discoveredGuidancePaths.forEach((sourcePath, index) => {
+        if (explicitGuidance.has(sourcePath)) {
+          context.addIssue({
+            code: "custom",
+            path: ["discoveredGuidancePaths", index],
+            message: `Discovered guidance duplicates explicit guidance: ${sourcePath}`
+          });
+        }
+      });
+      if (profile.guidancePaths.length + profile.discoveredGuidancePaths.length > 20) {
+        context.addIssue({
+          code: "custom",
+          path: ["discoveredGuidancePaths"],
+          message: "Combined explicit and discovered guidance cannot exceed 20 files"
+        });
+      }
+    });
+    ReviewVerdictSchema = external_exports.enum(["approved", "changes-requested", "blocked"]);
+    ReviewFindingSeveritySchema = external_exports.enum(["minor", "major", "blocker"]);
+    RequirementVerdictSchema = external_exports.enum(["accepted", "rejected", "blocked"]);
+    WorkflowGateIdSchema = external_exports.enum([
+      "functional",
+      "openspec",
+      "architecture",
+      "security",
+      "visual",
+      "accessibility",
+      "performance",
+      "observability",
+      "release"
+    ]);
+    ReviewPacketIdSchema = external_exports.string().regex(/^packet_[a-f0-9]{64}$/, "Expected packet_<64 lowercase hex characters>");
+    ImplementationReviewPacketSchema = external_exports.object({
+      id: ReviewPacketIdSchema,
+      runId: RunIdSchema,
+      revision: external_exports.number().int().positive(),
+      baseSha: GitObjectIdSchema,
+      headSha: GitObjectIdSchema,
+      evidenceDigest: Sha256DigestSchema,
+      diffDigest: Sha256DigestSchema,
+      changedFiles: external_exports.array(external_exports.string().trim().min(1)).max(1e4)
+    }).strict();
+    RequirementContractSchema = external_exports.object({
+      id: external_exports.string().trim().min(1).max(200),
+      title: external_exports.string().trim().min(1).max(500),
+      acceptanceCriteria: external_exports.array(external_exports.string().trim().min(1).max(2e3)).min(1).max(50)
+    }).strict();
+    LegacyBaselineSchema = external_exports.object({
+      scope: external_exports.string().trim().min(1).max(2e3),
+      evidencePaths: external_exports.array(external_exports.string().trim().min(1)).min(1),
+      checks: external_exports.array(
+        external_exports.object({
+          command: external_exports.string().trim().min(1).max(2e3),
+          resultPath: external_exports.string().trim().min(1),
+          status: external_exports.enum(["passed", "failed"])
+        }).strict()
+      ).min(1).max(50)
+    }).strict();
+    ReviewFindingSchema = external_exports.object({
+      severity: ReviewFindingSeveritySchema,
+      title: external_exports.string().trim().min(1).max(500),
+      evidence: external_exports.array(external_exports.string().trim().min(1)).default([])
+    }).strict();
+    ReviewRequirementSchema = external_exports.object({
+      id: external_exports.string().trim().min(1).max(200),
+      verdict: RequirementVerdictSchema
+    }).strict();
+    ReviewGateResultSchema = external_exports.object({
+      id: WorkflowGateIdSchema,
+      status: external_exports.enum(["passed", "failed", "blocked"]),
+      evidencePaths: external_exports.array(external_exports.string().trim().min(1)).min(1)
+    }).strict();
+    ReviewSubmissionSchema = external_exports.object({
+      kind: external_exports.enum(["functional-review", "design-review"]),
+      reviewPacketId: ReviewPacketIdSchema,
+      verdict: ReviewVerdictSchema,
+      summary: external_exports.string().trim().min(1).max(4e3),
+      findings: external_exports.array(ReviewFindingSchema).default([]),
+      requirements: external_exports.array(ReviewRequirementSchema).default([]),
+      artifactPaths: external_exports.array(external_exports.string().trim().min(1)).default([]),
+      gateResults: external_exports.array(ReviewGateResultSchema).default([]),
+      blocker: WorkflowBlockerSchema.optional()
+    }).strict().superRefine((review, context) => {
+      if (review.verdict === "approved" && review.blocker !== void 0) {
+        context.addIssue({
+          code: "custom",
+          path: ["blocker"],
+          message: "Approved reviews cannot report a blocker"
+        });
+      }
+      if (review.blocker !== void 0 && review.blocker.stage !== review.kind) {
+        context.addIssue({
+          code: "custom",
+          path: ["blocker", "stage"],
+          message: "Review blockers must identify the submitted review stage"
+        });
+      }
+      if (review.verdict !== "approved") {
+        return;
+      }
+      if (review.artifactPaths.length === 0) {
+        context.addIssue({
+          code: "custom",
+          path: ["artifactPaths"],
+          message: "Approved reviews require concrete evidence artifacts"
+        });
+      }
+      if (review.requirements.length === 0) {
+        context.addIssue({
+          code: "custom",
+          path: ["requirements"],
+          message: "Approved reviews require at least one reviewed requirement"
+        });
+      }
+      if (review.gateResults.length === 0) {
+        context.addIssue({
+          code: "custom",
+          path: ["gateResults"],
+          message: "Approved reviews require structured gate results"
+        });
+      }
+      const seenGateIds = /* @__PURE__ */ new Set();
+      review.gateResults.forEach((gate2, index) => {
+        if (seenGateIds.has(gate2.id)) {
+          context.addIssue({
+            code: "custom",
+            path: ["gateResults", index, "id"],
+            message: `Duplicate gate result ${gate2.id}`
+          });
+        }
+        seenGateIds.add(gate2.id);
+        if (gate2.status !== "passed") {
+          context.addIssue({
+            code: "custom",
+            path: ["gateResults", index, "status"],
+            message: "Approved reviews require every reported gate to pass"
+          });
+        }
+        gate2.evidencePaths.forEach((evidencePath, evidenceIndex) => {
+          if (!review.artifactPaths.includes(evidencePath)) {
+            context.addIssue({
+              code: "custom",
+              path: ["gateResults", index, "evidencePaths", evidenceIndex],
+              message: "Gate evidence must be included in artifactPaths"
+            });
+          }
+        });
+      });
+      review.findings.forEach((finding, index) => {
+        if (finding.severity === "major" || finding.severity === "blocker") {
+          context.addIssue({
+            code: "custom",
+            path: ["findings", index, "severity"],
+            message: "Approved reviews cannot contain major or blocker findings"
+          });
+        }
+      });
+      review.requirements.forEach((requirement, index) => {
+        if (requirement.verdict !== "accepted") {
+          context.addIssue({
+            code: "custom",
+            path: ["requirements", index, "verdict"],
+            message: "Approved reviews require every reviewed requirement to be accepted"
+          });
+        }
+      });
+    });
+    ContractsSubmissionSchema = external_exports.object({
+      kind: external_exports.literal("contracts"),
+      status: external_exports.enum(["passed", "failed", "blocked"]),
+      summary: external_exports.string().trim().min(1).max(4e3),
+      artifactPaths: external_exports.array(external_exports.string().trim().min(1)).default([]),
+      baselinePaths: external_exports.array(external_exports.string().trim().min(1)).default([]),
+      requirementManifest: external_exports.array(RequirementContractSchema).default([]),
+      legacyBaseline: LegacyBaselineSchema.optional(),
+      workloadSignals: WorkloadSignalsSchema.optional(),
+      guidanceTrace: GuidanceTraceSchema.default({
+        explicit: [],
+        discovered: [],
+        skillHints: [],
+        appliedSkills: []
+      }),
+      blocker: WorkflowBlockerSchema.optional()
+    }).strict().superRefine((submission, context) => {
+      if (submission.status === "passed" && submission.blocker !== void 0) {
+        context.addIssue({
+          code: "custom",
+          path: ["blocker"],
+          message: "Passed contracts cannot report a blocker"
+        });
+      }
+      if (submission.blocker !== void 0 && submission.blocker.stage !== "contracts") {
+        context.addIssue({
+          code: "custom",
+          path: ["blocker", "stage"],
+          message: "Contract blockers must identify the contracts stage"
+        });
+      }
+      if (submission.status === "passed" && submission.artifactPaths.length === 0) {
+        context.addIssue({
+          code: "custom",
+          path: ["artifactPaths"],
+          message: "Passed contracts require generated contract artifacts"
+        });
+      }
+      if (submission.status === "passed" && submission.requirementManifest.length === 0) {
+        context.addIssue({
+          code: "custom",
+          path: ["requirementManifest"],
+          message: "Passed contracts require structured requirements and acceptance criteria"
+        });
+      }
+      const requirementIds = /* @__PURE__ */ new Set();
+      submission.requirementManifest.forEach((requirement, index) => {
+        if (requirementIds.has(requirement.id)) {
+          context.addIssue({
+            code: "custom",
+            path: ["requirementManifest", index, "id"],
+            message: `Duplicate requirement ${requirement.id}`
+          });
+        }
+        requirementIds.add(requirement.id);
+      });
+      submission.baselinePaths.forEach((baselinePath, index) => {
+        if (!submission.artifactPaths.includes(baselinePath)) {
+          context.addIssue({
+            code: "custom",
+            path: ["baselinePaths", index],
+            message: "Every baseline must be included in artifactPaths"
+          });
+        }
+      });
+      submission.legacyBaseline?.evidencePaths.forEach((baselinePath, index) => {
+        if (!submission.artifactPaths.includes(baselinePath)) {
+          context.addIssue({
+            code: "custom",
+            path: ["legacyBaseline", "evidencePaths", index],
+            message: "Every focused legacy baseline must be included in artifactPaths"
+          });
+        }
+      });
+      submission.legacyBaseline?.checks.forEach((check2, index) => {
+        if (!submission.legacyBaseline?.evidencePaths.includes(check2.resultPath)) {
+          context.addIssue({
+            code: "custom",
+            path: ["legacyBaseline", "checks", index, "resultPath"],
+            message: "Legacy baseline check results must be declared as baseline evidence"
+          });
+        }
+        if (submission.status === "passed" && check2.status !== "passed") {
+          context.addIssue({
+            code: "custom",
+            path: ["legacyBaseline", "checks", index, "status"],
+            message: "Passed contracts require every focused legacy baseline check to pass"
+          });
+        }
+      });
+    });
+    ApiArtifactsSchema = external_exports.object({
+      types: external_exports.array(external_exports.string().trim().min(1)).min(1),
+      schemas: external_exports.array(external_exports.string().trim().min(1)).min(1),
+      wrappers: external_exports.array(external_exports.string().trim().min(1)).min(1),
+      mocks: external_exports.array(external_exports.string().trim().min(1)).min(1),
+      contractTests: external_exports.array(external_exports.string().trim().min(1)).min(1)
+    }).strict();
+    ApiReadySubmissionSchema = external_exports.object({
+      kind: external_exports.literal("api-ready"),
+      status: external_exports.literal("passed"),
+      summary: external_exports.string().trim().min(1).max(4e3),
+      implementationContextId: ImplementationContextIdSchema,
+      artifactPaths: external_exports.array(external_exports.string().trim().min(1)).min(1),
+      apiArtifacts: ApiArtifactsSchema
+    }).strict().superRefine((submission, context) => {
+      const categorizedPaths = /* @__PURE__ */ new Set();
+      for (const [group, paths] of Object.entries(submission.apiArtifacts)) {
+        paths.forEach((artifactPath, index) => {
+          if (!submission.artifactPaths.includes(artifactPath)) {
+            context.addIssue({
+              code: "custom",
+              path: ["apiArtifacts", group, index],
+              message: "Every API-ready artifact must be included in artifactPaths"
+            });
+          }
+          if (categorizedPaths.has(artifactPath)) {
+            context.addIssue({
+              code: "custom",
+              path: ["apiArtifacts", group, index],
+              message: "API-ready artifact categories must use distinct evidence files"
+            });
+          }
+          categorizedPaths.add(artifactPath);
+        });
+      }
+    });
+    FeatureEvidenceSchema = external_exports.object({
+      scope: external_exports.literal("targeted-feature"),
+      testSelector: external_exports.string().trim().min(3).max(500).refine(
+        (selector) => /(?:^|[/\\])[^/\\]+\.(?:spec|test)\.[cm]?[jt]sx?$/i.test(selector) || /^@[a-z0-9][a-z0-9._-]+$/i.test(selector) || /^--project(?:=|\s+)[a-z0-9][a-z0-9._-]+$/i.test(selector),
+        "Feature E2E selector must be a specific test file, @tag, or --project value"
+      ),
+      testCommand: external_exports.string().trim().min(1).max(2e3),
+      resultPath: external_exports.string().trim().min(1),
+      videoPath: external_exports.string().trim().regex(/\.(?:webm|mp4)$/i, "Feature video must be .webm or .mp4")
+    }).strict();
+    ImplementationSubmissionSchema = external_exports.object({
+      kind: external_exports.literal("implementation"),
+      status: external_exports.enum(["passed", "failed", "blocked"]),
+      summary: external_exports.string().trim().min(1).max(4e3),
+      apiReady: external_exports.boolean(),
+      implementationContextId: ImplementationContextIdSchema.optional(),
+      uiChanged: external_exports.boolean(),
+      changedFiles: external_exports.array(external_exports.string().trim().min(1)).default([]),
+      artifactPaths: external_exports.array(external_exports.string().trim().min(1)).default([]),
+      featureEvidence: FeatureEvidenceSchema.optional(),
+      blocker: WorkflowBlockerSchema.optional()
+    }).strict().superRefine((submission, context) => {
+      if (submission.status === "passed" && submission.blocker !== void 0) {
+        context.addIssue({
+          code: "custom",
+          path: ["blocker"],
+          message: "Passed implementations cannot report a blocker"
+        });
+      }
+      if (submission.blocker !== void 0 && submission.blocker.stage !== "implementation") {
+        context.addIssue({
+          code: "custom",
+          path: ["blocker", "stage"],
+          message: "Implementation blockers must identify the implementation stage"
+        });
+      }
+      if (submission.status === "passed" && submission.artifactPaths.length === 0) {
+        context.addIssue({
+          code: "custom",
+          path: ["artifactPaths"],
+          message: "Passed implementation requires executable evidence artifacts"
+        });
+      }
+      if (submission.featureEvidence !== void 0) {
+        const evidence = submission.featureEvidence;
+        if (submission.implementationContextId === void 0) {
+          context.addIssue({
+            code: "custom",
+            path: ["implementationContextId"],
+            message: "Feature evidence requires an implementationContextId"
+          });
+        }
+        if (!isTargetedPlaywrightCommand(evidence.testCommand, evidence.testSelector)) {
+          context.addIssue({
+            code: "custom",
+            path: ["featureEvidence", "testCommand"],
+            message: "Targeted E2E command must be one unchained Playwright invocation with the declared selector as an argument"
+          });
+        }
+        for (const [key, evidencePath] of [
+          ["resultPath", evidence.resultPath],
+          ["videoPath", evidence.videoPath]
+        ]) {
+          if (!submission.artifactPaths.includes(evidencePath)) {
+            context.addIssue({
+              code: "custom",
+              path: ["featureEvidence", key],
+              message: `${key} must be included in artifactPaths`
+            });
+          }
+        }
+        const videos = submission.artifactPaths.filter(
+          (artifactPath) => /\.(?:webm|mp4)$/i.test(artifactPath)
+        );
+        if (videos.length !== 1 || videos[0] !== evidence.videoPath) {
+          context.addIssue({
+            code: "custom",
+            path: ["artifactPaths"],
+            message: "Feature evidence requires exactly one declared video"
+          });
+        }
+      }
+    });
+    FigmaBundleSubmissionSchema = external_exports.object({
+      kind: external_exports.literal("figma-bundle"),
+      provider: external_exports.literal("host-connected-figma"),
+      capturedAt: external_exports.string().datetime({ offset: true }),
+      fileUrl: FigmaFileUrlSchema,
+      nodeIds: external_exports.array(external_exports.string().trim().min(1)).min(1),
+      manifestPath: external_exports.string().trim().regex(/\.json$/i, "Figma manifest must be a JSON file"),
+      artifactPaths: external_exports.array(external_exports.string().trim().min(1)).min(1)
+    }).strict().superRefine((submission, context) => {
+      if (!submission.artifactPaths.includes(submission.manifestPath)) {
+        context.addIssue({
+          code: "custom",
+          path: ["manifestPath"],
+          message: "Figma manifest must be included in artifactPaths"
+        });
+      }
+      if (new Set(submission.artifactPaths).size !== submission.artifactPaths.length) {
+        context.addIssue({
+          code: "custom",
+          path: ["artifactPaths"],
+          message: "Figma bundle artifact paths must be unique"
+        });
+      }
+      const visualPaths = submission.artifactPaths.filter(
+        (artifactPath) => artifactPath !== submission.manifestPath
+      );
+      if (visualPaths.length === 0 || visualPaths.some((artifactPath) => !/\.png$/i.test(artifactPath))) {
+        context.addIssue({
+          code: "custom",
+          path: ["artifactPaths"],
+          message: "Figma bundle requires one JSON manifest and one or more PNG visuals"
+        });
+      }
+    });
+    WorkflowSubmissionSchema = external_exports.union([
+      ContractsSubmissionSchema,
+      ApiReadySubmissionSchema,
+      ImplementationSubmissionSchema,
+      ReviewSubmissionSchema,
+      FigmaBundleSubmissionSchema
+    ]);
+    WorkflowActionSchema = external_exports.discriminatedUnion("kind", [
+      external_exports.object({ kind: external_exports.literal("prepare-contracts"), runId: RunIdSchema }).strict(),
+      external_exports.object({
+        kind: external_exports.literal("implement"),
+        runId: RunIdSchema,
+        requireApiReady: external_exports.boolean()
+      }).strict(),
+      external_exports.object({
+        kind: external_exports.literal("review-functional"),
+        runId: RunIdSchema,
+        reviewPacketId: ReviewPacketIdSchema
+      }).strict(),
+      external_exports.object({
+        kind: external_exports.literal("review-design"),
+        runId: RunIdSchema,
+        reviewPacketId: ReviewPacketIdSchema
+      }).strict(),
+      external_exports.object({ kind: external_exports.literal("publish-draft"), runId: RunIdSchema }).strict(),
+      external_exports.object({ kind: external_exports.literal("archive-after-merge"), runId: RunIdSchema }).strict()
+    ]);
+    WorkflowStageSummarySchema = external_exports.object({
+      name: external_exports.string().trim().min(1),
+      status: external_exports.enum(["pending", "running", "passed", "failed", "blocked", "skipped", "waived"]),
+      checkpoint: external_exports.string().trim().min(1).optional()
+    }).strict();
+    WorkflowResumeContextSchema = external_exports.object({
+      goal: external_exports.string().trim().min(1).max(4e3),
+      evidencePaths: external_exports.array(external_exports.string().trim().min(1).max(1e3)).max(200),
+      submissions: external_exports.array(
+        external_exports.object({
+          kind: external_exports.string().trim().min(1),
+          summary: external_exports.string().trim().min(1).max(500),
+          outcome: external_exports.string().trim().min(1)
+        }).strict()
+      ).max(16)
+    }).strict();
+    DiagnosticPublicationSchema = external_exports.object({
+      host: external_exports.enum(["github", "gitlab"]),
+      url: external_exports.string().url(),
+      number: external_exports.string().trim().min(1).max(100),
+      created: external_exports.boolean(),
+      updated: external_exports.boolean(),
+      publishResultArtifactId: ArtifactIdSchema
+    }).strict().refine((publication) => publication.created || publication.updated, {
+      message: "Diagnostic publication evidence must record a created or updated request"
+    });
+    WorkflowStatusSchema = external_exports.object({
+      runId: RunIdSchema,
+      status: external_exports.enum(["running", "needs-external-action", "blocked", "publish-ready", "completed"]),
+      currentStage: external_exports.string().trim().min(1).optional(),
+      scope: WorkflowScopeSchema,
+      deliveryProfile: DeliveryProfileSchema,
+      workload: WorkloadEstimateSchema,
+      delegationPolicy: DelegationPolicySchema,
+      requiredValidations: external_exports.array(external_exports.string().trim().min(1)).superRefine((items, context) => {
+        if (new Set(items).size !== items.length) {
+          context.addIssue({ code: "custom", message: "Required validations must be unique" });
+        }
+      }),
+      stages: external_exports.array(WorkflowStageSummarySchema),
+      nextActions: external_exports.array(WorkflowActionSchema),
+      blockers: external_exports.array(external_exports.string().trim().min(1)),
+      blockerDetails: external_exports.array(WorkflowBlockerSchema),
+      diagnosticPublication: DiagnosticPublicationSchema.optional(),
+      resumeContext: WorkflowResumeContextSchema
+    }).strict();
+  }
+});
+
+// src/workflow/gate-policy.ts
+function classifyWorkflowScope(input) {
+  const text = input.requestText.toLowerCase();
+  const figmaUrls = input.figmaUrls ?? [];
+  const explicit = input.explicitScope ?? "auto";
+  const hasUiTerms = /\b(ui|ux|screen|page|component|frontend|figma|visual|design|css|react|vue)\b/i.test(text) || /(화면|디자인|프론트엔드|컴포넌트)/.test(text);
+  const ui = explicit === "ui" || explicit === "auto" && (figmaUrls.length > 0 || hasUiTerms);
+  const code = explicit !== "docs";
+  return WorkflowScopeSchema.parse({
+    code,
+    ui,
+    api: /\b(api|openapi|swagger|endpoint|contract|mock|schema)\b/i.test(text) || /(스키마|엔드포인트|계약|목업)/.test(text),
+    specification: /\b(spec|brief|requirement|openspec|gherkin)\b/i.test(text) || /(기획|요구사항)/.test(text),
+    hasVisualBaseline: figmaUrls.length > 0 || /\b(visual baseline|legacy screenshot)\b/i.test(text),
+    securitySensitive: /\b(auth|secret|token|storage|navigation|network|dependency)\b/i.test(text) || /보안/.test(text),
+    performanceSensitive: /\b(performance|lighthouse|web vitals|bundle|latency)\b/i.test(text) || /성능/.test(text),
+    observabilityRequested: /\b(observability|telemetry|trace|tracing|log correlation)\b/i.test(text) || /(관측|텔레메트리|추적)/.test(text)
+  });
+}
+function buildGatePlan(scope) {
+  return [
+    gate(
+      "functional",
+      scope.code ? "required" : "not-applicable",
+      "Code changes require executable verification."
+    ),
+    gate(
+      "openspec",
+      scope.specification ? "conditional" : "not-applicable",
+      "Specification validation applies only to specification-backed scope."
+    ),
+    gate(
+      "architecture",
+      scope.code ? "conditional" : "not-applicable",
+      "Architecture checks apply when changed boundaries support them."
+    ),
+    gate(
+      "security",
+      scope.securitySensitive ? "required" : scope.code ? "conditional" : "not-applicable",
+      "Targeted security checks follow auth, secret, storage, navigation, network, and dependency risk."
+    ),
+    gate(
+      "visual",
+      scope.ui && scope.hasVisualBaseline ? "required" : "not-applicable",
+      "Visual comparison requires both UI scope and a baseline."
+    ),
+    gate(
+      "accessibility",
+      scope.ui ? "required" : "not-applicable",
+      "Changed interactive UI states require accessibility evidence."
+    ),
+    gate(
+      "performance",
+      scope.performanceSensitive ? "required" : scope.ui ? "conditional" : "opt-in",
+      "Performance runs for sensitive routes or explicit intent."
+    ),
+    gate(
+      "observability",
+      scope.observabilityRequested ? "required" : "opt-in",
+      "Observability is generated only when explicitly requested."
+    ),
+    gate(
+      "release",
+      "release-only",
+      "Full archive integrity and package verification run only for releases."
+    )
+  ];
+}
+function gate(id, applicability, reason) {
+  return WorkflowGateSchema.parse({ id, applicability, reason });
+}
+var GateApplicabilitySchema, WorkflowGateSchema;
+var init_gate_policy = __esm({
+  "src/workflow/gate-policy.ts"() {
+    "use strict";
+    init_zod();
+    init_workflow_contracts();
+    GateApplicabilitySchema = external_exports.enum([
+      "required",
+      "conditional",
+      "opt-in",
+      "release-only",
+      "not-applicable"
+    ]);
+    WorkflowGateSchema = external_exports.object({
+      id: WorkflowGateIdSchema,
+      applicability: GateApplicabilitySchema,
+      reason: external_exports.string().trim().min(1)
+    }).strict();
+  }
+});
+
+// src/workflow/delivery-policy.ts
+function buildDelegationPolicy(size) {
+  const maxReadOnlyScouts = size === "XS" || size === "S" ? 0 : size === "M" ? 1 : 2;
+  return DelegationPolicySchema.parse({
+    singleWriter: true,
+    allowNested: false,
+    maxReadOnlyScouts,
+    parallelReviewers: size === "L" || size === "XL"
+  });
+}
+function buildDeliveryProfile(input) {
+  if (input.mode === "brief" && input.briefPath === void 0) {
+    throw new Error("brief mode requires briefPath");
+  }
+  if (input.mode === "figma" && input.figmaUrl === void 0) {
+    throw new Error("figma mode requires figmaUrl");
+  }
+  if ((input.mode === "feature" || input.mode === "figma") && !input.scope.ui) {
+    throw new Error(`${input.mode} mode requires UI scope`);
+  }
+  const userFacingFeature = input.mode === "feature" && input.scope.ui;
+  return DeliveryProfileSchema.parse({
+    mode: input.mode,
+    changeKind: input.changeKind,
+    publication: input.publication,
+    ...input.briefPath === void 0 ? {} : { briefPath: input.briefPath },
+    ...input.figmaUrl === void 0 ? {} : { figmaUrl: input.figmaUrl },
+    docsPaths: input.docsPaths ?? [],
+    openApiPaths: input.openApiPaths ?? [],
+    guidancePaths: input.guidancePaths ?? [],
+    discoveredGuidancePaths: input.discoveredGuidancePaths ?? [],
+    skillHints: input.skillHints ?? [],
+    recommendedSkills: input.recommendedSkills ?? [],
+    requirements: {
+      brief: input.briefPath !== void 0,
+      legacyBaseline: input.mode === "legacy",
+      targetedFeatureE2E: userFacingFeature,
+      featureVideo: userFacingFeature,
+      figmaBundle: input.figmaUrl !== void 0
+    }
+  });
+}
+var init_delivery_policy = __esm({
+  "src/workflow/delivery-policy.ts"() {
+    "use strict";
+    init_workflow_contracts();
+  }
+});
+
+// src/workflow/index.ts
+var init_workflow = __esm({
+  "src/workflow/index.ts"() {
+    "use strict";
+    init_workflow_contracts();
+    init_gate_policy();
+    init_delivery_policy();
+    init_workload_policy();
+  }
+});
+
 // src/state/errors.ts
 var StageStateError, StageNotFoundError, InvalidStageTransitionError, StageLeaseMismatchError, StageLeaseExpiredError, StageRetryExhaustedError;
-var init_errors4 = __esm({
+var init_errors5 = __esm({
   "src/state/errors.ts"() {
     "use strict";
     StageStateError = class extends Error {
@@ -44057,7 +45381,7 @@ var init_stage_machine = __esm({
     "use strict";
     init_run();
     init_stages();
-    init_errors4();
+    init_errors5();
     DEFAULT_LEASE_TTL_MS = 5 * 60 * 1e3;
     ALLOWED_TRANSITIONS = /* @__PURE__ */ new Map([
       ["pending", ["running"]],
@@ -44077,8 +45401,53 @@ import { createHash } from "crypto";
 import { readFile, readdir, realpath, stat } from "fs/promises";
 import path from "path";
 import { promisify } from "util";
+function diagnosticPublicationUncertainResult(reportArtifact, status) {
+  return {
+    intent: "blocked-diagnostic",
+    skipped: true,
+    reason: "diagnostic-publication-uncertain",
+    retryable: false,
+    exactRecoveryInstruction: DIAGNOSTIC_RECOVERY_INSTRUCTION,
+    diagnosticReport: { artifactId: reportArtifact.id, path: reportArtifact.uri },
+    status
+  };
+}
+function blockedDiagnosticReportKey(run, blocker) {
+  return `${blocker.stage}:${stage(run, blocker.stage).attempt}:${blocker.code}`;
+}
+function diagnosticExecutionIdentity(run, blocker, input) {
+  return {
+    runId: run.id,
+    reportKey: blockedDiagnosticReportKey(run, blocker),
+    sourceBranch: input.sourceBranch,
+    targetBranch: input.targetBranch,
+    remoteName: input.remoteName,
+    pushBranch: input.pushBranch
+  };
+}
+function diagnosticClaimFenceKey(identity) {
+  const fenceIdentity = {
+    runId: identity.runId,
+    reportKey: identity.reportKey,
+    sourceBranch: identity.sourceBranch,
+    targetBranch: identity.targetBranch
+  };
+  return createHash("sha256").update(JSON.stringify(fenceIdentity)).digest("hex");
+}
+function latestDiagnosticPublishClaimEvent(run, executionKey) {
+  return [...run.artifacts].reverse().find(
+    (artifact) => artifact.metadata["reportKind"] === "diagnostic-publish-claim" && artifact.metadata["diagnosticExecutionKey"] === executionKey
+  );
+}
+function diagnosticPublishClaimIsActive(artifact, timestamp) {
+  const expiresAt = artifact?.metadata["expiresAt"];
+  return artifact?.metadata["claimState"] === "active" && typeof expiresAt === "string" && Date.parse(expiresAt) > Date.parse(timestamp);
+}
 function publishResultIsFullySynced(result) {
   return result.status === "passed" && result.requestSynced && result.request?.draft === true && (!result.visualPreviewExpected || result.visualPreviewSynced) && (!result.featureVideoExpected || result.featureVideoSynced) && result.partialReasons.length === 0;
+}
+function diagnosticPublishResultIsFullySynced(result) {
+  return result.status === "blocked" && result.requestSynced && result.request?.draft === true && (!result.visualPreviewExpected || result.visualPreviewSynced) && (!result.featureVideoExpected || result.featureVideoSynced) && result.partialReasons.length === 0;
 }
 function publishStageError(result) {
   const partial2 = result.status === "passed";
@@ -44088,6 +45457,186 @@ function publishStageError(result) {
     message: result.errorMessage ?? (result.partialReasons.join("; ") || fallbackMessage),
     retryable: partial2 || result.status === "failed" && result.retryable
   };
+}
+function blockerFromSubmission(submission) {
+  return "blocker" in submission ? submission.blocker : void 0;
+}
+function reconstructFailedSubmissionForPersistence(run, submission) {
+  if (submission.kind === "figma-bundle" || submission.kind === "api-ready") return submission;
+  const successful = "verdict" in submission ? submission.verdict === "approved" : submission.status === "passed";
+  if (successful) return submission;
+  const rawBlocker = blockerFromSubmission(submission);
+  const blocker = rawBlocker === void 0 ? void 0 : reconstructWorkflowBlocker(run, rawBlocker, stage(run, rawBlocker.stage));
+  return {
+    ...submission,
+    summary: blocker?.summary ?? genericBlockerSummary(submission.kind, "unexpected"),
+    ...blocker === void 0 ? {} : { blocker }
+  };
+}
+function failureContextForSubmission(run, submission) {
+  if (submission.kind === "figma-bundle" || submission.kind === "api-ready") return void 0;
+  const successful = "verdict" in submission ? submission.verdict === "approved" : submission.status === "passed";
+  if (successful) return void 0;
+  const submissionStage = stageForSubmission(submission);
+  const failureStage = (submission.kind === "functional-review" || submission.kind === "design-review") && submission.verdict === "changes-requested" ? "implementation" : submissionStage;
+  return {
+    workflowStageName: submissionStage,
+    workflowStageAttempt: stage(run, submissionStage).attempt,
+    workflowFailureStage: failureStage,
+    workflowFailureAttempt: stage(run, failureStage).attempt
+  };
+}
+function reconstructWorkflowBlocker(run, blocker, failedStage) {
+  const requiredValidations = requiredValidationsForRun(
+    scopeFromRun(run),
+    deliveryProfileFromRun(run)
+  );
+  const trustedEvidencePaths = new Set(
+    run.artifacts.flatMap((artifact) => {
+      const projectPath = artifact.metadata["projectRelativePath"];
+      return typeof projectPath === "string" && isSafeDurableEvidencePath(projectPath) ? [projectPath] : [];
+    })
+  );
+  return WorkflowBlockerSchema.parse({
+    stage: blocker.stage,
+    code: blockerCodeForKind(blocker.kind),
+    kind: blocker.kind,
+    summary: genericBlockerSummary(blocker.stage, blocker.kind),
+    retryable: blocker.retryable,
+    resumable: blocker.resumable,
+    completedWork: completedWorkForRun(run),
+    evidencePaths: blocker.evidencePaths.filter(
+      (evidencePath) => isSafeDurableEvidencePath(evidencePath) && trustedEvidencePaths.has(evidencePath)
+    ),
+    attemptedRecovery: attemptedRecoveryForStage(failedStage),
+    unrunValidations: remainingValidationsForRun(run, requiredValidations),
+    exactUnblockAction: genericUnblockAction(blocker.stage, blocker.kind)
+  });
+}
+function blockerCodeForKind(kind) {
+  if (kind === "missing-input") return "MISSING_INPUT";
+  if (kind === "missing-tool") return "MISSING_TOOL";
+  if (kind === "policy") return "POLICY_BLOCKER";
+  if (kind === "verification") return "VERIFICATION_BLOCKED";
+  if (kind === "publish-precondition") return "PUBLISH_PRECONDITION";
+  if (kind === "budget-split") return "BUDGET_SPLIT_REQUIRED";
+  return "UNEXPECTED_BLOCKER";
+}
+function completedWorkForRun(run) {
+  return run.stages.filter((item) => ["passed", "skipped", "waived"].includes(item.status)).map((item) => `${item.name} stage ${item.status}.`);
+}
+function attemptedRecoveryForStage(failedStage) {
+  const executionCount = failedStage.attempt + 1;
+  return executionCount <= 1 ? [] : [`The ${failedStage.name} stage was attempted ${executionCount} times.`];
+}
+function deriveWorkflowBlocker(run, failedStage, requiredValidations, kindOverride) {
+  if (failedStage.error === void 0) {
+    throw new Error(`Cannot derive a blocker for ${failedStage.name} without a stage error`);
+  }
+  const kind = kindOverride ?? blockerKindForStageError(failedStage.name, failedStage.error.code);
+  const code = canonicalDurableBlockerCode(kind, failedStage.error.code);
+  const evidencePaths = [
+    ...new Set(
+      run.artifacts.flatMap((artifact) => {
+        const projectPath = artifact.metadata["projectRelativePath"];
+        if (typeof projectPath !== "string" || !isSafeDurableEvidencePath(projectPath)) return [];
+        return [projectPath];
+      })
+    )
+  ].slice(-50);
+  return WorkflowBlockerSchema.parse({
+    stage: failedStage.name,
+    code,
+    kind,
+    summary: genericBlockerSummary(failedStage.name, kind),
+    retryable: failedStage.error.retryable,
+    resumable: true,
+    completedWork: completedWorkForRun(run),
+    evidencePaths,
+    attemptedRecovery: attemptedRecoveryForStage(failedStage),
+    unrunValidations: remainingValidationsForRun(run, requiredValidations),
+    exactUnblockAction: genericUnblockAction(failedStage.name, kind)
+  });
+}
+function remainingValidationsForRun(run, requiredValidations) {
+  const completed = completedValidationsForRun(run);
+  return [...new Set(requiredValidations)].filter((validation) => !completed.has(validation)).slice(0, 20);
+}
+function completedValidationsForRun(run) {
+  const completed = /* @__PURE__ */ new Set();
+  const artifacts = new Map(run.artifacts.map((artifact) => [artifact.id, artifact]));
+  const latestStageSubmission = (stageName) => [...stage(run, stageName).artifactIds].reverse().map((artifactId) => artifacts.get(artifactId)).find(
+    (artifact) => artifact?.metadata["adapter"] === "workflow-v2" && artifact.metadata["workflowSubmissionKind"] === stageName
+  );
+  for (const reviewStage of ["functional-review", "design-review"]) {
+    const gateResults = latestStageSubmission(reviewStage)?.metadata["gateResults"];
+    if (!Array.isArray(gateResults)) continue;
+    for (const result of gateResults) {
+      if (typeof result === "object" && result !== null && "id" in result && "status" in result && typeof result.id === "string" && result.status === "passed") {
+        completed.add(result.id);
+      }
+    }
+  }
+  if (stage(run, "contracts").status === "passed") {
+    const legacyBaseline = latestStageSubmission("contracts")?.metadata["legacyBaseline"];
+    if (typeof legacyBaseline === "object" && legacyBaseline !== null && "checks" in legacyBaseline && Array.isArray(legacyBaseline.checks) && legacyBaseline.checks.length > 0 && legacyBaseline.checks.every(
+      (check2) => typeof check2 === "object" && check2 !== null && "status" in check2 && check2.status === "passed"
+    )) {
+      completed.add("legacy-baseline");
+    }
+  }
+  const implementation = stage(run, "implementation");
+  if (implementation.status === "passed") {
+    for (const artifactId of implementation.artifactIds) {
+      const role = artifacts.get(artifactId)?.metadata["featureEvidenceRole"];
+      if (role === "result") completed.add("targeted-feature-e2e");
+      if (role === "video") completed.add("feature-video");
+    }
+  }
+  if (implementation.checkpoint?.data["apiReady"] === true) completed.add("api-ready");
+  if (run.artifacts.some(
+    (artifact) => artifact.metadata["adapter"] === "workflow-v2" && artifact.metadata["workflowSubmissionKind"] === "figma-bundle" && artifact.metadata["status"] === "passed"
+  )) {
+    completed.add("figma-bundle");
+  }
+  if (stage(run, "publish").artifactIds.some(
+    (artifactId) => artifacts.get(artifactId)?.metadata["reportKind"] === "publish-result"
+  )) {
+    completed.add("draft-publication-preflight");
+  }
+  return completed;
+}
+function canonicalDurableBlockerCode(kind, rawCode) {
+  return KNOWN_DURABLE_BLOCKER_CODES.has(rawCode) ? rawCode : blockerCodeForKind(kind);
+}
+function blockerKindForStageError(stageName, code) {
+  if (/UNEXPECTED/.test(code)) return "unexpected";
+  if (code === "WORKFLOW_BLOCKED") return "unexpected";
+  if (code === "REVIEW_CHANGES_REQUESTED") return "unexpected";
+  if (/BUDGET|TOKEN_LIMIT|CONTEXT_LIMIT/.test(code)) return "budget-split";
+  if (/MISSING_(?:INPUT|CONTEXT|APPROVAL|EVIDENCE)/.test(code)) return "missing-input";
+  if (/MISSING_TOOL|TOOL_UNAVAILABLE|RUNTIME_UNAVAILABLE/.test(code)) return "missing-tool";
+  if (stageName === "publish" || /^PUBLISH_/.test(code)) return "publish-precondition";
+  if (/POLICY|PRECONDITION/.test(code)) return "policy";
+  if (stageName === "functional-review" || stageName === "design-review" || /REVIEW|VERIFY|VALIDATION|TEST/.test(code)) {
+    return "verification";
+  }
+  return "unexpected";
+}
+function genericBlockerSummary(stageName, kind) {
+  const reason = kind === "missing-input" ? "required input is missing" : kind === "missing-tool" ? "a required tool is unavailable" : kind === "policy" ? "a policy condition is unmet" : kind === "verification" ? "verification requires attention" : kind === "publish-precondition" ? "a publication precondition is unmet" : kind === "budget-split" ? "the remaining work must be split" : "an unexpected condition requires attention";
+  return `The ${stageName} stage stopped because ${reason}.`;
+}
+function genericUnblockAction(stageName, kind) {
+  if (kind === "missing-input") return `Provide the missing input and resume ${stageName}.`;
+  if (kind === "missing-tool") return `Enable the required tool and resume ${stageName}.`;
+  if (kind === "policy") return `Resolve the policy condition and retry ${stageName}.`;
+  if (kind === "verification") return `Address the verification result and rerun ${stageName}.`;
+  if (kind === "publish-precondition") {
+    return `Satisfy the publication precondition and retry ${stageName}.`;
+  }
+  if (kind === "budget-split") return `Split the remaining work before resuming ${stageName}.`;
+  return `Inspect sanitized diagnostics and retry ${stageName} when safe.`;
 }
 function scopeFromRun(run) {
   const rawScope = stage(run, "intake").checkpoint?.data["scope"];
@@ -44153,7 +45702,7 @@ function resumeContextForRun(run) {
     ...new Set(
       run.artifacts.flatMap((artifact) => {
         const projectPath = artifact.metadata["projectRelativePath"];
-        return typeof projectPath === "string" && projectPath.trim() !== "" ? [projectPath] : [];
+        return typeof projectPath === "string" && isSafeDurableEvidencePath(projectPath) ? [projectPath] : [];
       })
     )
   ].filter((projectPath) => projectPath.length <= 1e3);
@@ -44246,6 +45795,17 @@ function assertSubmissionPrerequisites(run, submission) {
   }
   if (submission.kind === "contracts" && submission.status === "passed" && submission.guidanceTrace.skillHints.some((skillHint) => !profile.skillHints.includes(skillHint))) {
     throw new Error("Every applied skill hint must be requested in the delivery profile");
+  }
+  if (submission.kind === "contracts" && submission.status === "passed") {
+    const allowedSkills = /* @__PURE__ */ new Set([...profile.skillHints, ...profile.recommendedSkills]);
+    const unapprovedSkills = submission.guidanceTrace.appliedSkills.filter(
+      (skill) => !allowedSkills.has(skill)
+    );
+    if (unapprovedSkills.length > 0) {
+      throw new Error(
+        `Every applied skill must be explicitly hinted or deterministically recommended: ${unapprovedSkills.join(", ")}`
+      );
+    }
   }
   if (submission.kind === "contracts" && submission.status === "passed" && profile.requirements.figmaBundle && !run.artifacts.some(
     (artifact) => artifact.metadata["workflowSubmissionKind"] === "figma-bundle"
@@ -44685,6 +46245,36 @@ async function resolveProjectTextFile(projectRoot, filePath, label, missingAllow
 function isMissingFileError(error51) {
   return typeof error51 === "object" && error51 !== null && "code" in error51 && (error51.code === "ENOENT" || error51.code === "ENOTDIR");
 }
+async function recommendedSkillsForIntake(input) {
+  const skills = [];
+  if (input.figmaUrl !== void 0) skills.push("figma", "design-system");
+  if (input.hasOpenApi) skills.push("api-generator");
+  const packages = await declaredPackageNames(input.projectRoot);
+  if (packages.has("react")) skills.push("react-best-practices");
+  if (packages.has("next")) skills.push("next-best-practices");
+  if (input.featureUi) skills.push("playwright");
+  return [...new Set(skills)];
+}
+async function declaredPackageNames(projectRoot) {
+  try {
+    const content = await readFile(path.join(projectRoot, "package.json"), "utf8");
+    const parsed = JSON.parse(content);
+    const packages = /* @__PURE__ */ new Set();
+    for (const field of [
+      "dependencies",
+      "devDependencies",
+      "peerDependencies",
+      "optionalDependencies"
+    ]) {
+      const values = parsed[field];
+      if (typeof values !== "object" || values === null || Array.isArray(values)) continue;
+      Object.keys(values).forEach((packageName) => packages.add(packageName));
+    }
+    return packages;
+  } catch {
+    return /* @__PURE__ */ new Set();
+  }
+}
 async function countDeclaredWorkspacePackages(projectRoot) {
   const patterns = /* @__PURE__ */ new Set();
   try {
@@ -44847,16 +46437,6 @@ async function hasPackageManifest(packageRoot) {
     return false;
   }
 }
-function markdownTableCell(value) {
-  return value.replaceAll("\\", "\\\\").replaceAll("|", "\\|").replace(/\r?\n/g, "<br>");
-}
-function markdownListValue(value) {
-  return [...value].map((character) => {
-    if (character === "\r") return "&#92;r";
-    if (character === "\n") return "&#92;n";
-    return MARKDOWN_LIST_CONTROL_CHARACTERS.has(character) ? `&#${character.charCodeAt(0)};` : character;
-  }).join("");
-}
 async function currentGitHead(projectRoot) {
   try {
     const { stdout } = await execFileAsync("git", ["rev-parse", "--verify", "HEAD"], {
@@ -44869,29 +46449,34 @@ async function currentGitHead(projectRoot) {
     return null;
   }
 }
-function latestArtifact(run, kind, reportKind) {
-  const artifact = [...run.artifacts].reverse().find((item) => item.kind === kind && item.metadata["reportKind"] === reportKind);
-  if (artifact === void 0) {
-    throw new Error(`Run ${run.id} has no ${reportKind} artifact`);
-  }
-  return artifact;
+function readyReportArtifactForPacket(run, reviewPacketId) {
+  const artifacts = new Map(run.artifacts.map((artifact) => [artifact.id, artifact]));
+  return [...stage(run, "report").artifactIds].reverse().map((artifactId) => artifacts.get(artifactId)).find(
+    (artifact) => artifact?.kind === "pr-report" && artifact.metadata["reportKind"] === "pr-body-markdown" && artifact.metadata["reportIntent"] === "ready" && artifact.metadata["decision"] === "ready" && artifact.metadata["reviewPacketId"] === reviewPacketId
+  );
 }
-var import_pngjs, import_yaml, WORKER_ID, execFileAsync, DEFAULT_EXTERNAL_LEASE_TTL_MS, DEFAULT_EXTERNAL_HEARTBEAT_MS, MAX_COMPOSABLE_SOURCE_PATHS, MAX_INTAKE_SOURCE_CHARS, MAX_OPENAPI_OPERATIONS, GUIDANCE_CANDIDATES, ComposableSourcePathsSchema, NormalizedDeliveryProfilePathsSchema, SkillHintsSchema, FigmaManifestSchema, FeatureResultSchema, WorkflowStartInputSchema, WorkflowAdvanceInputSchema, WorkflowSubmitInputSchema, WorkflowStatusInputSchema, WorkflowPublishInputSchema, WorkflowArchiveInputSchema, WorkflowService, MARKDOWN_LIST_CONTROL_CHARACTERS;
+var import_pngjs, import_yaml, WORKER_ID, execFileAsync, DEFAULT_EXTERNAL_LEASE_TTL_MS, DEFAULT_EXTERNAL_HEARTBEAT_MS, MAX_DIAGNOSTIC_CLAIM_ATTEMPTS, MAX_COMPOSABLE_SOURCE_PATHS, MAX_INTAKE_SOURCE_CHARS, MAX_OPENAPI_OPERATIONS, GUIDANCE_CANDIDATES, ComposableSourcePathsSchema, NormalizedDeliveryProfilePathsSchema, SkillHintsSchema, FigmaManifestSchema, FeatureResultSchema, WorkflowStartInputSchema, WorkflowAdvanceInputSchema, WorkflowSubmitInputSchema, WorkflowStatusInputSchema, WorkflowPublishInputSchema, WorkflowArchiveInputSchema, WorkflowService, DiagnosticPublishClaimUncertainError, DIAGNOSTIC_RECOVERY_INSTRUCTION, KNOWN_DURABLE_BLOCKER_CODES;
 var init_workflow_service = __esm({
   "src/application/workflow-service.ts"() {
     "use strict";
     import_pngjs = __toESM(require_png(), 1);
     import_yaml = __toESM(require_dist2(), 1);
     init_zod();
+    init_pr_report_model();
+    init_workflow_report_renderer();
+    init_publisher();
     init_artifact();
     init_id_factory();
     init_ids();
+    init_run2();
+    init_errors4();
     init_workflow();
     init_stage_machine();
     WORKER_ID = "workflow-orchestrator";
     execFileAsync = promisify(execFile);
     DEFAULT_EXTERNAL_LEASE_TTL_MS = 15 * 60 * 1e3;
     DEFAULT_EXTERNAL_HEARTBEAT_MS = 60 * 1e3;
+    MAX_DIAGNOSTIC_CLAIM_ATTEMPTS = 8;
     MAX_COMPOSABLE_SOURCE_PATHS = 20;
     MAX_INTAKE_SOURCE_CHARS = 2e5;
     MAX_OPENAPI_OPERATIONS = 1e3;
@@ -45011,12 +46596,14 @@ var init_workflow_service = __esm({
     WorkflowStatusInputSchema = external_exports.object({ runId: RunIdSchema }).strict();
     WorkflowPublishInputSchema = external_exports.object({
       runId: RunIdSchema,
+      intent: PublishIntentSchema.default("ready"),
       mode: external_exports.enum(["preview", "execute"]),
       sourceBranch: external_exports.string().trim().min(1),
       targetBranch: external_exports.string().trim().min(1).default("main"),
       title: external_exports.string().trim().min(1).optional(),
       remoteName: external_exports.string().trim().min(1).default("origin"),
       pushBranch: external_exports.boolean().default(true),
+      recoverUncertain: external_exports.boolean().default(false),
       confirm: external_exports.boolean().default(false)
     }).strict().superRefine((input, context) => {
       if (input.sourceBranch === input.targetBranch) {
@@ -45031,6 +46618,13 @@ var init_workflow_service = __esm({
           code: "custom",
           path: ["confirm"],
           message: "Executing publication requires confirm=true"
+        });
+      }
+      if (input.recoverUncertain && (input.intent !== "blocked-diagnostic" || input.mode !== "execute" || !input.confirm)) {
+        context.addIssue({
+          code: "custom",
+          path: ["recoverUncertain"],
+          message: "recoverUncertain=true requires confirmed blocked-diagnostic execute publication"
         });
       }
     });
@@ -45072,6 +46666,7 @@ var init_workflow_service = __esm({
       now;
       externalLeaseTtlMs;
       externalHeartbeatMs;
+      diagnosticPublishFlights = /* @__PURE__ */ new Map();
       async start(rawInput) {
         const input = WorkflowStartInputSchema.parse(rawInput);
         const sources = await prepareComposableSources(input);
@@ -45134,6 +46729,12 @@ var init_workflow_service = __esm({
           specification: classifiedScope.specification || sources.openApi.length > 0
         });
         const gatePlan = buildGatePlan(scope);
+        const recommendedSkills = await recommendedSkillsForIntake({
+          projectRoot: input.projectRoot,
+          ...figmaUrl === void 0 ? {} : { figmaUrl },
+          hasOpenApi: sources.openApi.length > 0,
+          featureUi: scope.ui && (input.mode === "feature" || input.changeKind === "feature")
+        });
         const deliveryProfile = buildDeliveryProfile({
           mode: input.mode,
           changeKind: input.changeKind,
@@ -45145,7 +46746,8 @@ var init_workflow_service = __esm({
           openApiPaths: normalizedProfilePaths.openApiPaths,
           guidancePaths: normalizedProfilePaths.guidancePaths,
           discoveredGuidancePaths: normalizedProfilePaths.discoveredGuidancePaths,
-          skillHints: sources.skillHints
+          skillHints: sources.skillHints,
+          recommendedSkills
         });
         const workload = estimateWorkload({
           phase: "intake",
@@ -45236,8 +46838,15 @@ var init_workflow_service = __esm({
           stageName,
           workerId: WORKER_ID
         });
+        const activeRun = await this.dependencies.runStore.get(run.id);
+        const runWithEvidence = {
+          ...activeRun,
+          artifacts: [...activeRun.artifacts, ...evidenceArtifacts]
+        };
+        const rawBlocker = blockerFromSubmission(submission);
+        const typedBlocker = rawBlocker === void 0 ? void 0 : reconstructWorkflowBlocker(runWithEvidence, rawBlocker, started.stage);
         const artifact = await this.recordSubmissionArtifact(
-          await this.dependencies.runStore.get(run.id),
+          activeRun,
           submission,
           evidenceArtifacts,
           reviewPacket
@@ -45246,8 +46855,20 @@ var init_workflow_service = __esm({
         const outcome = submissionOutcome(submission);
         if ((submission.kind === "functional-review" || submission.kind === "design-review") && submission.verdict === "changes-requested") {
           const current = await this.dependencies.runStore.get(run.id);
-          const reopened = reopenImplementationForReviewChanges(current, submission.summary, this.now);
-          await this.dependencies.runStore.save(reopened, current.revision);
+          const reopened = reopenImplementationForReviewChanges(
+            current,
+            typedBlocker?.summary ?? genericBlockerSummary(submission.kind, "unexpected"),
+            this.now
+          );
+          await this.dependencies.runStore.save(
+            {
+              ...reopened,
+              stages: reopened.stages.map(
+                (item) => item.name === "implementation" ? { ...item, artifactIds: [.../* @__PURE__ */ new Set([...item.artifactIds, artifact.id])] } : item
+              )
+            },
+            current.revision
+          );
           return this.status({ runId: run.id });
         }
         if (outcome === "passed") {
@@ -45281,9 +46902,9 @@ var init_workflow_service = __esm({
             leaseId: started.stage.lease.id,
             artifactIds,
             error: {
-              code: outcome === "blocked" ? "WORKFLOW_BLOCKED" : "CHANGES_REQUESTED",
-              message: submission.summary,
-              retryable: outcome !== "blocked"
+              code: typedBlocker?.code ?? (outcome === "blocked" ? "WORKFLOW_BLOCKED" : "CHANGES_REQUESTED"),
+              message: typedBlocker?.summary ?? `${stageName} stage reported ${outcome === "blocked" ? "a blocker" : "a failure"}.`,
+              retryable: typedBlocker?.retryable ?? outcome !== "blocked"
             }
           });
         }
@@ -45296,16 +46917,20 @@ var init_workflow_service = __esm({
         const deliveryProfile = deliveryProfileFromRun(run);
         const workload = workloadFromRun(run, scope, deliveryProfile);
         const nextActions = actionsForRun(run, scope, deliveryProfile);
+        const requiredValidations = requiredValidationsForRun(scope, deliveryProfile);
         const currentStage = run.stages.find(
           (item) => !["passed", "skipped", "waived"].includes(item.status)
         );
-        const blockers = run.stages.flatMap(
-          (item) => item.error === void 0 || item.error.retryable ? [] : [item.error.message]
+        const blockerDetails = await this.blockerDetailsForRun(run, requiredValidations);
+        const blockers = blockerDetails.flatMap(
+          (blocker) => blocker.retryable ? [] : [blocker.summary]
         );
         const reportPassed = stage(run, "report").status === "passed";
         const publishPassed = stage(run, "publish").status === "passed";
         const publicationCompleted = publishPassed || deliveryProfile.publication === "none" && stage(run, "publish").status === "skipped";
         const status = publicationCompleted ? "completed" : blockers.length > 0 ? "blocked" : reportPassed ? "publish-ready" : nextActions.length > 0 ? "needs-external-action" : "running";
+        const currentBlocker = blockerDetails.find((blocker) => !blocker.retryable);
+        const diagnosticPublication = status === "blocked" && currentBlocker !== void 0 ? await this.diagnosticPublicationForRun(run, currentBlocker) : void 0;
         return WorkflowStatusSchema.parse({
           runId: run.id,
           status,
@@ -45313,7 +46938,8 @@ var init_workflow_service = __esm({
           scope,
           deliveryProfile,
           workload,
-          requiredValidations: requiredValidationsForRun(scope, deliveryProfile),
+          delegationPolicy: buildDelegationPolicy(workload.size),
+          requiredValidations,
           stages: run.stages.map((item) => ({
             name: item.name,
             status: item.status,
@@ -45321,8 +46947,83 @@ var init_workflow_service = __esm({
           })),
           nextActions,
           blockers,
+          blockerDetails,
+          ...diagnosticPublication === void 0 ? {} : { diagnosticPublication },
           resumeContext: resumeContextForRun(run)
         });
+      }
+      async ensureBlockedDiagnosticReport(rawInput) {
+        const input = WorkflowStatusInputSchema.parse(rawInput);
+        const run = await this.dependencies.runStore.get(input.runId);
+        const blocker = (await this.blockerDetailsForRun(
+          run,
+          requiredValidationsForRun(scopeFromRun(run), deliveryProfileFromRun(run))
+        )).find((item) => !item.retryable);
+        if (blocker === void 0) {
+          throw new Error(`Run ${run.id} has no current non-retryable blocker`);
+        }
+        const blockedStageAttempt = stage(run, blocker.stage).attempt;
+        const idempotencyKey = blockedDiagnosticReportKey(run, blocker);
+        const existing = [...run.artifacts].reverse().find(
+          (artifact2) => artifact2.kind === "pr-report" && artifact2.metadata["reportIntent"] === "blocked-diagnostic" && artifact2.metadata["idempotencyKey"] === idempotencyKey
+        );
+        if (existing !== void 0) return existing;
+        const timestamp = this.now();
+        const sourceRunRevision = run.revision;
+        const markdown = renderBlockedWorkflowReport({
+          runId: run.id,
+          projectRoot: run.projectRoot,
+          blocker
+        });
+        const blob = await this.dependencies.artifactStore.writeBlob({
+          content: Buffer.from(markdown, "utf8"),
+          mediaType: "text/markdown",
+          storedAt: timestamp,
+          label: "pr-report.md"
+        });
+        const artifact = ArtifactRefSchema.parse({
+          id: createArtifactId(),
+          kind: "pr-report",
+          uri: blob.uri,
+          mediaType: "text/markdown",
+          digest: blob.digest,
+          producedBy: "orchestrator",
+          evidenceIds: [],
+          createdAt: timestamp,
+          metadata: {
+            adapter: "workflow-v2",
+            ...WorkflowReportMetadataSchema.parse({
+              reportKind: "pr-body-markdown",
+              reportIntent: "blocked-diagnostic",
+              decision: "blocked"
+            }),
+            locale: "en",
+            blockedStage: blocker.stage,
+            errorCode: blocker.code,
+            blockedStageAttempt,
+            sourceRunRevision,
+            idempotencyKey
+          }
+        });
+        try {
+          await this.dependencies.runStore.save(
+            {
+              ...run,
+              revision: run.revision + 1,
+              updatedAt: timestamp,
+              artifacts: [...run.artifacts, artifact]
+            },
+            run.revision
+          );
+        } catch (error51) {
+          if (!(error51 instanceof RevisionConflictError)) throw error51;
+          const winner = (await this.dependencies.runStore.get(run.id)).artifacts.find(
+            (item) => item.kind === "pr-report" && item.metadata["reportIntent"] === "blocked-diagnostic" && item.metadata["idempotencyKey"] === idempotencyKey
+          );
+          if (winner === void 0) throw error51;
+          return winner;
+        }
+        return artifact;
       }
       async publish(rawInput) {
         const input = WorkflowPublishInputSchema.parse(rawInput);
@@ -45334,10 +47035,32 @@ var init_workflow_service = __esm({
         if (deliveryProfileFromRun(run).publication !== "draft") {
           throw new Error("Draft publication was not requested for this workflow");
         }
-        const reportArtifact = latestArtifact(run, "pr-report", "pr-body-markdown");
-        const reviewedHeadSha = reviewPacketFromRun(run)?.headSha;
+        if (input.intent === "blocked-diagnostic") {
+          return this.publishBlockedDiagnostic(input, run, publisher);
+        }
+        if (stage(run, "report").status !== "passed") {
+          throw new Error("Ready publication requires a passed report stage");
+        }
+        if (reviewPacketFromRun(run) === void 0) {
+          throw new Error("Ready publication requires the current implementation review packet");
+        }
+        await assertReviewPacketFresh(run);
+        const packet = reviewPacketFromRun(run);
+        const reportArtifact = readyReportArtifactForPacket(run, packet.id);
+        if (reportArtifact === void 0) {
+          throw new Error("Ready publication requires a ready report for the current review packet");
+        }
+        const reportMetadata = WorkflowReportMetadataSchema.safeParse({
+          reportKind: reportArtifact.metadata["reportKind"],
+          reportIntent: reportArtifact.metadata["reportIntent"],
+          decision: reportArtifact.metadata["decision"]
+        });
+        if (!reportMetadata.success || reportMetadata.data.reportIntent !== "ready" || reportArtifact.metadata["reviewPacketId"] !== packet.id) {
+          throw new Error("Ready publication requires a ready report for the current review packet");
+        }
         const baseInput = {
           runId: run.id,
+          intent: input.intent,
           reportArtifactId: reportArtifact.id,
           sourceBranch: input.sourceBranch,
           targetBranch: input.targetBranch,
@@ -45348,7 +47071,7 @@ var init_workflow_service = __esm({
           labels: ["spec-to-pr"],
           reviewers: [],
           assignees: [],
-          ...reviewedHeadSha === null || reviewedHeadSha === void 0 ? {} : { headSha: reviewedHeadSha }
+          ...packet.headSha === null ? {} : { headSha: packet.headSha }
         };
         if (input.mode === "preview") {
           return publisher.plan(baseInput);
@@ -45402,6 +47125,150 @@ var init_workflow_service = __esm({
           });
         }
         return { result, status: await this.status({ runId: run.id }) };
+      }
+      async publishBlockedDiagnostic(input, run, publisher) {
+        const workflowStatus = await this.status({ runId: run.id });
+        const blocker = workflowStatus.blockerDetails.find((item) => !item.retryable);
+        if (workflowStatus.status !== "blocked" || blocker === void 0) {
+          throw new Error("Blocked diagnostic publication requires a currently blocked Run");
+        }
+        if (input.mode === "preview") {
+          const skipped = blocker.kind === "publish-precondition";
+          return {
+            runId: run.id,
+            intent: input.intent,
+            mode: input.mode,
+            sourceBranch: input.sourceBranch,
+            targetBranch: input.targetBranch,
+            willEnsureReport: true,
+            eligibleForPublication: !skipped,
+            preflightPending: !skipped,
+            skipped,
+            blocker: {
+              stage: blocker.stage,
+              code: blocker.code,
+              kind: blocker.kind,
+              exactUnblockAction: blocker.exactUnblockAction
+            }
+          };
+        }
+        const executionIdentity = diagnosticExecutionIdentity(run, blocker, input);
+        const executionKey = JSON.stringify(executionIdentity);
+        const inFlight = this.diagnosticPublishFlights.get(executionKey);
+        if (inFlight !== void 0) return inFlight;
+        const flight = this.executeBlockedDiagnostic(
+          input,
+          run,
+          publisher,
+          blocker,
+          executionIdentity
+        ).finally(() => {
+          if (this.diagnosticPublishFlights.get(executionKey) === flight) {
+            this.diagnosticPublishFlights.delete(executionKey);
+          }
+        });
+        this.diagnosticPublishFlights.set(executionKey, flight);
+        return flight;
+      }
+      async executeBlockedDiagnostic(input, run, publisher, blocker, executionIdentity) {
+        const reportArtifact = await this.ensureBlockedDiagnosticReport({ runId: run.id });
+        const actualReportKey = reportArtifact.metadata["idempotencyKey"];
+        if (reportArtifact.metadata["reportIntent"] !== "blocked-diagnostic" || actualReportKey !== executionIdentity.reportKey) {
+          const stopped = {
+            intent: "blocked-diagnostic",
+            skipped: true,
+            reason: "diagnostic-context-changed",
+            retryable: true,
+            expectedReportKey: executionIdentity.reportKey,
+            actualReportKey: typeof actualReportKey === "string" ? actualReportKey : null,
+            diagnosticReport: { artifactId: reportArtifact.id, path: reportArtifact.uri },
+            status: await this.status({ runId: run.id })
+          };
+          return stopped;
+        }
+        if (blocker.kind === "publish-precondition") {
+          return {
+            intent: input.intent,
+            skipped: true,
+            reason: "publish-precondition",
+            localReportPath: reportArtifact.uri,
+            diagnosticReport: { artifactId: reportArtifact.id, path: reportArtifact.uri },
+            exactUnblockAction: blocker.exactUnblockAction,
+            status: await this.status({ runId: run.id })
+          };
+        }
+        const runWithReport = await this.dependencies.runStore.get(run.id);
+        const synchronized = await this.synchronizedDiagnosticPublishResultForRun(
+          runWithReport,
+          reportArtifact.id,
+          executionIdentity
+        );
+        if (synchronized !== void 0) {
+          return { result: synchronized, status: await this.status({ runId: run.id }) };
+        }
+        const claim = await this.acquireDiagnosticPublishClaim(
+          run.id,
+          reportArtifact.id,
+          executionIdentity,
+          input.recoverUncertain
+        );
+        if (claim.state === "synchronized") {
+          return { result: claim.result, status: await this.status({ runId: run.id }) };
+        }
+        if (claim.state === "in-progress") {
+          return {
+            intent: "blocked-diagnostic",
+            skipped: true,
+            reason: "diagnostic-publication-in-progress",
+            retryable: true,
+            retryAfter: claim.expiresAt,
+            diagnosticReport: { artifactId: reportArtifact.id, path: reportArtifact.uri },
+            status: await this.status({ runId: run.id })
+          };
+        }
+        if (claim.state === "uncertain") {
+          return diagnosticPublicationUncertainResult(
+            reportArtifact,
+            await this.status({ runId: run.id })
+          );
+        }
+        const baseInput = {
+          runId: run.id,
+          intent: input.intent,
+          reportArtifactId: reportArtifact.id,
+          sourceBranch: input.sourceBranch,
+          targetBranch: input.targetBranch,
+          remoteName: input.remoteName,
+          mode: "draft",
+          pushBranch: input.pushBranch,
+          labels: ["spec-to-pr"],
+          reviewers: [],
+          assignees: []
+        };
+        try {
+          const result = await this.withDiagnosticPublishClaimHeartbeat(
+            run.id,
+            claim.executionKey,
+            claim.ownerClaimId,
+            (signal) => publisher.publish({ ...baseInput, confirm: true }, { signal })
+          );
+          await this.releaseDiagnosticPublishClaim(run.id, claim.executionKey, claim.ownerClaimId);
+          return { result, status: await this.status({ runId: run.id }) };
+        } catch (error51) {
+          if (error51 instanceof DiagnosticPublishClaimUncertainError) {
+            await this.markDiagnosticPublishClaimUncertainBestEffort(
+              run.id,
+              claim.executionKey,
+              claim.ownerClaimId
+            );
+            return diagnosticPublicationUncertainResult(
+              reportArtifact,
+              await this.status({ runId: run.id })
+            );
+          }
+          await this.releaseDiagnosticPublishClaim(run.id, claim.executionKey, claim.ownerClaimId);
+          throw error51;
+        }
       }
       async archive(rawInput) {
         const input = WorkflowArchiveInputSchema.parse(rawInput);
@@ -45479,7 +47346,13 @@ var init_workflow_service = __esm({
       }
       async recordSubmissionArtifact(run, submission, evidenceArtifacts, reviewPacket) {
         const timestamp = this.now();
-        const content = `${JSON.stringify(submission, null, 2)}
+        const persistedSubmission = reconstructFailedSubmissionForPersistence(
+          { ...run, artifacts: [...run.artifacts, ...evidenceArtifacts] },
+          submission
+        );
+        const failureContext = failureContextForSubmission(run, submission);
+        const persistedSummary = persistedSubmission.kind === "figma-bundle" ? "Accepted host-connected Figma bundle." : persistedSubmission.summary;
+        const content = `${JSON.stringify(persistedSubmission, null, 2)}
 `;
         const blob = await this.dependencies.artifactStore.writeBlob({
           content: Buffer.from(content, "utf8"),
@@ -45499,9 +47372,10 @@ var init_workflow_service = __esm({
           metadata: {
             adapter: "workflow-v2",
             workflowSubmissionKind: submission.kind,
-            ...submission.kind === "figma-bundle" ? { summary: "Accepted host-connected Figma bundle.", status: "passed" } : { summary: submission.summary },
+            ...submission.kind === "figma-bundle" ? { summary: persistedSummary, status: "passed" } : { summary: persistedSummary },
             ..."verdict" in submission ? { verdict: submission.verdict } : {},
             ..."status" in submission ? { status: submission.status } : {},
+            ...failureContext === void 0 ? {} : failureContext,
             evidenceArtifactIds: evidenceArtifacts.map((item) => item.id),
             ...submission.kind !== "contracts" ? {} : {
               requirementManifest: submission.requirementManifest,
@@ -45632,8 +47506,17 @@ var init_workflow_service = __esm({
         const timestamp = this.now();
         const artifacts = [];
         const apiPhysicalFiles = /* @__PURE__ */ new Map();
+        const preparedEvidencePaths = [];
         for (const evidencePath of submission.artifactPaths) {
-          const requestedPath = path.isAbsolute(evidencePath) ? path.normalize(evidencePath) : path.resolve(root, evidencePath);
+          if (path.isAbsolute(evidencePath)) {
+            throw new Error(
+              "Evidence path must be a project-relative durable evidence path within the project root"
+            );
+          }
+          if (!isSafeDurableEvidencePath(evidencePath)) {
+            throw new Error("Evidence path must be a safe durable evidence path");
+          }
+          const requestedPath = path.resolve(root, evidencePath);
           assertWithinProjectRoot(root, requestedPath, evidencePath);
           let resolvedPath;
           try {
@@ -45642,6 +47525,13 @@ var init_workflow_service = __esm({
             throw new Error(`Evidence file does not exist: ${evidencePath}`);
           }
           assertWithinProjectRoot(root, resolvedPath, evidencePath);
+          const projectRelativePath = path.relative(root, resolvedPath).split(path.sep).join("/");
+          if (!isSafeDurableEvidencePath(projectRelativePath)) {
+            throw new Error("Evidence path must be a safe durable evidence path");
+          }
+          preparedEvidencePaths.push({ evidencePath, resolvedPath, projectRelativePath });
+        }
+        for (const { evidencePath, resolvedPath, projectRelativePath } of preparedEvidencePaths) {
           const details = await stat(resolvedPath);
           if (!details.isFile()) {
             throw new Error(`Evidence path must reference a file: ${evidencePath}`);
@@ -45696,7 +47586,7 @@ var init_workflow_service = __esm({
             content,
             mediaType,
             storedAt: timestamp,
-            label: path.basename(resolvedPath)
+            label: path.posix.basename(projectRelativePath)
           });
           artifacts.push(
             ArtifactRefSchema.parse({
@@ -45710,7 +47600,7 @@ var init_workflow_service = __esm({
               createdAt: timestamp,
               metadata: {
                 adapter: "workflow-v2-evidence",
-                projectRelativePath: path.relative(root, resolvedPath),
+                projectRelativePath,
                 byteLength: details.size,
                 workflowSubmissionKind: submission.kind,
                 ...featureEvidenceRole === void 0 ? {} : { featureEvidenceRole },
@@ -45749,87 +47639,19 @@ var init_workflow_service = __esm({
         if (unreviewed.length > 0) {
           throw new Error(`PR report requires review coverage for: ${unreviewed.join(", ")}`);
         }
-        const verdictFor = (requirementId) => reviews.flatMap((review) => review.requirements).filter((requirement) => requirement.id === requirementId).map((requirement) => requirement.verdict).join(", ");
         const evidencePaths = [
           ...new Set([contracts, implementation, ...reviews].flatMap((item) => item.artifactPaths))
         ];
-        const gateLines = reviews.flatMap(
-          (review) => review.gateResults.map(
-            (gate2) => `- ${review.kind}/${gate2.id}: ${gate2.status} (${gate2.evidencePaths.join(", ")})`
-          )
-        );
-        const riskLines = reviews.flatMap(
-          (review) => review.findings.map((finding) => `- ${finding.severity}: ${finding.title}`)
-        );
-        const markdown = [
-          `# SpecToPR Run ${run.id}`,
-          "",
-          "## Decision",
-          "",
-          "Ready for draft review.",
-          "",
-          "## Review packet",
-          "",
-          `- ID: ${packet.id}`,
-          `- Revision: ${packet.revision}`,
-          `- Base: ${packet.baseSha ?? "unavailable"}`,
-          `- Head: ${packet.headSha ?? "unavailable"}`,
-          `- Evidence digest: ${packet.evidenceDigest}`,
-          `- Diff digest: ${packet.diffDigest}`,
-          "",
-          "## Project guidance",
-          "",
-          "### Explicit",
-          "",
-          ...contracts.guidanceTrace.explicit.length === 0 ? ["- None."] : contracts.guidanceTrace.explicit.map(
-            (guidancePath) => `- ${markdownListValue(guidancePath)}`
-          ),
-          "",
-          "### Automatically discovered",
-          "",
-          ...contracts.guidanceTrace.discovered.length === 0 ? ["- None."] : contracts.guidanceTrace.discovered.map(
-            (guidancePath) => `- ${markdownListValue(guidancePath)}`
-          ),
-          "",
-          "## Applied optional skills",
-          "",
-          ...contracts.guidanceTrace.skillHints.length === 0 ? ["- None."] : contracts.guidanceTrace.skillHints.map((skillHint) => `- ${skillHint}`),
-          "",
-          "## Requirement traceability",
-          "",
-          "| Requirement | Acceptance criteria | Review verdict |",
-          "| --- | --- | --- |",
-          ...contracts.requirementManifest.map(
-            (requirement) => `| ${markdownTableCell(`${requirement.id}: ${requirement.title}`)} | ${markdownTableCell(requirement.acceptanceCriteria.join("\n"))} | ${markdownTableCell(verdictFor(requirement.id))} |`
-          ),
-          ...contracts.legacyBaseline === void 0 ? [] : [
-            "",
-            "## Focused legacy baseline",
-            "",
-            `- Scope: ${contracts.legacyBaseline.scope}`,
-            ...contracts.legacyBaseline.checks.map(
-              (check2) => `- ${check2.status}: \`${check2.command}\` \u2192 ${check2.resultPath}`
-            )
-          ],
-          "",
-          "## Changed files",
-          "",
-          ...packet.changedFiles.length === 0 ? ["- No changed files declared."] : packet.changedFiles.map((file2) => `- ${file2}`),
-          "",
-          "## Evidence",
-          "",
-          ...evidencePaths.map((evidencePath) => `- ${evidencePath}`),
-          "",
-          "## Validation gates",
-          "",
-          ...gateLines.length === 0 ? ["- No gates recorded."] : gateLines,
-          "",
-          "## Risks",
-          "",
-          ...riskLines.length === 0 ? ["- No known review findings."] : riskLines,
-          ...implementation.featureEvidence === void 0 ? [] : ["", "## Feature E2E video", "", `- ${implementation.featureEvidence.videoPath}`],
-          ""
-        ].join("\n");
+        const markdown = renderReadyWorkflowReport({
+          runId: run.id,
+          reviewPacket: packet,
+          guidanceTrace: contracts.guidanceTrace,
+          requirementManifest: contracts.requirementManifest,
+          ...contracts.legacyBaseline === void 0 ? {} : { legacyBaseline: contracts.legacyBaseline },
+          evidencePaths,
+          reviews,
+          ...implementation.featureEvidence === void 0 ? {} : { featureVideoPath: implementation.featureEvidence.videoPath }
+        });
         const blob = await this.dependencies.artifactStore.writeBlob({
           content: Buffer.from(markdown, "utf8"),
           mediaType: "text/markdown",
@@ -45847,8 +47669,11 @@ var init_workflow_service = __esm({
           createdAt: timestamp,
           metadata: {
             adapter: "workflow-v2",
-            reportKind: "pr-body-markdown",
-            decision: "ready",
+            ...WorkflowReportMetadataSchema.parse({
+              reportKind: "pr-body-markdown",
+              reportIntent: "ready",
+              decision: "ready"
+            }),
             locale: "ko",
             reviewPacketId: packet.id
           }
@@ -45880,6 +47705,334 @@ var init_workflow_service = __esm({
         }
         return submissions;
       }
+      async diagnosticPublicationForRun(run, blocker) {
+        const reportKey = blockedDiagnosticReportKey(run, blocker);
+        const blockedStageAttempt = stage(run, blocker.stage).attempt;
+        for (const artifact of [...run.artifacts].reverse()) {
+          if (artifact.metadata["reportKind"] !== "publish-result") continue;
+          let parsed;
+          try {
+            parsed = PublishResultSchema.safeParse(
+              JSON.parse(
+                (await this.dependencies.artifactStore.readContent(artifact.digest)).toString("utf8")
+              )
+            );
+          } catch {
+            continue;
+          }
+          if (!parsed.success || parsed.data.request === void 0) continue;
+          const reportArtifact = run.artifacts.find(
+            (candidate) => candidate.id === parsed.data.reportArtifactId
+          );
+          if (reportArtifact?.metadata["reportIntent"] !== "blocked-diagnostic" || reportArtifact.metadata["idempotencyKey"] !== reportKey || reportArtifact.metadata["blockedStage"] !== blocker.stage || reportArtifact.metadata["errorCode"] !== blocker.code || reportArtifact.metadata["blockedStageAttempt"] !== blockedStageAttempt) {
+            continue;
+          }
+          const request = parsed.data.request;
+          const summary = DiagnosticPublicationSchema.safeParse({
+            host: request.host,
+            url: request.url,
+            number: request.number,
+            created: request.created,
+            updated: request.updated,
+            publishResultArtifactId: artifact.id
+          });
+          if (summary.success) return summary.data;
+        }
+        return void 0;
+      }
+      async synchronizedDiagnosticPublishResultForRun(run, reportArtifactId, executionIdentity) {
+        for (const artifact of [...run.artifacts].reverse()) {
+          if (artifact.metadata["reportKind"] !== "publish-result") continue;
+          let parsed;
+          try {
+            parsed = PublishResultSchema.safeParse(
+              JSON.parse(
+                (await this.dependencies.artifactStore.readContent(artifact.digest)).toString("utf8")
+              )
+            );
+          } catch {
+            continue;
+          }
+          if (!parsed.success || parsed.data.reportArtifactId !== reportArtifactId || artifact.metadata["diagnosticReportKey"] !== executionIdentity.reportKey || artifact.metadata["sourceBranch"] !== executionIdentity.sourceBranch || artifact.metadata["targetBranch"] !== executionIdentity.targetBranch || artifact.metadata["remoteName"] !== executionIdentity.remoteName || artifact.metadata["pushBranch"] !== executionIdentity.pushBranch || !diagnosticPublishResultIsFullySynced(parsed.data)) {
+            continue;
+          }
+          return {
+            run: summarizeRun(run),
+            result: parsed.data,
+            publishResultArtifactId: artifact.id
+          };
+        }
+        return void 0;
+      }
+      async acquireDiagnosticPublishClaim(runId, reportArtifactId, executionIdentity, recoverUncertain) {
+        const executionKey = diagnosticClaimFenceKey(executionIdentity);
+        for (let attempt = 0; attempt < MAX_DIAGNOSTIC_CLAIM_ATTEMPTS; attempt += 1) {
+          const run = await this.dependencies.runStore.get(RunIdSchema.parse(runId));
+          const synchronized = await this.synchronizedDiagnosticPublishResultForRun(
+            run,
+            reportArtifactId,
+            executionIdentity
+          );
+          if (synchronized !== void 0) {
+            return { state: "synchronized", result: synchronized };
+          }
+          const timestamp = this.now();
+          const activeClaim = latestDiagnosticPublishClaimEvent(run, executionKey);
+          if (diagnosticPublishClaimIsActive(activeClaim, timestamp)) {
+            return {
+              state: "in-progress",
+              expiresAt: activeClaim?.metadata["expiresAt"]
+            };
+          }
+          if (activeClaim !== void 0 && (activeClaim.metadata["claimState"] === "uncertain" || activeClaim.metadata["claimState"] === "active") && !recoverUncertain) {
+            return { state: "uncertain" };
+          }
+          const ownerClaimId = createArtifactId();
+          const expiresAt = new Date(Date.parse(timestamp) + this.externalLeaseTtlMs).toISOString();
+          const artifact = await this.writeDiagnosticPublishClaimEvent({
+            artifactId: ownerClaimId,
+            executionKey,
+            ownerClaimId,
+            state: "active",
+            timestamp,
+            expiresAt
+          });
+          try {
+            await this.dependencies.runStore.save(
+              {
+                ...run,
+                revision: run.revision + 1,
+                updatedAt: timestamp,
+                artifacts: [...run.artifacts, artifact]
+              },
+              run.revision
+            );
+            return { state: "acquired", executionKey, ownerClaimId };
+          } catch (error51) {
+            if (!(error51 instanceof RevisionConflictError)) throw error51;
+          }
+        }
+        throw new Error(`Could not acquire blocked-diagnostic publication claim for Run ${runId}`);
+      }
+      async withDiagnosticPublishClaimHeartbeat(runId, executionKey, ownerClaimId, operation) {
+        const controller = new AbortController();
+        let ownershipFailure;
+        let rejectOwnershipLoss;
+        const ownershipLoss = new Promise((_resolve, reject) => {
+          rejectOwnershipLoss = reject;
+        });
+        let heartbeatChain = Promise.resolve();
+        const loseOwnership = (error51) => {
+          if (ownershipFailure !== void 0) return;
+          ownershipFailure = new DiagnosticPublishClaimUncertainError(
+            "Blocked-diagnostic publication ownership became uncertain.",
+            error51
+          );
+          controller.abort(ownershipFailure);
+          rejectOwnershipLoss(ownershipFailure);
+        };
+        const timer = setInterval(() => {
+          heartbeatChain = heartbeatChain.then(async () => {
+            if (ownershipFailure !== void 0) return;
+            const renewed = await this.renewDiagnosticPublishClaim(runId, executionKey, ownerClaimId);
+            if (!renewed) {
+              throw new Error("Blocked-diagnostic publication claim ownership was lost");
+            }
+          }).catch((error51) => {
+            loseOwnership(error51);
+          });
+        }, this.externalHeartbeatMs);
+        timer.unref();
+        const operationPromise = operation(controller.signal);
+        try {
+          const result = await Promise.race([operationPromise, ownershipLoss]);
+          clearInterval(timer);
+          await heartbeatChain;
+          if (ownershipFailure !== void 0) throw ownershipFailure;
+          return result;
+        } catch (error51) {
+          clearInterval(timer);
+          if (ownershipFailure !== void 0) {
+            void operationPromise.catch(() => void 0);
+            throw ownershipFailure;
+          }
+          await heartbeatChain;
+          if (ownershipFailure !== void 0) {
+            void operationPromise.catch(() => void 0);
+            throw ownershipFailure;
+          }
+          throw error51;
+        }
+      }
+      async renewDiagnosticPublishClaim(runId, executionKey, ownerClaimId) {
+        for (let attempt = 0; attempt < MAX_DIAGNOSTIC_CLAIM_ATTEMPTS; attempt += 1) {
+          const run = await this.dependencies.runStore.get(RunIdSchema.parse(runId));
+          const latest = latestDiagnosticPublishClaimEvent(run, executionKey);
+          if (latest?.metadata["claimState"] !== "active" || latest.metadata["ownerClaimId"] !== ownerClaimId) {
+            return false;
+          }
+          const timestamp = this.now();
+          const expiresAt = new Date(Date.parse(timestamp) + this.externalLeaseTtlMs).toISOString();
+          const artifact = await this.writeDiagnosticPublishClaimEvent({
+            artifactId: createArtifactId(),
+            executionKey,
+            ownerClaimId,
+            state: "active",
+            timestamp,
+            expiresAt
+          });
+          try {
+            await this.dependencies.runStore.save(
+              {
+                ...run,
+                revision: run.revision + 1,
+                updatedAt: timestamp,
+                artifacts: [...run.artifacts, artifact]
+              },
+              run.revision
+            );
+            return true;
+          } catch (error51) {
+            if (!(error51 instanceof RevisionConflictError)) throw error51;
+          }
+        }
+        throw new Error(`Could not renew blocked-diagnostic publication claim for Run ${runId}`);
+      }
+      async releaseDiagnosticPublishClaim(runId, executionKey, ownerClaimId) {
+        for (let attempt = 0; attempt < MAX_DIAGNOSTIC_CLAIM_ATTEMPTS; attempt += 1) {
+          const run = await this.dependencies.runStore.get(RunIdSchema.parse(runId));
+          const latest = latestDiagnosticPublishClaimEvent(run, executionKey);
+          if (latest?.metadata["claimState"] !== "active" || latest.metadata["ownerClaimId"] !== ownerClaimId) {
+            return;
+          }
+          const timestamp = this.now();
+          const artifact = await this.writeDiagnosticPublishClaimEvent({
+            artifactId: createArtifactId(),
+            executionKey,
+            ownerClaimId,
+            state: "released",
+            timestamp
+          });
+          try {
+            await this.dependencies.runStore.save(
+              {
+                ...run,
+                revision: run.revision + 1,
+                updatedAt: timestamp,
+                artifacts: [...run.artifacts, artifact]
+              },
+              run.revision
+            );
+            return;
+          } catch (error51) {
+            if (!(error51 instanceof RevisionConflictError)) throw error51;
+          }
+        }
+        throw new Error(`Could not release blocked-diagnostic publication claim for Run ${runId}`);
+      }
+      async markDiagnosticPublishClaimUncertainBestEffort(runId, executionKey, ownerClaimId) {
+        try {
+          for (let attempt = 0; attempt < MAX_DIAGNOSTIC_CLAIM_ATTEMPTS; attempt += 1) {
+            const run = await this.dependencies.runStore.get(RunIdSchema.parse(runId));
+            const latest = latestDiagnosticPublishClaimEvent(run, executionKey);
+            if (latest?.metadata["ownerClaimId"] !== ownerClaimId || latest.metadata["claimState"] === "released") {
+              return;
+            }
+            if (latest.metadata["claimState"] === "uncertain") return;
+            const timestamp = this.now();
+            const artifact = await this.writeDiagnosticPublishClaimEvent({
+              artifactId: createArtifactId(),
+              executionKey,
+              ownerClaimId,
+              state: "uncertain",
+              timestamp
+            });
+            try {
+              await this.dependencies.runStore.save(
+                {
+                  ...run,
+                  revision: run.revision + 1,
+                  updatedAt: timestamp,
+                  artifacts: [...run.artifacts, artifact]
+                },
+                run.revision
+              );
+              return;
+            } catch (error51) {
+              if (!(error51 instanceof RevisionConflictError)) return;
+            }
+          }
+        } catch {
+        }
+      }
+      async writeDiagnosticPublishClaimEvent(input) {
+        const value = {
+          event: input.state === "active" ? "claim" : input.state === "released" ? "release" : "uncertain",
+          executionKey: input.executionKey,
+          ownerClaimId: input.ownerClaimId,
+          ...input.expiresAt === void 0 ? {} : { expiresAt: input.expiresAt }
+        };
+        const blob = await this.dependencies.artifactStore.writeBlob({
+          content: Buffer.from(`${JSON.stringify(value)}
+`, "utf8"),
+          mediaType: "application/json",
+          storedAt: input.timestamp,
+          label: "diagnostic-publish-claim.json"
+        });
+        return ArtifactRefSchema.parse({
+          id: input.artifactId,
+          kind: "agent-result-report",
+          uri: blob.uri,
+          mediaType: "application/json",
+          digest: blob.digest,
+          producedBy: "orchestrator",
+          evidenceIds: [],
+          createdAt: input.timestamp,
+          metadata: {
+            adapter: "workflow-v2",
+            reportKind: "diagnostic-publish-claim",
+            diagnosticExecutionKey: input.executionKey,
+            claimState: input.state,
+            ownerClaimId: input.ownerClaimId,
+            ...input.expiresAt === void 0 ? {} : { expiresAt: input.expiresAt }
+          }
+        });
+      }
+      async blockerDetailsForRun(run, requiredValidations) {
+        const blockers = [];
+        for (const item of run.stages) {
+          if (item.error === void 0) continue;
+          const submission = await this.causativeWorkflowSubmission(run, item);
+          const blocker = submission === void 0 ? void 0 : blockerFromSubmission(submission);
+          blockers.push(
+            blocker === void 0 ? deriveWorkflowBlocker(
+              run,
+              item,
+              requiredValidations,
+              submission === void 0 ? void 0 : "unexpected"
+            ) : reconstructWorkflowBlocker(run, blocker, item)
+          );
+        }
+        return blockers;
+      }
+      async causativeWorkflowSubmission(run, failedStage) {
+        const artifacts = new Map(run.artifacts.map((artifact) => [artifact.id, artifact]));
+        for (const artifactId of [...failedStage.artifactIds].reverse()) {
+          const artifact = artifacts.get(artifactId);
+          if (artifact?.metadata["adapter"] !== "workflow-v2" || artifact.metadata["workflowFailureStage"] !== failedStage.name || artifact.metadata["workflowFailureAttempt"] !== failedStage.attempt) {
+            continue;
+          }
+          const parsed = WorkflowSubmissionSchema.safeParse(
+            JSON.parse(
+              (await this.dependencies.artifactStore.readContent(artifact.digest)).toString("utf8")
+            )
+          );
+          if (parsed.success && parsed.data.kind !== "figma-bundle" && submissionOutcome(parsed.data) !== "passed") {
+            return parsed.data;
+          }
+        }
+        return void 0;
+      }
       async completeStage(runId, stageName, artifactIds = []) {
         const started = await this.dependencies.stageService.start({
           runId,
@@ -45909,29 +48062,26 @@ var init_workflow_service = __esm({
         });
       }
     };
-    MARKDOWN_LIST_CONTROL_CHARACTERS = /* @__PURE__ */ new Set([
-      "\\",
-      "`",
-      "*",
-      "_",
-      "{",
-      "}",
-      "[",
-      "]",
-      "(",
-      ")",
-      "#",
-      "+",
-      "-",
-      "!",
-      "|",
-      ">",
-      "<",
-      "&",
-      "~",
-      '"',
-      "'",
-      "="
+    DiagnosticPublishClaimUncertainError = class extends Error {
+      constructor(message, ownershipCause) {
+        super(message);
+        this.ownershipCause = ownershipCause;
+      }
+      ownershipCause;
+      name = "DiagnosticPublishClaimUncertainError";
+    };
+    DIAGNOSTIC_RECOVERY_INSTRUCTION = "Inspect the matching provider draft and durable publish result, then retry workflow_publish with recoverUncertain=true only after confirming no publication is still active.";
+    KNOWN_DURABLE_BLOCKER_CODES = /* @__PURE__ */ new Set([
+      "WORKFLOW_BLOCKED",
+      "CHANGES_REQUESTED",
+      "REVIEW_CHANGES_REQUESTED",
+      "PUBLISH_PARTIAL",
+      "PUBLISH_FAILED",
+      "PUBLISH_BLOCKED",
+      "PUBLISH_PRECONDITION",
+      "PUBLISH_UNEXPECTED_ERROR",
+      "ARCHIVE_FAILED",
+      "ARCHIVE_UNEXPECTED_ERROR"
     ]);
   }
 });
@@ -45942,7 +48092,10 @@ __export(create_server_exports, {
   createKernelServer: () => createKernelServer
 });
 function createKernelServer(servicesProvider) {
-  const server = new McpServer({ name: SERVER_NAME, version: package_default.version });
+  const server = new McpServer(
+    { name: SERVER_NAME, version: package_default.version },
+    { instructions: SERVER_INSTRUCTIONS }
+  );
   server.registerTool(
     "workflow_info",
     {
@@ -45977,8 +48130,7 @@ function createKernelServer(servicesProvider) {
     {
       title: "Start workflow",
       description: "Create a Run, capture intake, estimate workload, classify scope, and stop at the next boundary.",
-      inputSchema: WorkflowStartInputSchema.shape,
-      outputSchema: WorkflowStatusSchema.shape
+      inputSchema: WorkflowStartInputSchema.shape
     },
     async (input) => toolResult(await (await servicesProvider()).workflowService.start(input))
   );
@@ -45987,8 +48139,7 @@ function createKernelServer(servicesProvider) {
     {
       title: "Advance workflow",
       description: "Run deterministic steps until completion, a blocker, or an external action.",
-      inputSchema: WorkflowAdvanceInputSchema.shape,
-      outputSchema: WorkflowStatusSchema.shape
+      inputSchema: WorkflowAdvanceInputSchema.shape
     },
     async (input) => toolResult(await (await servicesProvider()).workflowService.advance(input))
   );
@@ -45997,8 +48148,7 @@ function createKernelServer(servicesProvider) {
     {
       title: "Submit workflow result",
       description: "Record contracts, API readiness, implementation, Figma, or review evidence.",
-      inputSchema: WorkflowSubmitInputSchema.shape,
-      outputSchema: WorkflowStatusSchema.shape
+      inputSchema: WorkflowSubmitInputSchema.shape
     },
     async (input) => toolResult(await (await servicesProvider()).workflowService.submit(input))
   );
@@ -46046,7 +48196,7 @@ function asStructuredContent(value) {
   }
   return { result: value };
 }
-var CONTRACT_VERSION, SERVER_NAME, TOOL_NAMES, DURABLE_STAGES, REVIEWER_ROLES, DELIVERY_MODES, EmptyInputSchema, WorkflowInfoSchema;
+var CONTRACT_VERSION, SERVER_NAME, SERVER_INSTRUCTIONS, TOOL_NAMES, DURABLE_STAGES, REVIEWER_ROLES, DELIVERY_MODES, EmptyInputSchema, WorkflowInfoSchema;
 var init_create_server = __esm({
   "src/mcp/create-server.ts"() {
     "use strict";
@@ -46057,6 +48207,7 @@ var init_create_server = __esm({
     init_workflow_contracts();
     CONTRACT_VERSION = "2.0.0";
     SERVER_NAME = "spec-to-pr-kernel";
+    SERVER_INSTRUCTIONS = "Workflow order: intake \u2192 contracts \u2192 implementation \u2192 functional-review/design-review \u2192 report \u2192 publish \u2192 archive. Stop for one external action per boundary. Missing evidence never passes a stage or gate. Use workflow_status to resume the recorded Run; use workflow_publish with blocked-diagnostic only for a currently blocked draft-publication Run.";
     TOOL_NAMES = [
       "workflow_advance",
       "workflow_archive",
@@ -46198,15 +48349,6 @@ var init_artifact_blob_store = __esm({
         return readFile2(contentPath);
       }
     };
-  }
-});
-
-// src/run/index.ts
-var init_run2 = __esm({
-  "src/run/index.ts"() {
-    "use strict";
-    init_stages();
-    init_run();
   }
 });
 
@@ -47498,816 +49640,6 @@ var init_archive = __esm({
   }
 });
 
-// src/pr-report/pr-report-model.ts
-var ReportLocaleSchema, ReportDecisionSchema, ReportSectionStatusSchema, ReportLinkSchema, ReportCheckSummarySchema, ReportGapSummarySchema, ReportGateRowSchema, ReportArtifactSummaryRowSchema, ReviewScorecardReportRowSchema, RequirementTraceRowSchema, VisualComparisonRowSchema, PerformanceMetricRowSchema, PrReportViewModelSchema;
-var init_pr_report_model = __esm({
-  "src/pr-report/pr-report-model.ts"() {
-    "use strict";
-    init_zod();
-    init_ids();
-    ReportLocaleSchema = external_exports.enum(["ko", "en"]);
-    ReportDecisionSchema = external_exports.enum(["blocked", "draft", "ready-after-review", "ready"]);
-    ReportSectionStatusSchema = external_exports.enum([
-      "pass",
-      "fail",
-      "warning",
-      "not-run",
-      "skipped",
-      "not-applicable"
-    ]);
-    ReportLinkSchema = external_exports.object({
-      label: external_exports.string().trim().min(1),
-      uri: external_exports.string().trim().min(1)
-    }).strict();
-    ReportCheckSummarySchema = external_exports.object({
-      name: external_exports.string().trim().min(1),
-      kind: external_exports.string().trim().min(1),
-      status: ReportSectionStatusSchema,
-      command: external_exports.string().optional(),
-      exitCode: external_exports.number().int().optional(),
-      reportArtifactId: ArtifactIdSchema.optional(),
-      summary: external_exports.string().trim().min(1)
-    }).strict();
-    ReportGapSummarySchema = external_exports.object({
-      id: GapIdSchema,
-      category: external_exports.string(),
-      severity: external_exports.string(),
-      status: external_exports.string(),
-      title: external_exports.string(),
-      impact: external_exports.string()
-    }).strict();
-    ReportGateRowSchema = external_exports.object({
-      gate: external_exports.string().trim().min(1),
-      required: external_exports.boolean(),
-      status: ReportSectionStatusSchema,
-      evidence: external_exports.array(external_exports.string().trim().min(1)).default([]),
-      notes: external_exports.string().trim().min(1)
-    }).strict();
-    ReportArtifactSummaryRowSchema = external_exports.object({
-      item: external_exports.string().trim().min(1),
-      status: ReportSectionStatusSchema,
-      artifacts: external_exports.array(ArtifactIdSchema).default([]),
-      notes: external_exports.string().trim().min(1)
-    }).strict();
-    ReviewScorecardReportRowSchema = external_exports.object({
-      id: external_exports.string().trim().min(1),
-      label: external_exports.string().trim().min(1),
-      score: external_exports.number().min(0).max(10),
-      threshold: external_exports.number().min(0).max(10),
-      status: ReportSectionStatusSchema,
-      notes: external_exports.string().trim().min(1),
-      evidence: external_exports.array(external_exports.string().trim().min(1)).default([]),
-      nextRepairTarget: external_exports.boolean().default(false)
-    }).strict();
-    RequirementTraceRowSchema = external_exports.object({
-      requirementId: external_exports.string().trim().min(1),
-      title: external_exports.string().trim().min(1),
-      status: external_exports.string().trim().min(1),
-      briefEvidence: external_exports.array(external_exports.string()).default([]),
-      figmaEvidence: external_exports.array(external_exports.string()).default([]),
-      openApiEvidence: external_exports.array(external_exports.string()).default([]),
-      scenarios: external_exports.array(external_exports.string()).default([]),
-      checks: external_exports.array(external_exports.string()).default([]),
-      gaps: external_exports.array(GapIdSchema).default([])
-    }).strict();
-    VisualComparisonRowSchema = external_exports.object({
-      state: external_exports.string().trim().min(1),
-      figmaArtifactId: ArtifactIdSchema.optional(),
-      browserArtifactId: ArtifactIdSchema.optional(),
-      diffArtifactId: ArtifactIdSchema.optional(),
-      exactMatch: external_exports.number().min(0).max(100).optional(),
-      reviewMatch: external_exports.number().min(0).max(100).optional(),
-      result: ReportSectionStatusSchema,
-      notes: external_exports.string().optional()
-    }).strict();
-    PerformanceMetricRowSchema = external_exports.object({
-      metric: external_exports.string().trim().min(1),
-      value: external_exports.string().trim().min(1),
-      budget: external_exports.string().optional(),
-      result: ReportSectionStatusSchema,
-      source: external_exports.string().trim().min(1)
-    }).strict();
-    PrReportViewModelSchema = external_exports.object({
-      schemaVersion: external_exports.literal("pr-report-v1"),
-      locale: ReportLocaleSchema.default("en"),
-      runId: RunIdSchema,
-      generatedAt: external_exports.string().datetime({ offset: true }),
-      decision: ReportDecisionSchema,
-      title: external_exports.string().trim().min(1),
-      summaryBullets: external_exports.array(external_exports.string().trim().min(1)).default([]),
-      runMetadata: external_exports.record(external_exports.string(), external_exports.string()).default({}),
-      reviewGuide: external_exports.array(external_exports.string().trim().min(1)).default([]),
-      gateRows: external_exports.array(ReportGateRowSchema).default([]),
-      scorecardRows: external_exports.array(ReviewScorecardReportRowSchema).default([]),
-      specificationLinks: external_exports.array(ReportLinkSchema).default([]),
-      traceabilityRows: external_exports.array(RequirementTraceRowSchema).default([]),
-      traceabilityRowCount: external_exports.number().int().nonnegative().default(0),
-      changeScopeRows: external_exports.array(external_exports.record(external_exports.string(), external_exports.string())).default([]),
-      apiRows: external_exports.array(external_exports.record(external_exports.string(), external_exports.string())).default([]),
-      functionalChecks: external_exports.array(ReportCheckSummarySchema).default([]),
-      designChecks: external_exports.array(ReportCheckSummarySchema).default([]),
-      figmaProviderRows: external_exports.array(ReportArtifactSummaryRowSchema).default([]),
-      figmaInventoryRows: external_exports.array(ReportArtifactSummaryRowSchema).default([]),
-      visualRows: external_exports.array(VisualComparisonRowSchema).default([]),
-      accessibilityChecks: external_exports.array(ReportCheckSummarySchema).default([]),
-      performanceRows: external_exports.array(PerformanceMetricRowSchema).default([]),
-      observabilityChecks: external_exports.array(ReportCheckSummarySchema).default([]),
-      runtimeChecks: external_exports.array(ReportCheckSummarySchema).default([]),
-      gapSummaries: external_exports.array(ReportGapSummarySchema).default([]),
-      archivePlan: external_exports.array(external_exports.string()).default([]),
-      reportArtifactIds: external_exports.array(ArtifactIdSchema).default([])
-    }).strict();
-  }
-});
-
-// src/publisher/publish-contracts.ts
-var ReviewHostSchema, PublishModeSchema, PublishTargetSchema, ReviewRequestPayloadSchema, ReviewRequestAssetRoleSchema, PublishedReviewAssetSchema, PublishPlanSchema, PublishedReviewRequestSchema, PublishResultSchema;
-var init_publish_contracts = __esm({
-  "src/publisher/publish-contracts.ts"() {
-    "use strict";
-    init_zod();
-    init_pr_report_model();
-    init_ids();
-    init_scalars();
-    ReviewHostSchema = external_exports.enum(["github", "gitlab"]);
-    PublishModeSchema = external_exports.literal("draft");
-    PublishTargetSchema = external_exports.object({
-      host: ReviewHostSchema,
-      webBaseUrl: external_exports.string().url(),
-      apiBaseUrl: external_exports.string().url(),
-      owner: external_exports.string().trim().min(1).optional(),
-      repo: external_exports.string().trim().min(1).optional(),
-      projectPath: external_exports.string().trim().min(1).optional(),
-      projectId: external_exports.string().trim().min(1).optional()
-    }).strict().superRefine((target, context) => {
-      if (target.host === "github") {
-        if (target.owner === void 0 || target.repo === void 0) {
-          context.addIssue({
-            code: "custom",
-            message: "GitHub publish target requires owner and repo",
-            path: ["owner"]
-          });
-        }
-      }
-      if (target.host === "gitlab") {
-        if (target.projectPath === void 0 && target.projectId === void 0) {
-          context.addIssue({
-            code: "custom",
-            message: "GitLab publish target requires projectPath or projectId",
-            path: ["projectPath"]
-          });
-        }
-      }
-    });
-    ReviewRequestPayloadSchema = external_exports.object({
-      runId: RunIdSchema,
-      title: external_exports.string().trim().min(1).max(250),
-      body: external_exports.string().min(1),
-      sourceBranch: external_exports.string().trim().min(1),
-      targetBranch: external_exports.string().trim().min(1),
-      headSha: GitObjectIdSchema.optional(),
-      mode: PublishModeSchema.default("draft"),
-      labels: external_exports.array(external_exports.string().trim().min(1)).default([]),
-      reviewers: external_exports.array(external_exports.string().trim().min(1)).default([]),
-      assignees: external_exports.array(external_exports.string().trim().min(1)).default([]),
-      reportArtifactId: ArtifactIdSchema
-    }).strict();
-    ReviewRequestAssetRoleSchema = external_exports.enum([
-      "figma",
-      "browser",
-      "diff",
-      "overlay",
-      "e2e-video"
-    ]);
-    PublishedReviewAssetSchema = external_exports.object({
-      artifactId: ArtifactIdSchema,
-      targetId: external_exports.string().trim().min(1),
-      role: ReviewRequestAssetRoleSchema,
-      label: external_exports.string().trim().min(1),
-      url: external_exports.string().trim().min(1),
-      // Whether `url` renders as an inline <img> in the review host.
-      // GitHub private-repo raw URLs require auth and cannot be embedded, so the
-      // review body falls back to a plain link for those assets.
-      embeddable: external_exports.boolean().default(true)
-    }).strict();
-    PublishPlanSchema = external_exports.object({
-      runId: RunIdSchema,
-      target: PublishTargetSchema,
-      payload: ReviewRequestPayloadSchema,
-      reportDecision: ReportDecisionSchema,
-      requiredTokenEnv: external_exports.string().trim().min(1),
-      willPushBranch: external_exports.boolean(),
-      willCreateOrUpdate: external_exports.boolean(),
-      warnings: external_exports.array(external_exports.string()).default([]),
-      plannedAt: IsoDateTimeSchema
-    }).strict();
-    PublishedReviewRequestSchema = external_exports.object({
-      host: ReviewHostSchema,
-      url: external_exports.string().url(),
-      number: external_exports.string().trim().min(1),
-      id: external_exports.string().trim().min(1).optional(),
-      iid: external_exports.string().trim().min(1).optional(),
-      draft: external_exports.boolean(),
-      sourceBranch: external_exports.string().trim().min(1),
-      targetBranch: external_exports.string().trim().min(1),
-      created: external_exports.boolean(),
-      updated: external_exports.boolean()
-    }).strict();
-    PublishResultSchema = external_exports.object({
-      runId: RunIdSchema,
-      status: external_exports.enum(["passed", "failed", "blocked"]),
-      target: PublishTargetSchema.optional(),
-      request: PublishedReviewRequestSchema.optional(),
-      reportArtifactId: ArtifactIdSchema.optional(),
-      publishedAssets: external_exports.array(PublishedReviewAssetSchema).default([]),
-      requestSynced: external_exports.boolean().default(false),
-      visualPreviewExpected: external_exports.boolean().default(false),
-      visualPreviewSynced: external_exports.boolean().default(false),
-      featureVideoExpected: external_exports.boolean().default(false),
-      featureVideoSynced: external_exports.boolean().default(false),
-      fallbackMode: external_exports.enum(["none", "gitlab-push-option"]).default("none"),
-      partialReasons: external_exports.array(external_exports.string().trim().min(1)).default([]),
-      errorCode: external_exports.string().trim().min(1).optional(),
-      errorMessage: external_exports.string().trim().min(1).optional(),
-      retryable: external_exports.boolean().default(false),
-      publishedAt: IsoDateTimeSchema
-    }).strict();
-  }
-});
-
-// src/publisher/remote-detector.ts
-function detectPublishTargetFromRemote(remote) {
-  const normalized = normalizeGitRemoteUrl(remote.url);
-  const kind = resolveHostKind(normalized.host);
-  if (kind === "github") {
-    const [owner, repo] = normalized.pathParts;
-    if (owner === void 0 || repo === void 0) {
-      throw new Error(`Cannot parse GitHub remote URL: ${remote.url}`);
-    }
-    const enterprise = normalized.host !== "github.com";
-    return PublishTargetSchema.parse({
-      host: "github",
-      webBaseUrl: envUrl("SPEC_TO_PR_WEB_BASE_URL") ?? `https://${normalized.host}`,
-      // github.com uses api.github.com; GitHub Enterprise uses https://<host>/api/v3.
-      apiBaseUrl: envUrl("SPEC_TO_PR_API_BASE_URL") ?? (enterprise ? `https://${normalized.host}/api/v3` : "https://api.github.com"),
-      owner,
-      repo
-    });
-  }
-  if (kind === "gitlab") {
-    if (normalized.pathParts.length < 2) {
-      throw new Error(`Cannot parse GitLab remote URL: ${remote.url}`);
-    }
-    return PublishTargetSchema.parse({
-      host: "gitlab",
-      webBaseUrl: envUrl("SPEC_TO_PR_WEB_BASE_URL") ?? `https://${normalized.host}`,
-      apiBaseUrl: envUrl("SPEC_TO_PR_API_BASE_URL") ?? `https://${normalized.host}/api/v4`,
-      projectPath: normalized.pathParts.join("/")
-    });
-  }
-  throw new Error(
-    `Unsupported Git remote host: ${normalized.host}. Set SPEC_TO_PR_GIT_HOST=github|gitlab (optionally with SPEC_TO_PR_API_BASE_URL and SPEC_TO_PR_WEB_BASE_URL) to publish to a self-hosted instance.`
-  );
-}
-function resolveHostKind(host) {
-  const override = process.env["SPEC_TO_PR_GIT_HOST"]?.trim().toLowerCase();
-  if (override === "github" || override === "gitlab") {
-    return override;
-  }
-  if (host === "github.com") return "github";
-  if (host === "gitlab.com") return "gitlab";
-  if (host.includes("gitlab")) return "gitlab";
-  if (host.includes("github")) return "github";
-  return void 0;
-}
-function envUrl(name) {
-  const value = process.env[name]?.trim();
-  return value !== void 0 && value.length > 0 ? value : void 0;
-}
-function normalizeGitRemoteUrl(rawUrl) {
-  const trimmed = rawUrl.trim();
-  const sshMatch = /^git@([^:]+):(.+)$/.exec(trimmed);
-  if (sshMatch !== null) {
-    return {
-      host: sshMatch[1].toLowerCase(),
-      pathParts: splitRepoPath(sshMatch[2])
-    };
-  }
-  const sshUrlMatch = /^ssh:\/\/git@([^/]+)\/(.+)$/.exec(trimmed);
-  if (sshUrlMatch !== null) {
-    return {
-      host: sshUrlMatch[1].toLowerCase(),
-      pathParts: splitRepoPath(sshUrlMatch[2])
-    };
-  }
-  const url2 = new URL(trimmed);
-  return {
-    host: url2.hostname.toLowerCase(),
-    pathParts: splitRepoPath(url2.pathname.replace(/^\/+/, ""))
-  };
-}
-function splitRepoPath(value) {
-  return value.replace(/\.git$/i, "").split("/").filter(Boolean);
-}
-var GitRemoteInfoSchema;
-var init_remote_detector = __esm({
-  "src/publisher/remote-detector.ts"() {
-    "use strict";
-    init_zod();
-    init_publish_contracts();
-    GitRemoteInfoSchema = external_exports.object({
-      name: external_exports.string().trim().min(1),
-      url: external_exports.string().trim().min(1)
-    }).strict();
-  }
-});
-
-// src/publisher/token-provider.ts
-import { execFileSync } from "child_process";
-function readPublisherToken(host) {
-  const config2 = HOST_CONFIG[host];
-  const fromEnv = readEnvToken(config2.envNames);
-  if (fromEnv !== void 0) {
-    return fromEnv;
-  }
-  const fromCli = readCliToken(config2.cli);
-  if (fromCli !== void 0) {
-    return fromCli;
-  }
-  throw new Error(
-    `${config2.label} token is not configured. Set one of: ${config2.envNames.join(", ")}, or authenticate the ${config2.cli.command} CLI (${config2.cli.command} ${config2.cli.args.join(" ")}).`
-  );
-}
-function readEnvToken(names) {
-  for (const name of names) {
-    const value = process.env[name];
-    if (value !== void 0 && value.trim().length > 0) {
-      return { token: value, source: name };
-    }
-  }
-  return void 0;
-}
-function readCliToken(cli) {
-  try {
-    const output = execFileSync(cli.command, cli.args, {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-      timeout: 1e4
-    }).trim();
-    if (output.length > 0) {
-      return { token: output, source: `${cli.command} ${cli.args.join(" ")}` };
-    }
-  } catch {
-  }
-  return void 0;
-}
-var HOST_CONFIG;
-var init_token_provider = __esm({
-  "src/publisher/token-provider.ts"() {
-    "use strict";
-    HOST_CONFIG = {
-      github: {
-        label: "GitHub",
-        envNames: ["GITHUB_TOKEN", "GH_TOKEN"],
-        cli: { command: "gh", args: ["auth", "token"] }
-      },
-      gitlab: {
-        label: "GitLab",
-        envNames: ["GITLAB_TOKEN", "GITLAB_PRIVATE_TOKEN"],
-        cli: { command: "glab", args: ["auth", "token"] }
-      }
-    };
-  }
-});
-
-// src/publisher/publish-redaction.ts
-function redactSecrets(input) {
-  return input.replace(/ghp_[A-Za-z0-9_]+/g, "[REDACTED_GITHUB_TOKEN]").replace(/github_pat_[A-Za-z0-9_]+/g, "[REDACTED_GITHUB_TOKEN]").replace(/glpat-[A-Za-z0-9_-]+/g, "[REDACTED_GITLAB_TOKEN]").replace(/Bearer\s+[A-Za-z0-9._~-]+/gi, "Bearer [REDACTED]").replace(/PRIVATE-TOKEN:\s*[A-Za-z0-9._~-]+/gi, "PRIVATE-TOKEN: [REDACTED]");
-}
-var init_publish_redaction = __esm({
-  "src/publisher/publish-redaction.ts"() {
-    "use strict";
-  }
-});
-
-// src/publisher/publisher-port.ts
-var init_publisher_port = __esm({
-  "src/publisher/publisher-port.ts"() {
-    "use strict";
-  }
-});
-
-// src/publisher/review-host.ts
-function encodeGitLabProjectId(projectPathOrId) {
-  if (/^\d+$/.test(projectPathOrId)) {
-    return projectPathOrId;
-  }
-  return encodeURIComponent(projectPathOrId);
-}
-var init_review_host = __esm({
-  "src/publisher/review-host.ts"() {
-    "use strict";
-  }
-});
-
-// src/publisher/github-publisher.ts
-function assertGitHub(target) {
-  if (target.host !== "github" || target.owner === void 0 || target.repo === void 0) {
-    throw new Error("Expected GitHub publish target");
-  }
-}
-function normalizeGitHubPr(pr, created, updated, payload) {
-  return PublishedReviewRequestSchema.parse({
-    host: "github",
-    url: String(pr["html_url"]),
-    number: String(pr["number"]),
-    id: String(pr["id"]),
-    draft: pr["draft"] === true,
-    sourceBranch: payload.sourceBranch,
-    targetBranch: payload.targetBranch,
-    created,
-    updated
-  });
-}
-function encodePath(path10) {
-  return path10.split("/").map(encodeURIComponent).join("/");
-}
-function safePathSegment(value) {
-  const safe = value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
-  return safe === "" ? "target" : safe;
-}
-var GitHubPublisherAdapter;
-var init_github_publisher = __esm({
-  "src/publisher/github-publisher.ts"() {
-    "use strict";
-    init_publish_contracts();
-    GitHubPublisherAdapter = class {
-      constructor(fetchImpl = fetch) {
-        this.fetchImpl = fetchImpl;
-      }
-      fetchImpl;
-      async findExisting(input) {
-        assertGitHub(input.target);
-        const url2 = new URL(
-          `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}/pulls`
-        );
-        url2.searchParams.set("head", `${input.target.owner}:${input.payload.sourceBranch}`);
-        url2.searchParams.set("base", input.payload.targetBranch);
-        url2.searchParams.set("state", "open");
-        const response = await this.githubFetch(url2.toString(), input.token, {
-          method: "GET"
-        });
-        if (!response.ok) {
-          throw new Error(`GitHub list PRs failed: ${response.status} ${await response.text()}`);
-        }
-        const pulls = await response.json();
-        const first = pulls[0];
-        if (first === void 0) {
-          return void 0;
-        }
-        return normalizeGitHubPr(first, false, true, input.payload);
-      }
-      async create(input) {
-        assertGitHub(input.target);
-        const response = await this.githubFetch(
-          `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}/pulls`,
-          input.token,
-          {
-            method: "POST",
-            body: JSON.stringify({
-              title: input.payload.title,
-              head: input.payload.sourceBranch,
-              base: input.payload.targetBranch,
-              body: input.payload.body,
-              draft: input.payload.mode === "draft",
-              maintainer_can_modify: true
-            })
-          }
-        );
-        if (!response.ok) {
-          throw new Error(`GitHub create PR failed: ${response.status} ${await response.text()}`);
-        }
-        const pr = await response.json();
-        await this.applyIssueMetadata({
-          target: input.target,
-          issueNumber: String(pr["number"]),
-          payload: input.payload,
-          token: input.token
-        });
-        return normalizeGitHubPr(pr, true, false, input.payload);
-      }
-      async updateBody(input) {
-        assertGitHub(input.target);
-        const response = await this.githubFetch(
-          `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}/pulls/${input.requestNumber}`,
-          input.token,
-          {
-            method: "PATCH",
-            body: JSON.stringify({
-              body: input.body
-            })
-          }
-        );
-        if (!response.ok) {
-          throw new Error(`GitHub update PR body failed: ${response.status} ${await response.text()}`);
-        }
-        const pr = await response.json();
-        return normalizeGitHubPr(pr, false, true, {
-          sourceBranch: String(pr["head"]?.["ref"] ?? ""),
-          targetBranch: String(pr["base"]?.["ref"] ?? "")
-        });
-      }
-      async publishAssets(input) {
-        assertGitHub(input.target);
-        const published = [];
-        const isPrivate = await this.isPrivateRepo({ target: input.target, token: input.token });
-        for (const asset of input.assets) {
-          const assetPath = [
-            ".spec-to-pr",
-            asset.role === "e2e-video" ? "feature-evidence" : "visual-assets",
-            input.payload.runId,
-            safePathSegment(asset.targetId),
-            asset.filename
-          ].join("/");
-          const existingSha = await this.findContentSha({
-            target: input.target,
-            path: assetPath,
-            branch: input.payload.sourceBranch,
-            token: input.token
-          });
-          const response = await this.githubFetch(
-            `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}/contents/${encodePath(assetPath)}`,
-            input.token,
-            {
-              method: "PUT",
-              body: JSON.stringify({
-                message: `chore(spec-to-pr): publish review evidence ${asset.artifactId}`,
-                content: asset.content.toString("base64"),
-                branch: input.payload.sourceBranch,
-                ...existingSha === void 0 ? {} : { sha: existingSha }
-              })
-            }
-          );
-          if (!response.ok) {
-            throw new Error(
-              `GitHub upload review asset failed: ${response.status} ${await response.text()}`
-            );
-          }
-          const uploaded = await response.json();
-          const content = uploaded["content"];
-          const commit = uploaded["commit"];
-          const commitSha = typeof commit?.["sha"] === "string" ? commit["sha"] : void 0;
-          const embeddable = !isPrivate && asset.role !== "e2e-video";
-          const url2 = isPrivate ? String(content?.["html_url"] ?? content?.["download_url"] ?? "") : commitSha !== void 0 ? `https://raw.githubusercontent.com/${input.target.owner}/${input.target.repo}/${commitSha}/${assetPath}` : String(content?.["download_url"] ?? content?.["html_url"] ?? "");
-          published.push(
-            PublishedReviewAssetSchema.parse({
-              artifactId: asset.artifactId,
-              targetId: asset.targetId,
-              role: asset.role,
-              label: asset.label,
-              url: url2,
-              embeddable
-            })
-          );
-        }
-        return published;
-      }
-      async isPrivateRepo(input) {
-        const response = await this.githubFetch(
-          `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}`,
-          input.token,
-          { method: "GET" }
-        );
-        if (!response.ok) {
-          return true;
-        }
-        const repo = await response.json();
-        return repo["private"] === true;
-      }
-      async applyIssueMetadata(input) {
-        if (input.payload.labels.length > 0) {
-          await this.githubFetch(
-            `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}/issues/${input.issueNumber}/labels`,
-            input.token,
-            {
-              method: "POST",
-              body: JSON.stringify({
-                labels: input.payload.labels
-              })
-            }
-          );
-        }
-        if (input.payload.reviewers.length > 0) {
-          await this.githubFetch(
-            `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}/pulls/${input.issueNumber}/requested_reviewers`,
-            input.token,
-            {
-              method: "POST",
-              body: JSON.stringify({
-                reviewers: input.payload.reviewers
-              })
-            }
-          );
-        }
-      }
-      async githubFetch(url2, token, init) {
-        return this.fetchImpl(url2, {
-          ...init,
-          headers: {
-            Accept: "application/vnd.github+json",
-            Authorization: `Bearer ${token}`,
-            "X-GitHub-Api-Version": "2022-11-28",
-            "Content-Type": "application/json",
-            ...init.headers
-          }
-        });
-      }
-      async findContentSha(input) {
-        const url2 = new URL(
-          `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}/contents/${encodePath(input.path)}`
-        );
-        url2.searchParams.set("ref", input.branch);
-        const response = await this.githubFetch(url2.toString(), input.token, {
-          method: "GET"
-        });
-        if (response.status === 404) {
-          return void 0;
-        }
-        if (!response.ok) {
-          throw new Error(
-            `GitHub inspect visual asset failed: ${response.status} ${await response.text()}`
-          );
-        }
-        const body = await response.json();
-        const sha = body["sha"];
-        return typeof sha === "string" && sha.length > 0 ? sha : void 0;
-      }
-    };
-  }
-});
-
-// src/publisher/gitlab-publisher.ts
-function assertGitLab(target) {
-  if (target.host !== "gitlab" || target.projectPath === void 0 && target.projectId === void 0) {
-    throw new Error("Expected GitLab publish target");
-  }
-}
-function normalizeGitLabMr(mr, created, updated, payload) {
-  return PublishedReviewRequestSchema.parse({
-    host: "gitlab",
-    url: String(mr["web_url"]),
-    number: String(mr["iid"]),
-    id: String(mr["id"]),
-    iid: String(mr["iid"]),
-    draft: String(mr["title"] ?? "").toLowerCase().startsWith("draft:"),
-    sourceBranch: payload.sourceBranch,
-    targetBranch: payload.targetBranch,
-    created,
-    updated
-  });
-}
-var GitLabPublisherAdapter;
-var init_gitlab_publisher = __esm({
-  "src/publisher/gitlab-publisher.ts"() {
-    "use strict";
-    init_publish_contracts();
-    init_review_host();
-    GitLabPublisherAdapter = class {
-      constructor(fetchImpl = fetch) {
-        this.fetchImpl = fetchImpl;
-      }
-      fetchImpl;
-      async findExisting(input) {
-        assertGitLab(input.target);
-        const project = encodeGitLabProjectId(input.target.projectId ?? input.target.projectPath);
-        const url2 = new URL(`${input.target.apiBaseUrl}/projects/${project}/merge_requests`);
-        url2.searchParams.set("source_branch", input.payload.sourceBranch);
-        url2.searchParams.set("target_branch", input.payload.targetBranch);
-        url2.searchParams.set("state", "opened");
-        const response = await this.gitlabFetch(url2.toString(), input.token, {
-          method: "GET"
-        });
-        if (!response.ok) {
-          throw new Error(`GitLab list MRs failed: ${response.status} ${await response.text()}`);
-        }
-        const mergeRequests = await response.json();
-        const first = mergeRequests[0];
-        if (first === void 0) {
-          return void 0;
-        }
-        return normalizeGitLabMr(first, false, true, input.payload);
-      }
-      async create(input) {
-        assertGitLab(input.target);
-        const project = encodeGitLabProjectId(input.target.projectId ?? input.target.projectPath);
-        const title = input.payload.mode === "draft" && !/^draft:/i.test(input.payload.title) ? `Draft: ${input.payload.title}` : input.payload.title;
-        const response = await this.gitlabFetch(
-          `${input.target.apiBaseUrl}/projects/${project}/merge_requests`,
-          input.token,
-          {
-            method: "POST",
-            body: JSON.stringify({
-              source_branch: input.payload.sourceBranch,
-              target_branch: input.payload.targetBranch,
-              title,
-              description: input.payload.body,
-              labels: input.payload.labels.join(",")
-            })
-          }
-        );
-        if (!response.ok) {
-          throw new Error(`GitLab create MR failed: ${response.status} ${await response.text()}`);
-        }
-        const mr = await response.json();
-        return normalizeGitLabMr(mr, true, false, input.payload);
-      }
-      async updateBody(input) {
-        assertGitLab(input.target);
-        const project = encodeGitLabProjectId(input.target.projectId ?? input.target.projectPath);
-        const response = await this.gitlabFetch(
-          `${input.target.apiBaseUrl}/projects/${project}/merge_requests/${input.requestNumber}`,
-          input.token,
-          {
-            method: "PUT",
-            body: JSON.stringify({
-              description: input.body
-            })
-          }
-        );
-        if (!response.ok) {
-          throw new Error(`GitLab update MR failed: ${response.status} ${await response.text()}`);
-        }
-        const mr = await response.json();
-        return normalizeGitLabMr(mr, false, true, {
-          sourceBranch: String(mr["source_branch"] ?? ""),
-          targetBranch: String(mr["target_branch"] ?? "")
-        });
-      }
-      async publishAssets(input) {
-        assertGitLab(input.target);
-        const project = encodeGitLabProjectId(input.target.projectId ?? input.target.projectPath);
-        const published = [];
-        for (const asset of input.assets) {
-          const form = new FormData();
-          form.append("file", new Blob([asset.content], { type: asset.mediaType }), asset.filename);
-          const response = await this.gitlabFetch(
-            `${input.target.apiBaseUrl}/projects/${project}/uploads`,
-            input.token,
-            {
-              method: "POST",
-              body: form
-            }
-          );
-          if (!response.ok) {
-            throw new Error(
-              `GitLab upload review asset failed: ${response.status} ${await response.text()}`
-            );
-          }
-          const uploaded = await response.json();
-          const uploadPath = String(uploaded["full_path"] ?? uploaded["url"] ?? "");
-          published.push(
-            PublishedReviewAssetSchema.parse({
-              artifactId: asset.artifactId,
-              targetId: asset.targetId,
-              role: asset.role,
-              label: asset.label,
-              url: uploadPath,
-              embeddable: asset.role !== "e2e-video"
-            })
-          );
-        }
-        return published;
-      }
-      async gitlabFetch(url2, token, init) {
-        const headers = {
-          "PRIVATE-TOKEN": token,
-          ...init.body instanceof FormData ? {} : { "Content-Type": "application/json" },
-          ...init.headers
-        };
-        return this.fetchImpl(url2, {
-          ...init,
-          headers
-        });
-      }
-    };
-  }
-});
-
-// src/publisher/index.ts
-var init_publisher = __esm({
-  "src/publisher/index.ts"() {
-    "use strict";
-    init_publish_contracts();
-    init_remote_detector();
-    init_token_provider();
-    init_publish_redaction();
-    init_publisher_port();
-    init_review_host();
-    init_github_publisher();
-    init_gitlab_publisher();
-  }
-});
-
 // src/application/openspec-archive-service.ts
 import { readdir as readdir2 } from "fs/promises";
 function requireArtifact(artifacts, artifactId) {
@@ -49347,10 +50679,15 @@ function failedPublishResult(input) {
     input.error instanceof Error ? input.error.message : String(input.error)
   );
   const preparationDetails = input.error instanceof PublishPreparationError ? input.error.details : void 0;
+  const synchronizationDetails = input.error instanceof ReviewRequestSynchronizationError ? input.error : void 0;
+  const partialReasons = synchronizationDetails === void 0 ? preparationDetails?.partialReasons ?? [publishFailureReason(message)] : [
+    `review request ${synchronizationDetails.phase} synchronization failed after host mutation: ${message}`
+  ];
   return PublishResultSchema.parse({
     runId: input.runId,
     status: "failed",
     target: input.target,
+    ...synchronizationDetails === void 0 ? {} : { request: synchronizationDetails.request },
     reportArtifactId: input.reportArtifactId,
     requestSynced: false,
     visualPreviewExpected: preparationDetails?.visualPreviewExpected ?? false,
@@ -49358,24 +50695,73 @@ function failedPublishResult(input) {
     featureVideoExpected: preparationDetails?.featureVideoExpected ?? false,
     featureVideoSynced: false,
     fallbackMode: "none",
-    partialReasons: preparationDetails?.partialReasons ?? [publishFailureReason(message)],
-    errorCode: "PUBLISH_FAILED",
+    partialReasons,
+    errorCode: synchronizationDetails === void 0 ? "PUBLISH_FAILED" : "PUBLISH_PARTIAL_SYNC",
     errorMessage: message,
-    retryable: true,
+    retryable: synchronizationDetails?.phase !== "reviewers",
     publishedAt: input.publishedAt
   });
 }
 function defaultTitle(runId) {
   return `spec-to-pr evidence report for ${runId}`;
 }
-function reportDecisionFromArtifact(artifact) {
-  return ReportDecisionSchema.catch("blocked").parse(artifact.metadata["decision"]);
+function blockedTitle(runId) {
+  return `[Blocked] SpecToPR Run ${runId}`;
+}
+function publishTitle(input) {
+  return input.intent === "blocked-diagnostic" ? blockedTitle(input.runId) : input.title ?? defaultTitle(input.runId);
+}
+function publishLabels(labels, intent) {
+  const readyLabels = labels.filter((label) => label !== "spec-to-pr:blocked");
+  const synchronized = [.../* @__PURE__ */ new Set(["spec-to-pr", ...readyLabels])];
+  return intent === "blocked-diagnostic" ? [...synchronized, "spec-to-pr:blocked"] : synchronized;
+}
+function reviewRequestUpdateFromPayload(payload) {
+  return {
+    title: payload.title,
+    body: payload.body,
+    labels: payload.labels
+  };
+}
+function reportMetadataFromArtifact(artifact) {
+  const reportIntent = WorkflowReportIntentSchema.safeParse(artifact.metadata["reportIntent"]);
+  const reportDecision = ReportDecisionSchema.safeParse(artifact.metadata["decision"]);
+  const combined = WorkflowReportMetadataSchema.safeParse({
+    reportKind: artifact.metadata["reportKind"],
+    reportIntent: artifact.metadata["reportIntent"],
+    decision: artifact.metadata["decision"]
+  });
+  return {
+    valid: combined.success,
+    ...reportIntent.success ? { reportIntent: reportIntent.data } : {},
+    ...reportDecision.success ? { reportDecision: reportDecision.data } : {}
+  };
+}
+function reportMatchesPublishIntent(input) {
+  if (!input.reportMetadataValid) return false;
+  if (input.publishIntent === "blocked-diagnostic") {
+    return input.reportIntent === "blocked-diagnostic" && input.reportDecision === "blocked";
+  }
+  return input.reportIntent === "ready" && input.reportDecision !== "blocked";
 }
 function buildPlanWarnings(input) {
   const warnings = [];
-  if (input.reportDecision === "blocked") {
+  if (!input.reportMetadataValid) {
     warnings.push(
-      "Report decision is blocked. Publishing is disabled until blockers are resolved."
+      `Report metadata is invalid: ${reportMetadataDescription(input)}. Publication is disabled.`
+    );
+  } else if (!reportMatchesPublishIntent({
+    reportMetadataValid: input.reportMetadataValid,
+    reportDecision: input.reportDecision,
+    reportIntent: input.reportIntent,
+    publishIntent: input.publishIntent
+  })) {
+    warnings.push(
+      `Report ${reportMetadataDescription(input)} cannot be published with intent ${input.publishIntent}.`
+    );
+  } else if (input.publishIntent === "blocked-diagnostic") {
+    warnings.push(
+      "Publishing a blocked diagnostic draft does not change the blocked workflow status."
     );
   } else if (input.reportDecision !== "ready") {
     warnings.push(`Report decision is ${input.reportDecision}. Publish only as a draft.`);
@@ -49385,11 +50771,21 @@ function buildPlanWarnings(input) {
   }
   return warnings;
 }
+function reportMetadataDescription(input) {
+  return `intent ${input.reportIntent ?? "unknown"} and decision ${input.reportDecision ?? "unknown"}`;
+}
 function findingCount(review) {
   const findings = review["findings"];
   return Array.isArray(findings) ? findings.length : 0;
 }
 function blockedPublishResult(input) {
+  const metadataDescription = reportMetadataDescription({
+    reportIntent: input.reportIntent,
+    reportDecision: input.reportDecision
+  });
+  const reportIsBlockedForReadyPublish = input.reportMetadataValid && input.intent === "ready" && input.reportDecision === "blocked";
+  const errorCode2 = !input.reportMetadataValid ? "PUBLISH_REPORT_METADATA_INVALID" : reportIsBlockedForReadyPublish ? "PUBLISH_BLOCKED" : "PUBLISH_INTENT_MISMATCH";
+  const errorMessage = !input.reportMetadataValid ? `Report metadata is invalid: ${metadataDescription}. Publication is disabled.` : reportIsBlockedForReadyPublish ? "Report decision is blocked. Finish required gates or regenerate the report after resolving blockers." : `Publish intent ${input.intent} is incompatible with report ${metadataDescription}.`;
   return PublishResultSchema.parse({
     runId: input.runId,
     status: "blocked",
@@ -49401,9 +50797,29 @@ function blockedPublishResult(input) {
     featureVideoExpected: false,
     featureVideoSynced: false,
     fallbackMode: "none",
-    partialReasons: ["Report decision is blocked. Publishing is disabled."],
-    errorCode: "PUBLISH_BLOCKED",
-    errorMessage: "Report decision is blocked. Finish required gates or regenerate the report after resolving blockers.",
+    partialReasons: [errorMessage],
+    errorCode: errorCode2,
+    errorMessage,
+    retryable: false,
+    publishedAt: input.publishedAt
+  });
+}
+function noDeltaPublishResult(input) {
+  const message = `No committed delta exists on ${input.sourceBranch} beyond ${input.targetBranch}; no review request was created or updated.`;
+  return PublishResultSchema.parse({
+    runId: input.runId,
+    status: "blocked",
+    target: input.target,
+    reportArtifactId: input.reportArtifactId,
+    requestSynced: false,
+    visualPreviewExpected: false,
+    visualPreviewSynced: false,
+    featureVideoExpected: false,
+    featureVideoSynced: false,
+    fallbackMode: "none",
+    partialReasons: [message],
+    errorCode: "PUBLISH_NO_DELTA",
+    errorMessage: message,
     retryable: false,
     publishedAt: input.publishedAt
   });
@@ -49420,7 +50836,7 @@ function publishFailureReason(message) {
 function publishResultIsFullySynced2(result) {
   return result.status === "passed" && result.requestSynced && result.request?.draft === true && (!result.visualPreviewExpected || result.visualPreviewSynced) && (!result.featureVideoExpected || result.featureVideoSynced) && result.partialReasons.length === 0;
 }
-var execFileAsync3, PUBLISHER_ADAPTER, PublishPreparationError, BasePublishInputShape, DetectPublishTargetInputSchema, DetectPublishTargetResultSchema, PlanReviewRequestPublishInputSchema, PublishReviewRequestInputSchema, PublishReviewRequestResultSchema, UpdateReviewRequestBodyInputSchema, GetPublishResultInputSchema, GetPublishResultResultSchema, RecordPublishReviewInputSchema, RecordPublishReviewResultSchema, PublisherService, VISUAL_PREVIEW_START, VISUAL_PREVIEW_END, FEATURE_VIDEO_START, FEATURE_VIDEO_END;
+var execFileAsync3, PUBLISHER_ADAPTER, MAX_PUBLISH_RESULT_SAVE_ATTEMPTS, PublishPreparationError, PublishNoDeltaError, BasePublishInputShape, DetectPublishTargetInputSchema, DetectPublishTargetResultSchema, PlanReviewRequestPublishInputSchema, PublishReviewRequestInputSchema, PublishReviewRequestResultSchema, UpdateReviewRequestBodyInputSchema, GetPublishResultInputSchema, GetPublishResultResultSchema, RecordPublishReviewInputSchema, RecordPublishReviewResultSchema, PublisherService, VISUAL_PREVIEW_START, VISUAL_PREVIEW_END, FEATURE_VIDEO_START, FEATURE_VIDEO_END;
 var init_publisher_service = __esm({
   "src/application/publisher-service.ts"() {
     "use strict";
@@ -49434,9 +50850,11 @@ var init_publisher_service = __esm({
     init_id_factory();
     init_ids();
     init_scalars();
+    init_errors4();
     init_visual_model();
     execFileAsync3 = promisify3(execFile3);
     PUBLISHER_ADAPTER = "publisher-v1";
+    MAX_PUBLISH_RESULT_SAVE_ATTEMPTS = 8;
     PublishPreparationError = class extends Error {
       constructor(message, details) {
         super(message);
@@ -49445,8 +50863,21 @@ var init_publisher_service = __esm({
       }
       details;
     };
+    PublishNoDeltaError = class extends Error {
+      constructor(sourceBranch, targetBranch) {
+        super(
+          `Draft publication requires at least one committed change on ${sourceBranch} beyond ${targetBranch}`
+        );
+        this.sourceBranch = sourceBranch;
+        this.targetBranch = targetBranch;
+        this.name = "PublishNoDeltaError";
+      }
+      sourceBranch;
+      targetBranch;
+    };
     BasePublishInputShape = {
       runId: RunIdSchema,
+      intent: PublishIntentSchema.default("ready"),
       reportArtifactId: ArtifactIdSchema.optional(),
       sourceBranch: external_exports.string().trim().min(1),
       targetBranch: external_exports.string().trim().min(1).default("main"),
@@ -49563,7 +50994,7 @@ var init_publisher_service = __esm({
         const reportBody = (await this.artifactStore.readContent(reportArtifact.digest)).toString(
           "utf8"
         );
-        const reportDecision = reportDecisionFromArtifact(reportArtifact);
+        const reportMetadata = reportMetadataFromArtifact(reportArtifact);
         const detected = await this.detectTarget({
           runId: input.runId,
           remoteName: input.remoteName,
@@ -49573,41 +51004,63 @@ var init_publisher_service = __esm({
         const target = detected.target;
         const payload = ReviewRequestPayloadSchema.parse({
           runId: run.id,
-          title: input.title ?? defaultTitle(run.id),
+          title: publishTitle({
+            runId: run.id,
+            intent: input.intent,
+            ...input.title === void 0 ? {} : { title: input.title }
+          }),
           body: reportBody,
           sourceBranch: input.sourceBranch,
           targetBranch: input.targetBranch,
-          ...input.headSha === void 0 ? {} : { headSha: input.headSha },
+          ...input.headSha === void 0 || input.intent === "blocked-diagnostic" ? {} : { headSha: input.headSha },
           mode: input.mode,
-          labels: input.labels,
+          labels: publishLabels(input.labels, input.intent),
           reviewers: input.reviewers,
           assignees: input.assignees,
           reportArtifactId: reportArtifact.id
         });
         return PublishPlanSchema.parse({
           runId: run.id,
+          intent: input.intent,
           target,
           payload,
-          reportDecision,
+          ...reportMetadata.reportIntent === void 0 ? {} : { reportIntent: reportMetadata.reportIntent },
+          ...reportMetadata.reportDecision === void 0 ? {} : { reportDecision: reportMetadata.reportDecision },
+          reportMetadataValid: reportMetadata.valid,
           requiredTokenEnv: publisherAuthHint(target.host),
           willPushBranch: input.pushBranch,
-          willCreateOrUpdate: reportDecision !== "blocked",
-          warnings: buildPlanWarnings({ payload, reportDecision }),
+          willCreateOrUpdate: reportMatchesPublishIntent({
+            reportMetadataValid: reportMetadata.valid,
+            reportDecision: reportMetadata.reportDecision,
+            reportIntent: reportMetadata.reportIntent,
+            publishIntent: input.intent
+          }),
+          warnings: buildPlanWarnings({
+            payload,
+            reportMetadataValid: reportMetadata.valid,
+            reportDecision: reportMetadata.reportDecision,
+            reportIntent: reportMetadata.reportIntent,
+            publishIntent: input.intent
+          }),
           plannedAt: timestamp
         });
       }
-      async publish(rawInput) {
+      async publish(rawInput, options = {}) {
         const input = PublishReviewRequestInputSchema.parse(rawInput);
         const run = await this.runStore.get(input.runId);
         const timestamp = IsoDateTimeSchema.parse(this.now());
         const { confirm, ...planInput } = input;
         void confirm;
         const plan = await this.plan(planInput);
-        if (plan.reportDecision === "blocked") {
+        if (!plan.willCreateOrUpdate) {
           const result2 = blockedPublishResult({
             runId: run.id,
             target: plan.target,
             reportArtifactId: plan.payload.reportArtifactId,
+            intent: plan.intent,
+            reportMetadataValid: plan.reportMetadataValid,
+            ...plan.reportIntent === void 0 ? {} : { reportIntent: plan.reportIntent },
+            ...plan.reportDecision === void 0 ? {} : { reportDecision: plan.reportDecision },
             publishedAt: timestamp
           });
           return this.recordPublishResult({
@@ -49615,43 +51068,77 @@ var init_publisher_service = __esm({
             result: result2,
             payload: plan.payload,
             timestamp,
+            remoteName: input.remoteName,
+            pushBranch: input.pushBranch,
             addPublishingAgentResult: false
           });
         }
-        await this.assertPublishBranchReady({
-          projectRoot: run.projectRoot,
-          sourceBranch: input.sourceBranch,
-          targetBranch: input.targetBranch,
-          ...input.headSha === void 0 ? {} : { headSha: input.headSha }
-        });
+        try {
+          await this.assertPublishBranchReady({
+            projectRoot: run.projectRoot,
+            sourceBranch: input.sourceBranch,
+            targetBranch: input.targetBranch,
+            ...input.headSha === void 0 || plan.intent === "blocked-diagnostic" ? {} : { headSha: input.headSha }
+          });
+        } catch (error51) {
+          if (!(error51 instanceof PublishNoDeltaError)) throw error51;
+          const result2 = noDeltaPublishResult({
+            runId: run.id,
+            target: plan.target,
+            reportArtifactId: plan.payload.reportArtifactId,
+            sourceBranch: error51.sourceBranch,
+            targetBranch: error51.targetBranch,
+            publishedAt: timestamp
+          });
+          return this.recordPublishResult({
+            runId: run.id,
+            result: result2,
+            payload: plan.payload,
+            timestamp,
+            remoteName: input.remoteName,
+            pushBranch: input.pushBranch,
+            addPublishingAgentResult: false
+          });
+        }
         const result = await this.executePublish({
           run,
           plan,
           timestamp,
           pushBranch: input.pushBranch,
-          remoteName: input.remoteName
+          remoteName: input.remoteName,
+          signal: options.signal
         });
+        options.signal?.throwIfAborted();
         return this.recordPublishResult({
           runId: run.id,
           result,
           payload: plan.payload,
           timestamp,
+          remoteName: input.remoteName,
+          pushBranch: input.pushBranch,
           addPublishingAgentResult: result.status === "passed"
         });
       }
-      async updateBody(rawInput) {
+      async updateBody(rawInput, options = {}) {
         const input = UpdateReviewRequestBodyInputSchema.parse(rawInput);
         const run = await this.runStore.get(input.runId);
         const timestamp = IsoDateTimeSchema.parse(this.now());
         const { allowBlockedBody, confirm, publishMode, requestNumber, ...planInput } = input;
         void confirm;
-        const plan = await this.plan(planInput);
-        const blockedBodyUpdateAllowed = allowBlockedBody || publishMode === "blocked-draft-update";
-        if (plan.reportDecision === "blocked" && !blockedBodyUpdateAllowed) {
+        const blockedBodyUpdateAllowed = allowBlockedBody || publishMode === "blocked-draft-update" || input.intent === "blocked-diagnostic";
+        const plan = await this.plan({
+          ...planInput,
+          ...blockedBodyUpdateAllowed ? { intent: "blocked-diagnostic" } : {}
+        });
+        if (!plan.willCreateOrUpdate) {
           const result2 = blockedPublishResult({
             runId: run.id,
             target: plan.target,
             reportArtifactId: plan.payload.reportArtifactId,
+            intent: plan.intent,
+            reportMetadataValid: plan.reportMetadataValid,
+            ...plan.reportIntent === void 0 ? {} : { reportIntent: plan.reportIntent },
+            ...plan.reportDecision === void 0 ? {} : { reportDecision: plan.reportDecision },
             publishedAt: timestamp
           });
           return this.recordPublishResult({
@@ -49659,19 +51146,25 @@ var init_publisher_service = __esm({
             result: result2,
             payload: plan.payload,
             timestamp,
+            remoteName: input.remoteName,
+            pushBranch: input.pushBranch,
             addPublishingAgentResult: false
           });
         }
         const result = await this.executeUpdateBody({
           plan,
           requestNumber,
-          timestamp
+          timestamp,
+          signal: options.signal
         });
+        options.signal?.throwIfAborted();
         return this.recordPublishResult({
           runId: run.id,
           result,
           payload: plan.payload,
           timestamp,
+          remoteName: input.remoteName,
+          pushBranch: input.pushBranch,
           addPublishingAgentResult: result.status === "passed"
         });
       }
@@ -49721,9 +51214,7 @@ var init_publisher_service = __esm({
         ])).stdout.trim();
         const ahead = Number.parseInt(aheadText, 10);
         if (!Number.isSafeInteger(ahead) || ahead < 1) {
-          throw new Error(
-            `Draft publication requires at least one committed change on ${input.sourceBranch} beyond ${input.targetBranch}`
-          );
+          throw new PublishNoDeltaError(input.sourceBranch, input.targetBranch);
         }
       }
       async recordReview(rawInput) {
@@ -49754,6 +51245,7 @@ var init_publisher_service = __esm({
       }
       async executePublish(input) {
         try {
+          input.signal?.throwIfAborted();
           const token = readPublisherToken(input.plan.target.host);
           if (input.pushBranch) {
             await this.git(input.run.projectRoot, [
@@ -49763,17 +51255,20 @@ var init_publisher_service = __esm({
               input.plan.payload.sourceBranch
             ]);
           }
+          input.signal?.throwIfAborted();
           const publisher = this.publishers[input.plan.target.host];
           const prepared = await this.preparePayloadForPublish({
             run: input.run,
             plan: input.plan,
             publisher,
-            token: token.token
+            token: token.token,
+            signal: input.signal
           });
           const existing = await publisher.findExisting({
             target: input.plan.target,
             payload: prepared.payload,
-            token: token.token
+            token: token.token,
+            ...input.signal === void 0 ? {} : { signal: input.signal }
           });
           if (existing !== void 0 && !existing.draft) {
             throw new Error(`Refusing to update non-draft review request ${existing.number}`);
@@ -49781,19 +51276,21 @@ var init_publisher_service = __esm({
           const request = existing === void 0 ? await publisher.create({
             target: input.plan.target,
             payload: prepared.payload,
-            token: token.token
-          }) : await publisher.updateBody({
+            token: token.token,
+            ...input.signal === void 0 ? {} : { signal: input.signal }
+          }) : await publisher.update({
             target: input.plan.target,
             requestNumber: existing.number,
-            body: prepared.payload.body,
-            token: token.token
+            update: reviewRequestUpdateFromPayload(prepared.payload),
+            token: token.token,
+            ...input.signal === void 0 ? {} : { signal: input.signal }
           });
           if (!request.draft) {
             throw new Error(`Review request ${request.number} is not a draft after publication`);
           }
           return PublishResultSchema.parse({
             runId: input.plan.runId,
-            status: "passed",
+            status: input.plan.intent === "blocked-diagnostic" ? "blocked" : "passed",
             target: input.plan.target,
             request,
             reportArtifactId: input.plan.payload.reportArtifactId,
@@ -49809,6 +51306,7 @@ var init_publisher_service = __esm({
             publishedAt: input.timestamp
           });
         } catch (error51) {
+          if (input.signal?.aborted) throw input.signal.reason ?? error51;
           return failedPublishResult({
             runId: input.plan.runId,
             target: input.plan.target,
@@ -49820,6 +51318,7 @@ var init_publisher_service = __esm({
       }
       async executeUpdateBody(input) {
         try {
+          input.signal?.throwIfAborted();
           const token = readPublisherToken(input.plan.target.host);
           const publisher = this.publishers[input.plan.target.host];
           const run = await this.runStore.get(input.plan.runId);
@@ -49827,12 +51326,14 @@ var init_publisher_service = __esm({
             run,
             plan: input.plan,
             publisher,
-            token: token.token
+            token: token.token,
+            signal: input.signal
           });
           const existing = await publisher.findExisting({
             target: input.plan.target,
             payload: prepared.payload,
-            token: token.token
+            token: token.token,
+            ...input.signal === void 0 ? {} : { signal: input.signal }
           });
           if (existing === void 0 || existing.number !== input.requestNumber) {
             throw new Error(`Draft review request ${input.requestNumber} could not be verified`);
@@ -49840,18 +51341,19 @@ var init_publisher_service = __esm({
           if (!existing.draft) {
             throw new Error(`Refusing to update non-draft review request ${existing.number}`);
           }
-          const request = await publisher.updateBody({
+          const request = await publisher.update({
             target: input.plan.target,
             requestNumber: input.requestNumber,
-            body: prepared.payload.body,
-            token: token.token
+            update: reviewRequestUpdateFromPayload(prepared.payload),
+            token: token.token,
+            ...input.signal === void 0 ? {} : { signal: input.signal }
           });
           if (!request.draft) {
             throw new Error(`Review request ${request.number} is not a draft after body update`);
           }
           return PublishResultSchema.parse({
             runId: input.plan.runId,
-            status: "passed",
+            status: input.plan.intent === "blocked-diagnostic" ? "blocked" : "passed",
             target: input.plan.target,
             request,
             reportArtifactId: input.plan.payload.reportArtifactId,
@@ -49867,6 +51369,7 @@ var init_publisher_service = __esm({
             publishedAt: input.timestamp
           });
         } catch (error51) {
+          if (input.signal?.aborted) throw input.signal.reason ?? error51;
           return failedPublishResult({
             runId: input.plan.runId,
             target: input.plan.target,
@@ -49899,7 +51402,8 @@ var init_publisher_service = __esm({
             target: input.plan.target,
             payload: input.plan.payload,
             token: input.token,
-            assets
+            assets,
+            ...input.signal === void 0 ? {} : { signal: input.signal }
           });
         } catch (error51) {
           const message = error51 instanceof Error ? error51.message : String(error51);
@@ -50059,7 +51563,8 @@ var init_publisher_service = __esm({
         };
       }
       async recordPublishResult(input) {
-        const run = await this.runStore.get(RunIdSchema.parse(input.runId));
+        let run = await this.runStore.get(RunIdSchema.parse(input.runId));
+        const reportArtifact = requireArtifact2(run.artifacts, input.payload.reportArtifactId);
         const publishResultArtifact = await this.writeJsonArtifact({
           label: "publish-result",
           value: input.result,
@@ -50074,48 +51579,68 @@ var init_publisher_service = __esm({
             visualPreviewExpected: input.result.visualPreviewExpected,
             visualPreviewSynced: input.result.visualPreviewSynced,
             featureVideoExpected: input.result.featureVideoExpected,
-            featureVideoSynced: input.result.featureVideoSynced
+            featureVideoSynced: input.result.featureVideoSynced,
+            publishIntent: reportArtifact.metadata["reportIntent"],
+            diagnosticReportKey: reportArtifact.metadata["idempotencyKey"],
+            sourceBranch: input.payload.sourceBranch,
+            targetBranch: input.payload.targetBranch,
+            remoteName: input.remoteName,
+            pushBranch: input.pushBranch
           }
         });
         const shouldAddPublishingAgentResult = input.addPublishingAgentResult && publishResultIsFullySynced2(input.result);
-        const agentResults = shouldAddPublishingAgentResult ? [
-          ...run.agentResults,
-          AgentResultSchema.parse({
-            schemaVersion: RUNTIME_CONTRACT_VERSION,
-            id: createAgentResultId(),
-            runId: run.id,
-            kind: "publishing",
-            agent: "pr-publisher",
-            status: "passed",
-            baseSha: input.payload.headSha ?? run.baseCommit ?? "0000000",
-            evidenceIds: [],
-            artifactIds: [input.payload.reportArtifactId, publishResultArtifact.id],
-            gapIds: [],
-            checks: [],
-            decisions: [],
-            target: input.result.request?.host,
-            prUrl: input.result.request?.url,
-            prNumber: input.result.request?.number,
-            draft: input.result.request?.draft ?? true,
-            reportArtifactId: input.payload.reportArtifactId,
-            startedAt: input.timestamp,
-            completedAt: input.timestamp
-          })
-        ] : run.agentResults;
-        const nextRun = RunManifestSchema.parse({
-          ...run,
-          revision: run.revision + 1,
-          updatedAt: input.timestamp,
-          artifacts: [...run.artifacts, publishResultArtifact],
-          agentResults
-        });
-        await this.runStore.save(nextRun, run.revision);
-        return PublishReviewRequestResultSchema.parse({
-          run: summarizeRun(nextRun),
-          result: input.result,
-          publishResultArtifactId: publishResultArtifact.id,
-          ...agentResults.length === run.agentResults.length ? {} : { agentResultId: agentResults.at(-1)?.id }
-        });
+        const publishingAgentResult = shouldAddPublishingAgentResult ? AgentResultSchema.parse({
+          schemaVersion: RUNTIME_CONTRACT_VERSION,
+          id: createAgentResultId(),
+          runId: run.id,
+          kind: "publishing",
+          agent: "pr-publisher",
+          status: "passed",
+          baseSha: input.payload.headSha ?? run.baseCommit ?? "0000000",
+          evidenceIds: [],
+          artifactIds: [input.payload.reportArtifactId, publishResultArtifact.id],
+          gapIds: [],
+          checks: [],
+          decisions: [],
+          target: input.result.request?.host,
+          prUrl: input.result.request?.url,
+          prNumber: input.result.request?.number,
+          draft: input.result.request?.draft ?? true,
+          reportArtifactId: input.payload.reportArtifactId,
+          startedAt: input.timestamp,
+          completedAt: input.timestamp
+        }) : void 0;
+        for (let attempt = 0; attempt < MAX_PUBLISH_RESULT_SAVE_ATTEMPTS; attempt += 1) {
+          if (run.artifacts.some((artifact) => artifact.id === publishResultArtifact.id)) {
+            return PublishReviewRequestResultSchema.parse({
+              run: summarizeRun(run),
+              result: input.result,
+              publishResultArtifactId: publishResultArtifact.id,
+              ...publishingAgentResult === void 0 ? {} : { agentResultId: publishingAgentResult.id }
+            });
+          }
+          const agentResults = publishingAgentResult === void 0 || run.agentResults.some((result) => result.id === publishingAgentResult.id) ? run.agentResults : [...run.agentResults, publishingAgentResult];
+          const nextRun = RunManifestSchema.parse({
+            ...run,
+            revision: run.revision + 1,
+            updatedAt: Date.parse(input.timestamp) >= Date.parse(run.updatedAt) ? input.timestamp : run.updatedAt,
+            artifacts: [...run.artifacts, publishResultArtifact],
+            agentResults
+          });
+          try {
+            await this.runStore.save(nextRun, run.revision);
+            return PublishReviewRequestResultSchema.parse({
+              run: summarizeRun(nextRun),
+              result: input.result,
+              publishResultArtifactId: publishResultArtifact.id,
+              ...publishingAgentResult === void 0 ? {} : { agentResultId: publishingAgentResult.id }
+            });
+          } catch (error51) {
+            if (!(error51 instanceof RevisionConflictError)) throw error51;
+            run = await this.runStore.get(RunIdSchema.parse(input.runId));
+          }
+        }
+        throw new Error(`Could not persist publish result for Run ${input.runId}`);
       }
       async writeJsonArtifact(input) {
         const content = `${JSON.stringify(input.value, null, 2)}
@@ -50462,39 +51987,6 @@ var init_stage_service = __esm({
   }
 });
 
-// src/store/errors.ts
-var RunStoreError, RunAlreadyExistsError, RunNotFoundError, RevisionConflictError;
-var init_errors5 = __esm({
-  "src/store/errors.ts"() {
-    "use strict";
-    RunStoreError = class extends Error {
-      constructor(message) {
-        super(message);
-        this.name = new.target.name;
-      }
-    };
-    RunAlreadyExistsError = class extends RunStoreError {
-      constructor(runId) {
-        super(`Run already exists: ${runId}`);
-      }
-    };
-    RunNotFoundError = class extends RunStoreError {
-      constructor(runId) {
-        super(`Run not found: ${runId}`);
-      }
-    };
-    RevisionConflictError = class extends RunStoreError {
-      constructor(runId, expectedRevision, actualRevision) {
-        super(`Revision conflict for ${runId}: expected ${expectedRevision}, actual ${actualRevision}`);
-        this.expectedRevision = expectedRevision;
-        this.actualRevision = actualRevision;
-      }
-      expectedRevision;
-      actualRevision;
-    };
-  }
-});
-
 // src/store/sqlite-run-store.ts
 import { mkdirSync } from "fs";
 import path8 from "path";
@@ -50534,7 +52026,7 @@ var init_sqlite_run_store = __esm({
     "use strict";
     init_run2();
     init_ids();
-    init_errors5();
+    init_errors4();
     require2 = createRequire(import.meta.url);
     SqliteRunStore = class {
       database;

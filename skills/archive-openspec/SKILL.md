@@ -1,6 +1,6 @@
 ---
 name: archive-openspec
-description: Use when a published spec-to-pr change has been merged and its workflow evidence or OpenSpec change should be archived explicitly.
+description: Use when the user explicitly requests post-merge archival for a merged spec-to-pr change with authoritative merge evidence.
 ---
 
 # Archive OpenSpec

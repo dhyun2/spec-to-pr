@@ -1,6 +1,6 @@
 ---
 name: spec-to-pr
-description: Use when running an evidence-driven implementation from intake through a draft review request or explicit post-merge archive.
+description: Use when orchestrating an evidence-driven v2 Run across its stage-specific external actions.
 ---
 
 # Spec to PR
@@ -26,3 +26,7 @@ Use the v2 facade as the sole workflow authority:
 Immediately after start, report the `workflow_status.workload` size (`XS`–`XL`), token range, and confidence. Treat it as a range, not a promise, and preserve the complete `requiredValidations` list from status. When the SDK reports the 80% boundary, finish the current action group and continue from the compact fresh-thread checkpoint using `resumeContext.goal`, its project-relative evidence paths, and submission summaries. On `--resume`, call `workflow_status` for the existing run ID first; never repeat intake or create a duplicate Run. At the automatic hard limit, do not begin another action: keep that list unchanged and return `split-required` for independently verifiable scope slices. If SDK usage is unavailable, stop before another nonterminal action instead of assuming zero.
 
 Keep API and UI work in one implementation context. The `api-ready` checkpoint must precede UI evidence submission. Use only `functional-reviewer`, plus `design-reviewer` when UI scope applies; these independent reviews may run in parallel after implementation. Never merge, approve, waive missing required evidence, treat skipped work as passed, or remove verification because the runtime reached an automatic boundary.
+
+Route stage work to the matching public skill; do not use the umbrella skill as a substitute for stage-specific instructions. Keep `deliveryProfile.recommendedSkills` and user `skillHints` optional, apply only installed and applicable candidates, and record only skills actually applied. Reviewers remain read-only and never call the workflow MCP.
+
+Before every `workflow_submit`, require each `artifactPaths` or evidence-path entry to be a portable project-relative, `/`-separated safe name. Reject absolute, traversal, control-character, backslash/non-portable, or secret-shaped paths, and never embed token, password, secret, or credential values. A descriptive filename such as `token-validation.json` remains valid because it names evidence rather than containing a secret value.

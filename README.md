@@ -4,6 +4,8 @@ An evidence-driven Claude Code and Codex plugin that turns a brief, a legacy cha
 
 Korean version: [README.ko.md](README.ko.md)
 
+> **Version labels:** this README describes **Released 0.2.1** behavior from the `main` branch.
+
 ## Four delivery modes
 
 | Mode      | Give SpecToPR                              | What it verifies                                                    | Result                                      |
@@ -27,7 +29,7 @@ The public runtime is intentionally small:
 
 - **7 MCP tools:** `workflow_info`, `workflow_start`, `workflow_advance`, `workflow_submit`, `workflow_status`, `workflow_publish`, `workflow_archive`
 - **8 durable stages:** intake, contracts, implementation, functional review, design review, report, publish, archive
-- **9 skills:** `spec-to-pr`, `doctor`, `intake-contracts`, `implement`, `review-functional`, `review-design`, `publish`, `archive-openspec`, `prepare-release`
+- **8 skills:** `spec-to-pr`, `doctor`, `intake-contracts`, `implement`, `review-functional`, `review-design`, `publish`, `archive-openspec`
 - **2 independent reviewers:** `functional-reviewer` and conditional `design-reviewer`
 
 API and UI implementation stay in one context. For API-backed UI, the agent first submits distinct physical, non-empty types, schemas, wrappers, mocks, and a passing JSON contract-test result with a stable `implementationContextId` as an explicit `api-ready` checkpoint; path, symlink, or hard-link aliases do not count as separate evidence. Final implementation must repeat that ID. `apiReady: true` alone is not evidence. There are no separate API/UI implementation agents and no integration lane. After implementation, the orchestrator freezes a `workflow_status` snapshot, contracts, diff, and evidence paths for each independent reviewer; reviewers return verdict payloads without calling workflow tools.
@@ -35,6 +37,8 @@ API and UI implementation stay in one context. For API-backed UI, the agent firs
 Immediately after intake, `workflow_status` reports an `XS`–`XL` workload, estimated token range, confidence, reasons, an 80% checkpoint threshold, and the authoritative required-validation list. Contract authors may submit non-empty numeric `workloadSignals` to refine it without adding a tool or stage. The same status carries a compact `resumeContext` with the recorded goal, project-relative evidence paths, and submission summaries. The SDK pins the first durable Run ID, instructs each turn to stop after one workflow action group, requires a fresh status at every completed boundary, never lets later statuses shrink required validation, sums actual input plus output tokens, and starts a compact fresh thread at the first boundary at or above 80%. At the hard limit it keeps every required validation and returns `split-required`; there is no caller-selected token allowance. Numeric-only fresh completed-run history may calibrate only the displayed range. The automatic hard limit stays at the workload class default, and legacy samples recorded with a different hard limit are excluded from calibration. Missing usage stops continuation as `usage-unavailable`. History writes are serialized and atomic, storage is bounded and revalidated on every access, prompts/code/diffs/paths/tool output/final responses are never stored, and optional history I/O cannot fail the workflow.
 
 Publishing only creates or updates a draft GitHub PR or GitLab MR. Draft flows work on a non-target `codex/*` source branch and commit only intended changes before publication; runtime preflight requires a clean tree and at least one source commit beyond the target. Publishing never merges, approves, closes, or marks a review request ready.
+
+Ready publication uses `workflow_publish intent: ready`. If a required input, tool, policy, verification, publish precondition, budget split, or unexpected failure blocks the Run, typed redacted `blockerDetails` records completed work, attempted recovery, unrun validations, and the exact unblock action. A valid preflight can publish `intent: blocked-diagnostic`, but that diagnostic draft remains `status: blocked`; otherwise, including `PUBLISH_NO_DELTA`, the Run returns a **local blocked report** without an empty commit or issue fallback. Missing required browser proof is `BROWSER_NOT_RUN`. Recovery resumes the same durable Run and updates the same source/target **same draft PR** from blocked to ready.
 
 ## Requirements
 
@@ -157,9 +161,11 @@ pnpm plugin:validate
 
 ## Documentation
 
-The maintained guide is at **https://dhyun2.github.io/spec-to-pr/**. It covers prerequisites, installation, the four cases, the v2 pipeline, skills, configuration, and troubleshooting.
+The maintained guide is at **https://dhyun2.github.io/spec-to-pr/**. It covers prerequisites, installation, the four cases, the v2 pipeline, skills, configuration, troubleshooting, and an official-source comparison of Spec Kit, OpenSpec, Kiro, and BMAD.
 
 [Start with the brief-to-PR guide](https://dhyun2.github.io/spec-to-pr/en/usage/brief) for required inputs, copyable prompts, execution phases, blockers, evidence, and illustrative draft PRs. The Usage sidebar links the other three cases separately.
+
+[Read the comparison and adoption policy](https://dhyun2.github.io/spec-to-pr/en/concepts/comparison) for adopted, conditional, and rejected orchestration patterns.
 
 Run it locally with:
 

@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { link, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -10,15 +11,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ArtifactBlobStore } from "../../src/artifact-registry/artifact-blob-store.js";
 import { IntakeRequestService } from "../../src/application/intake-request-service.js";
 import type { OpenSpecArchiveService } from "../../src/application/openspec-archive-service.js";
-import type { PublisherService } from "../../src/application/publisher-service.js";
+import { PublisherService } from "../../src/application/publisher-service.js";
 import { RunService } from "../../src/application/run-service.js";
 import { StageService } from "../../src/application/stage-service.js";
 import {
+  WorkflowPublishInputSchema,
   WorkflowService,
   type WorkflowServiceDependencies,
 } from "../../src/application/workflow-service.js";
 import { SourceSnapshotStore } from "../../src/source-registry/snapshot-store.js";
 import { SqliteRunStore } from "../../src/store/sqlite-run-store.js";
+import type { RunStore } from "../../src/store/run-store.js";
+import type {
+  PublishedReviewRequest,
+  PublishTarget,
+  ReviewRequestPayload,
+  ReviewRequestPublisher,
+  ReviewRequestUpdate,
+} from "../../src/publisher/index.js";
+import { ArtifactRefSchema } from "../../src/runtime/artifact.js";
+import { createArtifactId } from "../../src/runtime/id-factory.js";
 
 const FIGMA_URL = "https://www.figma.com/design/abc/file?node-id=1-2";
 const FEATURE_CONTEXT_ID = `ctx_${"x".repeat(124)}`;
@@ -121,6 +133,1124 @@ describe("WorkflowService", () => {
     await rm(directory, { recursive: true, force: true });
   });
 
+  it("defaults workflow publication to ready and accepts blocked diagnostics", () => {
+    expect(
+      WorkflowPublishInputSchema.parse({
+        runId: `run_${"a".repeat(32)}`,
+        mode: "preview",
+        sourceBranch: "codex/diagnostic",
+      }).intent,
+    ).toBe("ready");
+    expect(
+      WorkflowPublishInputSchema.parse({
+        runId: `run_${"a".repeat(32)}`,
+        intent: "blocked-diagnostic",
+        mode: "preview",
+        sourceBranch: "codex/diagnostic",
+      }),
+    ).toMatchObject({ intent: "blocked-diagnostic", recoverUncertain: false });
+    expect(
+      WorkflowPublishInputSchema.parse({
+        runId: `run_${"a".repeat(32)}`,
+        intent: "blocked-diagnostic",
+        mode: "execute",
+        sourceBranch: "codex/diagnostic",
+        confirm: true,
+        recoverUncertain: true,
+      }).recoverUncertain,
+    ).toBe(true);
+    for (const invalidRecovery of [
+      { intent: "ready", mode: "execute", confirm: true },
+      { intent: "blocked-diagnostic", mode: "preview", confirm: false },
+      { intent: "blocked-diagnostic", mode: "execute", confirm: false },
+    ] as const) {
+      expect(
+        WorkflowPublishInputSchema.safeParse({
+          runId: `run_${"a".repeat(32)}`,
+          sourceBranch: "codex/diagnostic",
+          recoverUncertain: true,
+          ...invalidRecovery,
+        }).success,
+      ).toBe(false);
+    }
+  });
+
+  it("requires a passed report before ready publication planning", async () => {
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Refactor the parser and publish the reviewed result",
+      scope: "non-ui",
+    });
+    const plan = vi.fn();
+    service = new WorkflowService({
+      ...dependencies,
+      publisherService: { plan } as unknown as PublisherService,
+    });
+
+    await expect(
+      service.publish({
+        runId: started.runId,
+        mode: "preview",
+        sourceBranch: "codex/ready-report",
+      }),
+    ).rejects.toThrow(/passed report/i);
+    expect(plan).not.toHaveBeenCalled();
+  });
+
+  it("requires the ready report to match the current review packet", async () => {
+    const runId = await preparePublishReadyWorkflow(service, directory);
+    await changeSource(directory, "src/parser.ts", "export const parser = 'stale-after-report';\n");
+    const plan = vi.fn();
+    service = new WorkflowService({
+      ...dependencies,
+      publisherService: { plan } as unknown as PublisherService,
+    });
+
+    await expect(
+      service.publish({
+        runId,
+        mode: "preview",
+        sourceBranch: "codex/ready-report",
+      }),
+    ).rejects.toThrow(/review packet.*stale/i);
+    expect(plan).not.toHaveBeenCalled();
+  });
+
+  it("rejects a passed ready report carrying an older review packet id", async () => {
+    const runId = await preparePublishReadyWorkflow(service, directory);
+    const run = await store.get(runId);
+    await store.save(
+      {
+        ...run,
+        revision: run.revision + 1,
+        artifacts: run.artifacts.map((artifact) =>
+          artifact.kind === "pr-report"
+            ? { ...artifact, metadata: { ...artifact.metadata, reviewPacketId: "packet_stale" } }
+            : artifact,
+        ),
+      },
+      run.revision,
+    );
+    const plan = vi.fn();
+    service = new WorkflowService({
+      ...dependencies,
+      publisherService: { plan } as unknown as PublisherService,
+    });
+
+    await expect(
+      service.publish({
+        runId,
+        mode: "preview",
+        sourceBranch: "codex/ready-report",
+      }),
+    ).rejects.toThrow(/report.*current review packet/i);
+    expect(plan).not.toHaveBeenCalled();
+  });
+
+  it("previews blocked diagnostic publication without mutating durable state", async () => {
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Prepare contracts that need an approval",
+      scope: "non-ui",
+      publication: "draft",
+    });
+    const blocked = await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "contracts",
+        status: "blocked",
+        summary: "Approval is missing.",
+        blocker: {
+          stage: "contracts",
+          code: "MISSING_APPROVAL",
+          kind: "missing-input",
+          summary: "Approval is missing.",
+          retryable: false,
+          resumable: true,
+          completedWork: [],
+          evidencePaths: [],
+          attemptedRecovery: [],
+          unrunValidations: ["functional"],
+          exactUnblockAction: "Provide approval.",
+        },
+      },
+    });
+    const before = await store.get(started.runId);
+    const plan = vi.fn();
+    service = new WorkflowService({
+      ...dependencies,
+      publisherService: { plan } as unknown as PublisherService,
+    });
+
+    const preview = await service.publish({
+      runId: started.runId,
+      intent: "blocked-diagnostic",
+      mode: "preview",
+      sourceBranch: "codex/blocked-diagnostic",
+    });
+
+    expect(preview).toEqual({
+      runId: started.runId,
+      intent: "blocked-diagnostic",
+      mode: "preview",
+      sourceBranch: "codex/blocked-diagnostic",
+      targetBranch: "main",
+      willEnsureReport: true,
+      eligibleForPublication: true,
+      preflightPending: true,
+      skipped: false,
+      blocker: {
+        stage: "contracts",
+        code: "MISSING_INPUT",
+        kind: "missing-input",
+        exactUnblockAction: blocked.blockerDetails[0]!.exactUnblockAction,
+      },
+    });
+    expect(preview).not.toHaveProperty("willCreateOrUpdate");
+    expect(plan).not.toHaveBeenCalled();
+    expect(await store.get(started.runId)).toEqual(before);
+  });
+
+  it("stops and retries when the blocker changes while acquiring its diagnostic report", async () => {
+    const { runId } = await prepareBlockedWorkflow(service, directory);
+    const publish = vi.fn().mockResolvedValue({ sent: true });
+    service = new WorkflowService({
+      ...dependencies,
+      publisherService: { publish } as unknown as PublisherService,
+    });
+    const ensureReport = service.ensureBlockedDiagnosticReport.bind(service);
+    vi.spyOn(service, "ensureBlockedDiagnosticReport").mockImplementationOnce(async (rawInput) => {
+      await service.submit({
+        runId,
+        submission: {
+          kind: "contracts",
+          status: "blocked",
+          summary: "A newer approval is missing.",
+          blocker: {
+            stage: "contracts",
+            code: "NEWER_MISSING_APPROVAL",
+            kind: "missing-input",
+            summary: "A newer approval is missing.",
+            retryable: false,
+            resumable: true,
+            completedWork: [],
+            evidencePaths: [],
+            attemptedRecovery: [],
+            unrunValidations: ["functional"],
+            exactUnblockAction: "Provide the newer approval.",
+          },
+        },
+      });
+      return ensureReport(rawInput);
+    });
+    const input = {
+      runId,
+      intent: "blocked-diagnostic" as const,
+      mode: "execute" as const,
+      sourceBranch: "codex/blocked-diagnostic",
+      confirm: true,
+    };
+
+    const stopped = (await service.publish(input)) as Record<string, unknown>;
+
+    expect(stopped).toMatchObject({
+      intent: "blocked-diagnostic",
+      skipped: true,
+      reason: "diagnostic-context-changed",
+      retryable: true,
+      expectedReportKey: "contracts:0:MISSING_INPUT",
+      actualReportKey: "contracts:1:MISSING_INPUT",
+      diagnosticReport: {
+        artifactId: expect.stringMatching(/^art_/),
+        path: expect.stringMatching(/^artifact:\/\/sha256\//),
+      },
+      status: { status: "blocked" },
+    });
+    expect(stopped).not.toHaveProperty("result");
+    expect(publish).not.toHaveBeenCalled();
+    expect(
+      (await store.get(runId)).artifacts.some(
+        (artifact) => artifact.metadata["reportKind"] === "publish-result",
+      ),
+    ).toBe(false);
+
+    await expect(service.publish(input)).resolves.toMatchObject({ result: { sent: true } });
+    expect(publish).toHaveBeenCalledTimes(1);
+  });
+
+  it("single-flights concurrent blocked diagnostic execution", async () => {
+    const { runId } = await prepareBlockedWorkflow(service, directory);
+    let releasePublish!: () => void;
+    const publishGate = new Promise<void>((resolve) => {
+      releasePublish = resolve;
+    });
+    const publish = vi.fn().mockImplementation(async () => {
+      await publishGate;
+      const reportArtifactId = (await store.get(runId)).artifacts.find(
+        (artifact) => artifact.metadata["reportIntent"] === "blocked-diagnostic",
+      )!.id;
+      return {
+        result: {
+          runId,
+          status: "blocked",
+          requestSynced: true,
+          request: {
+            host: "github",
+            url: "https://github.com/acme/spec-to-pr/pull/123",
+            number: "123",
+            draft: true,
+            sourceBranch: "codex/blocked-diagnostic",
+            targetBranch: "main",
+            created: true,
+            updated: false,
+          },
+          visualPreviewExpected: false,
+          visualPreviewSynced: false,
+          fallbackMode: "none",
+          partialReasons: [],
+          publishedAssets: [],
+          retryable: false,
+          publishedAt: new Date().toISOString(),
+        },
+        publishResultArtifactId: reportArtifactId,
+      };
+    });
+    service = new WorkflowService({
+      ...dependencies,
+      publisherService: { publish } as unknown as PublisherService,
+    });
+    const input = {
+      runId,
+      intent: "blocked-diagnostic" as const,
+      mode: "execute" as const,
+      sourceBranch: "codex/blocked-diagnostic",
+      confirm: true,
+    };
+
+    const first = service.publish(input);
+    const second = service.publish(input);
+    await vi.waitFor(() => expect(publish).toHaveBeenCalled());
+    releasePublish();
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(secondResult).toEqual(firstResult);
+    expect(
+      (await store.get(runId)).artifacts.filter(
+        (artifact) => artifact.metadata["reportIntent"] === "blocked-diagnostic",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("single-flights blocked diagnostics across WorkflowService instances sharing a RunStore", async () => {
+    const { runId } = await prepareBlockedWorkflow(service, directory);
+    let releasePublish!: () => void;
+    const publishGate = new Promise<void>((resolve) => {
+      releasePublish = resolve;
+    });
+    const publish = vi.fn().mockImplementation(async () => {
+      await publishGate;
+      return { sent: true };
+    });
+    const claimDependencies = {
+      ...dependencies,
+      publisherService: { publish } as unknown as PublisherService,
+      externalLeaseTtlMs: 120,
+      externalHeartbeatMs: 20,
+    };
+    const firstService = new WorkflowService(claimDependencies);
+    const secondService = new WorkflowService(claimDependencies);
+    const input = {
+      runId,
+      intent: "blocked-diagnostic" as const,
+      mode: "execute" as const,
+      sourceBranch: "codex/blocked-diagnostic",
+      confirm: true,
+    };
+    const stagesBefore = (await store.get(runId)).stages;
+
+    const first = firstService.publish(input);
+    await vi.waitFor(() => expect(publish).toHaveBeenCalledTimes(1));
+    await new Promise((resolve) => setTimeout(resolve, 180));
+    const second = (await secondService.publish(input)) as Record<string, unknown>;
+
+    expect(second).toMatchObject({
+      intent: "blocked-diagnostic",
+      skipped: true,
+      reason: "diagnostic-publication-in-progress",
+      retryable: true,
+      status: { status: "blocked" },
+    });
+    expect(publish).toHaveBeenCalledTimes(1);
+    releasePublish();
+    await expect(first).resolves.toMatchObject({ result: { sent: true } });
+    expect((await store.get(runId)).stages).toEqual(stagesBefore);
+  });
+
+  it("requires explicit recovery for a stale blocked-diagnostic publication claim", async () => {
+    const { runId } = await prepareBlockedWorkflow(service, directory);
+    const report = await service.ensureBlockedDiagnosticReport({ runId });
+    const run = await store.get(runId);
+    const staleTimestamp = run.updatedAt;
+    const currentTimestamp = new Date(Date.parse(staleTimestamp) + 60_000).toISOString();
+    const executionKey = createHash("sha256")
+      .update(
+        JSON.stringify({
+          runId,
+          reportKey: "contracts:0:MISSING_INPUT",
+          sourceBranch: "codex/blocked-diagnostic",
+          targetBranch: "main",
+        }),
+      )
+      .digest("hex");
+    const ownerClaimId = createArtifactId();
+    const blob = await artifactStore.writeBlob({
+      content: Buffer.from(
+        `${JSON.stringify({ event: "claim", executionKey, ownerClaimId, expiresAt: staleTimestamp })}\n`,
+        "utf8",
+      ),
+      mediaType: "application/json",
+      storedAt: staleTimestamp,
+      label: "diagnostic-publish-claim.json",
+    });
+    await store.save(
+      {
+        ...run,
+        revision: run.revision + 1,
+        updatedAt: currentTimestamp,
+        artifacts: [
+          ...run.artifacts,
+          ArtifactRefSchema.parse({
+            id: ownerClaimId,
+            kind: "agent-result-report",
+            uri: blob.uri,
+            mediaType: "application/json",
+            digest: blob.digest,
+            producedBy: "orchestrator",
+            evidenceIds: [],
+            createdAt: staleTimestamp,
+            metadata: {
+              adapter: "workflow-v2",
+              reportKind: "diagnostic-publish-claim",
+              diagnosticExecutionKey: executionKey,
+              claimState: "active",
+              ownerClaimId,
+              expiresAt: staleTimestamp,
+            },
+          }),
+        ],
+      },
+      run.revision,
+    );
+    const publish = vi.fn().mockResolvedValue({ sent: true });
+    const recoveryService = new WorkflowService({
+      ...dependencies,
+      publisherService: { publish } as unknown as PublisherService,
+      now: () => currentTimestamp,
+    });
+
+    const uncertain = recoveryService.publish({
+      runId,
+      intent: "blocked-diagnostic" as const,
+      mode: "execute" as const,
+      sourceBranch: "codex/blocked-diagnostic",
+      remoteName: "upstream",
+      pushBranch: false,
+      confirm: true,
+    });
+
+    await expect(uncertain).resolves.toMatchObject({
+      intent: "blocked-diagnostic",
+      skipped: true,
+      reason: "diagnostic-publication-uncertain",
+      retryable: false,
+      exactRecoveryInstruction: expect.stringContaining("recoverUncertain=true"),
+    });
+    expect(publish).not.toHaveBeenCalled();
+
+    await expect(
+      recoveryService.publish({
+        runId,
+        intent: "blocked-diagnostic" as const,
+        mode: "execute" as const,
+        sourceBranch: "codex/blocked-diagnostic",
+        remoteName: "upstream",
+        pushBranch: false,
+        confirm: true,
+        recoverUncertain: true,
+      }),
+    ).resolves.toMatchObject({ result: { sent: true } });
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(report.metadata["idempotencyKey"]).toBe("contracts:0:MISSING_INPUT");
+  });
+
+  it("aborts and fences a live diagnostic owner after heartbeat persistence fails", async () => {
+    const { runId } = await prepareBlockedWorkflow(service, directory);
+    let initialClaimWritten = false;
+    const heartbeatFailingStore: RunStore = {
+      create: (run) => store.create(run),
+      get: (id) => store.get(id),
+      list: (filter) => store.list(filter),
+      close: async () => {},
+      save: async (run, expectedRevision) => {
+        const current = await store.get(run.id);
+        const newActiveClaim = run.artifacts
+          .slice(current.artifacts.length)
+          .some(
+            (artifact) =>
+              artifact.metadata["reportKind"] === "diagnostic-publish-claim" &&
+              artifact.metadata["claimState"] === "active",
+          );
+        if (newActiveClaim && initialClaimWritten) {
+          throw new Error("simulated diagnostic heartbeat persistence failure");
+        }
+        await store.save(run, expectedRevision);
+        if (newActiveClaim) initialClaimWritten = true;
+      },
+    };
+    let providerSignal: AbortSignal | undefined;
+    const publish = vi
+      .fn()
+      .mockImplementationOnce(
+        async (_input: unknown, options?: { signal?: AbortSignal }): Promise<unknown> => {
+          providerSignal = options?.signal;
+          if (providerSignal === undefined) return { missingSignal: true };
+          return new Promise(() => undefined);
+        },
+      )
+      .mockResolvedValueOnce({ sent: true });
+    const firstService = new WorkflowService({
+      ...dependencies,
+      runStore: heartbeatFailingStore,
+      publisherService: { publish } as unknown as PublisherService,
+      externalLeaseTtlMs: 80,
+      externalHeartbeatMs: 20,
+    });
+    const secondService = new WorkflowService({
+      ...dependencies,
+      publisherService: { publish } as unknown as PublisherService,
+      externalLeaseTtlMs: 80,
+      externalHeartbeatMs: 20,
+    });
+    const input = {
+      runId,
+      intent: "blocked-diagnostic" as const,
+      mode: "execute" as const,
+      sourceBranch: "codex/blocked-diagnostic",
+      confirm: true,
+    };
+
+    await expect(firstService.publish(input)).resolves.toMatchObject({
+      skipped: true,
+      reason: "diagnostic-publication-uncertain",
+      retryable: false,
+    });
+    expect(providerSignal?.aborted).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 120));
+
+    const aliasRetry = { ...input, remoteName: "upstream", pushBranch: false };
+    await expect(secondService.publish(aliasRetry)).resolves.toMatchObject({
+      skipped: true,
+      reason: "diagnostic-publication-uncertain",
+    });
+    expect(publish).toHaveBeenCalledTimes(1);
+
+    await expect(
+      secondService.publish({ ...aliasRetry, recoverUncertain: true }),
+    ).resolves.toMatchObject({ result: { sent: true } });
+    expect(publish).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not share concurrent diagnostic results across different publication identities", async () => {
+    const { runId } = await prepareBlockedWorkflow(service, directory);
+    let releasePublish!: () => void;
+    const publishGate = new Promise<void>((resolve) => {
+      releasePublish = resolve;
+    });
+    const publish = vi.fn().mockImplementation(async (input: { sourceBranch: string }) => {
+      await publishGate;
+      const reportArtifactId = (await store.get(runId)).artifacts.find(
+        (artifact) => artifact.metadata["reportIntent"] === "blocked-diagnostic",
+      )!.id;
+      return {
+        result: {
+          runId,
+          status: "blocked",
+          requestSynced: true,
+          request: {
+            host: "github",
+            url: `https://github.com/acme/spec-to-pr/pull/${input.sourceBranch.endsWith("one") ? "1" : "2"}`,
+            number: input.sourceBranch.endsWith("one") ? "1" : "2",
+            draft: true,
+            sourceBranch: input.sourceBranch,
+            targetBranch: "main",
+            created: true,
+            updated: false,
+          },
+          visualPreviewExpected: false,
+          visualPreviewSynced: false,
+          fallbackMode: "none",
+          partialReasons: [],
+          publishedAssets: [],
+          retryable: false,
+          publishedAt: new Date().toISOString(),
+        },
+        publishResultArtifactId: reportArtifactId,
+      };
+    });
+    service = new WorkflowService({
+      ...dependencies,
+      publisherService: { publish } as unknown as PublisherService,
+    });
+    const baseInput = {
+      runId,
+      intent: "blocked-diagnostic" as const,
+      mode: "execute" as const,
+      targetBranch: "main",
+      remoteName: "origin",
+      pushBranch: false,
+      confirm: true,
+    };
+
+    const first = service.publish({ ...baseInput, sourceBranch: "codex/one" });
+    const second = service.publish({
+      ...baseInput,
+      sourceBranch: "codex/two",
+      remoteName: "upstream",
+      pushBranch: true,
+    });
+    await vi.waitFor(() => expect(publish).toHaveBeenCalled());
+    releasePublish();
+    const [firstResult, secondResult] = (await Promise.all([first, second])) as [
+      { result: { result: { request: { sourceBranch: string } } } },
+      { result: { result: { request: { sourceBranch: string } } } },
+    ];
+
+    expect(publish).toHaveBeenCalledTimes(2);
+    expect(firstResult.result.result.request.sourceBranch).toBe("codex/one");
+    expect(secondResult.result.result.request.sourceBranch).toBe("codex/two");
+  });
+
+  it.each([
+    { name: "failed", partial: false },
+    { name: "partially synchronized", partial: true },
+  ])("retries a $name blocked diagnostic result", async ({ partial }) => {
+    const { runId } = await prepareBlockedWorkflow(service, directory);
+    const report = await service.ensureBlockedDiagnosticReport({ runId });
+    const request = {
+      host: "github" as const,
+      url: "https://github.com/acme/spec-to-pr/pull/123",
+      number: "123",
+      draft: true,
+      sourceBranch: "codex/blocked-diagnostic",
+      targetBranch: "main",
+      created: true,
+      updated: false,
+    };
+    const unsynchronizedResult = {
+      runId,
+      status: partial ? ("blocked" as const) : ("failed" as const),
+      reportArtifactId: report.id,
+      ...(partial ? { request } : {}),
+      requestSynced: partial,
+      visualPreviewExpected: partial,
+      visualPreviewSynced: false,
+      featureVideoExpected: false,
+      featureVideoSynced: false,
+      fallbackMode: "none" as const,
+      partialReasons: [partial ? "visual preview is not synchronized" : "publisher failed"],
+      errorCode: partial ? "PUBLISH_PARTIAL_SYNC" : "PUBLISH_FAILED",
+      errorMessage: partial ? "visual preview is not synchronized" : "publisher failed",
+      publishedAssets: [],
+      retryable: true,
+      publishedAt: new Date().toISOString(),
+    };
+    const evidenceId = await appendPublishResultArtifact(
+      store,
+      artifactStore,
+      runId,
+      unsynchronizedResult,
+    );
+    const publish = vi.fn().mockResolvedValue({
+      result: unsynchronizedResult,
+      publishResultArtifactId: evidenceId,
+    });
+    service = new WorkflowService({
+      ...dependencies,
+      publisherService: { publish } as unknown as PublisherService,
+    });
+    const input = {
+      runId,
+      intent: "blocked-diagnostic" as const,
+      mode: "execute" as const,
+      sourceBranch: "codex/blocked-diagnostic",
+      confirm: true,
+    };
+
+    await service.publish(input);
+    await service.publish(input);
+
+    expect(publish).toHaveBeenCalledTimes(2);
+    expect(
+      (await store.get(runId)).artifacts.filter(
+        (artifact) => artifact.metadata["reportIntent"] === "blocked-diagnostic",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("publishes a blocked diagnostic as evidence without advancing report or publish", async () => {
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Prepare contracts that need an approval",
+      scope: "non-ui",
+      publication: "draft",
+    });
+    const blocked = await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "contracts",
+        status: "blocked",
+        summary: "Approval is missing.",
+        blocker: {
+          stage: "contracts",
+          code: "MISSING_APPROVAL",
+          kind: "missing-input",
+          summary: "Approval is missing.",
+          retryable: false,
+          resumable: true,
+          completedWork: [],
+          evidencePaths: [],
+          attemptedRecovery: [],
+          unrunValidations: ["functional"],
+          exactUnblockAction: "Provide approval.",
+        },
+      },
+    });
+    const stagesBefore = (await store.get(started.runId)).stages;
+    const previousGithubToken = process.env["GITHUB_TOKEN"];
+    process.env["GITHUB_TOKEN"] = "ghp_test_token";
+    let releaseCreate!: () => void;
+    const createGate = new Promise<void>((resolve) => {
+      releaseCreate = resolve;
+    });
+    const reviewPublisher = new WorkflowFakePublisher(createGate);
+    const publisherGitHead = (
+      await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: directory })
+    ).stdout.trim();
+    const publisherService = new PublisherService(
+      store,
+      artifactStore,
+      () => new Date(Date.now() + 60_000).toISOString(),
+      { github: reviewPublisher, gitlab: reviewPublisher },
+      async (_cwd, args) => {
+        if (args[0] === "status") return { stdout: "", stderr: "" };
+        if (args[0] === "rev-list") return { stdout: "1\n", stderr: "" };
+        if (args[0] === "symbolic-ref") {
+          return { stdout: "codex/blocked-diagnostic\n", stderr: "" };
+        }
+        if (args[0] === "rev-parse") return { stdout: `${publisherGitHead}\n`, stderr: "" };
+        return { stdout: "https://github.com/acme/spec-to-pr.git\n", stderr: "" };
+      },
+    );
+    service = new WorkflowService({ ...dependencies, publisherService });
+
+    try {
+      const publication = service.publish({
+        runId: started.runId,
+        intent: "blocked-diagnostic",
+        mode: "execute",
+        sourceBranch: "codex/blocked-diagnostic",
+        pushBranch: false,
+        confirm: true,
+      });
+      await vi.waitFor(() => expect(reviewPublisher.createdPayloads).toHaveLength(1));
+      const competingService = new WorkflowService({ ...dependencies, publisherService });
+      await expect(
+        competingService.publish({
+          runId: started.runId,
+          intent: "blocked-diagnostic",
+          mode: "execute",
+          sourceBranch: "codex/blocked-diagnostic",
+          pushBranch: false,
+          confirm: true,
+        }),
+      ).resolves.toMatchObject({
+        skipped: true,
+        reason: "diagnostic-publication-in-progress",
+      });
+      releaseCreate();
+      const response = (await publication) as {
+        result: Awaited<ReturnType<PublisherService["publish"]>>;
+        status: Awaited<ReturnType<WorkflowService["status"]>>;
+      };
+
+      expect(response.status).toMatchObject({
+        status: "blocked",
+        blockerDetails: blocked.blockerDetails,
+        diagnosticPublication: {
+          host: "github",
+          url: "https://github.com/acme/spec-to-pr/pull/123",
+          number: "123",
+          created: true,
+          updated: false,
+          publishResultArtifactId: expect.stringMatching(/^art_/),
+        },
+      });
+      expect((await service.status({ runId: started.runId })).diagnosticPublication).toEqual(
+        response.status.diagnosticPublication,
+      );
+      const persisted = await store.get(started.runId);
+      expect(persisted.stages).toEqual(stagesBefore);
+      expect(
+        persisted.artifacts.some(
+          (artifact) => artifact.metadata["reportIntent"] === "blocked-diagnostic",
+        ),
+      ).toBe(true);
+      expect(
+        persisted.artifacts.filter(
+          (artifact) => artifact.metadata["reportKind"] === "publish-result",
+        ),
+      ).toHaveLength(1);
+      const diagnosticReport = persisted.artifacts.find(
+        (artifact) => artifact.metadata["reportIntent"] === "blocked-diagnostic",
+      )!;
+      const reusedReport = await service.ensureBlockedDiagnosticReport({ runId: started.runId });
+      const afterReportReuse = await store.get(started.runId);
+      expect(reusedReport.id).toBe(diagnosticReport.id);
+      expect(afterReportReuse.revision).toBe(persisted.revision);
+      expect(
+        afterReportReuse.artifacts.filter(
+          (artifact) => artifact.metadata["reportIntent"] === "blocked-diagnostic",
+        ),
+      ).toHaveLength(1);
+      const beforePublishReuse = await store.get(started.runId);
+      const reusedPublish = (await service.publish({
+        runId: started.runId,
+        intent: "blocked-diagnostic",
+        mode: "execute",
+        sourceBranch: "codex/blocked-diagnostic",
+        pushBranch: false,
+        confirm: true,
+      })) as {
+        result: Awaited<ReturnType<PublisherService["publish"]>>;
+        status: Awaited<ReturnType<WorkflowService["status"]>>;
+      };
+      expect(reusedPublish.result.publishResultArtifactId).toBe(
+        response.result.publishResultArtifactId,
+      );
+      expect(reusedPublish.status).toEqual(response.status);
+      expect(await store.get(started.runId)).toEqual(beforePublishReuse);
+      expect(reviewPublisher.createdPayloads).toHaveLength(1);
+      expect(reviewPublisher.updatedMetadata).toHaveLength(0);
+      const publishDistinctIdentity = vi.fn().mockResolvedValue(response.result);
+      const distinctIdentityService = new WorkflowService({
+        ...dependencies,
+        publisherService: {
+          publish: publishDistinctIdentity,
+        } as unknown as PublisherService,
+      });
+      const baseDistinctInput = {
+        runId: started.runId,
+        intent: "blocked-diagnostic" as const,
+        mode: "execute" as const,
+        sourceBranch: "codex/blocked-diagnostic",
+        targetBranch: "main",
+        remoteName: "origin",
+        pushBranch: false,
+        confirm: true,
+      };
+      await distinctIdentityService.publish({
+        ...baseDistinctInput,
+        sourceBranch: "codex/different-source",
+      });
+      await distinctIdentityService.publish({
+        ...baseDistinctInput,
+        targetBranch: "develop",
+      });
+      await distinctIdentityService.publish({
+        ...baseDistinctInput,
+        remoteName: "upstream",
+      });
+      await distinctIdentityService.publish({
+        ...baseDistinctInput,
+        pushBranch: true,
+      });
+      expect(publishDistinctIdentity).toHaveBeenCalledTimes(4);
+      expect(reviewPublisher.createdPayloads[0]).toMatchObject({
+        title: `[Blocked] SpecToPR Run ${started.runId}`,
+        labels: ["spec-to-pr", "spec-to-pr:blocked"],
+      });
+
+      await service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "contracts",
+          status: "passed",
+          summary: "Approval supplied and requirements normalized.",
+          artifactPaths: ["contracts/requirements.json"],
+          requirementManifest: requirements("parser"),
+        },
+      });
+      await changeSource(directory, "src/parser.ts", "export const parser = 'recovered';\n");
+      const implemented = await service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "implementation",
+          status: "passed",
+          summary: "Parser recovered.",
+          apiReady: false,
+          uiChanged: false,
+          changedFiles: ["src/parser.ts"],
+          artifactPaths: ["test-results/unit.json"],
+        },
+      });
+      await service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "functional-review",
+          reviewPacketId: reviewPacketId(implemented, "review-functional"),
+          verdict: "approved",
+          summary: "Recovered implementation passed.",
+          findings: [],
+          requirements: [{ id: "parser", verdict: "accepted" }],
+          artifactPaths: ["test-results/unit.json"],
+          gateResults: [
+            {
+              id: "functional",
+              status: "passed",
+              evidencePaths: ["test-results/unit.json"],
+            },
+          ],
+        },
+      });
+      const ready = await service.advance({ runId: started.runId, until: "publish-ready" });
+
+      expect(ready.status).toBe("publish-ready");
+      expect(ready.diagnosticPublication).toBeUndefined();
+
+      const readyReport = (await store.get(started.runId)).artifacts.find(
+        (artifact) => artifact.metadata["reportIntent"] === "ready",
+      )!;
+      const newBlockerService = new WorkflowService({
+        ...dependencies,
+        publisherService: {
+          publish: vi.fn().mockResolvedValue({
+            result: {
+              runId: started.runId,
+              status: "blocked",
+              requestSynced: false,
+              visualPreviewExpected: false,
+              visualPreviewSynced: false,
+              fallbackMode: "none",
+              partialReasons: ["publication precondition is unmet"],
+              errorCode: "PUBLISH_PRECONDITION",
+              errorMessage: "publication precondition is unmet",
+              publishedAssets: [],
+              retryable: false,
+              publishedAt: new Date().toISOString(),
+            },
+            publishResultArtifactId: readyReport.id,
+          }),
+        } as unknown as PublisherService,
+      });
+      const newlyBlocked = (await newBlockerService.publish({
+        runId: started.runId,
+        mode: "execute",
+        sourceBranch: "codex/blocked-diagnostic",
+        pushBranch: false,
+        confirm: true,
+      })) as { status: Awaited<ReturnType<WorkflowService["status"]>> };
+      expect(newlyBlocked.status).toMatchObject({
+        status: "blocked",
+        blockerDetails: [{ kind: "publish-precondition", stage: "publish" }],
+      });
+      expect(newlyBlocked.status.diagnosticPublication).toBeUndefined();
+
+      const recovered = (await service.publish({
+        runId: started.runId,
+        mode: "execute",
+        sourceBranch: "codex/blocked-diagnostic",
+        pushBranch: false,
+        confirm: true,
+      })) as { status: Awaited<ReturnType<WorkflowService["status"]>> };
+      expect(recovered.status.status).toBe("completed");
+      expect(recovered.status.diagnosticPublication).toBeUndefined();
+      expect(reviewPublisher.updatedMetadata).toHaveLength(1);
+    } finally {
+      if (previousGithubToken === undefined) delete process.env["GITHUB_TOKEN"];
+      else process.env["GITHUB_TOKEN"] = previousGithubToken;
+    }
+  });
+
+  it("does not recurse into diagnostic publication for a publish-precondition blocker", async () => {
+    const runId = await preparePublishReadyWorkflow(service, directory);
+    const readyReport = (await store.get(runId)).artifacts.find(
+      (artifact) => artifact.metadata["reportIntent"] === "ready",
+    )!;
+    service = new WorkflowService({
+      ...dependencies,
+      publisherService: {
+        publish: vi.fn().mockResolvedValue({
+          result: {
+            runId,
+            status: "blocked",
+            requestSynced: false,
+            visualPreviewExpected: false,
+            visualPreviewSynced: false,
+            fallbackMode: "none",
+            partialReasons: ["publication precondition is unmet"],
+            errorCode: "PUBLISH_PRECONDITION",
+            errorMessage: "publication precondition is unmet",
+            publishedAssets: [],
+            retryable: false,
+            publishedAt: new Date().toISOString(),
+          },
+          publishResultArtifactId: readyReport.id,
+        }),
+      } as unknown as PublisherService,
+    });
+    const failed = (await service.publish(publishInput(runId))) as {
+      status: Awaited<ReturnType<WorkflowService["status"]>>;
+    };
+    const stagesBeforeDiagnostic = (await store.get(runId)).stages;
+    const exactUnblockAction = failed.status.blockerDetails[0]!.exactUnblockAction;
+    const plan = vi.fn();
+    const publish = vi.fn();
+    service = new WorkflowService({
+      ...dependencies,
+      publisherService: { plan, publish } as unknown as PublisherService,
+    });
+    const beforePreview = await store.get(runId);
+
+    await expect(
+      service.publish({
+        runId,
+        intent: "blocked-diagnostic",
+        mode: "preview",
+        sourceBranch: "codex/blocked-diagnostic",
+      }),
+    ).resolves.toMatchObject({
+      willEnsureReport: true,
+      eligibleForPublication: false,
+      preflightPending: false,
+      skipped: true,
+      blocker: { kind: "publish-precondition", exactUnblockAction },
+    });
+    expect(await store.get(runId)).toEqual(beforePreview);
+
+    const response = (await service.publish({
+      runId,
+      intent: "blocked-diagnostic",
+      mode: "execute",
+      sourceBranch: "codex/blocked-diagnostic",
+      confirm: true,
+    })) as {
+      skipped: boolean;
+      reason: string;
+      localReportPath: string;
+      exactUnblockAction: string;
+      status: Awaited<ReturnType<WorkflowService["status"]>>;
+    };
+
+    expect(response).toMatchObject({
+      skipped: true,
+      reason: "publish-precondition",
+      localReportPath: expect.stringMatching(/^artifact:\/\/sha256\//),
+      exactUnblockAction,
+      status: { status: "blocked" },
+    });
+    expect(response.status.diagnosticPublication).toBeUndefined();
+    expect(plan).not.toHaveBeenCalled();
+    expect(publish).not.toHaveBeenCalled();
+    const persisted = await store.get(runId);
+    expect(persisted.stages).toEqual(stagesBeforeDiagnostic);
+    expect(
+      persisted.artifacts.some(
+        (artifact) => artifact.metadata["reportIntent"] === "blocked-diagnostic",
+      ),
+    ).toBe(true);
+  });
+
+  it("retries ready publication with the passed report after a precondition diagnostic", async () => {
+    const runId = await preparePublishReadyWorkflow(service, directory);
+    const readyReport = (await store.get(runId)).artifacts.find(
+      (artifact) => artifact.metadata["reportIntent"] === "ready",
+    )!;
+    service = new WorkflowService({
+      ...dependencies,
+      publisherService: {
+        publish: vi.fn().mockResolvedValue({
+          result: {
+            runId,
+            status: "blocked",
+            requestSynced: false,
+            visualPreviewExpected: false,
+            visualPreviewSynced: false,
+            fallbackMode: "none",
+            partialReasons: ["publication precondition is unmet"],
+            errorCode: "PUBLISH_PRECONDITION",
+            errorMessage: "publication precondition is unmet",
+            publishedAssets: [],
+            retryable: false,
+            publishedAt: new Date().toISOString(),
+          },
+          publishResultArtifactId: readyReport.id,
+        }),
+      } as unknown as PublisherService,
+    });
+    await service.publish(publishInput(runId));
+    await service.publish({
+      runId,
+      intent: "blocked-diagnostic",
+      mode: "execute",
+      sourceBranch: "codex/fast-workflow-v2",
+      confirm: true,
+    });
+
+    const publish = vi.fn().mockResolvedValue({
+      result: {
+        runId,
+        status: "passed",
+        requestSynced: true,
+        request: {
+          host: "github",
+          url: "https://github.com/acme/spec-to-pr/pull/123",
+          number: "123",
+          draft: true,
+          sourceBranch: "codex/fast-workflow-v2",
+          targetBranch: "main",
+          created: false,
+          updated: true,
+        },
+        visualPreviewExpected: false,
+        visualPreviewSynced: false,
+        fallbackMode: "none",
+        partialReasons: [],
+        publishedAssets: [],
+        retryable: false,
+        publishedAt: new Date().toISOString(),
+      },
+      publishResultArtifactId: readyReport.id,
+    });
+    service = new WorkflowService({
+      ...dependencies,
+      publisherService: { publish } as unknown as PublisherService,
+    });
+
+    const retried = (await service.publish(publishInput(runId))) as {
+      status: Awaited<ReturnType<WorkflowService["status"]>>;
+    };
+
+    expect(publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        intent: "ready",
+        reportArtifactId: readyReport.id,
+        confirm: true,
+      }),
+    );
+    expect(retried.status.status).toBe("completed");
+  });
+
   it("starts compactly and stops at the contracts boundary", async () => {
     const inspectProject = vi.fn();
     service = new WorkflowService(
@@ -143,6 +1273,13 @@ describe("WorkflowService", () => {
       budget: { checkpointPercent: 80 },
     });
     expect(status.workload.tokenRange.max).toBeGreaterThan(status.workload.tokenRange.min);
+    expect(status.delegationPolicy).toMatchObject({
+      singleWriter: true,
+      allowNested: false,
+      maxReadOnlyScouts: expect.any(Number),
+      parallelReviewers: expect.any(Boolean),
+    });
+    expect(status.blockerDetails).toEqual([]);
     expect(status.requiredValidations).toEqual(["functional", "draft-publication-preflight"]);
     expect(status.resumeContext).toMatchObject({
       goal: "Refactor the parser and add unit tests",
@@ -154,6 +1291,815 @@ describe("WorkflowService", () => {
     expect(status).not.toHaveProperty("evidence");
     expect(status).not.toHaveProperty("agentResults");
     expect(inspectProject).not.toHaveBeenCalled();
+  });
+
+  it("maps typed and legacy submission failures into safe blocker details", async () => {
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Prepare contracts that require an external approval",
+      scope: "non-ui",
+      publication: "none",
+    });
+    const blocker = {
+      stage: "contracts",
+      code: "MISSING_APPROVAL",
+      kind: "missing-input",
+      summary: "A required approval is missing.",
+      retryable: false,
+      resumable: true,
+      completedWork: ["The request was classified."],
+      evidencePaths: [],
+      attemptedRecovery: ["Checked the supplied contract sources."],
+      unrunValidations: ["functional"],
+      exactUnblockAction: "Provide the approval and resubmit the contracts stage.",
+    } as const;
+
+    const blocked = await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "contracts",
+        status: "blocked",
+        summary: "Waiting for approval.",
+        blocker,
+      },
+    });
+    expect(blocked.status).toBe("blocked");
+    expect(blocked.blockerDetails).toEqual([
+      {
+        stage: "contracts",
+        code: "MISSING_INPUT",
+        kind: "missing-input",
+        summary: "The contracts stage stopped because required input is missing.",
+        retryable: false,
+        resumable: true,
+        completedWork: ["intake stage passed."],
+        evidencePaths: [],
+        attemptedRecovery: [],
+        unrunValidations: ["functional"],
+        exactUnblockAction: "Provide the missing input and resume contracts.",
+      },
+    ]);
+    expect(blocked.blockers).toEqual([blocked.blockerDetails[0]!.summary]);
+
+    const legacy = await service.start({
+      projectRoot: directory,
+      requestText: "A raw prompt marker that must never appear in blocker status",
+      scope: "non-ui",
+      publication: "none",
+    });
+    const unsafeLegacySummary =
+      "RAW_TRANSCRIPT sk-secret-token /Users/private/project requested prompt text";
+    const legacyBlocked = await service.submit({
+      runId: legacy.runId,
+      submission: {
+        kind: "contracts",
+        status: "blocked",
+        summary: unsafeLegacySummary,
+      },
+    });
+    expect(legacyBlocked.blockerDetails).toHaveLength(1);
+    expect(legacyBlocked.blockerDetails[0]).toMatchObject({
+      stage: "contracts",
+      code: "WORKFLOW_BLOCKED",
+      kind: "unexpected",
+      retryable: false,
+    });
+    expect(legacyBlocked.blockers).toEqual([legacyBlocked.blockerDetails[0]!.summary]);
+    expect(JSON.stringify(legacyBlocked.blockerDetails)).not.toContain("RAW_TRANSCRIPT");
+    expect(JSON.stringify(legacyBlocked.blockerDetails)).not.toContain("sk-secret-token");
+    expect(JSON.stringify(legacyBlocked.blockerDetails)).not.toContain("/Users/private");
+
+    const unsafeTyped = await service.start({
+      projectRoot: directory,
+      requestText: "Prepare another contract",
+      scope: "non-ui",
+      publication: "none",
+    });
+    const unsafeTypedStatus = await service.submit({
+      runId: unsafeTyped.runId,
+      submission: {
+        kind: "contracts",
+        status: "blocked",
+        summary: "Sanitize the typed blocker.",
+        artifactPaths: ["test-results/unit.json"],
+        blocker: {
+          ...blocker,
+          code: "AWS_SECRET_ACCESS_KEY_IDENTIFIER_SHAPED_SECRET",
+          summary: "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.payload.signature",
+          completedWork: ["Read /root/.ssh/id_rsa"],
+          attemptedRecovery: [String.raw`Connected to \\server\private\share`],
+          unrunValidations: ["AKIAIOSFODNN7EXAMPLE"],
+          exactUnblockAction: String.raw`Open C:\Users\private\.ssh\id_rsa`,
+          evidencePaths: ["test-results/unit.json"],
+        },
+      },
+    });
+    const serializedTypedBlocker = JSON.stringify(unsafeTypedStatus.blockerDetails);
+    const unsafeTypedRun = await store.get(unsafeTyped.runId);
+    const submissionArtifact = [...unsafeTypedRun.artifacts]
+      .reverse()
+      .find((item) => item.metadata["workflowSubmissionKind"] === "contracts")!;
+    const persistedContent = (await artifactStore.readContent(submissionArtifact.digest)).toString(
+      "utf8",
+    );
+    const durableOutput = `${serializedTypedBlocker}\n${persistedContent}\n${JSON.stringify(submissionArtifact.metadata)}`;
+    for (const sensitiveValue of [
+      "Authorization",
+      "eyJhbGciOiJIUzI1NiJ9",
+      "/root/.ssh",
+      String.raw`\\server\private\share`,
+      String.raw`C:\Users\private`,
+      "AKIAIOSFODNN7EXAMPLE",
+      "AWS_SECRET_ACCESS_KEY_IDENTIFIER_SHAPED_SECRET",
+    ]) {
+      expect(durableOutput).not.toContain(sensitiveValue);
+    }
+    expect(JSON.parse(persistedContent)).toMatchObject({
+      summary: "The contracts stage stopped because required input is missing.",
+      blocker: {
+        stage: "contracts",
+        code: "MISSING_INPUT",
+        kind: "missing-input",
+        completedWork: ["intake stage passed."],
+        evidencePaths: ["test-results/unit.json"],
+        attemptedRecovery: [],
+        unrunValidations: ["functional"],
+        exactUnblockAction: "Provide the missing input and resume contracts.",
+      },
+    });
+    expect(submissionArtifact.metadata).toMatchObject({
+      summary: "The contracts stage stopped because required input is missing.",
+      workflowStageAttempt: 0,
+    });
+  });
+
+  it("filters secret-shaped artifact paths from resume and derived blocker status", async () => {
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Prepare contracts without exposing credential values",
+      scope: "non-ui",
+      publication: "none",
+    });
+    const run = await store.get(started.runId);
+    const template = run.artifacts[0]!;
+    const safePath = "test-results/token-validation.json";
+    const secretPath = "test-results/access_token=ghp_1234567890abcdef.json";
+    await store.save(
+      {
+        ...run,
+        revision: run.revision + 1,
+        updatedAt: new Date(Date.parse(run.updatedAt) + 1_000).toISOString(),
+        artifacts: [
+          ...run.artifacts,
+          ArtifactRefSchema.parse({
+            ...template,
+            id: createArtifactId(),
+            metadata: { projectRelativePath: safePath },
+          }),
+          ArtifactRefSchema.parse({
+            ...template,
+            id: createArtifactId(),
+            metadata: { projectRelativePath: secretPath },
+          }),
+        ],
+      },
+      run.revision,
+    );
+    const startedStage = await dependencies.stageService.start({
+      runId: started.runId,
+      stageName: "contracts",
+      workerId: "durable-test-worker",
+    });
+    await dependencies.stageService.fail({
+      runId: started.runId,
+      stageName: "contracts",
+      workerId: "durable-test-worker",
+      leaseId: startedStage.stage.lease!.id,
+      error: {
+        code: "UNEXPECTED_RUNTIME_ERROR",
+        message: "A private dependency failed.",
+        retryable: false,
+      },
+    });
+
+    const status = await service.status({ runId: started.runId });
+    expect(status.resumeContext.evidencePaths).toContain(safePath);
+    expect(status.blockerDetails[0]?.evidencePaths).toContain(safePath);
+    expect(JSON.stringify(status)).not.toContain(secretPath);
+  });
+
+  it("rejects secret-shaped typed blocker evidence before durable persistence", async () => {
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Prepare contracts without persisting a token value",
+      scope: "non-ui",
+      publication: "none",
+    });
+    const before = await store.get(started.runId);
+    for (const secretPath of [
+      "proof/GITHUB_TOKEN=ghp_1234567890abcdef.txt",
+      "proof/x-GITHUB_TOKEN=ghp_1234567890abcdef.txt",
+      "proof/(GITHUB_TOKEN=ghp_1234567890abcdef).txt",
+      "proof/GITHUB_TOKEN%2525253Dghp_1234567890abcdef.txt",
+    ]) {
+      await expect(
+        service.submit({
+          runId: started.runId,
+          submission: {
+            kind: "contracts",
+            status: "blocked",
+            summary: "Approval is missing.",
+            blocker: {
+              stage: "contracts",
+              code: "MISSING_APPROVAL",
+              kind: "missing-input",
+              summary: "Approval is missing.",
+              retryable: false,
+              resumable: true,
+              completedWork: [],
+              evidencePaths: [secretPath],
+              attemptedRecovery: [],
+              unrunValidations: ["functional"],
+              exactUnblockAction: "Provide approval.",
+            },
+          },
+        }),
+      ).rejects.toThrow(/safe project-relative paths/);
+      const after = await store.get(started.runId);
+      expect(after).toEqual(before);
+      expect(JSON.stringify(after)).not.toContain(secretPath);
+    }
+  });
+
+  it.each([
+    "proof/GITHUB_TOKEN-abcdef1234567890.txt",
+    "proof/password-supersecretvalue.txt",
+    "proof/token-abcdef1234567890.txt",
+  ])("rejects unsafe ingested evidence path %s before writing any blob", async (secretPath) => {
+    const absolutePath = path.join(directory, secretPath);
+    await mkdir(path.dirname(absolutePath), { recursive: true });
+    await writeFile(absolutePath, "non-empty evidence\n", "utf8");
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Prepare contracts with bounded durable evidence names",
+      scope: "non-ui",
+      publication: "none",
+    });
+    const before = await store.get(started.runId);
+
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "contracts",
+          status: "blocked",
+          summary: "Evidence cannot be accepted.",
+          artifactPaths: [secretPath],
+        },
+      }),
+    ).rejects.toThrow(/safe durable evidence path/i);
+
+    const after = await store.get(started.runId);
+    expect(after).toEqual(before);
+    expect(JSON.stringify(await service.status({ runId: started.runId }))).not.toContain(
+      secretPath,
+    );
+    for (const artifact of after.artifacts) {
+      expect(JSON.stringify(artifact.metadata)).not.toContain(secretPath);
+      expect(JSON.stringify(await artifactStore.readMetadata(artifact.digest))).not.toContain(
+        secretPath,
+      );
+      expect((await artifactStore.readContent(artifact.digest)).toString("utf8")).not.toContain(
+        secretPath,
+      );
+    }
+  });
+
+  it("rejects a secret-shaped symlink alias before the safe target can be ingested", async () => {
+    const aliasPath = "proof/token-abcdef1234567890.txt";
+    const absoluteAliasPath = path.join(directory, aliasPath);
+    await mkdir(path.dirname(absoluteAliasPath), { recursive: true });
+    await symlink(path.join(directory, "test-results/unit.json"), absoluteAliasPath);
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Prepare contracts without persisting unsafe symlink aliases",
+      scope: "non-ui",
+      publication: "none",
+    });
+    const before = await store.get(started.runId);
+
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "contracts",
+          status: "blocked",
+          summary: "Evidence cannot be accepted.",
+          artifactPaths: [aliasPath],
+        },
+      }),
+    ).rejects.toThrow(/safe durable evidence path/i);
+
+    const after = await store.get(started.runId);
+    expect(after).toEqual(before);
+    expect(JSON.stringify(await service.status({ runId: started.runId }))).not.toContain(aliasPath);
+    for (const artifact of after.artifacts) {
+      expect(JSON.stringify(artifact.metadata)).not.toContain(aliasPath);
+      expect(JSON.stringify(await artifactStore.readMetadata(artifact.digest))).not.toContain(
+        aliasPath,
+      );
+      expect((await artifactStore.readContent(artifact.digest)).toString("utf8")).not.toContain(
+        aliasPath,
+      );
+    }
+  });
+
+  it("rejects an absolute artifact path before the original value can reach a submission blob", async () => {
+    const absoluteEvidencePath = path.join(directory, "test-results/unit.json");
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Prepare contracts with project-relative durable evidence",
+      scope: "non-ui",
+      publication: "none",
+    });
+    const before = await store.get(started.runId);
+
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "contracts",
+          status: "blocked",
+          summary: "Evidence cannot be accepted.",
+          artifactPaths: [absoluteEvidencePath],
+        },
+      }),
+    ).rejects.toThrow(/project-relative durable evidence path/i);
+
+    const after = await store.get(started.runId);
+    expect(after).toEqual(before);
+    expect(after.artifacts).toHaveLength(before.artifacts.length);
+    expect(
+      after.artifacts.some(
+        (artifact) => artifact.metadata["projectRelativePath"] === absoluteEvidencePath,
+      ),
+    ).toBe(false);
+  });
+
+  it.each([
+    "proof/GITHUB_TOKEN-abcdef1234567890.txt",
+    "proof/password-supersecretvalue.txt",
+    "proof/token-abcdef1234567890.txt",
+  ])(
+    "never persists separator-form blocker evidence %s even when the file is supplied",
+    async (secretPath) => {
+      const absolutePath = path.join(directory, secretPath);
+      await mkdir(path.dirname(absolutePath), { recursive: true });
+      await writeFile(absolutePath, "non-empty secret-shaped evidence\n", "utf8");
+      const started = await service.start({
+        projectRoot: directory,
+        requestText: "Prepare contracts without leaking evidence filenames",
+        scope: "non-ui",
+        publication: "none",
+      });
+      const before = await store.get(started.runId);
+
+      await expect(
+        service.submit({
+          runId: started.runId,
+          submission: {
+            kind: "contracts",
+            status: "blocked",
+            summary: "Evidence cannot be accepted.",
+            artifactPaths: [secretPath],
+            blocker: {
+              stage: "contracts",
+              code: "UNSAFE_EVIDENCE",
+              kind: "verification",
+              summary: "Evidence cannot be accepted.",
+              retryable: false,
+              resumable: true,
+              completedWork: [],
+              evidencePaths: [secretPath],
+              attemptedRecovery: [],
+              unrunValidations: ["functional"],
+              exactUnblockAction: "Supply evidence under a non-sensitive filename.",
+            },
+          },
+        }),
+      ).rejects.toThrow(/safe project-relative paths/i);
+
+      const after = await store.get(started.runId);
+      expect(after).toEqual(before);
+      expect(JSON.stringify(await service.status({ runId: started.runId }))).not.toContain(
+        secretPath,
+      );
+      for (const artifact of after.artifacts) {
+        expect(JSON.stringify(artifact.metadata)).not.toContain(secretPath);
+        expect(JSON.stringify(await artifactStore.readMetadata(artifact.digest))).not.toContain(
+          secretPath,
+        );
+        expect((await artifactStore.readContent(artifact.digest)).toString("utf8")).not.toContain(
+          secretPath,
+        );
+      }
+    },
+  );
+
+  it("persists typed blocker evidence only when it exactly matches ingested artifacts", async () => {
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Prepare contracts with bounded evidence",
+      scope: "non-ui",
+      publication: "none",
+    });
+    const knownPath = "test-results/unit.json";
+    const arbitraryPath = "proof/uncollected-result.json";
+
+    const status = await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "contracts",
+        status: "blocked",
+        summary: "Approval is missing.",
+        artifactPaths: [knownPath],
+        blocker: {
+          stage: "contracts",
+          code: "MISSING_APPROVAL",
+          kind: "missing-input",
+          summary: "Approval is missing.",
+          retryable: false,
+          resumable: true,
+          completedWork: [],
+          evidencePaths: [knownPath, arbitraryPath],
+          attemptedRecovery: [],
+          unrunValidations: ["functional"],
+          exactUnblockAction: "Provide approval.",
+        },
+      },
+    });
+
+    expect(status.blockerDetails[0]?.evidencePaths).toEqual([knownPath]);
+    const run = await store.get(started.runId);
+    const submissionArtifact = [...run.artifacts]
+      .reverse()
+      .find((artifact) => artifact.metadata["workflowSubmissionKind"] === "contracts")!;
+    const persisted = (await artifactStore.readContent(submissionArtifact.digest)).toString("utf8");
+    expect(persisted).toContain(knownPath);
+    expect(persisted).not.toContain(arbitraryPath);
+    expect(JSON.stringify(submissionArtifact.metadata)).not.toContain(arbitraryPath);
+  });
+
+  it("generates one idempotent blocked diagnostic without advancing the report stage", async () => {
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Prepare contracts that need an approval",
+      scope: "non-ui",
+      publication: "draft",
+    });
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "contracts",
+        status: "blocked",
+        summary: "Approval is missing.",
+        blocker: {
+          stage: "contracts",
+          code: "MISSING_APPROVAL",
+          kind: "missing-input",
+          summary: "Approval is missing.",
+          retryable: false,
+          resumable: true,
+          completedWork: [],
+          evidencePaths: [],
+          attemptedRecovery: [],
+          unrunValidations: ["functional"],
+          exactUnblockAction: "Provide approval.",
+        },
+      },
+    });
+    const blockedRun = await store.get(started.runId);
+    const reportStageBefore = blockedRun.stages.find((item) => item.name === "report")!;
+
+    const [first, second] = await Promise.all([
+      service.ensureBlockedDiagnosticReport({ runId: started.runId }),
+      service.ensureBlockedDiagnosticReport({ runId: started.runId }),
+    ]);
+
+    expect(second.id).toBe(first.id);
+    const reportedRun = await store.get(started.runId);
+    const diagnostics = reportedRun.artifacts.filter(
+      (artifact) =>
+        artifact.kind === "pr-report" && artifact.metadata["reportIntent"] === "blocked-diagnostic",
+    );
+    expect(diagnostics).toHaveLength(1);
+    expect(first.metadata).toMatchObject({
+      adapter: "workflow-v2",
+      reportKind: "pr-body-markdown",
+      reportIntent: "blocked-diagnostic",
+      decision: "blocked",
+      blockedStage: "contracts",
+      errorCode: "MISSING_INPUT",
+      blockedStageAttempt: 0,
+      sourceRunRevision: blockedRun.revision,
+      idempotencyKey: "contracts:0:MISSING_INPUT",
+    });
+    expect(reportedRun.revision).toBe(blockedRun.revision + 1);
+    expect(reportedRun.stages.find((item) => item.name === "report")).toEqual(reportStageBefore);
+    const markdown = (await artifactStore.readContent(first.digest)).toString("utf8");
+    expect(markdown).toContain("Blocked. Diagnostic report only.");
+    expect(markdown).toContain("## Exact unblock action");
+    expect(markdown).not.toContain(directory);
+  });
+
+  it("reports only genuinely remaining validations in a late design blocker diagnostic", async () => {
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Update the checkout screen",
+      scope: "ui",
+      publication: "draft",
+    });
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "contracts",
+        status: "passed",
+        summary: "Checkout requirements ready.",
+        artifactPaths: ["contracts/requirements.json"],
+        requirementManifest: requirements("checkout"),
+      },
+    });
+    await changeSource(directory, "src/checkout.tsx", "export const checkout = 'late-blocker';\n");
+    const implemented = await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "implementation",
+        status: "passed",
+        summary: "Checkout updated.",
+        apiReady: false,
+        uiChanged: true,
+        changedFiles: ["src/checkout.tsx"],
+        artifactPaths: ["test-results/unit.json"],
+      },
+    });
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "functional-review",
+        reviewPacketId: reviewPacketId(implemented, "review-functional"),
+        verdict: "approved",
+        summary: "Functional validation passed.",
+        findings: [],
+        requirements: [{ id: "checkout", verdict: "accepted" }],
+        artifactPaths: ["test-results/unit.json"],
+        gateResults: [
+          {
+            id: "functional",
+            status: "passed",
+            evidencePaths: ["test-results/unit.json"],
+          },
+        ],
+      },
+    });
+    const blocked = await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "design-review",
+        reviewPacketId: reviewPacketId(implemented, "review-design"),
+        verdict: "blocked",
+        summary: "Design review needs an external tool.",
+        findings: [],
+        requirements: [{ id: "checkout", verdict: "blocked" }],
+        artifactPaths: ["visual/diff.png"],
+        gateResults: [
+          {
+            id: "accessibility",
+            status: "passed",
+            evidencePaths: ["visual/diff.png"],
+          },
+        ],
+        blocker: {
+          stage: "design-review",
+          code: "MISSING_DESIGN_TOOL",
+          kind: "missing-tool",
+          summary: "The design tool is unavailable.",
+          retryable: false,
+          resumable: true,
+          completedWork: [],
+          evidencePaths: ["visual/diff.png"],
+          attemptedRecovery: [],
+          unrunValidations: [],
+          exactUnblockAction: "Enable the design tool and resume design review.",
+        },
+      },
+    });
+
+    expect(blocked.blockerDetails[0]?.unrunValidations).toEqual(["draft-publication-preflight"]);
+    const diagnostic = await service.ensureBlockedDiagnosticReport({ runId: started.runId });
+    const markdown = (await artifactStore.readContent(diagnostic.digest)).toString("utf8");
+    const unrunSection = markdown.slice(
+      markdown.indexOf("## Unrun validations"),
+      markdown.indexOf("## Exact unblock action"),
+    );
+    expect(unrunSection).toContain("- draft-publication-preflight");
+    expect(unrunSection).not.toContain("- functional");
+    expect(unrunSection).not.toContain("- accessibility");
+  });
+
+  it("reports a second zero-based stage execution as two attempts", async () => {
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Prepare retryable contracts",
+      scope: "non-ui",
+      publication: "none",
+    });
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "contracts",
+        status: "failed",
+        summary: "The first contract attempt failed.",
+      },
+    });
+
+    const second = await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "contracts",
+        status: "blocked",
+        summary: "The second contract attempt is blocked.",
+        blocker: {
+          stage: "contracts",
+          code: "MISSING_APPROVAL",
+          kind: "missing-input",
+          summary: "Approval is missing.",
+          retryable: false,
+          resumable: true,
+          completedWork: [],
+          evidencePaths: [],
+          attemptedRecovery: [],
+          unrunValidations: [],
+          exactUnblockAction: "Provide approval and resume contracts.",
+        },
+      },
+    });
+
+    expect(second.blockerDetails[0]?.attemptedRecovery).toEqual([
+      "The contracts stage was attempted 2 times.",
+    ]);
+  });
+
+  it("derives unexpected for legacy review blockers without typed details", async () => {
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Refactor the parser",
+      scope: "non-ui",
+      publication: "none",
+    });
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "contracts",
+        status: "passed",
+        summary: "Parser requirements ready.",
+        artifactPaths: ["contracts/requirements.json"],
+        requirementManifest: requirements("parser"),
+      },
+    });
+    await changeSource(directory, "src/parser.ts", "export const parser = 'review';\n");
+    const implemented = await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "implementation",
+        status: "passed",
+        summary: "Parser refactored.",
+        apiReady: false,
+        uiChanged: false,
+        changedFiles: ["src/parser.ts"],
+        artifactPaths: ["test-results/unit.json"],
+      },
+    });
+
+    const blocked = await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "functional-review",
+        reviewPacketId: reviewPacketId(implemented, "review-functional"),
+        verdict: "blocked",
+        summary: "Legacy review payload without structured details.",
+      },
+    });
+
+    expect(blocked.blockerDetails).toEqual([
+      expect.objectContaining({
+        stage: "functional-review",
+        code: "WORKFLOW_BLOCKED",
+        kind: "unexpected",
+      }),
+    ]);
+  });
+
+  it("does not reuse a stale typed blocker for a later durable stage failure", async () => {
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Refactor the parser",
+      scope: "non-ui",
+      publication: "none",
+    });
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "contracts",
+        status: "passed",
+        summary: "Parser requirements ready.",
+        artifactPaths: ["contracts/requirements.json"],
+        requirementManifest: requirements("parser"),
+      },
+    });
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "implementation",
+        status: "failed",
+        summary: "The tool was unavailable.",
+        apiReady: false,
+        uiChanged: false,
+        blocker: {
+          stage: "implementation",
+          code: "MISSING_PRIVATE_TOOL_NAME",
+          kind: "missing-tool",
+          summary: "Private tool details.",
+          retryable: true,
+          resumable: true,
+          completedWork: [],
+          evidencePaths: [],
+          attemptedRecovery: [],
+          unrunValidations: [],
+          exactUnblockAction: "Enable the private tool.",
+        },
+      },
+    });
+    const restarted = await dependencies.stageService.start({
+      runId: started.runId,
+      stageName: "implementation",
+      workerId: "durable-test-worker",
+    });
+    await dependencies.stageService.fail({
+      runId: started.runId,
+      stageName: "implementation",
+      workerId: "durable-test-worker",
+      leaseId: restarted.stage.lease!.id,
+      error: {
+        code: "UNEXPECTED_RUNTIME_ERROR",
+        message: "Authorization: Bearer durable-secret",
+        retryable: false,
+      },
+    });
+
+    const status = await service.status({ runId: started.runId });
+    expect(status.blockerDetails).toEqual([
+      expect.objectContaining({
+        stage: "implementation",
+        code: "UNEXPECTED_BLOCKER",
+        kind: "unexpected",
+      }),
+    ]);
+    expect(JSON.stringify(status.blockerDetails)).not.toContain("MISSING_PRIVATE_TOOL_NAME");
+    expect(JSON.stringify(status.blockerDetails)).not.toContain("durable-secret");
+  });
+
+  it("recommends skills deterministically from intake evidence without blocking", async () => {
+    await mkdir(path.join(directory, "docs"), { recursive: true });
+    await writeFile(
+      path.join(directory, "docs", "openapi.yaml"),
+      "openapi: 3.1.0\npaths:\n  /checkout:\n    post:\n      responses: {}\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(directory, "package.json"),
+      JSON.stringify({ dependencies: { next: "16.0.0", react: "19.0.0" } }),
+      "utf8",
+    );
+
+    const status = await service.start({
+      projectRoot: directory,
+      requestText: "Build the checkout feature from Figma and OpenAPI",
+      scope: "ui",
+      mode: "feature",
+      changeKind: "feature",
+      publication: "none",
+      figmaUrl: FIGMA_URL,
+      openApiPaths: ["docs/openapi.yaml"],
+    });
+
+    expect(status.deliveryProfile.recommendedSkills).toEqual([
+      "figma",
+      "design-system",
+      "api-generator",
+      "react-best-practices",
+      "next-best-practices",
+      "playwright",
+    ]);
   });
 
   it("reopens implementation and rejects stale review packets after changes are requested", async () => {
@@ -251,7 +2197,41 @@ describe("WorkflowService", () => {
     expect(reopened.nextActions).toEqual([
       { kind: "implement", runId: started.runId, requireApiReady: false },
     ]);
+    expect(reopened.blockerDetails).toEqual([
+      expect.objectContaining({ stage: "implementation", kind: "unexpected" }),
+    ]);
     expect(reopened.stages.find((stage) => stage.name === "design-review")?.status).toBe("pending");
+
+    const correlatedRun = await store.get(started.runId);
+    await store.save(
+      {
+        ...correlatedRun,
+        revision: correlatedRun.revision + 1,
+        artifacts: correlatedRun.artifacts.map((artifact) => {
+          if (
+            artifact.metadata["workflowSubmissionKind"] !== "functional-review" ||
+            artifact.metadata["verdict"] !== "changes-requested"
+          ) {
+            return artifact;
+          }
+          const {
+            workflowFailureStage: _workflowFailureStage,
+            workflowFailureAttempt: _workflowFailureAttempt,
+            ...legacyMetadata
+          } = artifact.metadata;
+          return { ...artifact, metadata: legacyMetadata };
+        }),
+      },
+      correlatedRun.revision,
+    );
+    const legacyReopened = await service.status({ runId: started.runId });
+    expect(legacyReopened.blockerDetails).toEqual([
+      expect.objectContaining({
+        stage: "implementation",
+        code: "REVIEW_CHANGES_REQUESTED",
+        kind: "unexpected",
+      }),
+    ]);
 
     const repaired = await service.submit({
       runId: started.runId,
@@ -683,6 +2663,7 @@ describe("WorkflowService", () => {
             explicit: [],
             discovered: [],
             skillHints: ["react-best-practices"],
+            appliedSkills: ["react-best-practices"],
           },
         },
       }),
@@ -708,10 +2689,43 @@ describe("WorkflowService", () => {
             explicit: [],
             discovered: [],
             skillHints: ["api-generator"],
+            appliedSkills: ["api-generator"],
           },
         },
       }),
-    ).rejects.toThrow(/skill hint.*requested/i);
+    ).rejects.toThrow(/applied skill|skill hint.*requested/i);
+
+    await mkdir(path.join(directory, "docs"), { recursive: true });
+    await writeFile(
+      path.join(directory, "docs", "recommended-openapi.yaml"),
+      "openapi: 3.1.0\npaths:\n  /health:\n    get:\n      responses: {}\n",
+      "utf8",
+    );
+    const recommended = await service.start({
+      projectRoot: directory,
+      requestText: "Prepare the supplied API contract",
+      scope: "non-ui",
+      publication: "none",
+      openApiPaths: ["docs/recommended-openapi.yaml"],
+    });
+    await expect(
+      service.submit({
+        runId: recommended.runId,
+        submission: {
+          kind: "contracts",
+          status: "passed",
+          summary: "Applied the recommended API generation workflow.",
+          artifactPaths: ["contracts/requirements.json"],
+          requirementManifest: requirements("recommended-skills"),
+          guidanceTrace: {
+            explicit: [],
+            discovered: [],
+            skillHints: [],
+            appliedSkills: ["api-generator"],
+          },
+        },
+      }),
+    ).resolves.toMatchObject({ nextActions: [{ kind: "implement" }] });
   });
 
   it("blocks missing explicit guidance before creating a durable Run", async () => {
@@ -1828,6 +3842,22 @@ describe("WorkflowService", () => {
       expectedRetryable: false,
       expectedWorkflowStatus: "blocked",
     },
+    {
+      name: "publication precondition",
+      result: {
+        status: "blocked" as const,
+        requestSynced: false,
+        visualPreviewExpected: false,
+        visualPreviewSynced: false,
+        partialReasons: ["publication precondition is unmet"],
+        errorCode: "PUBLISH_PRECONDITION",
+        errorMessage: "publication precondition is unmet",
+        retryable: false,
+      },
+      expectedCode: "PUBLISH_PRECONDITION",
+      expectedRetryable: false,
+      expectedWorkflowStatus: "blocked",
+    },
   ])(
     "fails the publish stage for $name",
     async ({ result, expectedCode, expectedRetryable, expectedWorkflowStatus }) => {
@@ -1851,7 +3881,7 @@ describe("WorkflowService", () => {
       });
 
       const response = (await service.publish(publishInput(runId))) as {
-        status: { status: string };
+        status: { status: string; blockerDetails: Array<{ stage: string; kind: string }> };
       };
       const run = await store.get(runId);
       const publishStage = run.stages.find((item) => item.name === "publish")!;
@@ -1863,9 +3893,56 @@ describe("WorkflowService", () => {
         code: expectedCode,
         retryable: expectedRetryable,
       });
+      expect(response.status.blockerDetails).toEqual([
+        expect.objectContaining({ stage: "publish", kind: "publish-precondition" }),
+      ]);
       expect(run.stages.find((item) => item.name === "archive")?.status).toBe("pending");
     },
   );
+
+  it.each([
+    "AWS_SECRET_ACCESS_KEY_IDENTIFIER_SHAPED_SECRET",
+    "SECRET_PUBLISH_PROVIDER_CREDENTIAL_IDENTIFIER",
+  ])("does not expose untrusted publisher error code %s in status", async (untrustedCode) => {
+    const runId = await preparePublishReadyWorkflow(service, directory);
+    const reportArtifactId = (await store.get(runId)).artifacts.find(
+      (artifact) => artifact.kind === "pr-report",
+    )!.id;
+    service = new WorkflowService({
+      ...dependencies,
+      publisherService: {
+        publish: vi.fn().mockResolvedValue({
+          result: {
+            runId,
+            status: "blocked",
+            requestSynced: false,
+            visualPreviewExpected: false,
+            visualPreviewSynced: false,
+            fallbackMode: "none",
+            partialReasons: ["provider rejected publication"],
+            errorCode: untrustedCode,
+            errorMessage: "provider rejected publication",
+            publishedAssets: [],
+            retryable: false,
+            publishedAt: new Date().toISOString(),
+          },
+          publishResultArtifactId: reportArtifactId,
+        }),
+      } as unknown as PublisherService,
+    });
+
+    const response = (await service.publish(publishInput(runId))) as {
+      status: { blockerDetails: Array<{ stage: string; code: string; kind: string }> };
+    };
+    expect(response.status.blockerDetails).toEqual([
+      expect.objectContaining({
+        stage: "publish",
+        code: "PUBLISH_PRECONDITION",
+        kind: "publish-precondition",
+      }),
+    ]);
+    expect(JSON.stringify(response.status.blockerDetails)).not.toContain(untrustedCode);
+  });
 
   it("completes publication only when every expected surface is synchronized", async () => {
     const runId = await preparePublishReadyWorkflow(service, directory);
@@ -1984,6 +4061,15 @@ describe("WorkflowService", () => {
       code: "PUBLISH_UNEXPECTED_ERROR",
       retryable: true,
     });
+    const status = await service.status({ runId });
+    expect(status.blockerDetails).toEqual([
+      expect.objectContaining({
+        stage: "publish",
+        code: "PUBLISH_UNEXPECTED_ERROR",
+        kind: "unexpected",
+      }),
+    ]);
+    expect(JSON.stringify(status.blockerDetails)).not.toContain("publisher transport crashed");
   });
 
   it("fails the archive stage when the archive service throws after the lease starts", async () => {
@@ -2075,6 +4161,78 @@ async function preparePublishReadyWorkflow(
   await service.advance({ runId: started.runId, until: "publish-ready" });
 
   return started.runId;
+}
+
+async function prepareBlockedWorkflow(service: WorkflowService, projectRoot: string) {
+  const started = await service.start({
+    projectRoot,
+    requestText: "Prepare contracts that need an approval",
+    scope: "non-ui",
+    publication: "draft",
+  });
+  const blocked = await service.submit({
+    runId: started.runId,
+    submission: {
+      kind: "contracts",
+      status: "blocked",
+      summary: "Approval is missing.",
+      blocker: {
+        stage: "contracts",
+        code: "MISSING_APPROVAL",
+        kind: "missing-input",
+        summary: "Approval is missing.",
+        retryable: false,
+        resumable: true,
+        completedWork: [],
+        evidencePaths: [],
+        attemptedRecovery: [],
+        unrunValidations: ["functional"],
+        exactUnblockAction: "Provide approval.",
+      },
+    },
+  });
+  return { runId: started.runId, blocked };
+}
+
+async function appendPublishResultArtifact(
+  store: SqliteRunStore,
+  artifactStore: ArtifactBlobStore,
+  runId: string,
+  result: unknown,
+) {
+  const run = await store.get(runId);
+  const timestamp = new Date(Date.parse(run.updatedAt) + 1_000).toISOString();
+  const blob = await artifactStore.writeBlob({
+    content: Buffer.from(`${JSON.stringify(result)}\n`, "utf8"),
+    mediaType: "application/json",
+    storedAt: timestamp,
+    label: "publish-result",
+  });
+  const artifact = ArtifactRefSchema.parse({
+    id: createArtifactId(),
+    kind: "agent-result-report",
+    uri: blob.uri,
+    mediaType: "application/json",
+    digest: blob.digest,
+    producedBy: "pr-publisher",
+    evidenceIds: [],
+    createdAt: timestamp,
+    metadata: {
+      adapter: "publisher-v1",
+      label: "publish-result",
+      reportKind: "publish-result",
+    },
+  });
+  await store.save(
+    {
+      ...run,
+      revision: run.revision + 1,
+      updatedAt: timestamp,
+      artifacts: [...run.artifacts, artifact],
+    },
+    run.revision,
+  );
+  return artifact.id;
 }
 
 async function submitApiReady(service: WorkflowService, runId: string) {
@@ -2196,4 +4354,64 @@ function validMp4(): Buffer {
     box("moov", Buffer.concat([box("mvhd", movieHeader), box("trak", Buffer.alloc(8))])),
     box("mdat", Buffer.alloc(32, 1)),
   ]);
+}
+
+class WorkflowFakePublisher implements ReviewRequestPublisher {
+  public readonly createdPayloads: ReviewRequestPayload[] = [];
+  public readonly updatedMetadata: ReviewRequestUpdate[] = [];
+  private existingRequest: PublishedReviewRequest | undefined;
+
+  public constructor(private readonly createGate?: Promise<void>) {}
+
+  public async findExisting(): Promise<PublishedReviewRequest | undefined> {
+    return this.existingRequest;
+  }
+
+  public async publishAssets() {
+    return [];
+  }
+
+  public async create(input: {
+    target: PublishTarget;
+    payload: ReviewRequestPayload;
+    token: string;
+  }): Promise<PublishedReviewRequest> {
+    this.createdPayloads.push(input.payload);
+    await this.createGate;
+    const request = {
+      host: "github",
+      url: "https://github.com/acme/spec-to-pr/pull/123",
+      number: "123",
+      id: "123",
+      draft: true,
+      sourceBranch: input.payload.sourceBranch,
+      targetBranch: input.payload.targetBranch,
+      created: true,
+      updated: false,
+    } satisfies PublishedReviewRequest;
+    this.existingRequest = { ...request, created: false };
+    return request;
+  }
+
+  public async update(input: {
+    target: PublishTarget;
+    requestNumber: string;
+    update: ReviewRequestUpdate;
+    token: string;
+  }): Promise<PublishedReviewRequest> {
+    this.updatedMetadata.push(input.update);
+    const request = {
+      host: "github",
+      url: `https://github.com/acme/spec-to-pr/pull/${input.requestNumber}`,
+      number: input.requestNumber,
+      id: input.requestNumber,
+      draft: true,
+      sourceBranch: "codex/blocked-diagnostic",
+      targetBranch: "main",
+      created: false,
+      updated: true,
+    } satisfies PublishedReviewRequest;
+    this.existingRequest = { ...request, updated: false };
+    return request;
+  }
 }

@@ -72,6 +72,36 @@ Create API contract evidence first, then implement the UI in the same implementa
 5. **Design review:** Only for `scope: ui`, independently evaluate fidelity, interaction, design-system use, and accessibility.
 6. **Report / publish:** Build traceability, change, validation, review, and risk sections; publish only for `publication: draft`.
 
+## Execution policy: stages, agents, skills, and tools
+
+| Durable stage       | Exact behavior for this case                                                                             |
+| ------------------- | -------------------------------------------------------------------------------------------------------- |
+| `intake`            | Normalize `briefPath`, request, scope, publication, workload, and `requiredValidations`.                 |
+| `contracts`         | Fix the brief acceptance trace and resolve optional-source precedence or conflicts.                      |
+| `implementation`    | One implementation writer works in one `implementationContextId`; API-ready precedes API-backed UI.      |
+| `functional-review` | The read-only `functional-reviewer` judges contracts, diff, and focused checks from an immutable packet. |
+| `design-review`     | The read-only `design-reviewer` applies only to UI scope; otherwise it is not applicable.                |
+| `report`            | Build the canonical traceability, validation, review, risk, and redacted-blocker report.                 |
+| `publish`           | Create/update a same-source/target draft only when `publication: draft` is ready.                        |
+| `archive`           | Run only after merge, authoritative evidence, and a separate user request.                               |
+
+Agent policy allows zero read-only scout workers for XS/S, at most one for M, and at most two for L/XL. Scouts only perform independent read-heavy discovery. Only reviewers may run in parallel after implementation: **no nesting** and no **parallel writer**.
+
+- `stageSkillRoute`: public actions route `intake-contracts` → `implement` → `review-functional`, adding `review-design` for UI and `publish` for draft delivery. This routing is not `deliveryProfile.recommendedSkills`.
+- `recommendedSkills`: `figmaUrl` → `figma`, `design-system`; `openApiPaths` → `api-generator`; detected React/Next packages → `react-best-practices`, `next-best-practices` optional candidates.
+- Brief UI alone does not recommend `playwright`; only the `mode: feature` + UI mapping adds that candidate.
+- `appliedSkills`: record only the allowed union of `recommendedSkills` and installed, available/applicable optional `skillHints`. Missing optional skills do not block.
+- **workflow MCP:** required for Run/status/submission/publication. **Figma host:** required only when `figmaUrl` is supplied. **Playwright Test/CLI:** the assertion/structured-result oracle only when brief `requiredValidations` include browser acceptance; this profile does not inherit feature E2E or video.
+- **Browser MCP:** optional interactive reproduction/inspection on capable hosts. **Chrome DevTools MCP:** conditional for console, network, performance, memory, or live-DOM diagnosis; screenshots/traces never replace assertions.
+
+### Ready, blocked diagnostic, and resume
+
+The normal path uses `workflow_publish intent: ready` for an evidence-backed draft. A blocker records typed `blockerDetails` and the exact unblock action. Only a valid publication preflight may use `workflow_publish intent: blocked-diagnostic`; that diagnostic draft remains `status: blocked` and is not a passed report/publish verdict. If the tree is not clean, the branch is the target, authentication/remote is unsupported, there is no committed delta or one-commit lead, or the code is `PUBLISH_NO_DELTA`, return a **local blocked report** without an empty commit or issue fallback.
+
+For `diagnostic-publication-uncertain`, never publish automatically. Inspect GitHub/GitLab for a matching draft, show the result to the user, and call the same `workflow_publish` action with `recoverUncertain: true` only after explicit approval.
+
+After correction, continue the **same Run** from `workflow_status`/`resumeContext` without repeating passed stages. If a diagnostic draft exists, update the same source/target **same draft PR** from `[Blocked]` to the normal `intent: ready` title/body and remove its blocked label.
+
 ## Evidence and validation <span id="evidence-brief"></span>
 
 The paths below are an **Illustrative expectation**.

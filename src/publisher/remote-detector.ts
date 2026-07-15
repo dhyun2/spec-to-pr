@@ -60,8 +60,7 @@ export function detectPublishTargetFromRemote(remote: GitRemoteInfo): PublishTar
 /**
  * Decide whether a remote host is GitHub or GitLab. Resolution order:
  * 1. explicit SPEC_TO_PR_GIT_HOST override (for self-hosted instances),
- * 2. exact known SaaS hosts,
- * 3. hostname heuristic (contains "github"/"gitlab") for enterprise installs.
+ * 2. exact known SaaS hosts.
  */
 function resolveHostKind(host: string): "github" | "gitlab" | undefined {
   const override = process.env["SPEC_TO_PR_GIT_HOST"]?.trim().toLowerCase();
@@ -72,8 +71,6 @@ function resolveHostKind(host: string): "github" | "gitlab" | undefined {
 
   if (host === "github.com") return "github";
   if (host === "gitlab.com") return "gitlab";
-  if (host.includes("gitlab")) return "gitlab";
-  if (host.includes("github")) return "github";
 
   return undefined;
 }

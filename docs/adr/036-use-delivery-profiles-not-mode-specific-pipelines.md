@@ -16,7 +16,7 @@ Four independent pipelines would duplicate agents, stages, tools, and policies. 
 
 ## Decision
 
-`workflow_start` records one delivery profile on the existing Run. A profile contains `mode`, `changeKind`, publication intent, supplied source references, and derived evidence requirements. The modes are `auto`, `brief`, `legacy`, `feature`, and `figma`; all use the same seven public tools, eight durable stages, nine skills, and two reviewers defined by ADR 035.
+`workflow_start` records one delivery profile on the existing Run. A profile contains `mode`, `changeKind`, publication intent, supplied source references, and derived evidence requirements. The modes are `auto`, `brief`, `legacy`, `feature`, and `figma`; all use the same seven public tools, eight durable stages, eight public marketplace skills, and two reviewers defined by ADR 035. Release maintenance remains outside the public user workflow.
 
 Mode policies are:
 

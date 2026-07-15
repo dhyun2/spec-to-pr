@@ -7,6 +7,40 @@ use the plugin tag format, for example `spec-to-pr--v0.1.0`.
 
 ## Unreleased
 
+## 0.2.1 - 2026-07-15
+
+### Added
+
+- Added typed, redacted blocker details with exact resume actions and deterministic workload-aware
+  delegation guidance.
+- Added blocked-diagnostic draft PR/MR creation and same-draft recovery without marking blocked
+  report or publish stages as passed.
+- Added bilingual framework comparison guidance and detailed Korean/English execution guides for
+  brief, legacy, feature, and Figma delivery.
+
+### Changed
+
+- Reduced orchestration overhead with compact status action envelopes, bounded read-only scouts,
+  one implementation writer, and at most one eligible SDK blocked-finalization turn.
+- Reduced the public marketplace surface to eight skills by moving `prepare-release` to a
+  maintainer-only repository skill; both reviewers are now configuration-enforced read-only and
+  workflow-MCP-free.
+- Defined Playwright Test/CLI assertions as the browser acceptance oracle, with browser MCP and
+  Chrome DevTools MCP limited to optional interactive or targeted diagnostic use.
+
+### Fixed
+
+- Hardened diagnostic publication identity, retry, concurrency, report correlation, and provider
+  preflight so stale blockers, conflicting branch/remote inputs, and lookalike provider hosts cannot
+  reuse or receive the wrong publication result.
+
+### Verified
+
+- `pnpm check`
+- `pnpm plugin:validate`
+- `pnpm --dir website build && pnpm guide:check`
+- `pnpm release:build 0.2.1 --full`
+
 ## 0.2.0 - 2026-07-14
 
 ### Added

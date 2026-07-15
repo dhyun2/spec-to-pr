@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, realpathSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -14,6 +15,7 @@ import {
 
 import {
   executeBudgetedBoundaryTurns,
+  type BlockedDiagnosticPreflight,
   type BoundaryClient,
   type BoundaryThread,
 } from "./boundary-runner.js";
@@ -35,8 +37,7 @@ import {
 } from "./workload-budget.js";
 import {
   CODEX_WORKFLOW_TOOL_NAMES,
-  buildCodexPublishInstructions,
-  buildCodexReviewAgentInstructions,
+  buildCodexActionEnvelopeInstructions,
 } from "./workflow-policy.js";
 
 export type SpecToPrCodexRunInput = {
@@ -170,6 +171,8 @@ export async function runSpecToPrWithCodex(
     ),
     requiredValidations,
     maxTurns: input.maxTurns ?? 12,
+    inspectBlockedDiagnosticPreflight: () =>
+      inspectBlockedDiagnosticPreflight(input.workingDirectory, input.env),
   });
   const usage = sdkUsage(result.usage);
   const runtimeWorkload = result.workflowStatus?.workload;
@@ -299,23 +302,15 @@ export function buildSpecToPrPrompt(input: SpecToPrCodexRunInput): string {
     `Call workflow_info to read the contract, then workflow_start once with the request and these delivery fields: ${startFields}.`,
     "Apply instructions in this precedence order: current user request > explicit project guidance > automatically discovered project guidance > applicable installed skills > SpecToPR defaults.",
     "For each optional skill hint, ask the host to use the named skill only when it is installed and applicable. Missing optional skills do not block the Run; never assume a hinted capability is available.",
-    publication === "draft"
-      ? "Before implementation, inspect git status and work on an actual non-target codex/<short-slug> source branch without absorbing unrelated dirty changes. Before workflow_publish, stage only intended files, commit all intended changes on that source branch, require a clean tree and at least one commit beyond the target, then pass the actual sourceBranch and targetBranch."
-      : "Do not create a publication-only branch when publication is none unless implementation isolation requires it.",
+    "When submitting evidence, include an optional skill in guidanceTrace.appliedSkills only when it was actually applied. Do not copy unused skill hints or recommendations.",
     "Use workflow_advance until it returns an external action or terminal status. Fulfill external actions and return compact evidence with workflow_submit; use workflow_status to resume or inspect blockers.",
-    "In this SDK turn, complete only one external action group and stop after its returned workflow status. Functional and design reviews returned together may run in parallel.",
-    "Keep API and UI work in one implementation context; never split them into separate implementation agents or worktrees.",
+    buildCodexActionEnvelopeInstructions({
+      publication,
+      includeReviewAgents: input.enableReviewAgents !== false,
+      includeDesignReview: hasUiScope,
+    }),
     'For API-backed UI, generate distinct physical non-empty project-local types, schemas, wrappers, mocks, and a passing JSON contract-test result before UI work and UI completion evidence; path, symlink, and hard-link aliases do not count separately. Submit workflow_submit with kind: "api-ready", status: "passed", one stable implementationContextId, artifactPaths, and apiArtifacts containing nonempty types, schemas, wrappers, mocks, and contractTests arrays. Continue UI in the same context and repeat that implementationContextId on final implementation only after workflow_status records the checkpoint; apiReady: true alone is not evidence.',
     "Run the fast default gates selected by workflow applicability. Run full matrices, hardening suites, package verification, and cross-host manifest validation only for an explicit release workflow.",
-    "",
-    buildCodexPublishInstructions(),
-    "",
-    input.enableReviewAgents === false
-      ? ""
-      : buildCodexReviewAgentInstructions({
-          includeFunctionalReview: true,
-          includeDesignReview: hasUiScope,
-        }),
     "",
     "User request:",
     userPrompt,
@@ -329,10 +324,62 @@ export function buildResumeSpecToPrPrompt(): string {
   return [
     "Resume the existing Run recorded in this Codex task; do not create a new Run or repeat intake.",
     "Recover the latest runId from thread history and call workflow_status first. If no durable runId is recoverable, stop without modifying files.",
-    "Use resumeContext.goal, its project-relative evidencePaths, submission summaries, stages, and nextActions as the compact source of truth.",
+    "Use status.nextActions, blockerDetails, deliveryProfile.publication, delegationPolicy, diagnosticPublication, requiredValidations, and resumeContext as the compact action envelope.",
     "Complete only one external action group and stop after its fresh structured workflow status.",
     "Preserve every required validation and keep API and UI work in one implementation context.",
   ].join("\n");
+}
+
+export function inspectBlockedDiagnosticPreflight(
+  workingDirectory: string,
+  configuredEnv?: Record<string, string>,
+): BlockedDiagnosticPreflight {
+  const env = configuredEnv === undefined ? { ...process.env } : { ...configuredEnv };
+  const sourceBranch = gitOutput(workingDirectory, ["branch", "--show-current"], env);
+  if (sourceBranch === undefined || !sourceBranch.startsWith("codex/")) {
+    return { eligible: false, reason: "non-codex-or-detached-source-branch" };
+  }
+  const worktreeStatus = gitOutput(
+    workingDirectory,
+    ["status", "--porcelain", "--untracked-files=normal"],
+    env,
+  );
+  if (worktreeStatus === undefined || worktreeStatus !== "") {
+    return { eligible: false, reason: "working-tree-not-clean" };
+  }
+
+  const remoteName = "origin";
+  const remoteUrl = gitOutput(workingDirectory, ["remote", "get-url", remoteName], env);
+  const host = supportedReviewHost(remoteUrl, env);
+  if (host === undefined) return { eligible: false, reason: "unsupported-remote" };
+  if (!hasExistingPublisherCredential(host, env)) {
+    return { eligible: false, reason: "publisher-credentials-unavailable" };
+  }
+
+  const remoteHead = gitOutput(
+    workingDirectory,
+    ["symbolic-ref", "--quiet", "--short", `refs/remotes/${remoteName}/HEAD`],
+    env,
+  );
+  const targetBranch = remoteHead?.startsWith(`${remoteName}/`)
+    ? remoteHead.slice(remoteName.length + 1)
+    : "main";
+  if (sourceBranch === targetBranch) {
+    return { eligible: false, reason: "source-equals-target" };
+  }
+  if (gitOutput(workingDirectory, ["rev-parse", "--verify", targetBranch], env) === undefined) {
+    return { eligible: false, reason: "target-branch-unavailable" };
+  }
+  const ahead = gitOutput(
+    workingDirectory,
+    ["rev-list", "--count", `${targetBranch}..${sourceBranch}`],
+    env,
+  );
+  if (ahead === undefined || !/^\d+$/.test(ahead) || Number(ahead) < 1) {
+    return { eligible: false, reason: "no-committed-delta" };
+  }
+
+  return { eligible: true, sourceBranch, targetBranch, remoteName };
 }
 
 export function validateSpecToPrRunInput(input: SpecToPrCodexRunInput): void {
@@ -456,6 +503,71 @@ function sdkUsage(usage: AggregatedUsage): RunResult["usage"] {
     output_tokens: usage.outputTokens,
     reasoning_output_tokens: usage.reasoningOutputTokens,
   };
+}
+
+function gitOutput(
+  workingDirectory: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+): string | undefined {
+  try {
+    return execFileSync("git", args, {
+      cwd: workingDirectory,
+      encoding: "utf8",
+      env,
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 10_000,
+    }).trim();
+  } catch {
+    return undefined;
+  }
+}
+
+function supportedReviewHost(
+  remoteUrl: string | undefined,
+  env: NodeJS.ProcessEnv,
+): "github" | "gitlab" | undefined {
+  if (remoteUrl === undefined) return undefined;
+  const host = remoteHost(remoteUrl);
+  if (host === undefined) return undefined;
+  const override = env["SPEC_TO_PR_GIT_HOST"]?.trim().toLowerCase();
+  if (override === "github" || override === "gitlab") return override;
+  if (host === "github.com") return "github";
+  if (host === "gitlab.com") return "gitlab";
+  return undefined;
+}
+
+function remoteHost(remoteUrl: string): string | undefined {
+  const trimmed = remoteUrl.trim();
+  const scpHost = /^[^@]+@([^:]+):/.exec(trimmed)?.[1];
+  if (scpHost !== undefined) return scpHost.toLowerCase();
+  try {
+    return new URL(trimmed).hostname.toLowerCase();
+  } catch {
+    return undefined;
+  }
+}
+
+function hasExistingPublisherCredential(
+  host: "github" | "gitlab",
+  env: NodeJS.ProcessEnv,
+): boolean {
+  const names =
+    host === "github" ? ["GITHUB_TOKEN", "GH_TOKEN"] : ["GITLAB_TOKEN", "GITLAB_PRIVATE_TOKEN"];
+  if (names.some((name) => (env[name]?.trim().length ?? 0) > 0)) return true;
+  const command = host === "github" ? "gh" : "glab";
+  try {
+    return (
+      execFileSync(command, ["auth", "token"], {
+        encoding: "utf8",
+        env,
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 10_000,
+      }).trim().length > 0
+    );
+  } catch {
+    return false;
+  }
 }
 
 function requiredValidationsForInput(input: SpecToPrCodexRunInput): string[] {

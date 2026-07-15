@@ -1,9 +1,11 @@
 ---
 name: prepare-release
-description: Use when preparing the spec-to-pr plugin itself for a release candidate after normal implementation and review evidence is complete.
+description: Use when a maintainer is preparing the spec-to-pr plugin itself for a release candidate after implementation and review evidence is complete.
 ---
 
 # Prepare Release
+
+This is a maintainer-only repository skill. It is not part of the public marketplace or release package.
 
 Read `workflow_status` and require completed implementation and applicable reviews. Run the repository's release-only checks: formatting, type checking, clean generated-output comparison, build, tests, plugin validation, tracked-file package creation, ZIP checksum/entry/commit/runtime verification, version/profile parity, and release-note generation. There is no separate constant-pass eval or security report.
 
