@@ -4,7 +4,7 @@ An evidence-driven Claude Code and Codex plugin for four explicit deliveries: fu
 
 Korean version: [README.ko.md](README.ko.md)
 
-> **Development status:** this branch contains **Unreleased** changes on top of package `0.2.1`. See the changelog before publishing a new version.
+> **Current release:** `0.3.0` · See the changelog for the verified release scope.
 
 ## Four delivery modes
 

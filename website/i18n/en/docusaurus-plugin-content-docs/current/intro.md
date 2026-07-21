@@ -20,7 +20,7 @@ secondary={{ label: "Choose a delivery", href: "/usage/" }}
 />
 
 :::info[The version you are reading]
-This site describes **Unreleased** behavior under development on package `0.2.1`. The public surface stays deliberately small: 7 MCP tools, 8 durable stages, 8 skills, and 2 independent reviewers.
+This site describes the released behavior of SpecToPR `0.3.0`. The public surface stays deliberately small: 7 MCP tools, 8 durable stages, 8 skills, and 2 independent reviewers.
 :::
 
 ## Choose the input; keep one Run

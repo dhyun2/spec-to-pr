@@ -20,7 +20,7 @@ secondary={{ label: "내 케이스 고르기", href: "/usage/" }}
 />
 
 :::info[지금 읽고 있는 버전]
-이 사이트는 패키지 `0.2.1` 위에서 개발 중인 **Unreleased** 동작을 설명합니다. 공개 표면은 7 MCP tools, 8 durable stages, skill 8개, 독립 reviewer 2개로 유지합니다.
+이 사이트는 SpecToPR `0.3.0`의 릴리스 동작을 설명합니다. 공개 표면은 7 MCP tools, 8 durable stages, skill 8개, 독립 reviewer 2개로 유지합니다.
 :::
 
 ## 입력을 고르면 나머지는 같은 Run입니다

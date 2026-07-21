@@ -103,7 +103,7 @@ const config: Config = {
           items: [{ label: "GitHub", href: "https://github.com/dhyun2/spec-to-pr" }],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} SpecToPR · Development docs (package v${version})`,
+      copyright: `Copyright © ${new Date().getFullYear()} SpecToPR · Documentation · v${version}`,
     },
     prism: {
       theme: prismThemes.github,

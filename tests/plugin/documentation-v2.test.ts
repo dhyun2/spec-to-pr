@@ -689,9 +689,12 @@ describe("v2 documentation", () => {
       expect(contents).toContain("recommendedSkills");
       expect(contents).toContain("appliedSkills");
     }
-    expect(readme).toContain("Unreleased");
-    expect(readmeKo).toContain("Unreleased");
-    expect(config).toContain("Development docs");
+    expect(readme).toContain("Current release");
+    expect(readmeKo).toContain("현재 릴리스");
+    expect(readme).not.toContain("Unreleased");
+    expect(readmeKo).not.toContain("Unreleased");
+    expect(config).toContain("Documentation · v${version}");
+    expect(config).not.toContain("Development docs");
     expect(intro).toContain("skill 8개");
     expect(adr).toContain("eight public marketplace skills");
 

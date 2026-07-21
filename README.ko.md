@@ -4,7 +4,7 @@
 
 English version: [README.md](README.md)
 
-> **개발 상태:** 이 브랜치는 패키지 `0.2.1` 위의 **Unreleased** 변경을 설명합니다. 새 버전을 배포하기 전에 CHANGELOG를 확인하세요.
+> **현재 릴리스:** `0.3.0` · 검증된 릴리스 범위는 CHANGELOG에서 확인할 수 있습니다.
 
 ## 네 가지 납품 모드
 
