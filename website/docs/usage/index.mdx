@@ -1,0 +1,46 @@
+---
+sidebar_position: 1
+title: 어디서 시작하나요?
+hide_title: true
+description: SpecToPR의 네 가지 delivery 중 현재 작업에 맞는 시작점을 고릅니다
+---
+
+import GuideHero from "@site/src/components/guide/GuideHero";
+import ModeChooser from "@site/src/components/guide/ModeChooser";
+import NextStep from "@site/src/components/guide/NextStep";
+
+<GuideHero
+  eyebrow="Four inputs, one verified delivery"
+  title="어디서 시작하나요?"
+  summary="지금 가지고 있는 기준선을 고르세요. SpecToPR이 필요한 추가 입력, 검증 범위, PR 증거를 그 케이스에 맞춰 구성합니다."
+  primary={{ label: "기획서로 시작", href: "/usage/brief" }}
+  secondary={{ label: "먼저 설치 확인", href: "/getting-started/installation" }}
+/>
+
+<ModeChooser locale="ko" />
+
+## 30초 선택 기준
+
+| 출발점              | 필수로 주는 것                             | 비교 기준                   | draft PR에 더해지는 것                      |
+| ------------------- | ------------------------------------------ | --------------------------- | ------------------------------------------- |
+| 제품/화면 전체 개발 | 기획서 + Figma + OpenAPI                   | Figma ↔ 결과 화면           | API 사용·gap, 화면 일치율, Web Vitals       |
+| 레거시 마이그레이션 | 대상 저장소 + 실행 가능한 별도 legacy path | 실행한 legacy ↔ 결과 화면   | inventory·coverage, 이관/제외 근거          |
+| 한 기능 개발        | 기획서 + Figma + OpenAPI                   | Figma ↔ 결과 화면           | 해당 기능 E2E + 재생 가능한 영상 정확히 1개 |
+| 디자인 구현         | Figma URL + 대상 저장소                    | Figma ↔ mock 기반 결과 화면 | 수치화된 시각 비교; 실제 API 통합은 제외    |
+
+:::tip[입력이 섞여 있어도 괜찮습니다]
+Mode는 결과물과 필수 evidence를 고르고, source는 조합됩니다. 예를 들어 `feature`에 brief, Figma, OpenAPI, project guidance를 함께 줄 수 있습니다.
+:::
+
+## 모든 케이스가 공유하는 약속
+
+한 명의 implementation writer가 구현하고, immutable packet을 functional reviewer와 UI일 때 design reviewer가 독립 검토합니다. 시각 검증은 `pngjs`로 읽은 RGBA 픽셀을 선형 색 공간에서 비교하며 허용 거리 `0.02`, review ratio `98%` 이상, mask `20%` 이하, 비교 총 3회를 계약으로 사용합니다.
+
+<NextStep
+  eyebrow="추천 시작점"
+  title="처음이라면 brief 케이스를 그대로 복사하세요"
+  description="필수 입력, 최소·완전 프롬프트, 예상 브랜치와 15개 섹션 PR까지 한 페이지에서 볼 수 있습니다."
+  href="/usage/brief"
+  label="기획서 케이스 열기"
+  secondary={{ label: "파이프라인 이해하기", href: "/concepts/pipeline" }}
+/>

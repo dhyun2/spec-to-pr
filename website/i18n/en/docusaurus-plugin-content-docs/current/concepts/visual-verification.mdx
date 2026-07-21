@@ -1,0 +1,52 @@
+---
+sidebar_position: 3
+title: Visual verification
+hide_title: true
+description: Pixel comparison, provenance, and reviewer gates for Figma or running-legacy baselines
+---
+
+import GuideHero from "@site/src/components/guide/GuideHero";
+import VisualProof from "@site/src/components/guide/VisualProof";
+import NextStep from "@site/src/components/guide/NextStep";
+
+<GuideHero
+  eyebrow="Baseline → capture → metrics → review"
+  title="How visual similarity is computed"
+  summary="This is not a score an agent writes by feel. Runtime reads two PNGs captured under the same conditions and produces pixel metrics plus inspectable diffs."
+  primary={{ label: "Figma delivery", href: "/usage/figma" }}
+  secondary={{ label: "Legacy delivery", href: "/usage/legacy" }}
+/>
+
+## Real comparator outputs
+
+<VisualProof locale="en" />
+
+## Pin the comparison target first
+
+- `brief`, `feature`, and `figma`: the baseline is the node PNG fetched through host-connected Figma.
+- `legacy`: the baseline is a PNG captured from the separately running `legacyProjectRoot` at the matching route and state.
+- Actual comes from the target implementation at the same route, state, viewport, device scale, and deterministic fixture.
+- Both captures pin provider, ISO `capturedAt`, project-relative PNG path, and `sha256:` digest into the current immutable packet.
+
+## What `compare-visuals` calculates
+
+Runtime uses the `pngjs`-based bounded decoder to read both images as RGBA and rejects dimension mismatch. Every mask needs a reason and coordinates; masking more than `20%` or every pixel fails.
+
+For each compared pixel, sRGB channels move into linear color space, alpha is premultiplied, and normalized Euclidean RGBA distance is calculated. Byte-identical pixels count as exact matches; distance at or below `0.02` counts as a review match. `reviewMatchRatio` must reach at least `98%`.
+
+:::info[Repair is deliberately bounded]
+There are three total comparisons: the initial comparison plus at most two repairs. Runtime rejects caller-supplied scores. Capture produces baseline and actual PNGs under the same target contract; the production comparator accepts those two PNGs and returns `diff.png`, `overlay.png`, and metrics. The report binds capture and comparison paths and digests into one packet.
+:::
+
+## Who verifies that the proof is trustworthy?
+
+The `functional reviewer` does not replace the visual score. For UI scope, the `design reviewer` verifies that baseline provenance, actual manifest, digests, threshold, mask reasons, and diff/overlay paths belong to the current packet, then evaluates interaction, responsive behavior, and accessibility.
+
+<NextStep
+  eyebrow="Apply it"
+  title="If you only have Figma, start with deterministic mocks"
+  description="The design case never invents a production API. It reproduces states with mock data and uses this same pixel pipeline."
+  href="/usage/figma"
+  label="Open the Figma case"
+  secondary={{ label: "Revisit review ownership", href: "/concepts/reviews" }}
+/>

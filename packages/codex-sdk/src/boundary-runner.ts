@@ -6,6 +6,7 @@ import {
   type AggregatedUsage,
   type WorkloadSize,
 } from "./workload-budget.js";
+import { parallelReviewersForWorkload } from "./generated/delivery-mode-policy.js";
 
 export type BoundaryWorkflowStatus = {
   runId: string;
@@ -513,7 +514,7 @@ function parseDelegationPolicy(
       allowNested: false,
       maxReadOnlyScouts:
         workloadSize === "M" ? 1 : workloadSize === "L" || workloadSize === "XL" ? 2 : 0,
-      parallelReviewers: workloadSize === "L" || workloadSize === "XL",
+      parallelReviewers: parallelReviewersForWorkload(workloadSize),
     };
   }
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;

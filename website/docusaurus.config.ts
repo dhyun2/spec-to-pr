@@ -8,7 +8,7 @@ const { version } = require("../package.json") as { version: string };
 
 const config: Config = {
   title: "SpecToPR",
-  tagline: "기획서 · 레거시 변경 · 사용자 기능 · Figma를 검증된 구현과 draft PR로",
+  tagline: "기획서 · 레거시 마이그레이션 · 사용자 기능 · Figma를 검증된 구현과 draft PR로",
   favicon: "img/favicon.ico",
 
   future: { v4: true },
@@ -17,6 +17,7 @@ const config: Config = {
   organizationName: "dhyun2",
   projectName: "spec-to-pr",
   onBrokenLinks: "throw",
+  onBrokenAnchors: "throw",
 
   i18n: {
     defaultLocale: "ko",
@@ -28,12 +29,13 @@ const config: Config = {
   },
 
   markdown: {
-    format: "detect",
+    format: "mdx",
     mermaid: true,
     hooks: { onBrokenMarkdownLinks: "throw" },
   },
 
   themes: ["@docusaurus/theme-mermaid"],
+  clientModules: ["./src/client/accessibility.ts"],
 
   plugins: [
     [
@@ -70,7 +72,7 @@ const config: Config = {
       title: "SpecToPR",
       items: [
         { type: "docSidebar", sidebarId: "guideSidebar", position: "left", label: "가이드" },
-        { to: "/usage/brief", position: "left", label: "사용법" },
+        { to: "/usage/", position: "left", label: "사용법" },
         { to: "/concepts/pipeline", position: "left", label: "v2 구조" },
         { type: "localeDropdown", position: "right" },
         { href: "https://github.com/dhyun2/spec-to-pr", label: "GitHub", position: "right" },
@@ -84,7 +86,7 @@ const config: Config = {
           items: [
             { label: "설치", to: "/getting-started/installation" },
             { label: "퀵스타트", to: "/getting-started/quickstart" },
-            { label: "사용법", to: "/usage/brief" },
+            { label: "사용법", to: "/usage/" },
           ],
         },
         {
@@ -101,7 +103,7 @@ const config: Config = {
           items: [{ label: "GitHub", href: "https://github.com/dhyun2/spec-to-pr" }],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} SpecToPR · Released 0.2.1 (package v${version})`,
+      copyright: `Copyright © ${new Date().getFullYear()} SpecToPR · Development docs (package v${version})`,
     },
     prism: {
       theme: prismThemes.github,

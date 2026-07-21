@@ -1,4 +1,5 @@
 import { accumulateUsage, decideBudgetAction, } from "./workload-budget.js";
+import { parallelReviewersForWorkload } from "./generated/delivery-mode-policy.js";
 export async function executeBudgetedBoundaryTurns(input) {
     if (!Number.isInteger(input.maxTurns) || input.maxTurns <= 0) {
         throw new Error("maxTurns must be a positive integer");
@@ -332,7 +333,7 @@ function parseDelegationPolicy(value, workloadSize) {
             singleWriter: true,
             allowNested: false,
             maxReadOnlyScouts: workloadSize === "M" ? 1 : workloadSize === "L" || workloadSize === "XL" ? 2 : 0,
-            parallelReviewers: workloadSize === "L" || workloadSize === "XL",
+            parallelReviewers: parallelReviewersForWorkload(workloadSize),
         };
     }
     if (typeof value !== "object" || value === null || Array.isArray(value))

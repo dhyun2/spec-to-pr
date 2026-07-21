@@ -5,6 +5,7 @@ title: 설치
 
 import Tabs from "@theme/Tabs";
 import TabItem from "@theme/TabItem";
+import NextStep from "@site/src/components/guide/NextStep";
 
 # SpecToPR 설치
 
@@ -113,4 +114,13 @@ Doctor는 `workflow_info`를 호출해 contract version `2.0.0`과 다음 표면
 - `functional-reviewer`, `design-reviewer` 정의
 - evidence ledger, artifact storage, draft publisher, explicit archive runtime
 
-호스트별 tool namespace 표기는 다를 수 있지만 public contract는 같습니다. 다음은 [퀵스타트](/getting-started/quickstart)입니다.
+호스트별 tool namespace 표기는 다를 수 있지만 public contract는 같습니다.
+
+<NextStep
+  eyebrow="설치 확인 완료"
+  title="첫 draft PR 흐름을 5분 안에 실행해 보세요"
+  description="Doctor 결과를 확인했다면, 하나의 완전한 brief 요청으로 intake부터 publish까지 이어집니다."
+  href="/getting-started/quickstart"
+  label="퀵스타트 시작"
+  secondary={{ label: "설정 레퍼런스", href: "/reference/config" }}
+/>

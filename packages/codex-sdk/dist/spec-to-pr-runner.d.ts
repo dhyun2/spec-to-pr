@@ -7,12 +7,16 @@ export type SpecToPrCodexRunInput = {
     changeKind?: "auto" | "feature" | "fix" | "refactor" | "migration" | "design" | "docs";
     publication?: "draft" | "none";
     prompt?: string;
+    legacyProjectRoot?: string;
+    legacyNetworkEvidencePath?: string;
     briefPath?: string;
     docsPath?: string;
     docsPaths?: string[];
     figmaUrl?: string;
     openApiPath?: string;
     openApiPaths?: string[];
+    openApiUrl?: string;
+    openApiUrls?: string[];
     guidancePaths?: string[];
     skillHints?: string[];
     resumeThreadId?: string;

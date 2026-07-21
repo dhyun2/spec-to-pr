@@ -6,10 +6,13 @@ import { runSpecToPrWithCodex, type SpecToPrCodexRunInput } from "./spec-to-pr-r
 type ParsedArgs = {
   cwd?: string;
   prompt?: string;
+  legacyProject?: string;
+  legacyNetwork?: string;
   brief?: string;
   docs: string[];
   figma?: string;
   openapi: string[];
+  openapiUrls: string[];
   guidance: string[];
   skills: string[];
   resume?: string;
@@ -37,6 +40,12 @@ const input: SpecToPrCodexRunInput = {
 if (args.prompt !== undefined) {
   input.prompt = args.prompt;
 }
+if (args.legacyProject !== undefined) {
+  input.legacyProjectRoot = args.legacyProject;
+}
+if (args.legacyNetwork !== undefined) {
+  input.legacyNetworkEvidencePath = args.legacyNetwork;
+}
 if (args.brief !== undefined) {
   input.briefPath = args.brief;
 }
@@ -48,6 +57,9 @@ if (args.figma !== undefined) {
 }
 if (args.openapi.length > 0) {
   input.openApiPaths = args.openapi;
+}
+if (args.openapiUrls.length > 0) {
+  input.openApiUrls = args.openapiUrls;
 }
 if (args.guidance.length > 0) {
   input.guidancePaths = args.guidance;
@@ -102,7 +114,13 @@ console.log(
 );
 
 function parseArgs(argv: string[]): ParsedArgs {
-  const parsed: ParsedArgs = { docs: [], openapi: [], guidance: [], skills: [] };
+  const parsed: ParsedArgs = {
+    docs: [],
+    openapi: [],
+    openapiUrls: [],
+    guidance: [],
+    skills: [],
+  };
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -146,6 +164,12 @@ function parseArgs(argv: string[]): ParsedArgs {
       case "--prompt":
         parsed.prompt = value;
         break;
+      case "--legacy-project":
+        parsed.legacyProject = value;
+        break;
+      case "--legacy-network":
+        parsed.legacyNetwork = value;
+        break;
       case "--brief":
         parsed.brief = value;
         break;
@@ -157,6 +181,9 @@ function parseArgs(argv: string[]): ParsedArgs {
         break;
       case "--openapi":
         parsed.openapi.push(value);
+        break;
+      case "--openapi-url":
+        parsed.openapiUrls.push(value);
         break;
       case "--guidance":
         parsed.guidance.push(value);
@@ -211,10 +238,13 @@ function printUsage(): void {
 
 Options:
   --prompt <text>       Additional user request
+  --legacy-project <p> Separate read-only legacy project root
+  --legacy-network <p> Project-local HAR/JSON for the scoped legacy flow
   --brief <path>        Brief or plan path
   --docs <path>         Supporting document path (repeatable)
   --figma <url>         Figma file or node URL
   --openapi <path>      OpenAPI file path (repeatable)
+  --openapi-url <url>   HTTPS OpenAPI or Swagger UI URL (repeatable)
   --guidance <path>     Project guidance file path (repeatable)
   --skill <name>        Optional installed-skill hint (repeatable)
   --resume <thread-id>  Resume an existing Codex thread

@@ -20,11 +20,11 @@ The current repository exposes exactly **8 public marketplace skills**. Release 
 
 ## Mode routing
 
-Mode selects delivery/evidence policy while sources compose. `brief` requires `briefPath`; `legacy` a concrete delta and focused baseline; `feature` changed-feature Playwright E2E plus exactly one video; `figma` `figmaUrl` plus a real `figma-bundle`. `auto` does not invent mode evidence. Modes do not create new skills, stages, or agent lanes.
+Mode selects delivery/evidence policy. `brief` is brief/Figma/OpenAPI full delivery; `legacy` migrates from a separate `legacyProjectRoot`; `feature` adds changed-feature Playwright E2E and one video to full delivery; `figma` is mock-backed Figma implementation. All default to draft. `sourceProvenance`, `visualTargets`, `compare-visuals`, `legacyInventory`, `apiCoverage`, `performanceEvidence`, and 15-section `pr-report-v2.1` remain typed contracts inside the existing stages.
 
 ## Deterministic recommendations and applied trace
 
-Contracts derive optional `recommendedSkills` deterministically from sources and scope: `figmaUrl` → `figma`/`design-system`, `openApiPaths` → `api-generator`, detected React/Next packages → `react-best-practices`/`next-best-practices`, and `mode: feature` + UI → `playwright`.
+Contracts derive optional `recommendedSkills` deterministically from sources and scope: `figmaUrl` → `figma`/`design-system`, `openApiPaths`/`openApiUrls` → `api-generator`, detected React/Next packages → `react-best-practices`/`next-best-practices`, and `mode: feature` + UI → `playwright`.
 
 `intake-contracts`, `implement`, `review-functional`, `review-design`, `publish`, and `archive-openspec` are the public `stageSkillRoute` for durable actions. That action routing is not `deliveryProfile.recommendedSkills` or an optional applied-skill candidate.
 

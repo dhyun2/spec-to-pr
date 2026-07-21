@@ -7,6 +7,41 @@ use the plugin tag format, for example `spec-to-pr--v0.1.0`.
 
 ## Unreleased
 
+### Added
+
+- Added real PDF brief extraction, local/HTTPS OpenAPI provenance, bounded legacy feature inventory,
+  operation-aware API coverage, measured performance evidence, and deterministic alpha-aware visual
+  comparison with Figma or running-legacy baselines.
+- Added canonical JSON and Markdown `pr-report-v2.1` artifacts with explicit `complete`, `not-run`,
+  `blocked`, and `not-applicable` section states. Ready reports are current-packet bound; blocked
+  reports omit stale packet paths and expose the stopped stage, completed evidence, and exact unblock
+  action.
+- Added content-addressed artifact verification, atomic writes, bounded OpenAPI `$ref` resolution,
+  legacy inventory freshness checks, bounded PNG decoding, and digest-bound deterministic mock fixtures.
+
+### Changed
+
+- Defined four strict deliveries: brief + Figma + OpenAPI full delivery; separate-project legacy
+  migration; full feature delivery plus targeted E2E and one video; and mock-backed Figma delivery.
+- Synchronized SDK prompts, MCP capabilities, public skills, reviewer profiles, READMEs, ADRs, and
+  the bilingual four-page guide; Figma delivery now defaults to a draft PR.
+- Upload visual and feature assets to one managed `spec-to-pr/evidence` branch using immutable
+  run/packet/target/artifact paths and upload-commit-SHA-pinned URLs instead of per-Run branches or
+  source-branch mutation.
+- Pinned the complete OpenAPI operation inventory at intake, moved legacy migrated coverage to the
+  current implementation packet, derived legacy API candidates even without supplied OpenAPI,
+  required strict deterministic Figma mock manifests, and made visual comparison enforce at least
+  98% with no more than 20% justified masking over three total attempts.
+- Split and minified the MCP runtime with lazy PDF/PNG codecs. Release packages now validate every
+  emitted chunk, local import, packaged startup, and entry/total byte budget.
+- Completed the Korean/English guide surface, including translated getting-started/configuration
+  pages, localized sidebar/footer labels, and browser checks for language, landmarks, keyboard locale
+  navigation, mobile navigation, and duplicate IDs.
+
+### Removed
+
+- Removed ignored `.superpowers` planning residue and browser scratch logs from the working copy.
+
 ## 0.2.1 - 2026-07-15
 
 ### Added

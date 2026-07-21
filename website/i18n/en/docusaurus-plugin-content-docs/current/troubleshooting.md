@@ -9,15 +9,18 @@ Start with `/spec-to-pr:doctor`. `workflow_info` must report contract `2.0.0`, s
 
 ## Inputs and sources
 
-- Brief does not start: provide a readable project-relative regular file in `briefPath`.
-- Legacy scope expands: state current behavior, desired behavior, and the affected entry point; do not request broad modernization.
+- Brief does not start: provide all three required sources—a readable project-relative regular file in `briefPath`, `figmaUrl`, and project-relative `openApiPaths` or credential-free HTTPS `openApiUrls`. URL provenance records the URL, fetch time, and content hash.
+- Feature does not start: feature has the same three required sources as brief. It additionally requires only the changed feature's targeted E2E and exactly one video.
+- Legacy scope expands: provide a `legacyProjectRoot` that is a different absolute project directory from the target, then state the migration route, behavior, and error conditions. Runtime inventories that project read-only and compares the running legacy screen with the migrated result; it does not broadly modernize unrelated code.
+- `LEGACY_API_METHOD_UNKNOWN`: do not guess the method/path. Supply uniquely matching scoped OpenAPI or set `legacyNetworkEvidencePath` to a project-local standard HAR/request JSON captured from that flow. The input is bounded to 1 MB and 1,000 requests; blocked intake exposes no downstream action or submission bypass.
+- Figma-only starts unexpected API or E2E work: Figma mode uses deterministic mocks and visual comparison. Real API integration, performance evidence, feature E2E, and video are not enabled by default.
 - Figma contracts block: restore the host-connected Figma permission and submit exactly one strict bundle with `provider: host-connected-figma`, ISO `capturedAt`, matching `fileUrl`, non-empty `nodeIds`, JSON `manifestPath`, and real PNG `visualPaths`.
 - Explicit guidance is missing: every `guidancePaths` item must be a project-local regular file. Missing auto-discovery candidates are ignored.
 - Optional skill is absent: Missing optional skills do not block. Keep it out of `appliedSkills` and preserve guidance and required evidence.
 
 ## Feature browser evidence
 
-Use one unchained Playwright Test/CLI command that selects the changed feature by path, tag, or project. Reject broad/full-project commands, list/pass-with-no-tests options, skipped/zero tests, or invalid structured JSON. Feature requires exactly one non-empty valid WebM/MP4 no larger than 25 MB; other profiles do not inherit that video requirement.
+Use one unchained Playwright Test/CLI command that selects the changed feature by path, tag, or project. Reject broad/full-project commands, list/pass-with-no-tests options, skipped/zero tests, or invalid structured JSON. Feature requires exactly one non-empty valid WebM/MP4 no larger than 25 MB; other profiles do not inherit that video requirement. Brief and legacy instead report applicable lab Web Vitals and explicitly mark field data available or unavailable.
 
 Playwright assertions and structured results are the acceptance oracle. Browser MCP or a host browser is optional interactive reproduction/inspection. Chrome DevTools MCP is conditional for console, network, performance, memory, and live-DOM diagnosis. Screenshots, video, DevTools traces, and agent observation do not replace assertions.
 

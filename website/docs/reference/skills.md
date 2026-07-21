@@ -20,11 +20,11 @@ title: 공개 스킬 8개
 
 ## Mode routing
 
-Mode는 납품·증거 정책이고 source는 조합됩니다. `brief`는 `briefPath`, `legacy`는 concrete delta/focused baseline, `feature`는 changed-feature Playwright E2E와 영상 정확히 1개, `figma`는 `figmaUrl`과 real `figma-bundle`을 요구합니다. `auto`는 mode-specific evidence를 임의로 켜지 않습니다. Mode마다 새 skill/stage/agent lane을 만들지 않습니다.
+Mode는 납품·증거 정책입니다. `brief`는 brief/Figma/OpenAPI full delivery, `legacy`는 별도 `legacyProjectRoot` migration, `feature`는 full delivery + changed-feature Playwright E2E/영상 1개, `figma`는 mock-backed Figma 구현입니다. 모두 기본 draft입니다. `sourceProvenance`, `visualTargets`, `compare-visuals`, `legacyInventory`, `apiCoverage`, `performanceEvidence`, 15-section `pr-report-v2.1`는 기존 stage 안의 typed contract이며 새 skill/lane을 만들지 않습니다.
 
 ## Deterministic recommendation과 적용 trace
 
-Contracts는 source와 scope에서 optional `recommendedSkills`를 deterministic하게 계산합니다: `figmaUrl` → `figma`/`design-system`, `openApiPaths` → `api-generator`, 감지된 React/Next package → `react-best-practices`/`next-best-practices`, `mode: feature` + UI → `playwright`입니다.
+Contracts는 source와 scope에서 optional `recommendedSkills`를 deterministic하게 계산합니다: `figmaUrl` → `figma`/`design-system`, `openApiPaths`/`openApiUrls` → `api-generator`, 감지된 React/Next package → `react-best-practices`/`next-best-practices`, `mode: feature` + UI → `playwright`입니다.
 
 `intake-contracts`, `implement`, `review-functional`, `review-design`, `publish`, `archive-openspec`은 durable action의 public `stageSkillRoute`입니다. 이 action routing은 `deliveryProfile.recommendedSkills`나 optional applied-skill 후보가 아닙니다.
 

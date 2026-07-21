@@ -1,88 +1,100 @@
 ---
 sidebar_position: 2
-title: 2. Legacy change → draft PR
-description: Capture a focused baseline and change only a narrow legacy behavior delta
+title: 2. Legacy migration → draft PR
+description: Run a separate legacy project as the migration and visual baseline for a target project
 ---
+
+import RunPipeline from "@site/src/components/guide/RunPipeline";
+import NextStep from "@site/src/components/guide/NextStep";
 
 Immediately after intake, status reports an `XS`–`XL` workload, estimated token range, confidence, and reasons. These are estimates, not fixed promises. At the 80% boundary SpecToPR checkpoints and continues from compact context; at the hard limit it splits scope or waits for a user decision without removing anything from `requiredValidations`.
 
 ## Use this case <span id="use-this-case-legacy"></span>
 
-Use this case to preserve an existing product while changing one **narrow current → desired behavior delta**. It fits bug fixes, small compatibility changes, and bounded refactors. It is not a request to inventory or modernize the entire repository.
+Use this case to migrate behavior from a separate legacy project into the target repository. Inventory its routes/components/APIs/state, run both applications, and implement the behavior in the target architecture. The visual baseline is the **running legacy** screen, not Figma.
 
-:::tip Input / result
-**Input:** repository + reproducible current behavior + desired delta · **Result:** focused baseline, minimal change, affected regression checks, and a draft PR
+:::tip[Input / result]
+**Input:** target repository + separate `legacyProjectRoot` + migration scope · **Result:** legacy coverage, running legacy comparison, Web Vitals, inventory-derived API usage/gaps, and a 15-section draft PR
 :::
+
+<RunPipeline locale="en" mode="legacy" />
 
 ## Required inputs <span id="required-inputs-legacy"></span>
 
-| Input         | Requirement                                                         |
-| ------------- | ------------------------------------------------------------------- |
-| Repository    | Absolute Git repository path with a usable run or test setup        |
-| `mode`        | `legacy`                                                            |
-| Delta         | Narrow current behavior, desired behavior, and affected entry point |
-| `changeKind`  | Usually `fix` or `refactor`, matching the actual intent             |
-| `scope`       | `ui` for a UI delta; otherwise normally `non-ui`                    |
-| `publication` | `draft` for a PR or `none` to stop after reviews                    |
+| Input               | Requirement                                           |
+| ------------------- | ----------------------------------------------------- |
+| Repository          | Absolute path to the target Git repository            |
+| `mode`              | `legacy`                                              |
+| `legacyProjectRoot` | Absolute path to a different read-only legacy project |
+| Migration scope     | Routes, screens, user behavior, and APIs to migrate   |
+| `changeKind`        | `migration`                                           |
+| `scope`             | `ui`                                                  |
+| `publication`       | `draft` for a PR or `none` to stop after reviews      |
 
 ## Optional inputs <span id="optional-inputs-legacy"></span>
 
-- A reproduction command, failure log, test name, route, or screenshot makes the focused baseline precise.
-- `briefPath`, `docsPaths`, and `openApiPaths` add contract evidence for the delta.
-- `figmaUrl` adds UI design evidence and requires a real `figma-bundle`.
+- Start commands, fixtures, route, and state for both apps make the running baseline precise.
+- `legacyNetworkEvidencePath`: only when source adapters cannot determine a method/path, provide a scoped legacy-flow HAR/JSON under a gitignored evidence directory inside the target project. Standard HAR, `{requests:[{method,url}]}`, and `[{method,url}]` are accepted up to 1 MB and 1,000 requests. Raw headers/cookies/bodies/query strings are not copied into durable artifacts or PRs; only locator, digest, normalized method/path, and adapter remain.
+- `briefPath`, `docsPaths`, `openApiPaths`, and `openApiUrls` add migration evidence.
 - `guidancePaths` and `skillHints` specify project rules and applicable supporting skills.
 
 ## Minimal prompt <span id="minimal-prompt-legacy"></span>
 
 ```text
-/spec-to-pr /absolute/path/to/legacy-app
+/spec-to-pr /absolute/path/to/new-app
 mode: legacy
-scope: non-ui
-changeKind: fix
+scope: ui
+legacyProjectRoot: /absolute/path/to/legacy-app
+changeKind: migration
 publication: draft
-Reproduce the duplicate notification created by a payment retry, change only that behavior to create one notification, and publish a draft PR.
+Migrate the legacy payment-retry screen and behavior into the target architecture.
+Run both apps, compare the same route/state/viewport, and publish the measured draft PR.
 ```
 
 ## Full prompt example <span id="full-prompt-legacy"></span>
 
 ```text
-/spec-to-pr /absolute/path/to/legacy-app
+/spec-to-pr /absolute/path/to/new-app
 mode: legacy
-scope: non-ui
+scope: ui
+legacyProjectRoot: /absolute/path/to/legacy-app
+legacyNetworkEvidencePath: evidence/payment-retry.har
 docsPaths: [docs/payment-retry-rules.md]
 openApiPaths: [docs/payment-api.yaml]
 guidancePaths: [AGENTS.md, docs/architecture/ARCHITECTURE.md]
 skillHints: [api-generator]
-changeKind: fix
+changeKind: migration
 publication: draft
-Change only the duplicate notification created when POST /payments/:id/retry returns 409.
-Reproduce it with the existing integration test and keep the result as a focused baseline.
-Run only affected payment retry checks. Do not perform a full inventory, migration, or full-project E2E.
+Inventory and migrate the payment-retry route, component, API, state, and persistence.
+Run both projects and use the legacy screen as the visual baseline with the same fixture/viewport.
+Improve the target implementation without copying the old architecture blindly.
 ```
 
 ## What SpecToPR does <span id="process-legacy"></span>
 
-1. **Intake:** Confirm the delta and affected entry point; report the workload/token estimate.
-2. **Focused baseline:** Before editing, reproduce current behavior as a real test, log, or screenshot artifact.
-3. **Contracts:** Separate preserved behavior from changed behavior and freeze `requiredValidations`.
-4. **Implementation:** Preserve unrelated behavior and apply the smallest sufficient change.
-5. **Independent reviews:** Always run functional review; run design review only for a UI delta.
-6. **Report / publish:** Include before/after evidence, risk, rollback notes, and the draft PR.
+1. **Intake / legacy inventory:** Canonicalize the separate read-only root and create bounded `legacyInventory` keys. When HAR/JSON is supplied, pin its raw digest, the `runtime-network-har` adapter, and observed method/path into the same inventory digest. A blocked intake exposes no `nextActions` and rejects downstream submissions.
+2. **Contracts:** Map stable keys to `planned` coverage and declare running legacy screenshots as `visualTargets`; do not claim migrated files before implementation.
+3. **Implementation:** One writer migrates into the target architecture and replaces every planned key with current-packet migrated/excluded coverage. The legacy inventory records API candidates and confidence through the bounded `source-fetch-literal`, `source-fetch-dynamic`, `source-http-client`, `source-request-config`, and `source-generated-client` adapters. Candidates require exact operation-aware `apiCoverage` and `api-ready` evidence; zero candidates produce a `complete` API section bound to the adapter list and inventory digest. Scoped runtime/OpenAPI may resolve an ambiguous method/path only when the match is unique; otherwise intake returns a durable `LEGACY_API_METHOD_UNKNOWN` blocker and never guesses or loses the Run. Optional OpenAPI enriches this inventory but never controls applicability.
+4. **Compare / performance:** Run both apps at matching route/state/fixture/viewport. Every actual capture repeats the target route/state/viewport/device scale/fixture and records provider, ISO capture time, PNG path, and `sha256:` digest. Runtime rejects target drift or digest mismatch before `compare-visuals`, which enforces at least 98%, no more than 20% justified masking, and three total comparison attempts (the initial comparison plus at most two repairs); record Web Vitals.
+5. **Independent reviews:** Functional and design reviewers judge migration, visuals, interaction, and accessibility.
+6. **Report / publish:** Publish 15-section packet-bound `pr-report-v2.1` with migrated/out-of-scope/gap/blocked coverage.
+
+Every report section is `complete`, `not-run`, `blocked`, or `not-applicable`; stale paths outside the current review packet are omitted. GitHub images, diffs, and overlays use immutable paths on one managed `spec-to-pr/evidence` branch and URLs pinned to the upload commit SHA, not a branch per Run.
 
 ## Execution policy: stages, agents, skills, and tools
 
-| Durable stage       | Exact behavior for this case                                                                          |
-| ------------------- | ----------------------------------------------------------------------------------------------------- |
-| `intake`            | Record current/desired behavior, affected entry point, scope, publication, and workload.              |
-| `contracts`         | Establish the pre-edit focused baseline, preserved behavior, narrow delta, and `requiredValidations`. |
-| `implementation`    | One implementation writer preserves unrelated code and edits only the minimum delta.                  |
-| `functional-review` | The read-only `functional-reviewer` judges before/after evidence and affected regressions.            |
-| `design-review`     | The read-only `design-reviewer` applies only to a UI delta; otherwise it is not applicable.           |
-| `report`            | Build the canonical baseline, delta, checks, rollback, review, and blocker report.                    |
-| `publish`           | Create/update a draft only when ready and `publication: draft`.                                       |
-| `archive`           | Run only after verified merge and a separate user action.                                             |
+| Durable stage       | Exact behavior for this case                                                                           |
+| ------------------- | ------------------------------------------------------------------------------------------------------ |
+| `intake`            | Record current/desired behavior, affected entry point, scope, publication, and workload.               |
+| `contracts`         | Freeze `legacyInventory`, planned coverage, running legacy `visualTargets`, and `requiredValidations`. |
+| `implementation`    | One implementation writer migrates into the target architecture with API/performance evidence.         |
+| `functional-review` | The read-only `functional-reviewer` judges before/after evidence and affected regressions.             |
+| `design-review`     | The read-only `design-reviewer` applies only to a UI delta; otherwise it is not applicable.            |
+| `report`            | Build 15-section `pr-report-v2.1` migration/API/visual/performance/blocker reporting.                  |
+| `publish`           | Create/update a draft only when ready and `publication: draft`.                                        |
+| `archive`           | Run only after verified merge and a separate user action.                                              |
 
-Agent policy allows zero read-only scout workers for XS/S, at most one for M, and at most two for L/XL; even large legacy discovery stays independent and read-heavy. One implementation writer edits. There is **no nesting**, no **parallel writer**, and reviewer parallelism is post-implementation and UI-conditional.
+Agent policy allows zero read-only scout workers for XS/S, at most one for M, and at most two for L/XL; even large legacy discovery stays independent and read-heavy. One implementation writer edits. There is **no nesting**, no **parallel writer**, and reviewer parallelism is enabled only for L/XL after implementation.
 
 - `stageSkillRoute`: public actions route `intake-contracts` → `implement` → `review-functional`, adding `review-design` for a UI delta and `publish` for draft delivery. This routing is not `deliveryProfile.recommendedSkills`.
 - `recommendedSkills`: `figmaUrl` → `figma`, `design-system`; `openApiPaths` → `api-generator`; detected React/Next packages → `react-best-practices`, `next-best-practices` optional candidates.
@@ -93,7 +105,7 @@ Agent policy allows zero read-only scout workers for XS/S, at most one for M, an
 
 ### Ready, blocked diagnostic, and resume
 
-The normal path uses `workflow_publish intent: ready`. An unresolved baseline or verification blocker records redacted `blockerDetails` and an exact unblock action; only a passing preflight may create a `workflow_publish intent: blocked-diagnostic` draft. It remains `status: blocked`, not a success verdict. A dirty/target branch, missing auth, unsupported remote, missing committed delta/one-commit lead, or `PUBLISH_NO_DELTA` returns a **local blocked report** without empty commits or issue fallback.
+The normal path uses `workflow_publish intent: ready`. Ready and blocked use the same 15-section `pr-report-v2.1`, so a diagnostic draft exposes the stopped stage, completed migration, unrun validations, and exact unblock action. Only passing preflight may create `workflow_publish intent: blocked-diagnostic`; it remains `status: blocked`. `PUBLISH_NO_DELTA` returns a **local blocked report** without empty commits or issue fallback.
 
 For `diagnostic-publication-uncertain`, never publish automatically. Inspect GitHub/GitLab for a matching draft, show the result to the user, and call the same `workflow_publish` action with `recoverUncertain: true` only after explicit approval.
 
@@ -101,12 +113,13 @@ Correct the input/environment and resume the **same Run** at its latest status. 
 
 ## Evidence and validation <span id="evidence-legacy"></span>
 
-| Evidence        | Illustrative path                           | Passing condition                                               |
-| --------------- | ------------------------------------------- | --------------------------------------------------------------- |
-| Before baseline | `evidence/legacy/payment-retry-before.json` | Duplicate notifications reproduce under the same request        |
-| After result    | `evidence/legacy/payment-retry-after.json`  | One notification and the existing response contract remain      |
-| Affected checks | `evidence/tests/payment-retry.json`         | Relevant unit/integration checks pass                           |
-| Review          | `evidence/reviews/functional.json`          | Delta, preserved behavior, and regression evidence are approved |
+| Evidence   | Illustrative path                       | Passing condition                                                                           |
+| ---------- | --------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Inventory  | `evidence/legacy/inventory.json`        | Stable keys and source paths are recorded                                                   |
+| Coverage   | `evidence/legacy/coverage.json`         | Every scoped key is migrated/out-of-scope/gap/blocked                                       |
+| Visual     | `evidence/visual/migration-report.json` | Running legacy/result ratio ≥ 98%, mask ≤ 20%, with diff/overlay                            |
+| API gap    | `evidence/api/coverage.json`            | Every derived candidate maps to production/mock/test evidence, or an empty-inventory digest |
+| Web Vitals | `evidence/performance/migration.json`   | Lab metrics plus field source or unavailable reason                                         |
 
 Filenames are an **Illustrative expectation**. UI or Figma sources add design evidence, but legacy mode does not automatically require a feature video.
 
@@ -122,18 +135,21 @@ Filenames are an **Illustrative expectation**. UI or Figma sources add design ev
 **Illustrative expectation title:** `fix: prevent duplicate payment retry notification`
 
 ```md
-## Current behavior baseline
+## Legacy migration coverage
 
-- One 409 retry creates two notification rows
+- legacy_checkout_retry: migrated → src/features/payment-retry
 
-## Requested delta
+## Visual fidelity
 
-- An idempotency key limits the same retry to one notification row
+- running legacy vs target review match: 98.62%
+- baseline / target / diff / overlay links
 
-## Affected validation
+## API, performance, and reviews
 
-- pnpm test -- payment-retry: passed
+- documented operations: 4/4 covered; gap none
+- LCP 2.2s, CLS 0.03, TBT 140ms
 - functional-reviewer: approved
+- design-reviewer: approved
 
 ## Risk / rollback
 
@@ -143,20 +159,31 @@ Filenames are an **Illustrative expectation**. UI or Figma sources add design ev
 
 ## When the Run stops <span id="blockers-legacy"></span>
 
-| Blocker                                  | User action to resume                                                    |
-| ---------------------------------------- | ------------------------------------------------------------------------ |
-| The delta is broad, such as “improve it” | State current/desired behavior and the affected entry point              |
-| Current behavior cannot be reproduced    | Supply reproduction data, command, environment condition, or failure log |
-| Baseline and source contract conflict    | Choose the authoritative expected behavior                               |
-| Required regression cannot run           | Provide the minimum run setup or an approved substitute artifact         |
-| Publication preflight fails              | Clean and commit intended changes on the source branch                   |
+| Blocker                                              | User action to resume                                            |
+| ---------------------------------------------------- | ---------------------------------------------------------------- |
+| `legacyProjectRoot` is missing or equals target      | Supply a different legacy directory                              |
+| `LEGACY_API_METHOD_UNKNOWN`                          | Supply scoped OpenAPI or `legacyNetworkEvidencePath`             |
+| HAR/JSON exceeds 1 MB/1,000 requests or is malformed | Recapture only the scoped flow in a bounded accepted format      |
+| Either application cannot run                        | Supply start commands, fixtures, and environment conditions      |
+| Baseline and source contract conflict                | Choose the authoritative expected behavior                       |
+| Required regression cannot run                       | Provide the minimum run setup or an approved substitute artifact |
+| Publication preflight fails                          | Clean and commit intended changes on the source branch           |
 
 ## What this case does not do <span id="exclusions-legacy"></span>
 
-- It does not inventory, migrate, or modernize the whole repository.
-- It does not require an unaffected full test matrix or full-project E2E.
-- It does not guess current behavior without baseline evidence.
-- It does not create feature video or Figma evidence without those inputs.
+- It does not edit the legacy project or scan dependencies/build output without bounds.
+- It does not copy old architecture blindly or damage target project guidance.
+- It does not run full-project E2E or create feature video by default.
+- It does not use Figma as this case's visual baseline; the running legacy app is authoritative.
+
+<NextStep
+  eyebrow="Inspect the baseline"
+  title="See how the running legacy app becomes measured evidence"
+  description="Matching route, state, and viewport captures become RGBA metrics, diff, overlay, and an independent design verdict."
+  href="/concepts/visual-verification"
+  label="Open visual verification"
+  secondary={{ label: "Open the Run pipeline", href: "/concepts/pipeline" }}
+/>
 
 ## Other usage cases
 

@@ -1,0 +1,47 @@
+---
+sidebar_position: 2
+title: Agent reviews and evidence ownership
+hide_title: true
+description: What the orchestrator, implementation writer, functional reviewer, and design reviewer own and verify
+---
+
+import GuideHero from "@site/src/components/guide/GuideHero";
+import AgentReviewMap from "@site/src/components/guide/AgentReviewMap";
+import NextStep from "@site/src/components/guide/NextStep";
+
+<GuideHero
+  eyebrow="One writer, two independent verdicts"
+  title="What each agent verifies"
+  summary="Mutation authority and verdict authority stay separate. One implementation writer changes the repository; two reviewers only read the same immutable evidence."
+  primary={{ label: "See visual verification", href: "/concepts/visual-verification" }}
+  secondary={{ label: "See the whole Run", href: "/concepts/pipeline" }}
+/>
+
+## Roles and evidence flow
+
+<AgentReviewMap locale="en" />
+
+## The order is an authority boundary
+
+1. The orchestrator pins accepted contracts, current diff, executable results, evidence paths, and the `workflow_status` snapshot into an immutable packet.
+2. One implementation writer submits API-ready and UI work under the same `implementationContextId`. There is no API/UI parallel writer.
+3. The `functional-reviewer` reads acceptance criteria, API coverage, tests, architecture/security gates, and legacy coverage.
+4. For UI scope, the `design-reviewer` reads baseline provenance, the real capture, visual report, interaction, responsive states, design-system use, and accessibility.
+5. Every applicable verdict must pass before `report` and draft `publish` open.
+
+:::info[What reviewers never do]
+Reviewers do not call workflow MCP, repair implementation, or calculate a new score. The design reviewer verifies that the metrics, diff, overlay, and provenance produced by `compare-visuals` belong to the current packet.
+:::
+
+## Scouts are neither reviewers nor writers
+
+XS/S uses no scouts. M allows at most one and L/XL at most two read-only scouts for bounded, independent discovery. Scouts cannot nest, browse, call workflow MCP, or write implementation in parallel.
+
+<NextStep
+  eyebrow="Go deeper into validation"
+  title="See how the pixel metrics are produced"
+  description="The next page follows baseline and actual through RGBA distance, diff, overlay, and the review ratio."
+  href="/concepts/visual-verification"
+  label="Open visual verification"
+  secondary={{ label: "See skill ownership", href: "/reference/skills" }}
+/>

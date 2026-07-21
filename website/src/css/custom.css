@@ -12,6 +12,16 @@
   --ifm-color-primary-lighter: #12887f;
   --ifm-color-primary-lightest: #159a90;
   --ifm-code-font-size: 95%;
+  --ifm-background-color: #fbfdfc;
+  --ifm-background-surface-color: #ffffff;
+  --ifm-font-color-base: #18312f;
+  --ifm-heading-color: #102b29;
+  --ifm-navbar-shadow: none;
+  --ifm-toc-border-color: #dbe8e5;
+  --guide-surface: #ffffff;
+  --guide-surface-subtle: #f1f7f5;
+  --guide-border: #d7e7e3;
+  --guide-text-muted: #506764;
   --ifm-font-family-base:
     -apple-system, BlinkMacSystemFont, "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR",
     "Segoe UI", sans-serif;
@@ -26,7 +36,65 @@
   --ifm-color-primary-light: #43d9c6;
   --ifm-color-primary-lighter: #4fdbc9;
   --ifm-color-primary-lightest: #75e2d4;
+  --ifm-background-color: #0c1514;
+  --ifm-background-surface-color: #111e1c;
+  --ifm-font-color-base: #d9e7e4;
+  --ifm-heading-color: #f0f8f6;
+  --ifm-toc-border-color: #263c38;
+  --guide-surface: #111e1c;
+  --guide-surface-subtle: #162724;
+  --guide-border: #29433e;
+  --guide-text-muted: #a7bcb8;
   --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  text-rendering: optimizeLegibility;
+}
+
+.navbar {
+  border-bottom: 1px solid var(--guide-border);
+  background: color-mix(in srgb, var(--ifm-background-color) 92%, transparent);
+  backdrop-filter: blur(14px);
+}
+
+.navbar__title {
+  letter-spacing: -0.025em;
+}
+
+.theme-doc-markdown {
+  font-size: 1.02rem;
+  line-height: 1.75;
+}
+
+.theme-doc-markdown > h2 {
+  margin-top: 3.75rem;
+  letter-spacing: -0.035em;
+}
+
+.theme-doc-markdown > h3 {
+  margin-top: 2.5rem;
+  letter-spacing: -0.025em;
+}
+
+.theme-code-block,
+.theme-doc-markdown pre {
+  border: 1px solid var(--guide-border);
+  box-shadow: none;
+}
+
+.theme-doc-markdown a:not([class]) {
+  text-underline-offset: 0.16em;
+  text-decoration-thickness: 0.08em;
+}
+
+:where(a, button, input, select, textarea):focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--ifm-color-primary) 68%, white);
+  outline-offset: 3px;
 }
 
 /* 표가 본문 폭을 넘으면 표 안에서만 가로 스크롤 */
@@ -34,6 +102,12 @@
   display: block;
   width: 100%;
   overflow-x: auto;
+  border: 1px solid var(--guide-border);
+  border-radius: 0.75rem;
+}
+
+.markdown table thead {
+  background: var(--guide-surface-subtle);
 }
 
 /* 한국어 제목 줄바꿈 품질 */
@@ -41,4 +115,20 @@
 .markdown h2,
 .markdown h3 {
   word-break: keep-all;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+@media (max-width: 996px) {
+  .theme-doc-markdown {
+    font-size: 1rem;
+  }
+
+  .theme-doc-markdown > h2 {
+    margin-top: 3rem;
+  }
 }

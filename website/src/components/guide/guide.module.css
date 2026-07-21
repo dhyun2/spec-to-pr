@@ -1,0 +1,544 @@
+.hero {
+  position: relative;
+  margin: 0 0 3rem;
+  padding: clamp(2rem, 6vw, 4.5rem) clamp(1.25rem, 4vw, 3.5rem);
+  overflow: hidden;
+  border: 1px solid var(--guide-border);
+  border-radius: 1.25rem;
+  background: var(--guide-surface-subtle);
+}
+
+.hero::after {
+  position: absolute;
+  inset: 0.9rem 0.9rem auto auto;
+  width: 4.5rem;
+  height: 0.32rem;
+  background: var(--ifm-color-primary);
+  content: "";
+}
+
+.eyebrow,
+.pipelineKicker,
+.roleName {
+  margin: 0 0 0.65rem;
+  color: var(--ifm-color-primary-darkest);
+  font-size: 0.78rem;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+[data-theme="dark"] .eyebrow,
+[data-theme="dark"] .pipelineKicker,
+[data-theme="dark"] .roleName {
+  color: var(--ifm-color-primary-light);
+}
+
+.heroTitle {
+  max-width: 14ch;
+  margin: 0;
+  font-size: clamp(2.35rem, 5vw, 3.8rem);
+  line-height: 1.02;
+  letter-spacing: -0.055em;
+}
+
+.heroSummary {
+  max-width: 47rem;
+  margin: 1.25rem 0 0;
+  color: var(--guide-text-muted);
+  font-size: clamp(1.05rem, 2vw, 1.28rem);
+  line-height: 1.7;
+}
+
+.heroActions,
+.nextActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1.75rem;
+}
+
+.primaryAction,
+.secondaryAction,
+.textAction {
+  display: inline-flex;
+  min-height: 2.8rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0.7rem 1rem;
+  border-radius: 0.65rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.primaryAction {
+  border: 1px solid var(--ifm-color-primary-darkest);
+  background: var(--ifm-color-primary-darkest);
+  color: #fff;
+}
+
+.primaryAction:hover {
+  background: var(--ifm-color-primary-dark);
+  color: #fff;
+  text-decoration: none;
+}
+
+[data-theme="dark"] .primaryAction {
+  border-color: var(--ifm-color-primary);
+  background: var(--ifm-color-primary);
+  color: #062e2a;
+}
+
+.secondaryAction {
+  border: 1px solid var(--guide-border);
+  background: var(--guide-surface);
+  color: var(--ifm-font-color-base);
+}
+
+.secondaryAction:hover,
+.textAction:hover {
+  color: var(--ifm-color-primary);
+  text-decoration: none;
+}
+
+.textAction {
+  padding-inline: 0.4rem;
+}
+
+.modeGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 1.5rem 0 3rem;
+}
+
+.modeCard {
+  display: flex;
+  min-width: 0;
+  min-height: 16rem;
+  flex-direction: column;
+  padding: 1.35rem;
+  border: 1px solid var(--guide-border);
+  border-radius: 0.95rem;
+  background: var(--guide-surface);
+  color: var(--ifm-font-color-base);
+  text-decoration: none;
+  transition:
+    border-color 160ms ease,
+    transform 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.modeCard:hover {
+  border-color: var(--ifm-color-primary);
+  box-shadow: 0 12px 28px rgba(15, 118, 110, 0.1);
+  color: var(--ifm-font-color-base);
+  text-decoration: none;
+  transform: translateY(-2px);
+}
+
+.modeNumber {
+  color: var(--ifm-color-primary);
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.modeName {
+  margin: 0.7rem 0 1.15rem;
+  color: var(--ifm-heading-color);
+  font-size: 1.25rem;
+  font-weight: 760;
+  line-height: 1.35;
+}
+
+.modeMeta {
+  display: block;
+  margin-top: 0.5rem;
+  color: var(--guide-text-muted);
+  font-size: 0.91rem;
+  line-height: 1.55;
+}
+
+.modeMeta strong {
+  margin-right: 0.3rem;
+  color: var(--ifm-font-color-base);
+}
+
+.modeLink {
+  margin-top: auto;
+  padding-top: 1.15rem;
+  color: var(--ifm-color-primary-darkest);
+  font-weight: 700;
+}
+
+[data-theme="dark"] .modeLink {
+  color: var(--ifm-color-primary-light);
+}
+
+.pipeline {
+  margin: 1.75rem 0 3rem;
+  padding: 1rem;
+  border: 1px solid var(--guide-border);
+  border-radius: 1rem;
+  background: var(--guide-surface);
+}
+
+.pipelineHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.15rem 0.15rem 0.85rem;
+}
+
+.pipelineKicker {
+  margin: 0;
+}
+
+.modeBadge {
+  padding: 0.22rem 0.5rem;
+  border: 1px solid var(--guide-border);
+  border-radius: 0.45rem;
+  color: var(--guide-text-muted);
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.76rem;
+}
+
+.stageGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.stageButton {
+  display: flex;
+  min-width: 0;
+  min-height: 4.6rem;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.45rem;
+  padding: 0.75rem;
+  border: 1px solid var(--guide-border);
+  border-radius: 0.65rem;
+  background: var(--guide-surface-subtle);
+  color: var(--ifm-font-color-base);
+  cursor: pointer;
+  text-align: left;
+}
+
+.stageButton span {
+  color: var(--guide-text-muted);
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.7rem;
+}
+
+.stageButton strong {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.78rem;
+  line-height: 1.3;
+}
+
+.stageButton[data-active="true"] {
+  border-color: var(--ifm-color-primary);
+  background: color-mix(in srgb, var(--ifm-color-primary) 12%, var(--guide-surface));
+  box-shadow: inset 0 0 0 1px var(--ifm-color-primary);
+}
+
+.pipelineDetail {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin-top: 0.8rem;
+  overflow: hidden;
+  border: 1px solid var(--guide-border);
+  border-radius: 0.7rem;
+  background: var(--guide-border);
+}
+
+.pipelineDetail > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.9rem;
+  background: var(--guide-surface);
+}
+
+.pipelineDetail span {
+  color: var(--guide-text-muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.pipelineDetail strong {
+  overflow-wrap: anywhere;
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+
+.pipelineNoScript {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--guide-border);
+  border-radius: 0.7rem;
+  background: var(--guide-surface-subtle);
+}
+
+.pipelineNoScript > p {
+  margin: 0;
+}
+
+.pipelineNoScript ol {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1rem 0 0;
+  padding-left: 1.25rem;
+}
+
+.pipelineNoScript li > span {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--guide-text-muted);
+  font-size: 0.88rem;
+}
+
+.reviewMap,
+.visualProof {
+  margin: 1.75rem 0 3rem;
+}
+
+.reviewFlow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 1rem;
+  border-block: 1px solid var(--guide-border);
+}
+
+.reviewFlow span {
+  padding: 0.8rem 0.5rem;
+  border-right: 1px solid var(--guide-border);
+  color: var(--guide-text-muted);
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.76rem;
+  text-align: center;
+}
+
+.reviewFlow span:last-child {
+  border-right: 0;
+}
+
+.roleGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.roleCard {
+  min-width: 0;
+  padding: 1.25rem;
+  border: 1px solid var(--guide-border);
+  border-radius: 0.9rem;
+  background: var(--guide-surface);
+}
+
+.roleCard h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  line-height: 1.45;
+}
+
+.roleCard dl {
+  margin: 1rem 0 0;
+}
+
+.roleCard dl > div {
+  padding: 0.65rem 0;
+  border-top: 1px solid var(--guide-border);
+}
+
+.roleCard dt {
+  color: var(--guide-text-muted);
+  font-size: 0.72rem;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.roleCard dd {
+  margin: 0.2rem 0 0;
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.proofMetrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--guide-border);
+  border-radius: 0.8rem;
+  background: var(--guide-border);
+}
+
+.proofMetrics p {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0;
+  padding: 1rem;
+  background: var(--guide-surface);
+}
+
+.proofMetrics strong {
+  color: var(--ifm-heading-color);
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 1.2rem;
+}
+
+.proofMetrics span {
+  color: var(--guide-text-muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.proofGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.proofCard {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--guide-border);
+  border-radius: 0.8rem;
+  background: var(--guide-surface);
+}
+
+.proofCard img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 12 / 7;
+  background: var(--guide-surface-subtle);
+  object-fit: cover;
+}
+
+.proofCard figcaption {
+  padding: 0.75rem 0.9rem;
+  border-top: 1px solid var(--guide-border);
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.proofCaption {
+  margin: 1rem 0 0;
+  padding-left: 1rem;
+  border-left: 3px solid var(--ifm-color-primary);
+  color: var(--guide-text-muted);
+  font-size: 0.92rem;
+}
+
+.nextStep {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 2rem;
+  margin: 4rem 0 1rem;
+  padding: clamp(1.25rem, 3vw, 2rem);
+  border-block: 1px solid var(--guide-border);
+  background: var(--guide-surface-subtle);
+}
+
+.nextStep h2 {
+  margin: 0;
+  font-size: clamp(1.35rem, 3vw, 1.8rem);
+  letter-spacing: -0.035em;
+}
+
+.nextStep p:not(.eyebrow) {
+  max-width: 42rem;
+  margin: 0.65rem 0 0;
+  color: var(--guide-text-muted);
+}
+
+.nextActions {
+  justify-content: flex-end;
+  margin: 0;
+}
+
+@media (max-width: 760px) {
+  .modeGrid,
+  .roleGrid,
+  .proofGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .stageGrid,
+  .proofMetrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .nextStep {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .nextActions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 480px) {
+  .hero {
+    padding: 1.5rem 1rem;
+    border-radius: 0.9rem;
+  }
+
+  .heroTitle {
+    font-size: 2.35rem;
+  }
+
+  .heroActions,
+  .nextActions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .primaryAction,
+  .secondaryAction,
+  .textAction {
+    width: 100%;
+  }
+
+  .stageGrid,
+  .pipelineDetail,
+  .proofMetrics {
+    grid-template-columns: 1fr;
+  }
+
+  .reviewFlow {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modeCard {
+    transition: none;
+  }
+
+  .modeCard:hover {
+    transform: none;
+  }
+}

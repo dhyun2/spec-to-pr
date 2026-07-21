@@ -12,7 +12,7 @@
     {
       "name": "spec-to-pr",
       "displayName": "SpecToPR",
-      "description": "Fast, evidence-backed workflow for turning briefs, legacy changes, Figma designs, and API contracts into verified draft pull requests.",
+      "description": "Evidence-backed workflow for full brief delivery, legacy migration, feature E2E, and Figma implementation into draft pull requests.",
       "version": "0.2.1",
       "author": {
         "name": "SpecToPR Team"

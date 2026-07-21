@@ -4,15 +4,20 @@ title: 3. 기능 개발 → E2E·영상·draft PR
 description: API와 UI를 구현하고 해당 기능 E2E와 영상 하나를 포함해 draft PR로 받는 방법
 ---
 
+import RunPipeline from "@site/src/components/guide/RunPipeline";
+import NextStep from "@site/src/components/guide/NextStep";
+
 Intake 직후 `XS`~`XL` workload, 예상 token range, confidence와 근거가 표시됩니다. 이는 고정 약속이 아닙니다. 80% 경계에서는 checkpoint와 compact context로 이어가며, 한계에 도달해도 `requiredValidations`를 빼지 않고 범위를 나누거나 사용자의 결정을 기다립니다.
 
 ## 이 케이스를 쓰는 경우 <span id="use-this-case-feature"></span>
 
-사용자에게 보이는 기능을 API와 UI까지 완성하고, **그 기능만 고른 E2E와 정확히 영상 하나**를 증거로 넣어 draft PR로 받고 싶을 때 사용합니다. 기획서, Figma, OpenAPI, 보조 문서, 폴더 구조 지침을 모두 한 Run에 조합하는 zero-to-100 흐름입니다.
+기획서·Figma·OpenAPI로 사용자 기능을 API와 UI까지 완성하고, full delivery 증거에 **그 기능만 고른 E2E와 정확히 영상 하나**를 추가할 때 사용합니다. 전체 프로젝트 E2E나 모든 feature 영상은 만들지 않습니다.
 
-:::tip 입력 / 결과
+:::tip[입력 / 결과]
 **입력:** 구체적 사용자 기능 + `mode: feature` + UI scope · **결과:** API/UI 구현, 독립 기능·디자인 리뷰, targeted E2E, 영상 1개, draft PR
 :::
+
+<RunPipeline locale="ko" mode="feature" />
 
 ## 반드시 제공할 것 <span id="required-inputs-feature"></span>
 
@@ -21,15 +26,15 @@ Intake 직후 `XS`~`XL` workload, 예상 token range, confidence와 근거가 �
 | 저장소        | 브라우저 기능과 관련 검사를 실행할 수 있는 Git 저장소       |
 | `mode`        | `feature`                                                   |
 | `scope`       | `ui` 필수                                                   |
+| `briefPath`   | 기능 수용 조건이 있는 PDF/MD 등                             |
+| `figmaUrl`    | 구현할 화면/state의 file/node URL                           |
+| OpenAPI       | `openApiPaths` 또는 HTTPS `openApiUrls` 중 하나 이상        |
 | 기능 요청     | 사용자, 진입점, 성공/오류 상태, 완료 조건을 구체적으로 기술 |
 | `changeKind`  | `feature`                                                   |
-| `publication` | 영상이 포함된 PR 납품 계약이므로 `draft`                    |
+| `publication` | 기본값은 `draft`; 구현·리뷰·로컬 영상까지만이면 `none`      |
 
 ## 선택 입력 <span id="optional-inputs-feature"></span>
 
-- `briefPath`: 수용 조건과 범위를 고정합니다.
-- `figmaUrl`: 화면·상태·component 근거를 제공합니다. 있으면 connected-host `figma-bundle`이 필수입니다.
-- `openApiPaths`: API types, schema, wrapper/client, mock 계약을 만듭니다.
 - `docsPaths`: 비즈니스 규칙과 edge case를 보충합니다.
 - `guidancePaths`: `AGENTS.md`, architecture, folder-structure 등 프로젝트 규칙을 명시합니다.
 - `skillHints`: `react-best-practices`, `next-best-practices`, `design-system`, `api-generator`처럼 설치·적용 가능한 skill을 요청합니다.
@@ -43,6 +48,9 @@ mode: feature
 scope: ui
 changeKind: feature
 publication: draft
+briefPath: docs/checkout.md
+figmaUrl: https://www.figma.com/design/FILE/checkout?node-id=12-345
+openApiPaths: [docs/openapi.yaml]
 checkout을 API와 UI까지 구현하고 해당 checkout 경로만 E2E로 검증해 영상 하나와 함께 draft PR로 발행해줘.
 ```
 
@@ -66,12 +74,14 @@ checkout을 end-to-end로 구현해줘. checkout test path/tag/project만 실행
 ## SpecToPR이 진행하는 과정 <span id="process-feature"></span>
 
 1. **Intake:** 모든 source와 기능 경계를 정규화하고 workload/token 추정과 `requiredValidations`를 표시합니다.
-2. **Contracts:** brief/OpenAPI/docs를 합치고 충돌을 멈춥니다. Figma URL이 있으면 실제 node·variables·screenshot·asset context와 strict manifest를 캡처합니다.
+2. **Contracts:** `sourceProvenance`, requirements, API operations, Figma `visualTargets`를 고정합니다.
 3. **API-ready:** 물리적으로 다른 non-empty type/schema/wrapper/mock과 passing contract-test JSON을 하나의 `implementationContextId`로 먼저 제출합니다.
-4. **UI implementation:** 같은 context ID에서 mock 기반 상태를 검증하고 실제 API 연결, loading/empty/error/success 상태를 완성합니다.
+4. **UI / visual / performance:** 같은 context ID에서 UI와 실제 API를 연결하고 intake 전체 operation과 정확히 일치하는 `apiCoverage`, Web Vitals, Figma/결과 `compare-visuals`를 만듭니다. 각 actual capture는 target의 route/state/viewport/device scale/fixture를 반복하고 provider, ISO capture time, PNG path, `sha256:` digest를 기록합니다. 런타임은 target drift·digest mismatch를 거부하며 기준은 최소 98%, mask 최대 20%, 비교 총 3회(최초 1회 + repair 최대 2회)입니다.
 5. **Independent reviews:** functional reviewer와 design reviewer가 고정된 계약·diff·증거를 각각 판정합니다.
 6. **Targeted feature proof:** 변경 기능을 고르는 Playwright invocation 하나만 실행하고 strict JSON과 유효한 영상 하나를 기록합니다.
-7. **Report / publish:** exact selector, command, result, video path와 모든 verdict를 포함한 draft PR을 발행합니다.
+7. **Report / publish:** packet-bound `pr-report-v2.1` 15개 섹션에 source/API/visual/performance/E2E/video를 담아 draft PR을 발행합니다.
+
+각 보고서 섹션은 `complete`, `not-run`, `blocked`, `not-applicable` 중 하나입니다. 현재 review packet에 속하지 않는 stale path는 PR에서 생략합니다. GitHub 이미지·diff·overlay·영상은 실행별 branch가 아니라 단일 관리 branch `spec-to-pr/evidence`의 immutable 경로에 올리고 upload commit SHA로 고정합니다.
 
 ## 실행 정책: stage, agent, skill, tool
 
@@ -82,17 +92,19 @@ checkout을 end-to-end로 구현해줘. checkout test path/tag/project만 실행
 | `implementation`    | 한 명의 implementation writer가 같은 `implementationContextId`에서 API-ready 뒤 UI를 구현하고 targeted feature proof를 만듭니다. |
 | `functional-review` | read-only `functional-reviewer`가 contract, diff, project checks, targeted E2E를 판정합니다.                                     |
 | `design-review`     | read-only `design-reviewer`가 visual/interaction/responsive/accessibility evidence를 판정합니다.                                 |
-| `report`            | exact selector, structured result, video 하나, reviewer verdict와 risk를 canonical report로 만듭니다.                            |
+| `report`            | `pr-report-v2.1` 15개 섹션에 exact selector/result/video, visual ratio, API gap, Web Vitals, risk를 기록합니다.                  |
 | `publish`           | `workflow_publish intent: ready`로 asset을 동기화한 draft PR/MR만 생성·갱신합니다.                                               |
 | `archive`           | merge 후 authoritative evidence와 별도 사용자 요청이 있을 때만 실행합니다.                                                       |
 
-Agent 정책은 XS/S read-only scout 0명, M 최대 1명, L/XL 최대 2명입니다. Scout는 source discovery만 읽고, API와 UI는 한 implementation writer가 함께 편집합니다. **no nesting**, **parallel writer 금지**이며 functional/design reviewer 병렬 실행은 implementation 뒤에만 허용됩니다.
+Agent 정책은 XS/S read-only scout 0명, M 최대 1명, L/XL 최대 2명입니다. Scout는 source discovery만 읽고, API와 UI는 한 implementation writer가 함께 편집합니다. **no nesting**, **parallel writer 금지**이며 functional/design reviewer 병렬 실행은 L/XL의 implementation 뒤에만 허용됩니다.
 
 - `stageSkillRoute`: public action은 `intake-contracts` → `implement` → `review-functional`/`review-design` → `publish` 순서입니다. 이 routing은 `deliveryProfile.recommendedSkills`가 아닙니다.
 - `recommendedSkills`: `figmaUrl` → `figma`, `design-system`; `openApiPaths` → `api-generator`; 감지된 React/Next package → `react-best-practices`, `next-best-practices`; `mode: feature` + UI → `playwright` optional candidate입니다.
 - `appliedSkills`: `recommendedSkills`와 실제 available/applicable한 `skillHints`의 optional-skill 허용 합집합만 기록합니다. Missing optional skills가 targeted E2E나 다른 필수 evidence를 약화시키지 않습니다.
 - **workflow MCP:** 필수. **Figma host:** `figmaUrl`이 있을 때 필수. **Playwright Test/CLI:** 변경 기능을 test path/tag/project로 고른 단일 command, retrying assertion, structured result의 acceptance oracle로 필수이며 video는 정확히 1개만 supporting evidence입니다.
 - **Browser MCP:** optional interactive reproduction/inspection. **Chrome DevTools MCP:** console/network/performance/memory/live-DOM 진단에만 conditional입니다. 둘 다 Playwright assertion, positive `testCount`, exact selector를 대체하지 않습니다.
+
+정상/blocked 모두 같은 `pr-report-v2.1` 15개 섹션을 사용합니다. Blocked PR은 멈춘 stage, 완료 작업, 미실행 검증, exact unblock action을 표시하고 계속 `status: blocked`입니다.
 
 ### Ready, blocked diagnostic, resume
 
@@ -108,6 +120,9 @@ Agent 정책은 XS/S read-only scout 0명, M 최대 1명, L/XL 최대 2명입니
 | ---------------- | ------------------------------------------------- | -------------------------------------------------------------------------- |
 | API-ready        | `evidence/api/api-ready.json`                     | 실제 artifact 4종, passing contract test, 같은 `implementationContextId`   |
 | Figma            | `evidence/figma/figma-bundle.json`                | URL을 줬다면 real connected-host bundle과 실제 PNG                         |
+| Visual fidelity  | `evidence/visual/checkout-report.json`            | Figma/결과 ratio ≥ 98%, baseline/target/diff/overlay                       |
+| API gap          | `evidence/api/coverage.json`                      | operation별 production/mock/test mapping                                   |
+| Web Vitals       | `evidence/performance/checkout.json`              | lab budget과 field source 또는 unavailable reason                          |
 | 기능/디자인 리뷰 | `evidence/reviews/functional.json`, `design.json` | 두 독립 verdict 모두 approved                                              |
 | targeted result  | `evidence/e2e/targeted-feature.json`              | `status: passed`, exact selector, 같은 context ID, 양수 `testCount`만 포함 |
 | 영상             | `evidence/e2e/checkout.webm`                      | `featureVideo: required`, WebM/MP4, 0초 초과, 25 MB 이하, 정확히 1개       |
@@ -148,6 +163,12 @@ Agent 정책은 XS/S read-only scout 0명, M 최대 1명, L/XL 최대 2명입니
 - result: evidence/e2e/targeted-feature.json
 - featureVideo: evidence/e2e/checkout.webm (exactly one)
 
+## Visual, API, and performance
+
+- Figma review match: 99.03%
+- API operations: 6/6 covered; gap none
+- Web Vitals: LCP 2.0s, CLS 0.03, TBT 110ms
+
 ## Risks and exclusions
 
 - 전체 프로젝트 E2E는 실행하지 않음
@@ -171,8 +192,17 @@ Agent 정책은 XS/S read-only scout 0명, M 최대 1명, L/XL 최대 2명입니
 - Figma URL만 보고 디자인을 추측하거나 polling하지 않습니다.
 - unrelated migration, test matrix, release 검증을 feature PR에 추가하지 않습니다.
 
+<NextStep
+  eyebrow="영상 전에 확인할 것"
+  title="E2E 영상과 독립 reviewer의 역할은 다릅니다"
+  description="영상은 targeted feature 실행을 보조하고, 기능·디자인 verdict는 같은 immutable packet을 별도로 판정합니다."
+  href="/concepts/reviews"
+  label="에이전트 리뷰 보기"
+  secondary={{ label: "시각 검증 보기", href: "/concepts/visual-verification" }}
+/>
+
 ## 다른 사용법
 
 - [기획서 → draft PR](./brief)
-- [레거시 변경 → draft PR](./legacy)
+- [레거시 마이그레이션 → draft PR](./legacy)
 - [Figma → 디자인 구현](./figma)

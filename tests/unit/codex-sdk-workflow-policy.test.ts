@@ -273,21 +273,96 @@ describe("Codex SDK workflow policy", () => {
       changeKind: "feature",
       publication: "draft",
       briefPath: "docs/brief.md",
+      figmaUrl: "https://figma.com/design/example",
+      openApiPath: "docs/openapi.yaml",
     });
     const legacy = buildSpecToPrPrompt({
       workingDirectory: "/tmp/project",
       deliveryMode: "legacy",
-      changeKind: "fix",
+      changeKind: "migration",
       publication: "draft",
-      prompt: "Fix only the affected parser behavior.",
+      legacyProjectRoot: "/tmp/legacy-project",
+      legacyNetworkEvidencePath: "evidence/legacy.har",
+      prompt: "Migrate the checkout screen from the legacy project.",
     });
 
     expect(brief).toContain('mode: "brief"');
     expect(brief).toContain('briefPath: "docs/brief.md"');
-    expect(brief).not.toContain("design-reviewer");
+    expect(brief).toContain("design-reviewer");
     expect(brief).toContain("workflow_status snapshot");
+    expect(brief).toContain("sourceProvenance");
+    expect(brief).toContain("visualTargets");
+    expect(brief).toContain("compare-visuals");
+    expect(brief).toContain("apiCoverage");
+    expect(brief).toContain("Web Vitals");
+    expect(brief).toContain("pr-report-v2");
     expect(legacy).toContain('mode: "legacy"');
-    expect(legacy).toContain("focused baseline");
+    expect(legacy).toContain('legacyProjectRoot: "/tmp/legacy-project"');
+    expect(legacy).toContain('legacyNetworkEvidencePath: "evidence/legacy.har"');
+    expect(legacy).toContain("running legacy screen");
+    expect(legacy).toContain("legacyInventory");
+    expect(legacy).toContain("legacyCoverage");
+    expect(legacy).toContain('- Legacy project: "/tmp/legacy-project"');
+  });
+
+  it("keeps the legacy reference outside writable additional directories", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-sdk-legacy-"));
+    const target = path.join(root, "target");
+    const legacy = path.join(root, "legacy");
+    await mkdir(target);
+    await mkdir(legacy);
+    try {
+      expect(() =>
+        validateSpecToPrRunInput({
+          workingDirectory: target,
+          deliveryMode: "legacy",
+          legacyProjectRoot: legacy,
+          prompt: "Migrate checkout.",
+          additionalDirectories: [legacy],
+          usageCalibration: false,
+        }),
+      ).toThrow(/writable.*legacy|legacy.*writable/i);
+      expect(() =>
+        validateSpecToPrRunInput({
+          workingDirectory: target,
+          deliveryMode: "legacy",
+          legacyProjectRoot: legacy,
+          prompt: "Migrate checkout.",
+          additionalDirectories: [root],
+          usageCalibration: false,
+        }),
+      ).toThrow(/writable.*legacy|legacy.*writable/i);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("infers legacy, brief, and Figma modes without shrinking composed input", () => {
+    const legacy = buildSpecToPrPrompt({
+      workingDirectory: "/tmp/project",
+      legacyProjectRoot: "/tmp/legacy-project",
+      prompt: "Migrate checkout.",
+    });
+    const brief = buildSpecToPrPrompt({
+      workingDirectory: "/tmp/project",
+      briefPath: "docs/brief.md",
+      figmaUrl: "https://figma.com/design/example",
+      openApiPath: "docs/openapi.yaml",
+      prompt: "Implement checkout.",
+    });
+    const figma = buildSpecToPrPrompt({
+      workingDirectory: "/tmp/project",
+      figmaUrl: "https://figma.com/design/example",
+      prompt: "Implement this design with mock data.",
+    });
+
+    expect(legacy).toContain('mode: "legacy"');
+    expect(brief).toContain('mode: "brief"');
+    expect(brief).not.toContain('mode: "figma"');
+    expect(figma).toContain('mode: "figma"');
+    for (const prompt of [legacy, brief, figma]) {
+      expect(prompt).toContain('publication: "draft"');
+    }
   });
 
   it("normalizes legacy and plural sources into deduplicated workflow_start arrays", () => {
@@ -296,10 +371,13 @@ describe("Codex SDK workflow policy", () => {
       deliveryMode: "feature",
       prompt: "Implement checkout from the supplied brief.",
       briefPath: "docs/checkout.md",
+      figmaUrl: "https://figma.com/design/example",
       docsPath: "docs/business-rules.md",
       docsPaths: ["docs/./business-rules.md", "docs/error-cases.md"],
       openApiPath: "docs/openapi.yaml",
       openApiPaths: ["docs/openapi.yaml", "docs/admin-openapi.yaml"],
+      openApiUrl: "https://api.example.com/openapi.yaml",
+      openApiUrls: ["https://api.example.com/openapi.yaml", "https://admin-api.example.com/docs"],
       guidancePaths: ["AGENTS.md", "AGENTS.md", "docs/architecture/ARCHITECTURE.md"],
       skillHints: ["react-best-practices", "react-best-practices", "api-generator"],
     });
@@ -308,10 +386,16 @@ describe("Codex SDK workflow policy", () => {
     expect(prompt).toContain('briefPath: "docs/checkout.md"');
     expect(prompt).toContain('docsPaths: ["docs/business-rules.md","docs/error-cases.md"]');
     expect(prompt).toContain('openApiPaths: ["docs/openapi.yaml","docs/admin-openapi.yaml"]');
+    expect(prompt).toContain(
+      'openApiUrls: ["https://api.example.com/openapi.yaml","https://admin-api.example.com/docs"]',
+    );
     expect(prompt).toContain('guidancePaths: ["AGENTS.md","docs/architecture/ARCHITECTURE.md"]');
     expect(prompt).toContain('skillHints: ["react-best-practices","api-generator"]');
     expect(prompt.match(/^- Docs: "docs\/business-rules\.md"$/gm)).toHaveLength(1);
     expect(prompt.match(/^- OpenAPI: "docs\/openapi\.yaml"$/gm)).toHaveLength(1);
+    expect(
+      prompt.match(/^- OpenAPI URL: "https:\/\/api\.example\.com\/openapi\.yaml"$/gm),
+    ).toHaveLength(1);
     expect(prompt).toContain('- Project guidance: "AGENTS.md"');
     expect(prompt).toContain('- Project guidance: "docs/architecture/ARCHITECTURE.md"');
     expect(prompt).toContain('- Optional skill hint: "react-best-practices"');
@@ -404,6 +488,8 @@ describe("Codex SDK workflow policy", () => {
         workingDirectory: "/tmp/project",
         deliveryMode: "brief",
         briefPath: "b".repeat(1_000),
+        figmaUrl: "https://figma.com/design/example",
+        openApiPath: "docs/openapi.yaml",
         usageCalibration: false,
       }),
     ).not.toThrow();
@@ -412,9 +498,38 @@ describe("Codex SDK workflow policy", () => {
         workingDirectory: "/tmp/project",
         deliveryMode: "brief",
         briefPath: "b".repeat(1_001),
+        figmaUrl: "https://figma.com/design/example",
+        openApiPath: "docs/openapi.yaml",
         usageCalibration: false,
       }),
     ).toThrow(/briefPath.*1000/i);
+  });
+
+  it("accepts HTTPS OpenAPI URLs for full delivery and rejects secret-bearing URLs", () => {
+    expect(() =>
+      validateSpecToPrRunInput({
+        workingDirectory: "/tmp/project",
+        deliveryMode: "brief",
+        briefPath: "docs/brief.md",
+        figmaUrl: "https://figma.com/design/example",
+        openApiUrl: "https://api.example.com/docs",
+        usageCalibration: false,
+      }),
+    ).not.toThrow();
+
+    for (const openApiUrl of [
+      "http://api.example.com/openapi.yaml",
+      "https://user:secret@api.example.com/openapi.yaml",
+      "https://api.example.com/openapi.yaml?token=secret",
+    ]) {
+      expect(() =>
+        validateSpecToPrRunInput({
+          workingDirectory: "/tmp/project",
+          openApiUrl,
+          usageCalibration: false,
+        }),
+      ).toThrow(/openApiUrls|HTTPS|credentials|secret/i);
+    }
   });
 
   it("rejects normalized source aliases reused across intake roles", () => {
@@ -466,6 +581,8 @@ describe("Codex SDK workflow policy", () => {
       "docs/openapi.yaml",
       "--openapi",
       "docs/admin-openapi.yaml",
+      "--openapi-url",
+      "https://api.example.com/openapi.yaml",
       "--guidance",
       "AGENTS.md",
       "--guidance",
@@ -490,22 +607,25 @@ describe("Codex SDK workflow policy", () => {
         briefPath: "docs/checkout.md",
         docsPaths: ["docs/business-rules.md", "docs/error-cases.md"],
         openApiPaths: ["docs/openapi.yaml", "docs/admin-openapi.yaml"],
+        openApiUrls: ["https://api.example.com/openapi.yaml"],
         guidancePaths: ["AGENTS.md", "docs/architecture/ARCHITECTURE.md"],
         skillHints: ["react-best-practices", "api-generator"],
       }),
     ]);
   });
 
-  it("does not preactivate UI validation for a backend-only brief", () => {
+  it("always activates UI validation for the full brief contract", () => {
     const prompt = buildSpecToPrPrompt({
       workingDirectory: "/tmp/project",
       deliveryMode: "brief",
       briefPath: "docs/backend-brief.md",
-      prompt: "Implement a database migration and API endpoint.",
+      figmaUrl: "https://figma.com/design/example",
+      openApiPath: "docs/openapi.yaml",
+      prompt: "Implement the API-backed checkout screen.",
     });
 
     expect(prompt).toContain("functional-reviewer");
-    expect(prompt).not.toContain("design-reviewer");
+    expect(prompt).toContain("design-reviewer");
   });
 
   it("rejects incomplete mode-specific SDK inputs before starting Codex", () => {
@@ -513,8 +633,17 @@ describe("Codex SDK workflow policy", () => {
       buildSpecToPrPrompt({
         workingDirectory: "/tmp/project",
         deliveryMode: "brief",
+        briefPath: "docs/brief.md",
       }),
-    ).toThrow(/briefPath/);
+    ).toThrow(/figmaUrl/);
+    expect(() =>
+      buildSpecToPrPrompt({
+        workingDirectory: "/tmp/project",
+        deliveryMode: "brief",
+        briefPath: "docs/brief.md",
+        figmaUrl: "https://figma.com/design/example",
+      }),
+    ).toThrow(/OpenAPI/);
     expect(() =>
       buildSpecToPrPrompt({
         workingDirectory: "/tmp/project",
@@ -525,14 +654,16 @@ describe("Codex SDK workflow policy", () => {
       buildSpecToPrPrompt({
         workingDirectory: "/tmp/project",
         deliveryMode: "legacy",
+        prompt: "Migrate checkout.",
       }),
-    ).toThrow(/concrete prompt/);
+    ).toThrow(/legacyProjectRoot/);
     expect(() =>
       buildSpecToPrPrompt({
         workingDirectory: "/tmp/project",
         deliveryMode: "feature",
+        prompt: "Implement checkout.",
       }),
-    ).toThrow(/concrete prompt/);
+    ).toThrow(/briefPath/);
   });
 
   it("limits feature validation to one targeted E2E and one video", () => {
@@ -542,18 +673,22 @@ describe("Codex SDK workflow policy", () => {
       changeKind: "feature",
       publication: "draft",
       prompt: "Add user-facing checkout.",
+      briefPath: "docs/checkout.md",
+      figmaUrl: "https://figma.com/design/example",
+      openApiPath: "docs/openapi.yaml",
     });
 
     expect(prompt).toContain('mode: "feature"');
     expect(prompt).toContain("exactly one .webm or .mp4");
     expect(prompt).toContain("Never run the full-project E2E suite by default");
     expect(prompt).toContain("featureEvidence");
+    expect(prompt).toContain("pr-report-v2");
     expect(prompt).toContain("positive testCount");
     expect(prompt).toContain("non-target codex/<short-slug>");
     expect(prompt).toContain("commit all intended changes");
   });
 
-  it("uses connected Figma intake and does not publish by default for Figma-only delivery", () => {
+  it("uses connected Figma intake and publishes a draft by default for Figma-only delivery", () => {
     const prompt = buildSpecToPrPrompt({
       workingDirectory: "/tmp/project",
       deliveryMode: "figma",
@@ -562,10 +697,13 @@ describe("Codex SDK workflow policy", () => {
     });
 
     expect(prompt).toContain('mode: "figma"');
-    expect(prompt).toContain('publication: "none"');
+    expect(prompt).toContain('publication: "draft"');
     expect(prompt).toContain("connected Figma capability");
     expect(prompt).toContain("figma-bundle");
     expect(prompt).toContain("before contracts");
+    expect(prompt).toContain("deterministic mock data");
+    expect(prompt).toContain("98%");
+    expect(prompt).toContain("compare-visuals");
   });
 
   it("resumes the durable run without starting intake again", () => {

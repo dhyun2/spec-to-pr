@@ -12,6 +12,12 @@ const input = {
 if (args.prompt !== undefined) {
     input.prompt = args.prompt;
 }
+if (args.legacyProject !== undefined) {
+    input.legacyProjectRoot = args.legacyProject;
+}
+if (args.legacyNetwork !== undefined) {
+    input.legacyNetworkEvidencePath = args.legacyNetwork;
+}
 if (args.brief !== undefined) {
     input.briefPath = args.brief;
 }
@@ -23,6 +29,9 @@ if (args.figma !== undefined) {
 }
 if (args.openapi.length > 0) {
     input.openApiPaths = args.openapi;
+}
+if (args.openapiUrls.length > 0) {
+    input.openApiUrls = args.openapiUrls;
 }
 if (args.guidance.length > 0) {
     input.guidancePaths = args.guidance;
@@ -69,7 +78,13 @@ console.log(JSON.stringify({
     usageCalibration: result.usageCalibration,
 }, null, 2));
 function parseArgs(argv) {
-    const parsed = { docs: [], openapi: [], guidance: [], skills: [] };
+    const parsed = {
+        docs: [],
+        openapi: [],
+        openapiUrls: [],
+        guidance: [],
+        skills: [],
+    };
     for (let index = 0; index < argv.length; index += 1) {
         const arg = argv[index];
         const value = argv[index + 1];
@@ -107,6 +122,12 @@ function parseArgs(argv) {
             case "--prompt":
                 parsed.prompt = value;
                 break;
+            case "--legacy-project":
+                parsed.legacyProject = value;
+                break;
+            case "--legacy-network":
+                parsed.legacyNetwork = value;
+                break;
             case "--brief":
                 parsed.brief = value;
                 break;
@@ -118,6 +139,9 @@ function parseArgs(argv) {
                 break;
             case "--openapi":
                 parsed.openapi.push(value);
+                break;
+            case "--openapi-url":
+                parsed.openapiUrls.push(value);
                 break;
             case "--guidance":
                 parsed.guidance.push(value);
@@ -167,10 +191,13 @@ function printUsage() {
 
 Options:
   --prompt <text>       Additional user request
+  --legacy-project <p> Separate read-only legacy project root
+  --legacy-network <p> Project-local HAR/JSON for the scoped legacy flow
   --brief <path>        Brief or plan path
   --docs <path>         Supporting document path (repeatable)
   --figma <url>         Figma file or node URL
   --openapi <path>      OpenAPI file path (repeatable)
+  --openapi-url <url>   HTTPS OpenAPI or Swagger UI URL (repeatable)
   --guidance <path>     Project guidance file path (repeatable)
   --skill <name>        Optional installed-skill hint (repeatable)
   --resume <thread-id>  Resume an existing Codex thread

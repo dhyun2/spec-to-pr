@@ -1,41 +1,44 @@
 ---
 sidebar_position: 1
-title: v2 파이프라인
+title: Run은 어떻게 움직이나요?
+hide_title: true
 ---
 
-# v2 파이프라인
+import GuideHero from "@site/src/components/guide/GuideHero";
+import RunPipeline from "@site/src/components/guide/RunPipeline";
+import NextStep from "@site/src/components/guide/NextStep";
+
+<GuideHero
+eyebrow="One Run · eight durable stages"
+title="Run은 어떻게 움직이나요?"
+summary="요청이 들어온 순간부터 draft PR과 merge 후 archive까지, 한 변경이 남기는 상태·증거·권한 경계를 따라갑니다."
+primary={{ label: "리뷰 역할 보기", href: "/concepts/reviews" }}
+secondary={{ label: "내 케이스 고르기", href: "/usage/" }}
+/>
 
 네 delivery mode는 별도 pipeline이 아니라 하나의 Run과 하나의 delivery profile을 공유합니다. Delivery mode controls delivery and evidence; input sources compose independently.
 
 `feature` profile 하나가 brief, Figma URL, OpenAPI, 보조 문서, project guidance, optional skill hint를 모두 받을 수 있습니다. Brief/문서/OpenAPI는 scope와 workload 분류에 참여합니다. Project guidance is excluded from scope classification; explicit/discovered path와 실제 적용 skill만 trace로 유지합니다.
 
+## Run map
+
+<RunPipeline locale="ko" />
+
 ## 7개 public tool
 
-| Tool               | 역할                                                                           |
-| ------------------ | ------------------------------------------------------------------------------ |
-| `workflow_info`    | contract version, tool/stage/reviewer inventory 확인                           |
-| `workflow_start`   | Run 생성, scope/delivery profile과 초기 workload 추정 기록                     |
-| `workflow_advance` | 다음 외부 action 또는 terminal 상태까지 deterministic 진행                     |
-| `workflow_submit`  | contracts, API-ready, implementation, Figma bundle, review evidence 제출       |
-| `workflow_status`  | stage, workload/token range, blocker, next action, bounded resume context 조회 |
-| `workflow_publish` | canonical report로 draft PR/MR preview 또는 실행                               |
-| `workflow_archive` | merge 확인 후 explicit archive preview 또는 실행                               |
+| Tool               | 역할                                                                                |
+| ------------------ | ----------------------------------------------------------------------------------- |
+| `workflow_info`    | contract version, tool/stage/reviewer inventory 확인                                |
+| `workflow_start`   | Run 생성, scope/delivery profile과 초기 workload 추정 기록                          |
+| `workflow_advance` | 다음 외부 action 또는 terminal 상태까지 deterministic 진행                          |
+| `workflow_submit`  | contracts, API-ready, implementation, Figma/visual comparison, review evidence 제출 |
+| `workflow_status`  | stage, workload/token range, blocker, next action, bounded resume context 조회      |
+| `workflow_publish` | canonical report로 draft PR/MR preview 또는 실행                                    |
+| `workflow_archive` | merge 확인 후 explicit archive preview 또는 실행                                    |
 
 이 목록 밖의 v1 microtool은 public contract가 아닙니다.
 
 ## 8개 durable stage
-
-```mermaid
-flowchart LR
-    I["1. intake"] --> C["2. contracts"]
-    C --> M["3. implementation"]
-    M --> F["4. functional-review"]
-    M --> D["5. design-review"]
-    F --> R["6. report"]
-    D --> R
-    R --> P["7. publish"]
-    P --> A["8. archive"]
-```
 
 | Stage               | 완료 조건                                                                                        |
 | ------------------- | ------------------------------------------------------------------------------------------------ |
@@ -44,7 +47,7 @@ flowchart LR
 | `implementation`    | API-backed UI는 선행 `api-ready` evidence 필수; feature는 targeted E2E + 영상 1개                |
 | `functional-review` | 코드 scope의 필수 기능 gate와 requirement가 독립적으로 승인됨                                    |
 | `design-review`     | UI scope의 visual/interaction/accessibility evidence가 독립적으로 승인됨; 비-UI면 not applicable |
-| `report`            | 두 review와 required gate에서 canonical publish decision 생성                                    |
+| `report`            | immutable packet에 묶인 15-section `pr-report-v2.1` JSON/Markdown 생성                           |
 | `publish`           | publication이 `draft`일 때 draft review request와 필수 asset sync                                |
 | `archive`           | authoritative merge evidence가 있을 때 명시적으로 실행                                           |
 
@@ -87,7 +90,11 @@ flowchart LR
 
 API와 UI를 별도 agent/worktree로 나누지 않으므로 context handoff와 integration lane이 없습니다. API 없는 변경은 해당 준비를 not applicable로 처리합니다. API-backed UI는 물리적으로 서로 다른 비어 있지 않은 type/schema/wrapper/mock 파일과 `status: passed`인 JSON contract-test 결과를 안정적인 `implementationContextId`와 함께 `apiArtifacts`로 제출합니다. Path, symlink, hard link alias는 별도 증거가 아닙니다. 최종 구현은 같은 ID를 반복해야 하며 `apiReady: true` 주장만으로 완료될 수 없습니다.
 
+Intake는 local/remote raw digest, 조회 시각, resolved locator를 `sourceProvenance`로 고정하고 OpenAPI 전체 operation inventory를 생성합니다. Figma/running legacy baseline은 공통 `visualTargets`를 씁니다. 각 actual capture는 target의 route/state/viewport/device scale/fixture와 provider, ISO capture time, PNG path, `sha256:` digest를 제출하고, `compare-visuals`는 target drift·digest mismatch와 caller score를 거부한 채 exact/review ratio, diff, overlay를 최소 98%, 정당한 mask 최대 20%, 비교 총 3회(최초 1회 + repair 최대 2회)로 계산합니다. Legacy contracts는 stable key를 `planned`로 고정하고 final implementation이 current-packet `migrated`/제외 coverage로 교체합니다. Brief/feature API coverage는 intake OpenAPI operation 집합과 정확히 일치해야 합니다. Legacy는 명시된 bounded source adapter 목록으로 API 후보를 파생합니다. 후보가 있으면 같은 완전한 API 증거를 요구하고, 후보가 0개면 API 섹션을 adapter 목록과 inventory digest에 묶어 `complete`로 남깁니다. Method/path가 모호한 후보는 유일한 scoped runtime/OpenAPI match로만 해소하며 그렇지 않으면 Run ID가 보존된 intake blocker로 반환합니다.
+
 Project instruction precedence는 current user request → explicit `guidancePaths` → automatically discovered guidance → available/applicable installed skill → SpecToPR defaults입니다. Missing optional skill은 blocker가 아니며 project guidance가 generic skill 조언보다 우선합니다.
+
+모호한 legacy API는 대상 프로젝트 내부 `legacyNetworkEvidencePath`의 bounded HAR/request JSON(최대 1 MB·1,000 request) 또는 유일한 scoped OpenAPI로만 해소합니다. Runtime evidence의 digest와 adapter는 inventory에 고정되며, 미해소 intake는 `nextActions: []`이고 모든 downstream submission을 거부합니다.
 
 ## 두 개의 독립 review
 
@@ -110,12 +117,12 @@ Scout는 편집, browser, workflow MCP, nested delegation을 하지 않습니다
 
 ## Mode별 조건부 evidence
 
-| Mode      | Delivery/evidence 조건                             | 조합 가능한 source 예시                          |
-| --------- | -------------------------------------------------- | ------------------------------------------------ |
-| `brief`   | acceptance criteria와 관련 검사                    | `briefPath` + docs/OpenAPI/guidance              |
-| `legacy`  | 요청 delta의 focused baseline과 영향받은 회귀 검사 | docs/OpenAPI/guidance                            |
-| `feature` | 단일 Playwright + passing JSON + 유효 영상 1개     | brief + Figma + OpenAPI + docs + guidance/skills |
-| `figma`   | Figma-primary UI/visual evidence                   | `figmaUrl` + docs/guidance                       |
+| Mode      | Delivery/evidence 조건                           | 조합 가능한 source 예시                                  |
+| --------- | ------------------------------------------------ | -------------------------------------------------------- |
+| `brief`   | full API/UI + Figma ratio + API gap + Web Vitals | brief + Figma + local/URL OpenAPI                        |
+| `legacy`  | migration + running legacy ratio + 파생 API gap  | target + `legacyProjectRoot` + optional docs/OpenAPI/HAR |
+| `feature` | brief full delivery + targeted E2E + 영상 1개    | brief + Figma + OpenAPI + docs/guidance/skills           |
+| `figma`   | deterministic mock UI + Figma ratio              | `figmaUrl` + docs/guidance                               |
 
 Mode는 tool, stage, lane을 추가하지 않습니다. Feature mode만 영상 비용을 지며 full-project E2E는 기본이 아닙니다. 어떤 mode든 `figmaUrl`이 있으면 host Figma capability의 typed `figma-bundle` 한 개가 필요합니다. Figma provider는 runtime 밖에 있고 polling하지 않습니다.
 
@@ -131,8 +138,21 @@ Playwright Test/CLI web-first assertion과 structured result가 browser acceptan
 
 `workflow_publish intent: ready`는 canonical passed report에서 draft PR/MR만 생성·갱신합니다. Blocker는 raw prompt/secret/transcript/private absolute path 없이 다음 typed `blockerDetails`를 보존합니다: `stage`, `code`, `kind`, `retryable`, `resumable`, completed work, redacted evidence, attempted recovery, unrun validations, exact unblock action.
 
+정상과 blocked publication 모두 같은 `pr-report-v2.1` 15개 섹션을 사용합니다. 각 섹션은 `complete`, `not-run`, `blocked`, `not-applicable` 중 하나이며, 현재 review packet에 없는 stale evidence path는 생략됩니다. 정상은 source/requirements/files/API/legacy/visual/reviews/performance/feature/risk/rollback/evidence를, blocked는 같은 위치에서 not-run 상태와 stopped stage/exact unblock action을 표시합니다.
+
+GitHub 증거는 실행마다 branch를 만들지 않고 단일 관리 branch `spec-to-pr/evidence`의 immutable run/packet/target/artifact 경로에 저장합니다. PR 링크는 upload commit SHA에 고정되어 동일 경로를 재사용해도 과거 증거가 바뀌지 않습니다.
+
 `workflow_publish intent: blocked-diagnostic`은 clean tree, non-target source, supported authenticated remote, committed delta, target보다 한 commit ahead 조건이 이미 맞을 때만 diagnostic draft를 만들 수 있습니다. Diagnostic publication은 계속 `status: blocked`이며 report/publish passed verdict가 아닙니다. 조건이 없거나 `PUBLISH_NO_DELTA`이면 empty commit 또는 issue fallback 없이 **local blocked report**를 반환합니다. 같은 action이 자기 precondition blocker를 다시 publish하며 loop하지 않습니다.
 
 동시 실행을 막는 durable claim이 만료되거나 heartbeat를 잃어 외부 mutation 성공 여부를 확정할 수 없으면 `reason: diagnostic-publication-uncertain`을 반환하고 자동 재발행하지 않습니다. `recoverUncertain: false`가 기본값입니다. 사용자가 GitHub/GitLab에서 같은 source/target의 matching draft를 직접 확인한 뒤 명시적으로 승인한 경우에만 기존 `workflow_publish`를 `recoverUncertain: true`로 다시 호출합니다. 이 선택적 복구는 새 tool/stage가 아니며 blocked stages를 passed로 바꾸지 않고, SDK도 자동 승인하지 않습니다.
 
 해결 뒤 `workflow_status.resumeContext`로 **same Run**을 이어가 통과한 stage를 반복하지 않습니다. Diagnostic draft가 있으면 같은 source/target의 **same draft PR**에서 `[Blocked]` 제목과 blocked label을 정상 ready 제목/본문으로 바꾸고 label을 제거합니다. Merge 뒤 archive는 별도 사용자 action이며 자동 polling하지 않습니다.
+
+<NextStep
+eyebrow="다음 개념"
+title="같은 packet을 읽어도 reviewer마다 보는 것이 다릅니다"
+description="Functional과 design verdict를 분리한 이유와 각 agent의 입력·출력·금지 권한을 확인하세요."
+href="/concepts/reviews"
+label="에이전트 리뷰 보기"
+secondary={{ label: "시각 검증 보기", href: "/concepts/visual-verification" }}
+/>

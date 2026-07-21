@@ -51,6 +51,10 @@ export const ReviewRequestPayloadSchema = z
     sourceBranch: z.string().trim().min(1),
     targetBranch: z.string().trim().min(1),
     headSha: GitObjectIdSchema.optional(),
+    reviewPacketId: z
+      .string()
+      .regex(/^packet_[a-f0-9]{64}$/)
+      .optional(),
     mode: PublishModeSchema.default("draft"),
     labels: z.array(z.string().trim().min(1)).default([]),
     reviewers: z.array(z.string().trim().min(1)).default([]),

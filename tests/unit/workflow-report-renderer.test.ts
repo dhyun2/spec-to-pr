@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { WorkflowReportMetadataSchema } from "../../src/pr-report/pr-report-model.js";
 import {
-  renderBlockedWorkflowReport,
+  PrReportV2Schema,
+  WorkflowReportMetadataSchema,
+  assertCurrentPrReportV2,
+} from "../../src/pr-report/pr-report-model.js";
+import {
+  renderPrReportV2Markdown,
   renderReadyWorkflowReport,
 } from "../../src/pr-report/workflow-report-renderer.js";
 
@@ -70,44 +74,6 @@ Ready for draft review.
 ## Feature E2E video
 
 - test-results/checkout.mp4
-`;
-
-const BLOCKED_REPORT_GOLDEN = `# SpecToPR Run run_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-
-## Decision
-
-Blocked. Diagnostic report only.
-
-## Blocker
-
-- Stage: implementation
-- Kind: missing-tool
-- Code: MISSING_TOOL
-- Retryable: no
-- Resumable: yes
-- Summary: Cannot read [project-root]/config.json with token&#61;[REDACTED] available.
-
-## Completed work
-
-- intake stage passed.
-- Contracts saved under [project-root]/contracts.
-
-## Evidence
-
-- contracts/requirements.json
-
-## Attempted recovery
-
-- authorization: [REDACTED]
-
-## Unrun validations
-
-- functional
-- accessibility
-
-## Exact unblock action
-
-Set password&#61;[REDACTED] and AWS_SECRET_ACCESS_KEY&#61;[REDACTED] in [project-root]/.env and resume implementation.
 `;
 
 describe("workflow report renderer", () => {
@@ -183,139 +149,6 @@ describe("workflow report renderer", () => {
     expect(report).toBe(READY_REPORT_GOLDEN);
   });
 
-  it("renders a complete blocked diagnostic and redacts project roots and secrets", () => {
-    const report = renderBlockedWorkflowReport({
-      runId: "run_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      projectRoot: "/Users/alice/private/app",
-      blocker: {
-        stage: "implementation",
-        kind: "missing-tool",
-        code: "MISSING_TOOL",
-        retryable: false,
-        resumable: true,
-        summary: "Cannot read /Users/alice/private/app/config.json with token=topsecret available.",
-        completedWork: [
-          "intake stage passed.",
-          "Contracts saved under /Users/alice/private/app/contracts.",
-        ],
-        evidencePaths: ["contracts/requirements.json"],
-        attemptedRecovery: ["authorization: Bearer abc.def.ghi"],
-        unrunValidations: ["functional", "accessibility"],
-        exactUnblockAction:
-          "Set password=hunter2 and AWS_SECRET_ACCESS_KEY=aws-secret-value in /Users/alice/private/app/.env and resume implementation.",
-      },
-    });
-
-    expect(report).toBe(BLOCKED_REPORT_GOLDEN);
-    expect(report).not.toContain("/Users/alice/private/app");
-    expect(report).not.toContain("topsecret");
-    expect(report).not.toContain("abc.def.ghi");
-    expect(report).not.toContain("hunter2");
-    expect(report).not.toContain("aws-secret-value");
-  });
-
-  it("keeps every blocked diagnostic section explicit when no details were recorded", () => {
-    const report = renderBlockedWorkflowReport({
-      runId: "run_cccccccccccccccccccccccccccccccc",
-      projectRoot: "/workspace/project",
-      blocker: {
-        stage: "functional-review",
-        kind: "verification",
-        code: "VERIFICATION_BLOCKED",
-        retryable: true,
-        resumable: true,
-        summary: "Verification requires attention.",
-        completedWork: [],
-        evidencePaths: [],
-        attemptedRecovery: [],
-        unrunValidations: [],
-        exactUnblockAction: "Rerun functional review.",
-      },
-    });
-
-    expect(report.match(/- None recorded\./g)).toHaveLength(4);
-  });
-
-  it("redacts complete Authorization values and URI userinfo", () => {
-    const report = renderBlockedWorkflowReport({
-      runId: "run_dddddddddddddddddddddddddddddddd",
-      projectRoot: "/workspace/project",
-      blocker: {
-        stage: "publish",
-        kind: "publish-precondition",
-        code: "PUBLISH_PRECONDITION",
-        retryable: false,
-        resumable: true,
-        summary: "Publisher credentials were rejected.",
-        completedWork: [],
-        evidencePaths: [],
-        attemptedRecovery: [
-          "Authorization: Basic dXNlcjpwYXNz",
-          'Authorization: Digest username="alice", response="secret-response"',
-          "Fetched https://alice:p@ss@example.com/private and postgres://db:pw@db.example/app",
-        ],
-        unrunValidations: [],
-        exactUnblockAction: "Configure credentials and retry publish.",
-      },
-    });
-
-    for (const secret of ["dXNlcjpwYXNz", "alice", "secret-response", "p@ss", "db:pw"]) {
-      expect(report).not.toContain(secret);
-    }
-    expect(report.match(/Authorization: \[REDACTED\]/g)).toHaveLength(2);
-    expect(report).toContain("https://[REDACTED]@example.com/private");
-    expect(report).toContain("postgres://[REDACTED]@db.example/app");
-  });
-
-  it("neutralizes Markdown and HTML in every blocked free-text field", () => {
-    const report = renderBlockedWorkflowReport({
-      runId: "run_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-      projectRoot: "/workspace/project",
-      blocker: {
-        stage: "design-review",
-        kind: "verification",
-        code: "VERIFICATION_BLOCKED",
-        retryable: false,
-        resumable: true,
-        summary: "# Forged heading\n<script>alert(1)</script> [link](https://evil.example)",
-        completedWork: ["- forged list item"],
-        evidencePaths: ["reports/[artifact](javascript:alert(1)).json"],
-        attemptedRecovery: ["<!-- forged comment -->"],
-        unrunValidations: ["1. forged ordered item"],
-        exactUnblockAction: "> forged quote\n## forged action heading",
-      },
-    });
-
-    expect(report.match(/^## [^\n]+$/gm)).toEqual([
-      "## Decision",
-      "## Blocker",
-      "## Completed work",
-      "## Evidence",
-      "## Attempted recovery",
-      "## Unrun validations",
-      "## Exact unblock action",
-    ]);
-    for (const activeMarkup of [
-      "# Forged heading",
-      "<script>",
-      "</script>",
-      "[link](",
-      "- - forged list item",
-      "[artifact](",
-      "<!--",
-      "1. forged ordered item",
-      "\n> forged quote",
-      "## forged action heading",
-    ]) {
-      expect(report).not.toContain(activeMarkup);
-    }
-    expect(report).toContain("&#35; Forged heading");
-    expect(report).toContain("&#60;script&#62;");
-    expect(report).toContain("&#91;link&#93;&#40;");
-    expect(report).toContain("&#45; forged list item");
-    expect(report).toContain("1&#46; forged ordered item");
-  });
-
   it("keeps workflow report intent and decision metadata consistent", () => {
     expect(
       WorkflowReportMetadataSchema.parse({
@@ -346,5 +179,69 @@ describe("workflow report renderer", () => {
         decision: "ready",
       }).success,
     ).toBe(false);
+  });
+
+  it("binds a zero-operation legacy API section to its inventory digest", () => {
+    const inventoryDigest = `sha256:${"a".repeat(64)}`;
+    const report = PrReportV2Schema.parse({
+      schemaVersion: "pr-report-v2.1",
+      runId: `run_${"a".repeat(32)}`,
+      generatedAt: "2026-07-20T00:00:00.000Z",
+      decision: "blocked",
+      mode: "legacy",
+      sectionStatuses: {
+        api: "complete",
+        legacy: "blocked",
+        visual: "not-run",
+        "functional-review": "not-run",
+        "design-review": "not-run",
+        performance: "not-run",
+        "feature-evidence": "not-applicable",
+      },
+      summary: { title: "Legacy migration", bullets: [], exclusions: [] },
+      sources: [],
+      skills: { hints: [], applied: [] },
+      requirements: [],
+      changedFiles: [],
+      implementationNotes: [],
+      api: {
+        applicable: true,
+        inventoryDigest,
+        discoveryAdapters: ["source-fetch-literal", "source-request-config"],
+        operations: [],
+        gaps: [],
+      },
+      legacy: { applicable: true, coverage: [] },
+      visual: { applicable: true, attempt: 0, status: "not-run", results: [] },
+      reviews: [],
+      performance: { applicable: true },
+      gaps: [],
+      blockers: ["Implementation blocked."],
+      unrunValidations: ["functional"],
+      risks: [],
+      rollback: {
+        trigger: "Unexpected migration behavior.",
+        strategy: "Revert the migration.",
+        steps: ["Revert the change."],
+        dataImpact: "None expected.",
+        postChecks: ["Run the legacy regression."],
+      },
+      evidencePaths: [],
+      artifactIds: [],
+    });
+
+    const markdown = renderPrReportV2Markdown(report);
+    expect(() => assertCurrentPrReportV2(report)).not.toThrow();
+    expect(report.api.inventoryDigest).toBe(inventoryDigest);
+    expect(markdown).toContain(`- Inventory digest: ${inventoryDigest}`);
+    expect(markdown).toContain("source-fetch-literal, source-request-config");
+    expect(markdown).toContain("No API operations detected");
+
+    const historical = PrReportV2Schema.parse({
+      ...report,
+      api: { applicable: true, operations: [], gaps: [] },
+    });
+    expect(historical.api.inventoryDigest).toBeUndefined();
+    expect(() => assertCurrentPrReportV2(historical)).toThrow(/inventory digest/i);
   });
 });

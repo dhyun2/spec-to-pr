@@ -3,6 +3,8 @@ sidebar_position: 1
 title: 사전 준비물
 ---
 
+import NextStep from "@site/src/components/guide/NextStep";
+
 # 사전 준비물
 
 ## 항상 필요
@@ -21,7 +23,9 @@ title: 사전 준비물
 | ---------------- | ------------------------------------------------------------------------ |
 | GitHub draft PR  | `GITHUB_TOKEN`, `GH_TOKEN`, 또는 로그인된 `gh`                           |
 | GitLab draft MR  | `GITLAB_TOKEN`, `GITLAB_PRIVATE_TOKEN`, 또는 로그인된 `glab`             |
-| Figma 모드       | 호스트에서 사용할 수 있는 Figma 연결과 파일 열람 권한                    |
+| Brief/Feature    | 기획서 파일, Figma URL·열람 권한, OpenAPI 로컬 파일 또는 HTTPS URL       |
+| Legacy migration | 대상과 다른 레거시 프로젝트 절대 경로와 두 프로젝트의 실행 환경          |
+| Figma 모드       | Figma URL·열람 권한과 deterministic mock으로 화면을 실행할 환경          |
 | 사용자 기능 영상 | 변경 기능만 선택하고 영상 녹화를 지원하는 Playwright 등 browser E2E 환경 |
 
 ## Figma 연결 원칙
@@ -50,4 +54,11 @@ SpecToPR은 자체 Figma provider를 실행하거나 polling하지 않습니다.
 
 전체 프로젝트 E2E를 기본으로 실행하거나 여러 영상을 PR에 올리는 방식은 지원 정책이 아닙니다.
 
-준비가 끝났다면 [설치](/getting-started/installation)로 이동하세요.
+<NextStep
+eyebrow="준비 완료"
+title="호스트에 SpecToPR을 설치하세요"
+description="Claude Code와 Codex 중 사용하는 환경을 고르고, marketplace 또는 로컬 경로로 설치할 수 있습니다."
+href="/getting-started/installation"
+label="설치 방법 보기"
+secondary={{ label: "네 가지 입력 비교", href: "/usage/" }}
+/>

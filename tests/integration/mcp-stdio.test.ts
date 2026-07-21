@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -87,6 +87,11 @@ describe("spec-to-pr MCP workflow facade", () => {
         targetedFeatureEvidence: true,
         featureVideoPublishing: true,
         hostFigmaIntake: true,
+        deterministicVisualComparison: true,
+        legacyProjectInventory: true,
+        operationAwareApiCoverage: true,
+        performanceEvidence: true,
+        canonicalPrReportV2: true,
       },
     });
 
@@ -117,5 +122,67 @@ describe("spec-to-pr MCP workflow facade", () => {
     expect(status.structuredContent).toMatchObject({ runId, status: "needs-external-action" });
     expect(status.structuredContent).not.toHaveProperty("evidence");
     expect(status.structuredContent).not.toHaveProperty("sources");
+
+    await mkdir(path.join(projectDirectory, "docs"), { recursive: true });
+    await writeFile(
+      path.join(projectDirectory, "docs", "brief.pdf"),
+      minimalTextPdf("Acceptance criterion: checkout submits once."),
+    );
+    await writeFile(
+      path.join(projectDirectory, "docs", "openapi.yaml"),
+      "openapi: 3.1.0\npaths:\n  /checkout:\n    post:\n      operationId: checkout\n      responses: {}\n",
+      "utf8",
+    );
+    const pdfStarted = await client.callTool({
+      name: "workflow_start",
+      arguments: {
+        projectRoot: projectDirectory,
+        requestText: "Implement checkout from the supplied full-delivery sources",
+        scope: "ui",
+        mode: "brief",
+        briefPath: "docs/brief.pdf",
+        figmaUrl: "https://www.figma.com/design/abc/file?node-id=1-2",
+        openApiPath: "docs/openapi.yaml",
+      },
+    });
+    if (pdfStarted.isError) throw new Error(JSON.stringify(pdfStarted.content));
+    expect(pdfStarted.structuredContent).toMatchObject({
+      status: "needs-external-action",
+      deliveryProfile: { mode: "brief", briefPath: "docs/brief.pdf" },
+    });
   });
 });
+
+function minimalTextPdf(text: string): Buffer {
+  const escaped = text.replaceAll("\\", "\\\\").replaceAll("(", "\\(").replaceAll(")", "\\)");
+  const stream = "BT /F1 12 Tf 72 720 Td (" + escaped + ") Tj ET";
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    "<< /Length " +
+      String(Buffer.byteLength(stream, "latin1")) +
+      " >>\nstream\n" +
+      stream +
+      "\nendstream",
+  ];
+  let body = "%PDF-1.4\n";
+  const offsets = [0];
+  objects.forEach((object, index) => {
+    offsets.push(Buffer.byteLength(body, "latin1"));
+    body += String(index + 1) + " 0 obj\n" + object + "\nendobj\n";
+  });
+  const xrefOffset = Buffer.byteLength(body, "latin1");
+  body += "xref\n0 " + String(objects.length + 1) + "\n0000000000 65535 f \n";
+  offsets.slice(1).forEach((offset) => {
+    body += String(offset).padStart(10, "0") + " 00000 n \n";
+  });
+  body +=
+    "trailer\n<< /Size " +
+    String(objects.length + 1) +
+    " /Root 1 0 R >>\nstartxref\n" +
+    String(xrefOffset) +
+    "\n%%EOF\n";
+  return Buffer.from(body, "latin1");
+}

@@ -1,11 +1,20 @@
 ---
 sidebar_position: 3
 title: 퀵스타트 — 첫 draft PR까지
+hide_title: true
 ---
 
-# 퀵스타트 — 첫 draft PR까지
+import GuideHero from "@site/src/components/guide/GuideHero";
+import RunPipeline from "@site/src/components/guide/RunPipeline";
+import NextStep from "@site/src/components/guide/NextStep";
 
-가장 단순한 `brief` 모드로 시작합니다.
+<GuideHero
+eyebrow="First evidence-backed draft"
+title="퀵스타트 — 첫 draft PR까지"
+summary="설치를 확인하고 하나의 완전한 요청을 복사한 뒤, 무엇이 검증되어 draft PR에 들어오는지 5분 안에 훑습니다."
+primary={{ label: "완전한 사용법 보기", href: "/usage/brief" }}
+secondary={{ label: "내 케이스 먼저 고르기", href: "/usage/" }}
+/>
 
 ## 1. 설치 확인
 
@@ -22,6 +31,7 @@ title: 퀵스타트 — 첫 draft PR까지
 ```text
 my-app/
 ├── docs/checkout.md
+├── docs/openapi.yaml
 ├── package.json
 └── src/...
 ```
@@ -31,25 +41,18 @@ Claude Code/Codex에 다음처럼 요청합니다.
 ```text
 /spec-to-pr /absolute/path/to/my-app
 mode는 brief이고 briefPath는 docs/checkout.md야.
-수용 조건대로 구현하고 관련 검사로 검증한 뒤 draft PR을 만들어줘.
+figmaUrl: https://www.figma.com/design/FILE/checkout?node-id=12-345
+openApiPaths: [docs/openapi.yaml]
+API/UI를 구현하고 Figma 일치율, API gap, Web Vitals까지 검증한 뒤 draft PR을 만들어줘.
 ```
 
 ## 3. 진행 흐름
 
-```mermaid
-flowchart LR
-    I["intake"] --> C["contracts"]
-    C --> M["implementation"]
-    M --> F["functional review"]
-    M --> D["UI일 때 design review"]
-    F --> R["report"]
-    D --> R
-    R --> P["draft publish"]
-```
+<RunPipeline locale="ko" mode="brief" />
 
 호스트는 `workflow_advance`로 다음 외부 action까지 이동하고 실제 산출물은 `workflow_submit`으로 제출합니다. 상태 전이와 재개 정보는 runtime이 관리합니다.
 
-Intake 직후 `workflow_status`에서 `XS`~`XL`, 예상 token range와 confidence를 확인할 수 있습니다. SDK runner는 action group마다 usage를 집계하고 hard limit의 80%에서 compact fresh thread로 이어갑니다. Budget 부족은 required check 생략 사유가 아니며 scope 분할 또는 명시적 추가 승인으로 처리합니다.
+Intake 직후 `workflow_status`에서 `XS`~`XL`, 예상 token range와 confidence를 확인할 수 있습니다. SDK runner는 action group마다 usage를 집계하고 hard limit의 80%에서 compact fresh thread로 이어갑니다. Hard limit에서는 required check를 빼지 않고 `split-required`로 멈춥니다.
 
 API scope가 있다면 같은 구현 context에서 다음 순서를 지킵니다.
 
@@ -75,3 +78,12 @@ Draft 발행을 요청했다면 구현 전에 target이 아닌 `codex/*` source 
 - Figma 구현: `mode: figma`, `figmaUrl`, host-connected Figma capability
 
 복사 가능한 예시와 예상 PR은 [기획서 → draft PR 사용법](/usage/brief)에서 시작해 케이스별 페이지에서 확인할 수 있습니다.
+
+<NextStep
+eyebrow="이제 실제 입력으로"
+title="기획서 케이스의 완전한 PR 예시를 확인하세요"
+description="필수·선택 입력, blocked 복구, 시각/API/performance 증거, 예상 15개 섹션을 이어서 볼 수 있습니다."
+href="/usage/brief"
+label="기획서 사용법 열기"
+secondary={{ label: "네 가지 케이스 비교", href: "/usage/" }}
+/>

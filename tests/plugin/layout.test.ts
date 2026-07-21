@@ -3,6 +3,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 
+import { MCP_ENTRY_MAX_BYTES, MCP_TOTAL_JS_MAX_BYTES } from "../../src/release/release-manifest.js";
 import { verifyReviewerProfileParity } from "../../src/release/release-verifier.js";
 
 const packageVersion = (
@@ -110,6 +111,7 @@ describe("plugin layout", () => {
 
     expect(Object.keys(packageJson.dependencies).sort()).toEqual([
       "@modelcontextprotocol/sdk",
+      "pdfjs-dist",
       "pngjs",
       "zod",
     ]);
@@ -178,19 +180,37 @@ describe("plugin layout", () => {
   });
 
   it("ships a production bundle without runtime dependency imports", () => {
-    const bundle = readFileSync(path.join(root, "dist", "mcp", "server.js"), "utf8");
+    const bundleDirectory = path.join(root, "dist", "mcp");
+    const bundleFiles = readdirSync(bundleDirectory)
+      .filter((file) => file.endsWith(".js"))
+      .sort();
+    const bundles = bundleFiles.map((file) => ({
+      file,
+      content: readFileSync(path.join(bundleDirectory, file), "utf8"),
+    }));
     const runtimeDependencies = ["@modelcontextprotocol/sdk", "minimatch", "pngjs", "yaml", "zod"];
 
-    for (const dependency of runtimeDependencies) {
-      const escapedDependency = dependency.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    expect(bundleFiles).toContain("server.js");
+    expect(bundleFiles.length).toBeGreaterThan(1);
+    expect(readFileSync(path.join(bundleDirectory, "server.js")).byteLength).toBeLessThanOrEqual(
+      MCP_ENTRY_MAX_BYTES,
+    );
+    expect(
+      bundles.reduce((total, bundle) => total + Buffer.byteLength(bundle.content), 0),
+    ).toBeLessThanOrEqual(MCP_TOTAL_JS_MAX_BYTES);
 
-      expect(bundle).not.toMatch(
-        new RegExp(`^import\\s+[^\\n]+\\s+from\\s+["']${escapedDependency}(?:/[^"']*)?["']`, "m"),
-      );
-      expect(bundle).not.toMatch(
-        new RegExp(`\\bimport\\(\\s*["']${escapedDependency}(?:/[^"']*)?["']\\s*\\)`),
-      );
-      expect(bundle).not.toMatch(new RegExp(`\\brequire\\(\\s*["']${escapedDependency}`));
+    for (const { content } of bundles) {
+      for (const dependency of runtimeDependencies) {
+        const escapedDependency = dependency.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+        expect(content).not.toMatch(
+          new RegExp(`^import\\s+[^\\n]+\\s+from\\s+["']${escapedDependency}(?:/[^"']*)?["']`, "m"),
+        );
+        expect(content).not.toMatch(
+          new RegExp(`\\bimport\\(\\s*["']${escapedDependency}(?:/[^"']*)?["']\\s*\\)`),
+        );
+        expect(content).not.toMatch(new RegExp(`\\brequire\\(\\s*["']${escapedDependency}`));
+      }
     }
   });
 
@@ -260,6 +280,9 @@ describe("plugin layout", () => {
       "figmaUrl",
       "docsPaths",
       "openApiPaths",
+      "openApiUrls",
+      "legacyProjectRoot",
+      "legacyNetworkEvidencePath",
       "guidancePaths",
       "skillHints",
     ]) {
@@ -269,12 +292,26 @@ describe("plugin layout", () => {
     expect(main).toContain("sources compose independently");
     expect(main).toContain("Any supplied `figmaUrl`");
     expect(main).toContain("`auto | ui | non-ui | docs`");
-    expect(main).toContain("Set `scope: ui` for `feature` and `figma`");
-    expect(main).toContain("Figma defaults to `publication: none`");
+    expect(main).toContain("The four delivery cases are UI contracts");
+    expect(main).toContain("Figma defaults to `publication: draft`");
+    for (const contract of [
+      "sourceProvenance",
+      "visualTargets",
+      "compare-visuals",
+      "legacyInventory",
+      "apiCoverage",
+      "performanceEvidence",
+      "pr-report-v2",
+    ]) {
+      expect(main).toContain(contract);
+    }
     expect(implement).toContain("targeted-feature");
     expect(implement).toContain("exactly one");
     expect(implement).toContain("full-project E2E");
     expect(implement).toContain("kind: api-ready");
+    expect(implement).toContain("operations");
+    expect(implement).toContain("apiCoverage");
+    expect(implement).toContain("performanceEvidence");
     for (const group of ["types", "schemas", "wrappers", "mocks", "contractTests"]) {
       expect(implement).toContain(`\`${group}\``);
     }
@@ -289,6 +326,10 @@ describe("plugin layout", () => {
     expect(intake).toContain("`capturedAt`");
     expect(intake).toContain("requirementManifest");
     expect(intake).toContain("legacyBaseline");
+    expect(intake).toContain("legacyInventory");
+    expect(intake).toContain("legacyCoverage");
+    expect(intake).toContain("visualTargets");
+    expect(intake).toContain("sourceProvenance");
     expect(intake).toContain("guidanceTrace");
     expect(intake).toContain("current user request");
     expect(intake).toContain("explicit `guidancePaths`");
@@ -298,7 +339,9 @@ describe("plugin layout", () => {
     expect(intake).toContain("Exclude project guidance from scope classification");
     expect(intake).toContain("Missing optional skills do not block");
     expect(intake).toContain("`auto | ui | non-ui | docs`");
-    expect(intake).toContain("Require `scope: ui` for `feature` and `figma`");
+    expect(intake).toContain(
+      "Require `scope: ui` for all four explicit delivery modes: `brief`, `legacy`, `feature`, and `figma`",
+    );
     const intakeBody = intake.slice(intake.indexOf("# Intake"));
     expect(intakeBody.indexOf("figma-bundle")).toBeLessThan(
       intakeBody.indexOf("Submit `contracts`"),
@@ -444,7 +487,7 @@ describe("plugin layout", () => {
       expect(policySource).toContain("actually applied");
     }
     expect(intake).toContain("`figmaUrl` -> `figma`, `design-system`");
-    expect(intake).toContain("`openApiPaths` -> `api-generator`");
+    expect(intake).toContain("`openApiPaths` or `openApiUrls` -> `api-generator`");
     expect(intake).toContain("React package evidence -> `react-best-practices`");
     expect(intake).toContain("Next.js package evidence -> `next-best-practices`");
     expect(intake).toContain("feature UI -> `playwright`");
@@ -566,7 +609,7 @@ describe("plugin layout", () => {
       "node scripts/check-generated-files.mjs schemas/runtime",
     );
     expect(rootPackage.scripts["bundle:check-dist"]).toBe(
-      "node scripts/check-generated-files.mjs dist/mcp/server.js",
+      "node scripts/check-generated-files.mjs dist/mcp",
     );
     expect(rootPackage.scripts["check"]).toContain("pnpm sdk:build && pnpm sdk:check-dist");
     expect(rootPackage.scripts["check"]).toContain("pnpm schemas:build && pnpm schemas:check");

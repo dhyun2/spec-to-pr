@@ -1,4 +1,5 @@
 import type { WorkloadSize } from "./workload-budget.js";
+import { parallelReviewersForWorkload } from "./generated/delivery-mode-policy.js";
 
 export type CodexReviewAgentProfile = {
   name: string;
@@ -53,7 +54,7 @@ export function scoutRoutingForWorkload(workloadSize: WorkloadSize): CodexScoutR
     independentReadHeavyOnly: true,
     allowNested: false,
     parallelWriters: false,
-    parallelReviewersAfterImplementation: workloadSize === "L" || workloadSize === "XL",
+    parallelReviewersAfterImplementation: parallelReviewersForWorkload(workloadSize),
   };
 }
 

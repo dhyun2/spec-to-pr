@@ -40,61 +40,6 @@ const REVIEWER_ROLES = ["functional-reviewer", "design-reviewer"] as const;
 const DELIVERY_MODES = ["auto", "brief", "legacy", "feature", "figma"] as const;
 
 const EmptyInputSchema = z.object({}).strict();
-const WorkflowInfoSchema = z
-  .object({
-    pluginName: z.literal("spec-to-pr"),
-    pluginVersion: z.string().min(1),
-    contractVersion: z.literal(CONTRACT_VERSION),
-    transport: z.literal("stdio"),
-    tools: z.tuple(TOOL_NAMES.map((name) => z.literal(name)) as ToolTuple),
-    durableStages: z.tuple(DURABLE_STAGES.map((name) => z.literal(name)) as StageTuple),
-    reviewerRoles: z.tuple(REVIEWER_ROLES.map((name) => z.literal(name)) as ReviewerTuple),
-    deliveryModes: z.tuple(DELIVERY_MODES.map((name) => z.literal(name)) as DeliveryModeTuple),
-    capabilities: z
-      .object({
-        apiReadyBeforeUi: z.literal(true),
-        explicitApiReadyCheckpoint: z.literal(true),
-        independentReviews: z.literal(true),
-        conditionalDesignReview: z.literal(true),
-        targetedFeatureEvidence: z.literal(true),
-        featureVideoPublishing: z.literal(true),
-        hostFigmaIntake: z.literal(true),
-      })
-      .strict(),
-  })
-  .strict();
-
-type ToolTuple = [
-  z.ZodLiteral<(typeof TOOL_NAMES)[0]>,
-  z.ZodLiteral<(typeof TOOL_NAMES)[1]>,
-  z.ZodLiteral<(typeof TOOL_NAMES)[2]>,
-  z.ZodLiteral<(typeof TOOL_NAMES)[3]>,
-  z.ZodLiteral<(typeof TOOL_NAMES)[4]>,
-  z.ZodLiteral<(typeof TOOL_NAMES)[5]>,
-  z.ZodLiteral<(typeof TOOL_NAMES)[6]>,
-];
-type StageTuple = [
-  z.ZodLiteral<(typeof DURABLE_STAGES)[0]>,
-  z.ZodLiteral<(typeof DURABLE_STAGES)[1]>,
-  z.ZodLiteral<(typeof DURABLE_STAGES)[2]>,
-  z.ZodLiteral<(typeof DURABLE_STAGES)[3]>,
-  z.ZodLiteral<(typeof DURABLE_STAGES)[4]>,
-  z.ZodLiteral<(typeof DURABLE_STAGES)[5]>,
-  z.ZodLiteral<(typeof DURABLE_STAGES)[6]>,
-  z.ZodLiteral<(typeof DURABLE_STAGES)[7]>,
-];
-type ReviewerTuple = [
-  z.ZodLiteral<(typeof REVIEWER_ROLES)[0]>,
-  z.ZodLiteral<(typeof REVIEWER_ROLES)[1]>,
-];
-type DeliveryModeTuple = [
-  z.ZodLiteral<(typeof DELIVERY_MODES)[0]>,
-  z.ZodLiteral<(typeof DELIVERY_MODES)[1]>,
-  z.ZodLiteral<(typeof DELIVERY_MODES)[2]>,
-  z.ZodLiteral<(typeof DELIVERY_MODES)[3]>,
-  z.ZodLiteral<(typeof DELIVERY_MODES)[4]>,
-];
-
 type StructuredResult = Record<string, unknown>;
 
 export function createKernelServer(servicesProvider: ServicesProvider): McpServer {
@@ -109,7 +54,6 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
       title: "Workflow information",
       description: "Return the compact SpecToPR v2 workflow contract and public tool list.",
       inputSchema: EmptyInputSchema.shape,
-      outputSchema: WorkflowInfoSchema.shape,
       annotations: { readOnlyHint: true },
     },
     async () =>
@@ -130,6 +74,11 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
           targetedFeatureEvidence: true,
           featureVideoPublishing: true,
           hostFigmaIntake: true,
+          deterministicVisualComparison: true,
+          legacyProjectInventory: true,
+          operationAwareApiCoverage: true,
+          performanceEvidence: true,
+          canonicalPrReportV2: true,
         },
       }),
   );

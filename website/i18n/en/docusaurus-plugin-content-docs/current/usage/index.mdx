@@ -1,0 +1,46 @@
+---
+sidebar_position: 1
+title: Choose your delivery
+hide_title: true
+description: Choose the SpecToPR delivery that matches the source of truth you have today
+---
+
+import GuideHero from "@site/src/components/guide/GuideHero";
+import ModeChooser from "@site/src/components/guide/ModeChooser";
+import NextStep from "@site/src/components/guide/NextStep";
+
+<GuideHero
+  eyebrow="Four inputs, one verified delivery"
+  title="Where are you starting from?"
+  summary="Choose the source of truth you have today. SpecToPR shapes the additional inputs, validation scope, and PR evidence around that case."
+  primary={{ label: "Start from a brief", href: "/usage/brief" }}
+  secondary={{ label: "Check installation first", href: "/getting-started/installation" }}
+/>
+
+<ModeChooser locale="en" />
+
+## Choose in 30 seconds
+
+| Starting point                  | Required input                                    | Visual baseline                     | Added to the draft PR                                     |
+| ------------------------------- | ------------------------------------------------- | ----------------------------------- | --------------------------------------------------------- |
+| Full product or screen delivery | brief + Figma + OpenAPI                           | Figma ↔ implemented screen          | API use and gaps, visual ratio, Web Vitals                |
+| Legacy migration                | target repository + runnable separate legacy path | running legacy ↔ implemented screen | inventory, coverage, migrated/excluded evidence           |
+| One feature                     | brief + Figma + OpenAPI                           | Figma ↔ implemented screen          | targeted feature E2E + exactly one playable video         |
+| Design implementation           | Figma URL + target repository                     | Figma ↔ mock-backed result          | measured visual comparison; real API integration excluded |
+
+:::tip[Inputs can still compose]
+Mode chooses the delivery and required evidence; sources compose independently. A `feature` Run can receive a brief, Figma, OpenAPI, and project guidance together.
+:::
+
+## The promise shared by every case
+
+Exactly one implementation writer owns implementation. The functional reviewer and, for UI, the design reviewer independently inspect an immutable packet. Visual verification decodes RGBA pixels with `pngjs`, compares them in linear color space with tolerance `0.02`, requires a `98%` review ratio, limits masks to `20%`, and permits three total comparisons.
+
+<NextStep
+  eyebrow="Recommended first path"
+  title="If this is your first Run, copy the brief case"
+  description="It keeps required inputs, minimal and complete prompts, the expected branch, and the 15-section PR on one page."
+  href="/usage/brief"
+  label="Open the brief case"
+  secondary={{ label: "Understand the pipeline", href: "/concepts/pipeline" }}
+/>

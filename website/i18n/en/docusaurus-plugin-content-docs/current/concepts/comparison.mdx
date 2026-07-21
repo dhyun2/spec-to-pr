@@ -8,8 +8,8 @@ description: A primary-source comparison of four frameworks and orchestration to
 
 This page uses only official product documentation and first-party repositories verified on **2026-07-15**. It is not a feature ranking. It explains why SpecToPR keeps seven MCP tools, eight durable stages, one implementation writer, and two read-only reviewers.
 
-:::info Version labels
-This guide describes **Released 0.2.1** behavior from the `main` branch.
+:::info[Version labels]
+This guide describes **Unreleased** behavior under development on top of package `0.2.1`.
 :::
 
 ## Framework comparison <span id="comparison-matrix"></span>
@@ -54,7 +54,7 @@ Evidence details:
 ## Conditional
 
 - Read-only scouts: zero for XS/S, at most one for M, at most two for L/XL, and only for independent read-heavy discovery.
-- Functional/design reviewers may run in parallel only after implementation; design review applies only to UI scope.
+- Functional/design reviewers may run in parallel only for L/XL after implementation; design review applies only to UI scope.
 - Installed/applicable host skills, Browser MCP, a host browser, and Chrome DevTools MCP are used only when applicable.
 - Changed-feature Playwright E2E and exactly one video apply only to the `feature` profile.
 

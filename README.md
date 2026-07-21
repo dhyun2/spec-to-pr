@@ -1,27 +1,31 @@
 # SpecToPR
 
-An evidence-driven Claude Code and Codex plugin that turns a brief, a legacy change request, a user-facing feature, or a Figma design into verified implementation and, when requested, a draft PR/MR.
+An evidence-driven Claude Code and Codex plugin for four explicit deliveries: full brief/Figma/API implementation, cross-project legacy migration, feature delivery with targeted E2E/video, and mock-backed Figma implementation. Every case ends in a draft PR/MR by default.
 
 Korean version: [README.ko.md](README.ko.md)
 
-> **Version labels:** this README describes **Released 0.2.1** behavior from the `main` branch.
+> **Development status:** this branch contains **Unreleased** changes on top of package `0.2.1`. See the changelog before publishing a new version.
 
 ## Four delivery modes
 
-| Mode      | Give SpecToPR                              | What it verifies                                                    | Result                                      |
-| --------- | ------------------------------------------ | ------------------------------------------------------------------- | ------------------------------------------- |
-| `brief`   | a brief/spec and target repository         | acceptance criteria, contracts, implementation, focused checks      | evidence-backed draft PR/MR                 |
-| `legacy`  | a repository and a concrete change request | a focused current-behavior baseline and affected regression scope   | evidence-backed draft PR/MR                 |
-| `feature` | a user-facing feature request              | changed-feature E2E only and exactly one `.webm` or `.mp4` video    | draft PR/MR with the video linked           |
-| `figma`   | a Figma URL and target repository          | real Figma context, implementation, visual and interaction evidence | design implementation; optional draft PR/MR |
+| Mode      | Give SpecToPR                              | What it verifies                                                                   | Result                                 |
+| --------- | ------------------------------------------ | ---------------------------------------------------------------------------------- | -------------------------------------- |
+| `brief`   | brief/PDF/MD + Figma + OpenAPI             | API/UI, Figma ratios, API gaps, Web Vitals                                         | 15-section evidence-backed draft PR/MR |
+| `legacy`  | target repo + separate `legacyProjectRoot` | inventory/coverage, running legacy comparison, performance, derived API usage/gaps | 15-section migration draft PR/MR       |
+| `feature` | the same full inputs for one feature       | full evidence + targeted E2E and exactly one `.webm`/`.mp4`                        | video-linked draft PR/MR               |
+| `figma`   | Figma URL and target repository            | deterministic mocks and measured Figma comparison                                  | design draft PR/MR                     |
 
 `auto` remains available for lightweight requests that do not need a mode-specific evidence policy.
 
-Delivery mode controls delivery and evidence; input sources compose independently. A zero-to-100 `feature` run can combine `briefPath`, `figmaUrl`, repeated `docsPaths`, repeated `openApiPaths`, `guidancePaths`, and optional `skillHints`. Any supplied Figma URL requires a real bundle even when the mode is `feature`. Project guidance is traceable but excluded from scope classification. Instruction precedence is the current user request, explicit guidance, automatically discovered project guidance, applicable installed skills, then SpecToPR defaults. Missing optional skills never block a Run.
+`brief` and `feature` require `briefPath`, `figmaUrl`, and at least one repeated local `openApiPaths` or HTTPS `openApiUrls` source. `legacy` requires a separate read-only `legacyProjectRoot` and may add a project-local `legacyNetworkEvidencePath` when source discovery cannot determine a request method/path; `figma` needs only Figma and uses mock data. `docsPaths`, `guidancePaths`, and optional `skillHints` compose independently. Project guidance is traceable but excluded from scope classification.
 
 Feature mode accepts one unchained Playwright invocation that selects the changed feature by test path, tag, or project; listing and pass-with-no-tests options plus broad/full-project commands are rejected. Its strict JSON result contains only `status: passed`, the exact `selector`, the submission's `implementationContextId`, and a positive `testCount`. Its one video must be a structurally valid WebM/MP4 container with non-zero duration and be no larger than 25 MB. Other modes do not record feature video unless their delivery profile explicitly requires it.
 
 Any delivery profile with a supplied `figmaUrl` uses the Figma capability already connected to the host. It submits exactly one `figma-bundle` with `provider: host-connected-figma`, ISO `capturedAt`, matching `fileUrl`, non-empty `nodeIds`, a declared `manifestPath`, and one or more actual PNG files. The strict manifest repeats that provenance and lists the PNG `visualPaths`. SpecToPR does not expose Figma microtools or poll Figma.
+
+Intake pins timestamped raw-digest `sourceProvenance`. Brief/feature pin the supplied OpenAPI operation inventory; legacy derives bounded API candidates through explicitly reported fetch, dynamic-fetch, HTTP-client, request-config, and generated-client source adapters and treats optional OpenAPI as enrichment. A project-local `legacyNetworkEvidencePath` accepts at most 1 MB and 1,000 requests in standard HAR JSON, `{requests:[{method,url}]}`, or `[{method,url}]` form; its digest and `runtime-network-har` adapter are bound into the inventory. A zero-operation legacy inventory is still a complete API section bound to its adapter list and inventory digest, not `not-applicable`. Ambiguous methods/paths resolve only from a unique scoped OpenAPI/runtime match; otherwise intake remains blocked, exposes no downstream action, and rejects downstream submissions instead of guessing or losing the Run. Figma and running-legacy baselines share `visualTargets`; every `compare-visuals` capture repeats target route/state/viewport/device-scale/fixture and records provider, ISO capture time, actual PNG path, and `sha256:` digest. Runtime rejects target drift or digest mismatch, computes alpha-aware exact/review ratios, diff, and overlay at a minimum 98% threshold, permits at most 20% justified masking, and allows three total comparison attempts (the initial comparison plus at most two repairs). Final implementation records exact operation-aware `apiCoverage`, current-packet legacy coverage, and required performance evidence. Canonical `pr-report-v2.1` JSON and Markdown share 15 sections and explicit `complete`, `not-run`, `blocked`, or `not-applicable` status. Historical v2.1 reports remain parseable, while new publication requires current adapter/digest evidence. A blocked report omits stale packet/review/visual claims.
+
+Runtime network evidence is parsed locally before a durable Run is created. Raw HAR headers, cookies, bodies, and query strings are not copied into intake artifacts or PR reports; only the project-relative locator, raw digest, normalized method/path, and adapter are retained. Source-derived literal API URLs also drop credentials, query, and fragment before inventory persistence. Keep the file in a gitignored project-local evidence directory so publication can remain clean.
 
 ## Lightweight v2 surface
 
@@ -36,7 +40,7 @@ API and UI implementation stay in one context. For API-backed UI, the agent firs
 
 Immediately after intake, `workflow_status` reports an `XS`–`XL` workload, estimated token range, confidence, reasons, an 80% checkpoint threshold, and the authoritative required-validation list. Contract authors may submit non-empty numeric `workloadSignals` to refine it without adding a tool or stage. The same status carries a compact `resumeContext` with the recorded goal, project-relative evidence paths, and submission summaries. The SDK pins the first durable Run ID, instructs each turn to stop after one workflow action group, requires a fresh status at every completed boundary, never lets later statuses shrink required validation, sums actual input plus output tokens, and starts a compact fresh thread at the first boundary at or above 80%. At the hard limit it keeps every required validation and returns `split-required`; there is no caller-selected token allowance. Numeric-only fresh completed-run history may calibrate only the displayed range. The automatic hard limit stays at the workload class default, and legacy samples recorded with a different hard limit are excluded from calibration. Missing usage stops continuation as `usage-unavailable`. History writes are serialized and atomic, storage is bounded and revalidated on every access, prompts/code/diffs/paths/tool output/final responses are never stored, and optional history I/O cannot fail the workflow.
 
-Publishing only creates or updates a draft GitHub PR or GitLab MR. Draft flows work on a non-target `codex/*` source branch and commit only intended changes before publication; runtime preflight requires a clean tree and at least one source commit beyond the target. Publishing never merges, approves, closes, or marks a review request ready.
+Publishing only creates or updates a draft GitHub PR or GitLab MR. Draft flows work on a non-target `codex/*` source branch and commit only intended changes before publication; runtime preflight requires a clean tree and at least one source commit beyond the target. GitHub media uses the single managed `spec-to-pr/evidence` branch, immutable run/packet/target/artifact paths, and upload-commit-SHA URLs; it never creates one evidence branch per Run or writes media to the source branch. Publishing never merges, approves, closes, or marks a review request ready.
 
 Ready publication uses `workflow_publish intent: ready`. If a required input, tool, policy, verification, publish precondition, budget split, or unexpected failure blocks the Run, typed redacted `blockerDetails` records completed work, attempted recovery, unrun validations, and the exact unblock action. A valid preflight can publish `intent: blocked-diagnostic`, but that diagnostic draft remains `status: blocked`; otherwise, including `PUBLISH_NO_DELTA`, the Run returns a **local blocked report** without an empty commit or issue fallback. Missing required browser proof is `BROWSER_NOT_RUN`. Recovery resumes the same durable Run and updates the same source/target **same draft PR** from blocked to ready.
 
@@ -89,15 +93,23 @@ Brief to draft PR:
 
 ```text
 /spec-to-pr /path/to/app
-Mode: brief. Brief: docs/checkout.md. Implement it, verify it, and publish a draft PR.
+mode: brief
+briefPath: docs/checkout.md
+figmaUrl: https://www.figma.com/design/FILE/checkout?node-id=12-345
+openApiUrls: [https://api.example.com/openapi.yaml]
+Implement API and UI, compare the result with Figma, report API gaps and Web Vitals,
+and publish the canonical draft PR.
 ```
 
-Focused legacy change:
+Legacy migration:
 
 ```text
-/spec-to-pr /path/to/legacy-app
-Mode: legacy. Change only the invoice retry behavior. Capture the current behavior first,
-run affected checks, and publish a draft PR. Do not scan or migrate the whole product.
+/spec-to-pr /path/to/new-app
+mode: legacy
+legacyProjectRoot: /path/to/legacy-app
+legacyNetworkEvidencePath: evidence/legacy-checkout.har # optional when source method/path is ambiguous
+Migrate invoice retry into the target architecture. Run both apps and compare the target
+against the running legacy screen before publishing the draft PR.
 ```
 
 Zero-to-100 user-facing feature with composable sources:
@@ -120,7 +132,7 @@ Figma implementation:
 ```text
 /spec-to-pr /path/to/app
 Mode: figma. Implement https://www.figma.com/file/... using the connected Figma capability.
-Submit real Figma evidence; do not use URL-only claims or polling.
+Use deterministic mocks, require the measured 98% comparison, and publish a draft PR.
 ```
 
 ## Codex SDK runner
@@ -161,9 +173,11 @@ pnpm plugin:validate
 
 ## Documentation
 
-The maintained guide is at **https://dhyun2.github.io/spec-to-pr/**. It covers prerequisites, installation, the four cases, the v2 pipeline, skills, configuration, troubleshooting, and an official-source comparison of Spec Kit, OpenSpec, Kiro, and BMAD.
+The maintained guide is at **https://dhyun2.github.io/spec-to-pr/**. Start with the outcome-first quickstart, choose one of four deliveries, then follow the interactive Run pipeline into agent ownership and the real pixel-verification model. Reference, troubleshooting, and an official-source comparison of Spec Kit, OpenSpec, Kiro, and BMAD remain separate.
 
-[Start with the brief-to-PR guide](https://dhyun2.github.io/spec-to-pr/en/usage/brief) for required inputs, copyable prompts, execution phases, blockers, evidence, and illustrative draft PRs. The Usage sidebar links the other three cases separately.
+[Choose a delivery](https://dhyun2.github.io/spec-to-pr/en/usage/) or open the [brief-to-PR guide](https://dhyun2.github.io/spec-to-pr/en/usage/brief) for required inputs, copyable prompts, execution phases, blockers, evidence, and an illustrative draft PR.
+
+[Follow the Run](https://dhyun2.github.io/spec-to-pr/en/concepts/pipeline), then inspect [agent review ownership](https://dhyun2.github.io/spec-to-pr/en/concepts/reviews) and [visual verification](https://dhyun2.github.io/spec-to-pr/en/concepts/visual-verification) for the exact `pngjs` RGBA comparison, thresholds, masks, diff, overlay, and provenance gates.
 
 [Read the comparison and adoption policy](https://dhyun2.github.io/spec-to-pr/en/concepts/comparison) for adopted, conditional, and rejected orchestration patterns.
 
@@ -174,4 +188,4 @@ pnpm --dir website install
 pnpm --dir website start
 ```
 
-The current architectural decisions are [ADR 035](docs/adr/035-use-coarse-workflow-facade-and-split-reviews.md), [ADR 036](docs/adr/036-use-delivery-profiles-not-mode-specific-pipelines.md), and [ADR 037](docs/adr/037-use-boundary-budgeting-and-numeric-calibration.md).
+The current architectural decisions are [ADR 035](docs/adr/035-use-coarse-workflow-facade-and-split-reviews.md), [ADR 036](docs/adr/036-use-delivery-profiles-not-mode-specific-pipelines.md), [ADR 037](docs/adr/037-use-boundary-budgeting-and-numeric-calibration.md), and [ADR 038](docs/adr/038-harden-evidence-trust-and-unify-delivery-policy.md).

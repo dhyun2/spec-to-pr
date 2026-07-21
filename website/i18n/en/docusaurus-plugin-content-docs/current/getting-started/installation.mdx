@@ -1,0 +1,126 @@
+---
+sidebar_position: 2
+title: Installation
+---
+
+import Tabs from "@theme/Tabs";
+import TabItem from "@theme/TabItem";
+import NextStep from "@site/src/components/guide/NextStep";
+
+# Install SpecToPR
+
+The product name is **SpecToPR**. The repository, installation ID, and command identifier are `spec-to-pr`.
+
+<Tabs groupId="host">
+<TabItem value="claude" label="Claude Code" default>
+
+## Marketplace installation
+
+In a Claude Code session:
+
+```text
+/plugin marketplace add dhyun2/spec-to-pr
+/plugin install spec-to-pr@spec-to-pr
+```
+
+Run `/reload-plugins` or start a new session after installation.
+
+Update:
+
+```text
+/plugin marketplace update spec-to-pr
+/plugin update spec-to-pr@spec-to-pr
+/reload-plugins
+```
+
+## Run from local source
+
+```bash
+git clone https://github.com/dhyun2/spec-to-pr.git
+cd spec-to-pr
+corepack enable
+pnpm install
+pnpm build
+claude --plugin-dir /absolute/path/to/spec-to-pr
+```
+
+</TabItem>
+<TabItem value="codex" label="Codex">
+
+## Git marketplace installation
+
+```bash
+codex plugin marketplace add https://github.com/dhyun2/spec-to-pr --ref main
+codex plugin add spec-to-pr@spec-to-pr
+```
+
+Update:
+
+```bash
+codex plugin marketplace upgrade spec-to-pr
+codex plugin add spec-to-pr@spec-to-pr
+```
+
+## Local marketplace installation
+
+```bash
+git clone https://github.com/dhyun2/spec-to-pr.git
+cd spec-to-pr
+corepack enable
+pnpm install
+pnpm build
+codex plugin marketplace add .
+codex plugin add spec-to-pr@spec-to-pr
+```
+
+Reopen Codex and start a new task. Use `/plugins` to verify the SpecToPR marketplace and `spec-to-pr` installation.
+
+## SDK runner
+
+```bash
+pnpm --dir packages/codex-sdk install
+pnpm --dir packages/codex-sdk build
+node packages/codex-sdk/dist/cli.js \
+  --cwd /path/to/app \
+  --mode brief \
+  --brief docs/plan.md \
+  --publish
+```
+
+See [Configuration](/reference/config) for modes and options.
+
+</TabItem>
+</Tabs>
+
+## Verify installation
+
+```text
+/spec-to-pr:doctor
+```
+
+Doctor calls `workflow_info` and verifies contract version `2.0.0` plus:
+
+- 7 tools
+- 8 durable stages
+- 2 reviewer roles
+- explicit API-ready-before-UI, independent reviews, and conditional design review capabilities
+
+A release package may omit `node_modules`. Diagnose the host-exposed `workflow_info` instead of importing an SDK directly from plugin cache.
+
+## Installed components
+
+- 8 public marketplace skills
+- local stdio MCP server launched by `node ./dist/mcp/server.js`
+- `functional-reviewer` and `design-reviewer` definitions
+- evidence ledger, artifact storage, draft publisher, and explicit archive runtime
+
+Hosts may display a different tool namespace, but the public contract is identical.
+
+<NextStep
+  eyebrow="Installation verified"
+  title="Run the first draft PR path in five minutes"
+  description="Once Doctor passes, one complete brief request walks through intake, implementation, reviews, and draft publication."
+  href="/getting-started/quickstart"
+  label="Start the quickstart"
+  secondary={{ label: "Configuration reference", href: "/reference/config" }}
+/>

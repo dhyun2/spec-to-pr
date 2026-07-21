@@ -4,15 +4,20 @@ title: 3. Feature → E2E, video, and draft PR
 description: Implement API and UI with targeted feature E2E and exactly one video
 ---
 
+import RunPipeline from "@site/src/components/guide/RunPipeline";
+import NextStep from "@site/src/components/guide/NextStep";
+
 Immediately after intake, status reports an `XS`–`XL` workload, estimated token range, confidence, and reasons. These are estimates, not fixed promises. At the 80% boundary SpecToPR checkpoints and continues from compact context; at the hard limit it splits scope or waits for a user decision without removing anything from `requiredValidations`.
 
 ## Use this case <span id="use-this-case-feature"></span>
 
-Use this case for a user-facing capability that must be completed through API and UI, verified with **E2E targeting only that feature and exactly one video**, and delivered as a draft PR. It is the zero-to-100 flow that can combine a brief, Figma, OpenAPI, supporting docs, and folder-structure guidance in one Run.
+Use this case to deliver a user-facing feature from a brief, Figma, and OpenAPI, then add **E2E targeting only that feature and exactly one video** to full-delivery evidence. It never records every feature or runs full-project E2E by default.
 
-:::tip Input / result
+:::tip[Input / result]
 **Input:** concrete user feature + `mode: feature` + UI scope · **Result:** API/UI implementation, independent functional/design reviews, targeted E2E, one video, and a draft PR
 :::
+
+<RunPipeline locale="en" mode="feature" />
 
 ## Required inputs <span id="required-inputs-feature"></span>
 
@@ -21,15 +26,15 @@ Use this case for a user-facing capability that must be completed through API an
 | Repository      | Git repository where the browser feature and relevant checks can run     |
 | `mode`          | `feature`                                                                |
 | `scope`         | `ui` is required                                                         |
+| `briefPath`     | PDF/Markdown acceptance criteria                                         |
+| `figmaUrl`      | File/node URL for required screens and states                            |
+| OpenAPI         | At least one local `openApiPaths` or HTTPS `openApiUrls` entry           |
 | Feature request | State user, entry point, success/error states, and completion conditions |
 | `changeKind`    | `feature`                                                                |
-| `publication`   | `draft`, because the profile delivers its video through the PR           |
+| `publication`   | Defaults to `draft`; use `none` to stop after reviews and local video    |
 
 ## Optional inputs <span id="optional-inputs-feature"></span>
 
-- `briefPath` freezes acceptance criteria and boundaries.
-- `figmaUrl` supplies screen/state/component evidence and requires a connected-host `figma-bundle`.
-- `openApiPaths` grounds API types, schema, wrapper/client, and mock contracts.
 - `docsPaths` adds business rules and edge cases.
 - `guidancePaths` names project instructions such as `AGENTS.md`, architecture, and folder structure.
 - `skillHints` requests applicable installed skills such as `react-best-practices`, `next-best-practices`, `design-system`, and `api-generator`.
@@ -43,6 +48,9 @@ mode: feature
 scope: ui
 changeKind: feature
 publication: draft
+briefPath: docs/checkout.md
+figmaUrl: https://www.figma.com/design/FILE/checkout?node-id=12-345
+openApiPaths: [docs/openapi.yaml]
 Implement checkout through API and UI, verify only the checkout path with E2E, attach one video, and publish a draft PR.
 ```
 
@@ -66,12 +74,14 @@ Implement checkout end to end. Run only the checkout test path, tag, or project 
 ## What SpecToPR does <span id="process-feature"></span>
 
 1. **Intake:** Normalize every source and feature boundary; report workload/token estimates and `requiredValidations`.
-2. **Contracts:** Reconcile brief, OpenAPI, and docs. When Figma is supplied, capture real nodes, variables, screenshots, assets, and a strict manifest.
+2. **Contracts:** Freeze `sourceProvenance`, requirements, API operations, and Figma `visualTargets`.
 3. **API-ready:** Submit distinct non-empty type/schema/wrapper/mock files plus a passing contract-test JSON under one `implementationContextId`.
-4. **UI implementation:** In the same context, validate mock-backed states, connect the real API, and finish loading, empty, error, and success states.
+4. **UI / visual / performance:** Connect UI/API, make `apiCoverage` exactly match all intake operations, and record Web Vitals. Every actual capture repeats the target route/state/viewport/device scale/fixture and records provider, ISO capture time, PNG path, and `sha256:` digest. Runtime rejects target drift or digest mismatch before Figma/result `compare-visuals`, which requires at least 98%, at most 20% justified masking, and three total comparison attempts (the initial comparison plus at most two repairs).
 5. **Independent reviews:** Functional and design reviewers separately judge frozen contracts, diff, and evidence.
 6. **Targeted feature proof:** Run one Playwright invocation selecting the changed feature and record strict JSON plus one valid video.
-7. **Report / publish:** Publish a draft PR with the exact selector, command, result, video path, and every verdict.
+7. **Report / publish:** Put source/API/visual/performance/E2E/video in packet-bound 15-section `pr-report-v2.1` and publish the draft.
+
+Every report section is `complete`, `not-run`, `blocked`, or `not-applicable`; stale paths outside the current review packet are omitted. GitHub images, diffs, overlays, and video use immutable paths on one managed `spec-to-pr/evidence` branch and URLs pinned to the upload commit SHA, not a branch per Run.
 
 ## Execution policy: stages, agents, skills, and tools
 
@@ -82,17 +92,19 @@ Implement checkout end to end. Run only the checkout test path, tag, or project 
 | `implementation`    | One implementation writer uses one `implementationContextId`, submits API-ready before UI, and creates targeted feature proof. |
 | `functional-review` | The read-only `functional-reviewer` judges contracts, diff, project checks, and targeted E2E.                                  |
 | `design-review`     | The read-only `design-reviewer` judges visual, interaction, responsive, and accessibility evidence.                            |
-| `report`            | Build the canonical exact-selector, structured-result, one-video, review, and risk report.                                     |
+| `report`            | Build 15-section `pr-report-v2.1` source/API/visual/Web Vitals/selector/result/video reporting.                                |
 | `publish`           | Use `workflow_publish intent: ready` to sync assets and create/update a draft only.                                            |
 | `archive`           | Run only after merge, authoritative evidence, and a separate request.                                                          |
 
-Agent policy allows zero read-only scout workers for XS/S, at most one for M, and at most two for L/XL. Scouts only read sources; one implementation writer owns API and UI. There is **no nesting** and no **parallel writer**. Functional/design reviewer parallelism starts only after implementation.
+Agent policy allows zero read-only scout workers for XS/S, at most one for M, and at most two for L/XL. Scouts only read sources; one implementation writer owns API and UI. There is **no nesting** and no **parallel writer**. Functional/design reviewer parallelism starts only for L/XL after implementation.
 
 - `stageSkillRoute`: public actions route `intake-contracts` → `implement` → `review-functional`/`review-design` → `publish`. This routing is not `deliveryProfile.recommendedSkills`.
 - `recommendedSkills`: `figmaUrl` → `figma`, `design-system`; `openApiPaths` → `api-generator`; detected React/Next packages → `react-best-practices`, `next-best-practices`; `mode: feature` + UI → `playwright` optional candidates.
 - `appliedSkills`: record only the allowed union of `recommendedSkills` and actually available/applicable optional `skillHints`. Missing optional skills never weaken targeted E2E or other required evidence.
 - **workflow MCP:** required. **Figma host:** required with `figmaUrl`. **Playwright Test/CLI:** required as the acceptance oracle using one changed-feature test path/tag/project command, retrying assertions, structured results, and exactly one supporting video.
 - **Browser MCP:** optional interactive reproduction/inspection. **Chrome DevTools MCP:** conditional for console/network/performance/memory/live-DOM diagnosis. Neither replaces the exact Playwright selector, assertions, or positive `testCount`.
+
+Ready and blocked drafts use the same 15-section `pr-report-v2.1`. A blocked draft exposes the stopped stage, completed work, unrun validations, and exact unblock action while remaining `status: blocked`.
 
 ### Ready, blocked diagnostic, and resume
 
@@ -108,6 +120,9 @@ After recovery, resume the **same Run** and repeat only the failed required proo
 | --------------- | ------------------------------------------------- | ----------------------------------------------------------------------------------- |
 | API-ready       | `evidence/api/api-ready.json`                     | Four physical artifact roles, passing contract test, same `implementationContextId` |
 | Figma           | `evidence/figma/figma-bundle.json`                | If URL supplied: real connected-host bundle and actual PNGs                         |
+| Visual fidelity | `evidence/visual/checkout-report.json`            | Figma/result ratio ≥ 98%, baseline/target/diff/overlay                              |
+| API gap         | `evidence/api/coverage.json`                      | Operation-level production/mock/test mapping                                        |
+| Web Vitals      | `evidence/performance/checkout.json`              | Lab budget and field source or unavailable reason                                   |
 | Reviews         | `evidence/reviews/functional.json`, `design.json` | Both independent verdicts approved                                                  |
 | Targeted result | `evidence/e2e/targeted-feature.json`              | Only `status: passed`, exact selector, same context ID, positive `testCount`        |
 | Video           | `evidence/e2e/checkout.webm`                      | `featureVideo: required`, WebM/MP4, non-zero duration, ≤25 MB, exactly one          |
@@ -148,6 +163,12 @@ The command must be one unchained Playwright invocation whose real argument sele
 - result: evidence/e2e/targeted-feature.json
 - featureVideo: evidence/e2e/checkout.webm (exactly one)
 
+## Visual, API, and performance
+
+- Figma review match: 99.03%
+- API operations: 6/6 covered; gap none
+- Web Vitals: LCP 2.0s, CLS 0.03, TBT 110ms
+
 ## Risks and exclusions
 
 - full-project E2E was not run
@@ -171,8 +192,17 @@ The command must be one unchained Playwright invocation whose real argument sele
 - It does not infer design from a Figma URL or poll Figma.
 - It does not add unrelated migrations, release matrices, or full-suite evidence to a feature PR.
 
+<NextStep
+  eyebrow="Before you judge the video"
+  title="The E2E video and independent reviewer verdicts have different jobs"
+  description="Video supports the targeted feature execution; functional and design reviewers separately judge the same immutable packet."
+  href="/concepts/reviews"
+  label="Open agent reviews"
+  secondary={{ label: "Inspect visual verification", href: "/concepts/visual-verification" }}
+/>
+
 ## Other usage cases
 
 - [Brief → draft PR](./brief)
-- [Legacy change → draft PR](./legacy)
+- [Legacy migration → draft PR](./legacy)
 - [Figma → design implementation](./figma)

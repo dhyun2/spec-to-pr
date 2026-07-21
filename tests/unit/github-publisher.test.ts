@@ -215,6 +215,8 @@ describe("GitHubPublisherAdapter", () => {
       .fn()
       // repo visibility check (public)
       .mockResolvedValueOnce(jsonResponse({ private: false }))
+      // managed evidence ref
+      .mockResolvedValueOnce(jsonResponse(evidenceRef()))
       // findContentSha -> not found
       .mockResolvedValueOnce(new Response("not found", { status: 404 }))
       // PUT upload -> returns commit sha
@@ -224,7 +226,7 @@ describe("GitHubPublisherAdapter", () => {
             html_url:
               "https://github.com/acme/spec-to-pr/blob/spec-to-pr/run-1/.spec-to-pr/visual-assets/x/figma.png",
           },
-          commit: { sha: "abc123def456" },
+          commit: { sha: EVIDENCE_COMMIT },
         }),
       );
     const adapter = new GitHubPublisherAdapter(fetchMock);
@@ -242,9 +244,9 @@ describe("GitHubPublisherAdapter", () => {
       expect.objectContaining({ method: "GET" }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
-      3,
+      4,
       expect.stringContaining(
-        "/repos/acme/spec-to-pr/contents/.spec-to-pr/visual-assets/run_11111111111111111111111111111111/home/figma.png",
+        `/repos/acme/spec-to-pr/contents/.spec-to-pr/visual-assets/run_11111111111111111111111111111111/${PACKET_ID}/home/art_22222222222222222222222222222222/figma.png`,
       ),
       expect.objectContaining({ method: "PUT" }),
     );
@@ -254,16 +256,47 @@ describe("GitHubPublisherAdapter", () => {
         targetId: "home",
         role: "figma",
         label: "Figma",
-        url: "https://raw.githubusercontent.com/acme/spec-to-pr/abc123def456/.spec-to-pr/visual-assets/run_11111111111111111111111111111111/home/figma.png",
+        url: `https://raw.githubusercontent.com/acme/spec-to-pr/${EVIDENCE_COMMIT}/.spec-to-pr/visual-assets/run_11111111111111111111111111111111/${PACKET_ID}/home/art_22222222222222222222222222222222/figma.png`,
         embeddable: true,
       },
     ]);
+  });
+
+  it("uploads ready evidence on the single managed ref without moving the reviewed source branch", async () => {
+    const reviewedHead = REVIEWED_HEAD;
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ private: false }))
+      .mockResolvedValueOnce(new Response("missing ref", { status: 404 }))
+      .mockResolvedValueOnce(jsonResponse(evidenceRef(reviewedHead), 201))
+      .mockResolvedValueOnce(new Response("missing asset", { status: 404 }))
+      .mockResolvedValueOnce(jsonResponse({ content: {}, commit: { sha: EVIDENCE_COMMIT } }));
+    const adapter = new GitHubPublisherAdapter(fetchMock);
+
+    await adapter.publishAssets({
+      target: githubTarget(),
+      payload: { ...payload(), headSha: reviewedHead },
+      token: "ghp_example",
+      assets: [asset()],
+    });
+
+    expect(JSON.parse(String(fetchMock.mock.calls[2]![1]!.body))).toEqual({
+      ref: "refs/heads/spec-to-pr/evidence",
+      sha: reviewedHead,
+    });
+    const uploadBody = JSON.parse(String(fetchMock.mock.calls[4]![1]!.body)) as Record<
+      string,
+      unknown
+    >;
+    expect(uploadBody["branch"]).toBe("spec-to-pr/evidence");
+    expect(uploadBody["branch"]).not.toBe("spec-to-pr/run-1");
   });
 
   it("falls back to a non-embeddable blob link for private repos", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse({ private: true }))
+      .mockResolvedValueOnce(jsonResponse(evidenceRef()))
       .mockResolvedValueOnce(new Response("not found", { status: 404 }))
       .mockResolvedValueOnce(
         jsonResponse({
@@ -271,7 +304,7 @@ describe("GitHubPublisherAdapter", () => {
             html_url:
               "https://github.com/acme/spec-to-pr/blob/spec-to-pr/run-1/.spec-to-pr/visual-assets/x/figma.png",
           },
-          commit: { sha: "abc123def456" },
+          commit: { sha: EVIDENCE_COMMIT },
         }),
       );
     const adapter = new GitHubPublisherAdapter(fetchMock);
@@ -285,7 +318,136 @@ describe("GitHubPublisherAdapter", () => {
 
     expect(result[0]).toMatchObject({
       embeddable: false,
-      url: "https://github.com/acme/spec-to-pr/blob/spec-to-pr/run-1/.spec-to-pr/visual-assets/x/figma.png",
+      url: `https://github.com/acme/spec-to-pr/blob/${EVIDENCE_COMMIT}/.spec-to-pr/visual-assets/run_11111111111111111111111111111111/${PACKET_ID}/home/art_22222222222222222222222222222222/figma.png`,
+    });
+  });
+
+  it("reuses the same managed branch across runs", async () => {
+    const fetchMock = vi.fn();
+    for (let index = 0; index < 2; index += 1) {
+      fetchMock
+        .mockResolvedValueOnce(jsonResponse({ private: false }))
+        .mockResolvedValueOnce(jsonResponse(evidenceRef()))
+        .mockResolvedValueOnce(new Response("not found", { status: 404 }))
+        .mockResolvedValueOnce(jsonResponse({ content: {}, commit: { sha: EVIDENCE_COMMIT } }));
+    }
+    const adapter = new GitHubPublisherAdapter(fetchMock);
+
+    await adapter.publishAssets({
+      target: githubTarget(),
+      payload: payload(),
+      token: "ghp_example",
+      assets: [asset()],
+    });
+    await adapter.publishAssets({
+      target: githubTarget(),
+      payload: { ...payload(), runId: `run_${"3".repeat(32)}`, sourceBranch: "codex/another" },
+      token: "ghp_example",
+      assets: [asset()],
+    });
+
+    const uploadBodies = fetchMock.mock.calls
+      .filter((call) => call[1]?.method === "PUT")
+      .map((call) => JSON.parse(String(call[1]?.body)) as Record<string, unknown>);
+    expect(uploadBodies).toHaveLength(2);
+    expect(uploadBodies.map((body) => body["branch"])).toEqual([
+      "spec-to-pr/evidence",
+      "spec-to-pr/evidence",
+    ]);
+    expect(JSON.stringify(uploadBodies)).not.toContain("codex/another");
+  });
+
+  it.each([
+    { ref: "refs/tags/spec-to-pr/evidence", object: { type: "commit", sha: REVIEWED_HEAD } },
+    { ref: "refs/heads/spec-to-pr/evidence", object: { type: "tag", sha: REVIEWED_HEAD } },
+    { ref: "refs/heads/spec-to-pr/evidence", object: { type: "commit", sha: "invalid" } },
+  ])("rejects malformed or non-commit managed refs", async (invalidRef) => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ private: false }))
+      .mockResolvedValueOnce(jsonResponse(invalidRef));
+    const adapter = new GitHubPublisherAdapter(fetchMock);
+
+    await expect(
+      adapter.publishAssets({
+        target: githubTarget(),
+        payload: payload(),
+        token: "ghp_example",
+        assets: [asset()],
+      }),
+    ).rejects.toThrow(/EVIDENCE_REF_CONFLICT/);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("re-fetches and validates the managed ref after a create race", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ private: false }))
+      .mockResolvedValueOnce(new Response("missing", { status: 404 }))
+      .mockResolvedValueOnce(new Response("already exists", { status: 422 }))
+      .mockResolvedValueOnce(jsonResponse(evidenceRef()))
+      .mockResolvedValueOnce(new Response("missing asset", { status: 404 }))
+      .mockResolvedValueOnce(jsonResponse({ content: {}, commit: { sha: EVIDENCE_COMMIT } }));
+    const adapter = new GitHubPublisherAdapter(fetchMock);
+
+    await expect(
+      adapter.publishAssets({
+        target: githubTarget(),
+        payload: payload(),
+        token: "ghp_example",
+        assets: [asset()],
+      }),
+    ).resolves.toHaveLength(1);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      expect.stringContaining("/git/ref/heads/spec-to-pr/evidence"),
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("fails closed when a create race does not produce a valid managed ref", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ private: false }))
+      .mockResolvedValueOnce(new Response("missing", { status: 404 }))
+      .mockResolvedValueOnce(new Response("already exists", { status: 422 }))
+      .mockResolvedValueOnce(new Response("still missing", { status: 404 }));
+    const adapter = new GitHubPublisherAdapter(fetchMock);
+
+    await expect(
+      adapter.publishAssets({
+        target: githubTarget(),
+        payload: payload(),
+        token: "ghp_example",
+        assets: [asset()],
+      }),
+    ).rejects.toThrow(/EVIDENCE_REF_CONFLICT/);
+  });
+
+  it("retries shared-ref upload conflicts with a refreshed content SHA", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ private: false }))
+      .mockResolvedValueOnce(jsonResponse(evidenceRef()))
+      .mockResolvedValueOnce(new Response("missing asset", { status: 404 }))
+      .mockResolvedValueOnce(new Response("ref moved", { status: 409 }))
+      .mockResolvedValueOnce(jsonResponse({ sha: "blobsha2" }))
+      .mockResolvedValueOnce(jsonResponse({ content: {}, commit: { sha: EVIDENCE_COMMIT } }));
+    const adapter = new GitHubPublisherAdapter(fetchMock);
+
+    await expect(
+      adapter.publishAssets({
+        target: githubTarget(),
+        payload: payload(),
+        token: "ghp_example",
+        assets: [asset()],
+      }),
+    ).resolves.toHaveLength(1);
+    const uploads = fetchMock.mock.calls.filter((call) => call[1]?.method === "PUT");
+    expect(uploads).toHaveLength(2);
+    expect(JSON.parse(String(uploads[1]![1]?.body))).toMatchObject({
+      branch: "spec-to-pr/evidence",
+      sha: "blobsha2",
     });
   });
 });
@@ -319,11 +481,24 @@ function payload(): ReviewRequestPayload {
     body: "# Summary",
     sourceBranch: "spec-to-pr/run-1",
     targetBranch: "main",
+    headSha: REVIEWED_HEAD,
+    reviewPacketId: PACKET_ID,
     mode: "draft",
     labels: ["spec-to-pr"],
     reviewers: [],
     assignees: [],
     reportArtifactId: "art_11111111111111111111111111111111",
+  };
+}
+
+const REVIEWED_HEAD = "a".repeat(40);
+const EVIDENCE_COMMIT = "c".repeat(40);
+const PACKET_ID = `packet_${"b".repeat(64)}`;
+
+function evidenceRef(sha = EVIDENCE_COMMIT) {
+  return {
+    ref: "refs/heads/spec-to-pr/evidence",
+    object: { type: "commit", sha },
   };
 }
 
@@ -336,9 +511,9 @@ function blockedPayload(): ReviewRequestPayload {
   };
 }
 
-function jsonResponse(value: unknown): Response {
+function jsonResponse(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {
-    status: 200,
+    status,
     headers: {
       "content-type": "application/json",
     },

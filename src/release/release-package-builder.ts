@@ -7,6 +7,7 @@ import {
   RELEASE_DIRECTORY_ALLOWLIST,
   RELEASE_FILE_ALLOWLIST,
   RELEASE_FORBIDDEN_PATTERNS,
+  validateMcpBundleFiles,
 } from "./release-manifest.js";
 
 export type ReleasePackageBuildResult = {
@@ -53,6 +54,10 @@ export class ReleasePackageBuilder {
     }
 
     const snapshot = await this.collectReleaseSnapshot();
+    const bundleFailures = validateMcpBundleFiles(snapshot.files);
+    if (bundleFailures.length > 0) {
+      throw new Error(`Release MCP bundle validation failed:\n${bundleFailures.join("\n")}`);
+    }
     const includedFiles = [...snapshot.files.keys()].sort();
     await mkdir(input.outputDirectory, { recursive: true });
     const packagePath = path.join(input.outputDirectory, `spec-to-pr-${input.version}.zip`);

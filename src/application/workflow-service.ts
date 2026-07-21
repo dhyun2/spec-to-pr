@@ -4,21 +4,40 @@ import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
-import { PNG } from "pngjs";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 
 import type { ArtifactBlobStore } from "../artifact-registry/artifact-blob-store.js";
-import { WorkflowReportMetadataSchema } from "../pr-report/pr-report-model.js";
 import {
-  renderBlockedWorkflowReport,
-  renderReadyWorkflowReport,
-} from "../pr-report/workflow-report-renderer.js";
+  PrReportSectionStatusesSchema,
+  PrReportV2Schema,
+  WorkflowReportMetadataSchema,
+  assertCurrentPrReportV2,
+  type PrReportSectionStatus,
+} from "../pr-report/pr-report-model.js";
+import { publicSourceRows } from "../pr-report/public-provenance.js";
+import {
+  LegacyInventorySchema,
+  assertLegacyInventoryFresh,
+  buildLegacyInventory,
+  directoriesOverlap,
+  mergeLegacyRuntimeNetworkEvidence,
+  validateLegacyRuntimeNetworkEvidence,
+  type LegacyInventory,
+} from "../legacy/legacy-inventory.js";
+import { renderPrReportV2Markdown } from "../pr-report/workflow-report-renderer.js";
 import { PublishIntentSchema, PublishResultSchema } from "../publisher/index.js";
 import { ArtifactRefSchema, type ArtifactRef } from "../runtime/artifact.js";
-import { createArtifactId } from "../runtime/id-factory.js";
+import { GapSchema } from "../runtime/gap.js";
+import { createArtifactId, createGapId } from "../runtime/id-factory.js";
 import { ArtifactIdSchema, RunIdSchema } from "../runtime/ids.js";
 import { summarizeRun, type RunManifest } from "../run/index.js";
+import {
+  extractPdfText,
+  fetchOpenApiDocument,
+  type RemoteOpenApiSource,
+} from "../source-ingestion/source-loader.js";
+import { inventoryOpenApiOperations } from "../source-ingestion/openapi-inventory.js";
 import type { RunStageName, StageState } from "../run/stages.js";
 import type { RunStore } from "../store/run-store.js";
 import { RevisionConflictError } from "../store/errors.js";
@@ -35,6 +54,7 @@ import {
   SkillHintSchema,
   WorkflowBlockerSchema,
   WorkflowSourcePathSchema,
+  WorkflowSourceUrlSchema,
   WorkflowActionSchema,
   WorkflowScopeSchema,
   WorkflowStatusSchema,
@@ -46,6 +66,7 @@ import {
   classifyWorkflowScope,
   estimateWorkload,
   isSafeDurableEvidencePath,
+  resolveDeliveryPolicy,
   type WorkflowScope,
   type WorkflowBlocker,
   type DeliveryProfile,
@@ -61,6 +82,13 @@ import type { OpenSpecArchiveService } from "./openspec-archive-service.js";
 import type { PublisherService } from "./publisher-service.js";
 import type { RunService } from "./run-service.js";
 import type { StageService } from "./stage-service.js";
+import {
+  MAX_VISUAL_REPAIR_ATTEMPTS,
+  VisualTargetManifestSchema,
+  compareVisualPngs,
+  type VisualTargetManifest,
+} from "../visual/visual-comparator.js";
+import { decodeBoundedPng } from "../visual/png-decoder.js";
 
 const WORKER_ID = "workflow-orchestrator" as const;
 const execFileAsync = promisify(execFile);
@@ -69,7 +97,6 @@ const DEFAULT_EXTERNAL_HEARTBEAT_MS = 60 * 1000;
 const MAX_DIAGNOSTIC_CLAIM_ATTEMPTS = 8;
 const MAX_COMPOSABLE_SOURCE_PATHS = 20;
 const MAX_INTAKE_SOURCE_CHARS = 200_000;
-const MAX_OPENAPI_OPERATIONS = 1_000;
 const GUIDANCE_CANDIDATES = [
   "AGENTS.md",
   "CLAUDE.md",
@@ -82,11 +109,17 @@ const ComposableSourcePathsSchema = z
   .array(WorkflowSourcePathSchema)
   .max(MAX_COMPOSABLE_SOURCE_PATHS)
   .default([]);
+const ComposableSourceUrlsSchema = z
+  .array(WorkflowSourceUrlSchema)
+  .max(MAX_COMPOSABLE_SOURCE_PATHS)
+  .default([]);
 const NormalizedDeliveryProfilePathsSchema = z
   .object({
     briefPath: WorkflowSourcePathSchema.optional(),
+    legacyNetworkEvidencePath: WorkflowSourcePathSchema.optional(),
     docsPaths: ComposableSourcePathsSchema,
     openApiPaths: ComposableSourcePathsSchema,
+    openApiUrls: ComposableSourceUrlsSchema,
     guidancePaths: ComposableSourcePathsSchema,
     discoveredGuidancePaths: ComposableSourcePathsSchema,
   })
@@ -107,6 +140,7 @@ const FigmaManifestSchema = z
           .regex(/\.png$/i),
       )
       .min(1),
+    visualTargets: z.array(VisualTargetManifestSchema).min(1).max(50),
   })
   .strict();
 
@@ -127,22 +161,77 @@ export const WorkflowStartInputSchema = z
     mode: DeliveryModeSchema.default("auto"),
     changeKind: ChangeKindSchema.default("auto"),
     publication: PublicationIntentSchema.optional(),
+    legacyProjectRoot: z.string().trim().min(1).max(1_000).optional(),
+    legacyNetworkEvidencePath: WorkflowSourcePathSchema.optional(),
     briefPath: WorkflowSourcePathSchema.optional(),
     figmaUrl: FigmaFileUrlSchema.optional(),
     docsPath: WorkflowSourcePathSchema.optional(),
     docsPaths: ComposableSourcePathsSchema,
     openApiPath: WorkflowSourcePathSchema.optional(),
     openApiPaths: ComposableSourcePathsSchema,
+    openApiUrl: WorkflowSourceUrlSchema.optional(),
+    openApiUrls: ComposableSourceUrlsSchema,
     guidancePaths: ComposableSourcePathsSchema,
     skillHints: SkillHintsSchema,
   })
   .strict()
   .superRefine((input, context) => {
-    if (input.mode === "brief" && input.briefPath === undefined) {
+    if (input.mode === "brief" || input.mode === "feature") {
+      if (input.briefPath === undefined) {
+        context.addIssue({
+          code: "custom",
+          path: ["briefPath"],
+          message: input.mode + " mode requires briefPath",
+        });
+      }
+      if (input.figmaUrl === undefined) {
+        context.addIssue({
+          code: "custom",
+          path: ["figmaUrl"],
+          message: input.mode + " mode requires figmaUrl",
+        });
+      }
+      if (
+        uniqueInputValues([
+          ...(input.openApiPath === undefined ? [] : [input.openApiPath]),
+          ...input.openApiPaths,
+        ]).length +
+          uniqueInputUrls([
+            ...(input.openApiUrl === undefined ? [] : [input.openApiUrl]),
+            ...input.openApiUrls,
+          ]).length ===
+        0
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["openApiPaths"],
+          message: input.mode + " mode requires at least one OpenAPI source",
+        });
+      }
+    }
+    if (input.mode === "legacy" && input.legacyProjectRoot === undefined) {
       context.addIssue({
         code: "custom",
-        path: ["briefPath"],
-        message: "brief mode requires briefPath",
+        path: ["legacyProjectRoot"],
+        message: "legacy mode requires legacyProjectRoot",
+      });
+    }
+    if (
+      input.legacyNetworkEvidencePath !== undefined &&
+      input.mode !== "auto" &&
+      input.mode !== "legacy"
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["legacyNetworkEvidencePath"],
+        message: "legacyNetworkEvidencePath is only valid for legacy mode",
+      });
+    }
+    if (input.legacyNetworkEvidencePath !== undefined && input.legacyProjectRoot === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["legacyProjectRoot"],
+        message: "legacyNetworkEvidencePath requires legacyProjectRoot",
       });
     }
     if (input.mode === "figma" && input.figmaUrl === undefined) {
@@ -153,7 +242,12 @@ export const WorkflowStartInputSchema = z
       });
     }
     if (
-      (input.mode === "feature" || input.mode === "figma") &&
+      (input.mode === "brief" ||
+        input.mode === "legacy" ||
+        input.mode === "feature" ||
+        input.mode === "figma" ||
+        input.figmaUrl !== undefined ||
+        input.legacyProjectRoot !== undefined) &&
       input.scope !== "auto" &&
       input.scope !== "ui"
     ) {
@@ -181,9 +275,30 @@ export const WorkflowStartInputSchema = z
       }
     }
 
+    const openApiSourceCount =
+      uniqueInputValues([
+        ...(input.openApiPath === undefined ? [] : [input.openApiPath]),
+        ...input.openApiPaths,
+      ]).length +
+      uniqueInputUrls([
+        ...(input.openApiUrl === undefined ? [] : [input.openApiUrl]),
+        ...input.openApiUrls,
+      ]).length;
+    if (openApiSourceCount > MAX_COMPOSABLE_SOURCE_PATHS) {
+      context.addIssue({
+        code: "custom",
+        path: ["openApiUrls"],
+        message: `OpenAPI paths and URLs cannot contain more than ${MAX_COMPOSABLE_SOURCE_PATHS} distinct sources`,
+      });
+    }
+
     const roles = new Map<string, string>();
     for (const [role, paths] of [
       ["briefPath", input.briefPath === undefined ? [] : [input.briefPath]],
+      [
+        "legacyNetworkEvidencePath",
+        input.legacyNetworkEvidencePath === undefined ? [] : [input.legacyNetworkEvidencePath],
+      ],
       ["docsPaths", [input.docsPath, ...input.docsPaths].filter(isDefined)],
       ["openApiPaths", [input.openApiPath, ...input.openApiPaths].filter(isDefined)],
       ["guidancePaths", input.guidancePaths],
@@ -298,6 +413,7 @@ export type WorkflowServiceDependencies = {
   runService: RunService;
   intakeRequestService: IntakeRequestService;
   stageService: StageService;
+  fetchOpenApiSource?: (input: { url: string }) => Promise<RemoteOpenApiSource>;
   publisherService?: PublisherService;
   archiveService?: OpenSpecArchiveService;
   now?: () => string;
@@ -327,15 +443,39 @@ export class WorkflowService {
 
   public async start(rawInput: unknown): Promise<WorkflowStatus> {
     const input = WorkflowStartInputSchema.parse(rawInput);
-    const sources = await prepareComposableSources(input);
+    const effectiveMode = resolveWorkflowDeliveryMode(input);
+    const canonicalLegacyProjectRoot = await canonicalLegacyDirectory({
+      projectRoot: input.projectRoot,
+      ...(input.legacyProjectRoot === undefined
+        ? {}
+        : { legacyProjectRoot: input.legacyProjectRoot }),
+      required: effectiveMode === "legacy",
+    });
+    const sources = await prepareComposableSources(
+      input,
+      this.dependencies.fetchOpenApiSource ?? fetchOpenApiDocument,
+    );
+    if (sources.legacyNetwork !== undefined) {
+      validateLegacyRuntimeNetworkEvidence(sources.legacyNetwork.text);
+    }
+    const sourceCapturedAt = this.now();
     const normalizedProfilePaths = NormalizedDeliveryProfilePathsSchema.parse({
       ...(sources.brief === undefined ? {} : { briefPath: sources.brief.path }),
+      ...(sources.legacyNetwork === undefined
+        ? {}
+        : { legacyNetworkEvidencePath: sources.legacyNetwork.path }),
       docsPaths: sources.docs.map((file) => file.path),
-      openApiPaths: sources.openApi.map((file) => file.path),
+      openApiPaths: sources.openApi
+        .filter((source) => source.origin === "file")
+        .map((source) => source.path),
+      openApiUrls: sources.openApi
+        .filter((source) => source.origin === "url")
+        .map((source) => source.path),
       guidancePaths: sources.guidance.map((file) => file.path),
       discoveredGuidancePaths: sources.discoveredGuidance.map((file) => file.path),
     });
-    const publication = input.publication ?? (input.mode === "figma" ? "none" : "draft");
+    const sourceOpenApiOperations = inventoryOpenApiOperations(sources.openApi);
+    const publication = input.publication ?? "draft";
     const initialHead = await currentGitHead(input.projectRoot);
     const created = await this.dependencies.runService.createRun({
       projectRoot: input.projectRoot,
@@ -368,12 +508,32 @@ export class WorkflowService {
         intakeArtifactIds.push(...artifactIds);
       }
     }
+    const legacyInventoryResult =
+      canonicalLegacyProjectRoot === undefined
+        ? undefined
+        : await this.recordLegacyInventory(
+            created.id,
+            canonicalLegacyProjectRoot,
+            sources.legacyNetwork,
+          );
+    const legacyInventoryArtifact = legacyInventoryResult?.artifact;
+    const legacyApiResult =
+      legacyInventoryResult === undefined
+        ? { operations: [], unresolved: [] }
+        : deriveLegacyApiOperations(legacyInventoryResult.inventory, sourceOpenApiOperations);
+    const openApiOperations = mergeDeliveryApiOperations(
+      sourceOpenApiOperations,
+      legacyApiResult.operations,
+    );
 
     const figmaUrl = input.figmaUrl ?? parsed.parsed.figmaUrls[0];
-    const explicitScope =
-      (input.mode === "feature" || input.mode === "figma") && input.scope === "auto"
-        ? "ui"
-        : input.scope;
+    const forcedUi =
+      effectiveMode === "brief" ||
+      effectiveMode === "legacy" ||
+      effectiveMode === "feature" ||
+      effectiveMode === "figma" ||
+      figmaUrl !== undefined;
+    const explicitScope = forcedUi && input.scope === "auto" ? "ui" : input.scope;
     const classificationText = [
       input.requestText,
       ...(sources.brief === undefined ? [] : [sources.brief.text]),
@@ -387,31 +547,53 @@ export class WorkflowService {
     });
     const scope = WorkflowScopeSchema.parse({
       ...classifiedScope,
-      api: classifiedScope.api || sources.openApi.length > 0,
+      ui: forcedUi || classifiedScope.ui,
+      api:
+        classifiedScope.api ||
+        sources.openApi.length > 0 ||
+        effectiveMode === "brief" ||
+        effectiveMode === "legacy" ||
+        effectiveMode === "feature",
       specification: classifiedScope.specification || sources.openApi.length > 0,
+      hasVisualBaseline:
+        classifiedScope.hasVisualBaseline || figmaUrl !== undefined || effectiveMode === "legacy",
+      performanceSensitive:
+        classifiedScope.performanceSensitive ||
+        effectiveMode === "brief" ||
+        effectiveMode === "legacy" ||
+        effectiveMode === "feature",
     });
     const gatePlan = buildGatePlan(scope);
     const recommendedSkills = await recommendedSkillsForIntake({
       projectRoot: input.projectRoot,
       ...(figmaUrl === undefined ? {} : { figmaUrl }),
       hasOpenApi: sources.openApi.length > 0,
-      featureUi: scope.ui && (input.mode === "feature" || input.changeKind === "feature"),
+      featureUi: scope.ui && (effectiveMode === "feature" || input.changeKind === "feature"),
     });
     const deliveryProfile = buildDeliveryProfile({
-      mode: input.mode,
+      mode: effectiveMode,
       changeKind: input.changeKind,
       publication,
       scope,
+      ...(canonicalLegacyProjectRoot === undefined
+        ? {}
+        : { legacyProjectRoot: canonicalLegacyProjectRoot }),
+      ...(normalizedProfilePaths.legacyNetworkEvidencePath === undefined
+        ? {}
+        : { legacyNetworkEvidencePath: normalizedProfilePaths.legacyNetworkEvidencePath }),
       ...(normalizedProfilePaths.briefPath === undefined
         ? {}
         : { briefPath: normalizedProfilePaths.briefPath }),
       ...(figmaUrl === undefined ? {} : { figmaUrl }),
       docsPaths: normalizedProfilePaths.docsPaths,
       openApiPaths: normalizedProfilePaths.openApiPaths,
+      openApiUrls: normalizedProfilePaths.openApiUrls,
+      openApiOperations,
       guidancePaths: normalizedProfilePaths.guidancePaths,
       discoveredGuidancePaths: normalizedProfilePaths.discoveredGuidancePaths,
       skillHints: sources.skillHints,
       recommendedSkills,
+      sourceProvenance: sourceProvenanceForPreparedSources(sources, sourceCapturedAt),
     });
     const workload = estimateWorkload({
       phase: "intake",
@@ -419,8 +601,7 @@ export class WorkflowService {
       scope,
       signals: {
         requirements: countIntakeRequirements(classificationText),
-        apiOperations:
-          sources.openApi.length > 0 ? countOpenApiOperations(sources.openApi) : scope.api ? 1 : 0,
+        apiOperations: sources.openApi.length > 0 ? openApiOperations.length : scope.api ? 1 : 0,
         uiSurfaces: scope.ui ? 1 : 0,
         figmaNodes: figmaUrl === undefined ? 0 : 1,
         testTargets: scope.code ? 1 : 0,
@@ -429,12 +610,73 @@ export class WorkflowService {
       },
     });
 
+    if (legacyApiResult.unresolved.length > 0) {
+      const timestamp = this.now();
+      const gap = GapSchema.parse({
+        id: createGapId(),
+        category: "api",
+        severity: "blocker",
+        status: "open",
+        title: "Legacy API method or path is unresolved",
+        expected:
+          "Every detected legacy API call maps to a unique method/path using source, runtime, or scoped OpenAPI evidence.",
+        observed: legacyApiResult.unresolved
+          .map((candidate) => `${candidate.normalizedKey} at ${candidate.sourcePath}`)
+          .join("; ")
+          .slice(0, 4_000),
+        impact: "API coverage cannot be proven without inventing a legacy operation.",
+        sourceEvidenceIds: [],
+        resolutionArtifactIds: [],
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        metadata: {
+          unresolvedCandidates: legacyApiResult.unresolved,
+          discoveryAdapters: legacyInventoryResult?.inventory.apiDiscoveryAdapters ?? [],
+        },
+      });
+      const current = await this.dependencies.runStore.get(created.id);
+      await this.dependencies.runStore.save(
+        {
+          ...current,
+          revision: current.revision + 1,
+          updatedAt: timestamp,
+          gaps: [...current.gaps, gap],
+        },
+        current.revision,
+      );
+      await this.dependencies.stageService.block({
+        runId: created.id,
+        stageName: "intake",
+        workerId: WORKER_ID,
+        leaseId: started.stage.lease!.id,
+        error: {
+          code: "LEGACY_API_METHOD_UNKNOWN",
+          message:
+            "A detected legacy API call needs scoped runtime network evidence or uniquely matching OpenAPI before migration can continue.",
+          retryable: false,
+        },
+        gapIds: [gap.id],
+        artifactIds: [
+          ...intakeArtifactIds,
+          ...(legacyInventoryArtifact === undefined ? [] : [legacyInventoryArtifact.id]),
+        ],
+        checkpoint: {
+          name: "scope-classified",
+          data: { scope, gatePlan, deliveryProfile, workload },
+        },
+      });
+      return this.status({ runId: created.id });
+    }
+
     await this.dependencies.stageService.complete({
       runId: created.id,
       stageName: "intake",
       workerId: WORKER_ID,
       leaseId: started.stage.lease!.id,
-      artifactIds: [...intakeArtifactIds],
+      artifactIds: [
+        ...intakeArtifactIds,
+        ...(legacyInventoryArtifact === undefined ? [] : [legacyInventoryArtifact.id]),
+      ],
       checkpoint: {
         name: "scope-classified",
         data: { scope, gatePlan, deliveryProfile, workload },
@@ -442,6 +684,63 @@ export class WorkflowService {
     });
 
     return this.status({ runId: created.id });
+  }
+
+  private async recordLegacyInventory(
+    runId: string,
+    legacyProjectRoot: string,
+    legacyNetworkEvidence?: ProjectTextSource,
+  ): Promise<{ artifact: ArtifactRef; inventory: LegacyInventory }> {
+    const sourceInventory = await buildLegacyInventory(legacyProjectRoot);
+    const inventory =
+      legacyNetworkEvidence === undefined
+        ? sourceInventory
+        : mergeLegacyRuntimeNetworkEvidence(
+            sourceInventory,
+            legacyNetworkEvidence.text,
+            legacyNetworkEvidence.path,
+          );
+    const timestamp = this.now();
+    const blob = await this.dependencies.artifactStore.writeBlob({
+      content: Buffer.from(`${JSON.stringify(inventory, null, 2)}\n`, "utf8"),
+      mediaType: "application/json",
+      storedAt: timestamp,
+      label: "legacy-inventory-v2.json",
+    });
+    const artifact = ArtifactRefSchema.parse({
+      id: createArtifactId(),
+      kind: "legacy-feature-inventory",
+      uri: blob.uri,
+      mediaType: "application/json",
+      digest: blob.digest,
+      producedBy: "orchestrator",
+      evidenceIds: [],
+      createdAt: timestamp,
+      metadata: {
+        adapter: "legacy-inventory-v2",
+        projectRelativePath: "contracts/legacy-inventory.json",
+        rootDigest: inventory.rootDigest,
+        sourceDigest: inventory.sourceDigest ?? inventory.rootDigest,
+        featureKeys: inventory.entries.map((entry) => entry.featureKey),
+        entryCount: inventory.entries.length,
+        visitedDirectories: inventory.visitedDirectories,
+        visitedEntries: inventory.visitedEntries,
+        scannedFiles: inventory.scannedFiles,
+        truncated: inventory.truncated,
+        apiDiscoveryAdapters: inventory.apiDiscoveryAdapters,
+      },
+    });
+    const current = await this.dependencies.runStore.get(runId);
+    await this.dependencies.runStore.save(
+      {
+        ...current,
+        revision: current.revision + 1,
+        updatedAt: timestamp,
+        artifacts: [...current.artifacts, artifact],
+      },
+      current.revision,
+    );
+    return { artifact, inventory };
   }
 
   public async advance(rawInput: unknown): Promise<WorkflowStatus> {
@@ -492,6 +791,13 @@ export class WorkflowService {
     const input = WorkflowSubmitInputSchema.parse(rawInput);
     const run = await this.dependencies.runStore.get(input.runId);
     const submission = input.submission;
+    if (
+      submission.kind === "visual-comparison" ||
+      ((submission.kind === "contracts" || submission.kind === "implementation") &&
+        submission.status === "passed")
+    ) {
+      await this.assertLegacyReferenceFresh(run);
+    }
     assertSubmissionPrerequisites(run, submission);
     if (submission.kind === "functional-review" || submission.kind === "design-review") {
       await assertReviewPacketFresh(run);
@@ -520,7 +826,13 @@ export class WorkflowService {
         run.id,
         [...evidenceArtifacts.map((item) => item.id), artifact.id],
         submission.implementationContextId,
+        submission.operations,
       );
+      return this.status({ runId: run.id });
+    }
+
+    if (submission.kind === "visual-comparison") {
+      await this.recordVisualComparison(run, submission, evidenceArtifacts);
       return this.status({ runId: run.id });
     }
 
@@ -655,6 +967,7 @@ export class WorkflowService {
       status === "blocked" && currentBlocker !== undefined
         ? await this.diagnosticPublicationForRun(run, currentBlocker)
         : undefined;
+    const legacyInventory = await this.legacyInventorySummaryForRun(run);
 
     return WorkflowStatusSchema.parse({
       runId: run.id,
@@ -676,8 +989,69 @@ export class WorkflowService {
       blockers,
       blockerDetails,
       ...(diagnosticPublication === undefined ? {} : { diagnosticPublication }),
+      ...(legacyInventory === undefined ? {} : { legacyInventory }),
       resumeContext: resumeContextForRun(run),
     });
+  }
+
+  private async legacyInventorySummaryForRun(run: RunManifest) {
+    const artifact = [...run.artifacts]
+      .reverse()
+      .find((candidate) => candidate.kind === "legacy-feature-inventory");
+    if (artifact === undefined) return undefined;
+    const inventory = LegacyInventorySchema.parse(
+      JSON.parse(
+        (await this.dependencies.artifactStore.readContent(artifact.digest)).toString("utf8"),
+      ),
+    );
+    return {
+      artifactId: artifact.id,
+      rootDigest: inventory.rootDigest,
+      truncated: inventory.truncated,
+      apiDiscoveryAdapters: inventory.apiDiscoveryAdapters,
+      entries: inventory.entries,
+    };
+  }
+
+  private async assertLegacyReferenceFresh(run: RunManifest): Promise<void> {
+    const profile = deliveryProfileFromRun(run);
+    if (!profile.requirements.legacyInventory || profile.legacyProjectRoot === undefined) return;
+    const artifact = [...run.artifacts]
+      .reverse()
+      .find((candidate) => candidate.kind === "legacy-feature-inventory");
+    if (artifact === undefined) {
+      throw new Error("LEGACY_INVENTORY_TRUNCATED: narrow the migration scope and restart intake");
+    }
+    const pinned = LegacyInventorySchema.parse(
+      JSON.parse(
+        (await this.dependencies.artifactStore.readContent(artifact.digest)).toString("utf8"),
+      ),
+    );
+    await assertLegacyInventoryFresh(profile.legacyProjectRoot, pinned);
+    if (profile.legacyNetworkEvidencePath !== undefined) {
+      const provenance = profile.sourceProvenance.find(
+        (source) =>
+          source.kind === "legacy-network" && source.locator === profile.legacyNetworkEvidencePath,
+      );
+      if (provenance === undefined) {
+        throw new Error(
+          "LEGACY_RUNTIME_EVIDENCE_CHANGED: restart intake with the runtime network evidence",
+        );
+      }
+      const evidenceFile = await readProjectTextFile(
+        run.projectRoot,
+        profile.legacyNetworkEvidencePath,
+        "Legacy runtime network evidence",
+      );
+      const currentDigest = `sha256:${createHash("sha256")
+        .update(await readFile(evidenceFile.resolvedPath))
+        .digest("hex")}`;
+      if (currentDigest !== provenance.digest) {
+        throw new Error(
+          "LEGACY_RUNTIME_EVIDENCE_CHANGED: restore the evidence or restart intake from its new state",
+        );
+      }
+    }
   }
 
   public async ensureBlockedDiagnosticReport(rawInput: unknown): Promise<ArtifactRef> {
@@ -707,11 +1081,33 @@ export class WorkflowService {
 
     const timestamp = this.now();
     const sourceRunRevision = run.revision;
-    const markdown = renderBlockedWorkflowReport({
-      runId: run.id,
-      projectRoot: run.projectRoot,
-      blocker,
+    const report = await this.materializeBlockedReport(run, blocker, timestamp);
+    const jsonBlob = await this.dependencies.artifactStore.writeBlob({
+      content: Buffer.from(`${JSON.stringify(report, null, 2)}\n`, "utf8"),
+      mediaType: "application/json",
+      storedAt: timestamp,
+      label: "pr-report-v2.1.json",
     });
+    const jsonArtifact = ArtifactRefSchema.parse({
+      id: createArtifactId(),
+      kind: "pr-report",
+      uri: jsonBlob.uri,
+      mediaType: "application/json",
+      digest: jsonBlob.digest,
+      producedBy: "orchestrator",
+      evidenceIds: [],
+      createdAt: timestamp,
+      metadata: {
+        adapter: "pr-report-v2",
+        reportKind: "pr-report-v2-json",
+        reportSchemaVersion: "pr-report-v2.1",
+        decision: "blocked",
+        blockedStage: blocker.stage,
+        errorCode: blocker.code,
+        idempotencyKey,
+      },
+    });
+    const markdown = renderPrReportV2Markdown(report);
     const blob = await this.dependencies.artifactStore.writeBlob({
       content: Buffer.from(markdown, "utf8"),
       mediaType: "text/markdown",
@@ -728,7 +1124,7 @@ export class WorkflowService {
       evidenceIds: [],
       createdAt: timestamp,
       metadata: {
-        adapter: "workflow-v2",
+        adapter: "pr-report-v2",
         ...WorkflowReportMetadataSchema.parse({
           reportKind: "pr-body-markdown",
           reportIntent: "blocked-diagnostic",
@@ -740,6 +1136,8 @@ export class WorkflowService {
         blockedStageAttempt,
         sourceRunRevision,
         idempotencyKey,
+        reportSchemaVersion: "pr-report-v2.1",
+        reportJsonArtifactId: jsonArtifact.id,
       },
     });
 
@@ -749,7 +1147,7 @@ export class WorkflowService {
           ...run,
           revision: run.revision + 1,
           updatedAt: timestamp,
-          artifacts: [...run.artifacts, artifact],
+          artifacts: [...run.artifacts, jsonArtifact, artifact],
         },
         run.revision,
       );
@@ -782,6 +1180,7 @@ export class WorkflowService {
     if (input.intent === "blocked-diagnostic") {
       return this.publishBlockedDiagnostic(input, run, publisher);
     }
+    await this.assertLegacyReferenceFresh(run);
     if (stage(run, "report").status !== "passed") {
       throw new Error("Ready publication requires a passed report stage");
     }
@@ -805,6 +1204,29 @@ export class WorkflowService {
       reportArtifact.metadata["reviewPacketId"] !== packet.id
     ) {
       throw new Error("Ready publication requires a ready report for the current review packet");
+    }
+    const reportJsonArtifactId = reportArtifact.metadata["reportJsonArtifactId"];
+    const reportJsonArtifact =
+      typeof reportJsonArtifactId === "string"
+        ? run.artifacts.find((artifact) => artifact.id === reportJsonArtifactId)
+        : undefined;
+    if (reportJsonArtifact === undefined) {
+      throw new Error("Ready publication requires a referenced pr-report-v2.1 JSON artifact");
+    }
+    const parsedReport = PrReportV2Schema.parse(
+      JSON.parse(
+        (await this.dependencies.artifactStore.readContent(reportJsonArtifact.digest)).toString(
+          "utf8",
+        ),
+      ),
+    );
+    assertCurrentPrReportV2(parsedReport);
+    if (
+      parsedReport.schemaVersion !== "pr-report-v2.1" ||
+      parsedReport.decision !== "ready" ||
+      parsedReport.binding?.reviewPacketId !== packet.id
+    ) {
+      throw new Error("Ready publication requires a current pr-report-v2.1 JSON artifact");
     }
     const baseInput = {
       runId: run.id,
@@ -1124,6 +1546,20 @@ export class WorkflowService {
     reviewPacket?: ImplementationReviewPacket,
   ): Promise<ArtifactRef> {
     const timestamp = this.now();
+    const persistedEvidenceArtifacts =
+      reviewPacket === undefined
+        ? evidenceArtifacts
+        : evidenceArtifacts.map((evidence) =>
+            ArtifactRefSchema.parse({
+              ...evidence,
+              metadata: {
+                ...evidence.metadata,
+                reviewPacketId: reviewPacket.id,
+                headSha: reviewPacket.headSha,
+                diffDigest: reviewPacket.diffDigest,
+              },
+            }),
+          );
     const persistedSubmission = reconstructFailedSubmissionForPersistence(
       { ...run, artifacts: [...run.artifacts, ...evidenceArtifacts] },
       submission,
@@ -1132,7 +1568,9 @@ export class WorkflowService {
     const persistedSummary =
       persistedSubmission.kind === "figma-bundle"
         ? "Accepted host-connected Figma bundle."
-        : persistedSubmission.summary;
+        : persistedSubmission.kind === "visual-comparison"
+          ? "Runtime-computed visual comparison."
+          : persistedSubmission.summary;
     const content = `${JSON.stringify(persistedSubmission, null, 2)}\n`;
     const blob = await this.dependencies.artifactStore.writeBlob({
       content: Buffer.from(content, "utf8"),
@@ -1153,7 +1591,11 @@ export class WorkflowService {
         adapter: "workflow-v2",
         workflowSubmissionKind: submission.kind,
         ...(submission.kind === "figma-bundle"
-          ? { summary: persistedSummary, status: "passed" }
+          ? {
+              summary: persistedSummary,
+              status: "passed",
+              visualTargets: submission.visualTargets,
+            }
           : { summary: persistedSummary }),
         ...("verdict" in submission ? { verdict: submission.verdict } : {}),
         ...("status" in submission ? { status: submission.status } : {}),
@@ -1164,6 +1606,9 @@ export class WorkflowService {
           : {
               requirementManifest: submission.requirementManifest,
               requirementIds: submission.requirementManifest.map((item) => item.id),
+              visualTargets: submission.visualTargets,
+              legacyScopeKeys: submission.legacyScopeKeys,
+              legacyCoverage: submission.legacyCoverage,
               ...(submission.legacyBaseline === undefined
                 ? {}
                 : { legacyBaseline: submission.legacyBaseline }),
@@ -1176,7 +1621,16 @@ export class WorkflowService {
               ...(submission.featureEvidence === undefined
                 ? {}
                 : { featureVideoPath: submission.featureEvidence.videoPath }),
+              apiCoverage: submission.apiCoverage,
+              legacyCoverage: submission.legacyCoverage,
+              ...(submission.mockDataEvidence === undefined
+                ? {}
+                : { mockDataEvidence: submission.mockDataEvidence }),
+              ...(submission.performanceEvidence === undefined
+                ? {}
+                : { performanceEvidence: submission.performanceEvidence }),
             }),
+        ...(submission.kind !== "api-ready" ? {} : { apiOperations: submission.operations }),
         ...(submission.kind !== "functional-review" && submission.kind !== "design-review"
           ? {}
           : {
@@ -1202,7 +1656,7 @@ export class WorkflowService {
         ...current,
         revision: current.revision + 1,
         updatedAt: timestamp,
-        artifacts: [...current.artifacts, ...evidenceArtifacts, artifact],
+        artifacts: [...current.artifacts, ...persistedEvidenceArtifacts, artifact],
       },
       current.revision,
     );
@@ -1253,6 +1707,7 @@ export class WorkflowService {
     runId: string,
     artifactIds: string[],
     implementationContextId: string,
+    operations: Array<Record<string, unknown>>,
   ): Promise<void> {
     const current = await this.dependencies.runStore.get(RunIdSchema.parse(runId));
     const timestamp = this.now();
@@ -1274,7 +1729,12 @@ export class WorkflowService {
                 artifactIds: [...new Set([...item.artifactIds, ...artifactIds])],
                 checkpoint: {
                   name: "api-ready",
-                  data: { apiReady: true, artifactIds, implementationContextId },
+                  data: {
+                    apiReady: true,
+                    artifactIds,
+                    implementationContextId,
+                    operations,
+                  },
                   updatedAt: timestamp,
                 },
               }
@@ -1329,6 +1789,27 @@ export class WorkflowService {
     const timestamp = this.now();
     const artifacts: ArtifactRef[] = [];
     const apiPhysicalFiles = new Map<string, string>();
+    const legacyExecutableEvidence = new Set(
+      submission.kind === "implementation"
+        ? submission.legacyCoverage.flatMap((coverage) => coverage.executableEvidencePaths)
+        : [],
+    );
+    const apiCoverageByEvidence = new Map<
+      string,
+      Array<{ operationKey: string; mockHandlers: string[] }>
+    >();
+    if (submission.kind === "implementation") {
+      for (const coverage of submission.apiCoverage) {
+        for (const evidencePath of coverage.executableEvidencePaths) {
+          const existing = apiCoverageByEvidence.get(evidencePath) ?? [];
+          existing.push({
+            operationKey: coverage.operationKey,
+            mockHandlers: coverage.mockHandlers,
+          });
+          apiCoverageByEvidence.set(evidencePath, existing);
+        }
+      }
+    }
     const preparedEvidencePaths: Array<{
       evidencePath: string;
       resolvedPath: string;
@@ -1359,6 +1840,27 @@ export class WorkflowService {
         throw new Error("Evidence path must be a safe durable evidence path");
       }
       preparedEvidencePaths.push({ evidencePath, resolvedPath, projectRelativePath });
+    }
+
+    const mockFixtureDigests = new Map<string, string>();
+    if (submission.kind === "implementation" && submission.mockDataEvidence !== undefined) {
+      const physicalFixtures = new Set<string>();
+      for (const fixturePath of submission.mockDataEvidence.fixturePaths) {
+        const prepared = preparedEvidencePaths.find((item) => item.evidencePath === fixturePath);
+        if (prepared === undefined) {
+          throw new Error(`Mock fixture must be included in artifactPaths: ${fixturePath}`);
+        }
+        if (physicalFixtures.has(prepared.resolvedPath)) {
+          throw new Error(`Mock fixture paths must resolve to distinct files: ${fixturePath}`);
+        }
+        physicalFixtures.add(prepared.resolvedPath);
+        const content = await readFile(prepared.resolvedPath);
+        assertMockFixture(content, fixturePath);
+        mockFixtureDigests.set(
+          fixturePath,
+          `sha256:${createHash("sha256").update(content).digest("hex")}`,
+        );
+      }
     }
 
     for (const { evidencePath, resolvedPath, projectRelativePath } of preparedEvidencePaths) {
@@ -1417,12 +1919,38 @@ export class WorkflowService {
       if (apiEvidenceRole === "contractTests") {
         assertPassingJsonResult(content, evidencePath);
       }
+      if (legacyExecutableEvidence.has(evidencePath)) {
+        assertPassingJsonResult(content, evidencePath);
+      }
+      const apiCoverage = apiCoverageByEvidence.get(evidencePath);
+      if (apiCoverage !== undefined) {
+        assertApiCoverageResult(content, evidencePath, apiCoverage);
+      }
+      if (
+        submission.kind === "implementation" &&
+        submission.performanceEvidence?.lab.resultPath === evidencePath
+      ) {
+        assertPerformanceResult(content, evidencePath, submission.performanceEvidence.lab.metrics);
+      }
+      if (
+        submission.kind === "implementation" &&
+        submission.mockDataEvidence?.manifestPath === evidencePath
+      ) {
+        assertDeterministicMockManifest(
+          content,
+          evidencePath,
+          [...mockFixtureDigests].map(([fixturePath, digest]) => ({ fixturePath, digest })),
+        );
+      }
       if (submission.kind === "figma-bundle") {
         if (evidencePath === submission.manifestPath) {
           assertFigmaManifest(content, evidencePath, submission);
         } else {
-          assertPng(content, evidencePath);
+          await assertPng(content, evidencePath);
         }
+      }
+      if (submission.kind === "visual-comparison") {
+        await assertPng(content, evidencePath);
       }
 
       const mediaType = mediaTypeForPath(resolvedPath);
@@ -1435,7 +1963,11 @@ export class WorkflowService {
       artifacts.push(
         ArtifactRefSchema.parse({
           id: createArtifactId(),
-          kind: "other",
+          kind:
+            (submission.kind === "figma-bundle" && /\.png$/i.test(evidencePath)) ||
+            submission.kind === "visual-comparison"
+              ? "screenshot"
+              : "other",
           uri: blob.uri,
           mediaType,
           digest: blob.digest,
@@ -1447,6 +1979,14 @@ export class WorkflowService {
             projectRelativePath,
             byteLength: details.size,
             workflowSubmissionKind: submission.kind,
+            ...(submission.kind !== "visual-comparison"
+              ? {}
+              : {
+                  reviewPacketId: submission.reviewPacketId,
+                  headSha: reviewPacketFromRun(run)?.headSha,
+                  diffDigest: reviewPacketFromRun(run)?.diffDigest,
+                  visualRole: "actual",
+                }),
             ...(featureEvidenceRole === undefined ? {} : { featureEvidenceRole }),
             ...(apiEvidenceRole === undefined ? {} : { apiEvidenceRole }),
             ...(submission.kind !== "figma-bundle"
@@ -1460,8 +2000,458 @@ export class WorkflowService {
     return artifacts;
   }
 
+  private async recordVisualComparison(
+    run: RunManifest,
+    submission: Extract<WorkflowSubmission, { kind: "visual-comparison" }>,
+    actualArtifacts: ArtifactRef[],
+  ): Promise<void> {
+    const packet = reviewPacketFromRun(run);
+    if (packet === undefined || packet.id !== submission.reviewPacketId) {
+      throw new Error("Visual comparison must reference the current implementation review packet");
+    }
+    const targets = visualTargetsFromRun(run);
+    if (targets.length === 0) {
+      throw new Error("Visual comparison requires a declared Figma or legacy target manifest");
+    }
+    const captures = new Map(submission.captures.map((capture) => [capture.targetId, capture]));
+    const targetIds = new Set(targets.map((target) => target.targetId));
+    const missing = targets
+      .map((target) => target.targetId)
+      .filter((targetId) => !captures.has(targetId));
+    const unknown = submission.captures
+      .map((capture) => capture.targetId)
+      .filter((targetId) => !targetIds.has(targetId));
+    if (missing.length > 0 || unknown.length > 0) {
+      throw new Error(
+        `Visual captures must exactly cover declared targets; missing: ${missing.join(", ") || "none"}; unknown: ${unknown.join(", ") || "none"}`,
+      );
+    }
+    const mismatchedCapture = targets.find((target) => {
+      const capture = captures.get(target.targetId)!;
+      return (
+        capture.route !== target.route ||
+        capture.state !== target.state ||
+        capture.viewport.width !== target.viewport.width ||
+        capture.viewport.height !== target.viewport.height ||
+        capture.deviceScaleFactor !== target.deviceScaleFactor ||
+        capture.fixture !== target.fixture
+      );
+    });
+    if (mismatchedCapture !== undefined) {
+      throw new Error(
+        `Visual capture manifest does not match declared target ${mismatchedCapture.targetId}`,
+      );
+    }
+    const replayedBaseline = submission.captures.find((capture) =>
+      targets.some((target) => target.baselinePath === capture.actualPath),
+    );
+    if (replayedBaseline !== undefined) {
+      throw new Error(
+        `VISUAL_CAPTURE_REPLAY: ${replayedBaseline.actualPath} is a declared baseline path`,
+      );
+    }
+    const boundActualArtifacts = actualArtifacts.map((artifact) => {
+      const capture = submission.captures.find(
+        (capture) => capture.actualPath === artifact.metadata["projectRelativePath"],
+      );
+      if (capture !== undefined && capture.actualDigest !== artifact.digest) {
+        throw new Error(
+          `VISUAL_CAPTURE_DIGEST_MISMATCH: ${capture.actualPath} does not match its declared digest`,
+        );
+      }
+      return ArtifactRefSchema.parse({
+        ...artifact,
+        metadata: {
+          ...artifact.metadata,
+          ...(capture === undefined
+            ? {}
+            : {
+                targetId: capture.targetId,
+                captureProvider: capture.provider,
+                visualCapturedAt: capture.capturedAt,
+                declaredCaptureDigest: capture.actualDigest,
+              }),
+        },
+      });
+    });
+    const submissionIdentity = visualSubmissionIdentity(
+      packet.id,
+      boundActualArtifacts.map((artifact) => ({
+        targetId: String(artifact.metadata["targetId"]),
+        digest: artifact.digest,
+      })),
+    );
+    const reservation = await this.reserveVisualAttempt(run.id, packet, submissionIdentity);
+    if (reservation.duplicate) return;
+    const attempt = reservation.attempt;
+    const attemptActualArtifacts = boundActualArtifacts.map((artifact) =>
+      ArtifactRefSchema.parse({
+        ...artifact,
+        metadata: { ...artifact.metadata, visualComparisonAttempt: attempt, submissionIdentity },
+      }),
+    );
+
+    try {
+      const timestamp = this.now();
+      const generatedArtifacts: ArtifactRef[] = [];
+      const results: Array<Record<string, unknown>> = [];
+
+      for (const target of targets) {
+        const capture = captures.get(target.targetId)!;
+        const actualArtifact = attemptActualArtifacts.find(
+          (artifact) => artifact.metadata["projectRelativePath"] === capture.actualPath,
+        );
+        if (actualArtifact === undefined) {
+          throw new Error(
+            `Missing ingested actual PNG for ${target.targetId}: ${capture.actualPath}`,
+          );
+        }
+        const expectedBaselineSubmissionKind =
+          target.baselineKind === "figma" ? "figma-bundle" : "contracts";
+        const baselineArtifact = [...run.artifacts]
+          .reverse()
+          .find(
+            (artifact) =>
+              artifact.metadata["projectRelativePath"] === target.baselinePath &&
+              artifact.metadata["workflowSubmissionKind"] === expectedBaselineSubmissionKind,
+          );
+        if (baselineArtifact === undefined) {
+          throw new Error(
+            `Missing immutable ${target.baselineKind} baseline for ${target.targetId}: ${target.baselinePath}`,
+          );
+        }
+
+        const comparison = await compareVisualPngs({
+          baseline: await this.dependencies.artifactStore.readContent(baselineArtifact.digest),
+          actual: await this.dependencies.artifactStore.readContent(actualArtifact.digest),
+          masks: target.masks,
+          reviewThreshold: target.reviewThreshold,
+        });
+        const artifactBase = `visual/${target.targetId}`;
+        const baselineRef = ArtifactRefSchema.parse({
+          ...baselineArtifact,
+          id: createArtifactId(),
+          kind: "screenshot",
+          producedBy: "orchestrator",
+          createdAt: timestamp,
+          metadata: {
+            ...baselineArtifact.metadata,
+            projectRelativePath: `${artifactBase}.baseline.png`,
+            reviewPacketId: packet.id,
+            headSha: packet.headSha,
+            diffDigest: packet.diffDigest,
+            targetId: target.targetId,
+            visualRole: "baseline",
+            visualComparisonAttempt: attempt,
+            sourceArtifactId: baselineArtifact.id,
+          },
+        });
+        const diffArtifact = await this.writeVisualArtifact({
+          content: comparison.diff,
+          kind: "visual-diff",
+          projectRelativePath: `${artifactBase}.diff.png`,
+          targetId: target.targetId,
+          role: "diff",
+          packet,
+          attempt,
+          timestamp,
+        });
+        const overlayArtifact = await this.writeVisualArtifact({
+          content: comparison.overlay,
+          kind: "screenshot",
+          projectRelativePath: `${artifactBase}.overlay.png`,
+          targetId: target.targetId,
+          role: "overlay",
+          packet,
+          attempt,
+          timestamp,
+        });
+        generatedArtifacts.push(baselineRef, diffArtifact, overlayArtifact);
+        results.push({
+          targetId: target.targetId,
+          name: target.name,
+          state: target.state,
+          route: target.route,
+          baselineKind: target.baselineKind,
+          viewport: target.viewport,
+          deviceScaleFactor: target.deviceScaleFactor,
+          fixture: target.fixture,
+          captureProvider: capture.provider,
+          capturedAt: capture.capturedAt,
+          actualDigest: capture.actualDigest,
+          masks: target.masks,
+          maskReasons: comparison.maskReasons,
+          status: comparison.status,
+          metrics: comparison.metrics,
+          baselineArtifactId: baselineRef.id,
+          actualArtifactId: actualArtifact.id,
+          diffArtifactId: diffArtifact.id,
+          overlayArtifactId: overlayArtifact.id,
+        });
+      }
+
+      const visualStatus = results.every((result) => result["status"] === "passed")
+        ? "passed"
+        : "failed";
+      const reportContent = Buffer.from(
+        `${JSON.stringify(
+          {
+            version: 2,
+            runId: run.id,
+            reviewPacketId: packet.id,
+            headSha: packet.headSha,
+            diffDigest: packet.diffDigest,
+            attempt,
+            maxAttempts: MAX_VISUAL_REPAIR_ATTEMPTS,
+            status: visualStatus,
+            generatedAt: timestamp,
+            results,
+          },
+          null,
+          2,
+        )}\n`,
+        "utf8",
+      );
+      const reportBlob = await this.dependencies.artifactStore.writeBlob({
+        content: reportContent,
+        mediaType: "application/json",
+        storedAt: timestamp,
+        label: "visual-comparison-v2.json",
+      });
+      const reportArtifact = ArtifactRefSchema.parse({
+        id: createArtifactId(),
+        kind: "visual-report",
+        uri: reportBlob.uri,
+        mediaType: "application/json",
+        digest: reportBlob.digest,
+        producedBy: "orchestrator",
+        evidenceIds: [],
+        createdAt: timestamp,
+        metadata: {
+          adapter: "visual-comparison-v2",
+          reportKind: "visual-report-v2-json",
+          workflowSubmissionKind: "visual-comparison",
+          reviewPacketId: packet.id,
+          headSha: packet.headSha,
+          diffDigest: packet.diffDigest,
+          visualComparisonAttempt: attempt,
+          visualStatus,
+          targetIds: targets.map((target) => target.targetId),
+          visualArtifactIds: [
+            ...attemptActualArtifacts.map((artifact) => artifact.id),
+            ...generatedArtifacts.map((artifact) => artifact.id),
+          ],
+          submissionIdentity,
+        },
+      });
+      const completionArtifact = await this.visualAttemptStatusArtifact({
+        runId: run.id,
+        packet,
+        submissionIdentity,
+        attempt,
+        status: "completed",
+        timestamp,
+      });
+      await this.appendVisualAttemptArtifacts(
+        run.id,
+        submissionIdentity,
+        [...attemptActualArtifacts, ...generatedArtifacts, reportArtifact, completionArtifact],
+        timestamp,
+      );
+    } catch (error: unknown) {
+      const timestamp = this.now();
+      const failureArtifact = await this.visualAttemptStatusArtifact({
+        runId: run.id,
+        packet,
+        submissionIdentity,
+        attempt,
+        status: "failed",
+        timestamp,
+      });
+      await this.appendVisualAttemptArtifacts(
+        run.id,
+        submissionIdentity,
+        [failureArtifact],
+        timestamp,
+      );
+      throw error;
+    }
+  }
+
+  private async reserveVisualAttempt(
+    runId: string,
+    packet: ImplementationReviewPacket,
+    submissionIdentity: string,
+  ): Promise<{ attempt: 1 | 2 | 3; duplicate: boolean }> {
+    for (let retry = 0; retry < 12; retry += 1) {
+      const current = await this.dependencies.runStore.get(runId);
+      const currentPacket = reviewPacketFromRun(current);
+      if (currentPacket?.id !== packet.id) {
+        throw new Error(
+          "Visual comparison must reference the current implementation review packet",
+        );
+      }
+      if (currentVisualReport(current, packet.id)?.metadata["visualStatus"] === "passed") {
+        throw new Error("The current review packet already has a passing visual comparison");
+      }
+      const reservations = visualAttemptReservations(current, packet.id);
+      const duplicate = reservations.find(
+        (candidate) => candidate.submissionIdentity === submissionIdentity,
+      );
+      if (duplicate !== undefined) return { attempt: duplicate.attempt, duplicate: true };
+      if (reservations.length >= MAX_VISUAL_REPAIR_ATTEMPTS) {
+        throw new Error(
+          `VISUAL_ATTEMPT_LIMIT_REACHED: the current review packet already used ${MAX_VISUAL_REPAIR_ATTEMPTS} attempts`,
+        );
+      }
+      const attempt = (reservations.length + 1) as 1 | 2 | 3;
+      const timestamp = this.now();
+      const artifact = await this.visualAttemptStatusArtifact({
+        runId,
+        packet,
+        submissionIdentity,
+        attempt,
+        status: "in-progress",
+        timestamp,
+      });
+      try {
+        await this.dependencies.runStore.save(
+          {
+            ...current,
+            revision: current.revision + 1,
+            updatedAt: timestamp,
+            artifacts: [...current.artifacts, artifact],
+          },
+          current.revision,
+        );
+        return { attempt, duplicate: false };
+      } catch (error: unknown) {
+        if (!(error instanceof RevisionConflictError)) throw error;
+      }
+    }
+    throw new Error("VISUAL_ATTEMPT_REFRESH_REQUIRED: refresh workflow_status and retry");
+  }
+
+  private async visualAttemptStatusArtifact(input: {
+    runId: string;
+    packet: ImplementationReviewPacket;
+    submissionIdentity: string;
+    attempt: 1 | 2 | 3;
+    status: "in-progress" | "completed" | "failed";
+    timestamp: string;
+  }): Promise<ArtifactRef> {
+    const content = Buffer.from(
+      `${JSON.stringify({
+        reviewPacketId: input.packet.id,
+        submissionIdentity: input.submissionIdentity,
+        attempt: input.attempt,
+        status: input.status,
+      })}\n`,
+      "utf8",
+    );
+    const blob = await this.dependencies.artifactStore.writeBlob({
+      content,
+      mediaType: "application/json",
+      storedAt: input.timestamp,
+      label: `visual-attempt-${String(input.attempt)}-${input.status}.json`,
+    });
+    return ArtifactRefSchema.parse({
+      id: createArtifactId(),
+      kind: "other",
+      uri: blob.uri,
+      mediaType: "application/json",
+      digest: blob.digest,
+      producedBy: "orchestrator",
+      evidenceIds: [],
+      createdAt: input.timestamp,
+      metadata: {
+        adapter: "visual-attempt-reservation-v2",
+        reviewPacketId: input.packet.id,
+        headSha: input.packet.headSha,
+        diffDigest: input.packet.diffDigest,
+        submissionIdentity: input.submissionIdentity,
+        visualComparisonAttempt: input.attempt,
+        reservationStatus: input.status,
+      },
+    });
+  }
+
+  private async appendVisualAttemptArtifacts(
+    runId: string,
+    submissionIdentity: string,
+    artifacts: ArtifactRef[],
+    timestamp: string,
+  ): Promise<void> {
+    for (let retry = 0; retry < 12; retry += 1) {
+      const current = await this.dependencies.runStore.get(runId);
+      if (
+        current.artifacts.some(
+          (artifact) =>
+            artifact.kind === "visual-report" &&
+            artifact.metadata["submissionIdentity"] === submissionIdentity,
+        )
+      ) {
+        return;
+      }
+      try {
+        await this.dependencies.runStore.save(
+          {
+            ...current,
+            revision: current.revision + 1,
+            updatedAt: timestamp,
+            artifacts: [...current.artifacts, ...artifacts],
+          },
+          current.revision,
+        );
+        return;
+      } catch (error: unknown) {
+        if (!(error instanceof RevisionConflictError)) throw error;
+      }
+    }
+    throw new Error("VISUAL_ATTEMPT_REFRESH_REQUIRED: refresh workflow_status and retry");
+  }
+
+  private async writeVisualArtifact(input: {
+    content: Buffer;
+    kind: "screenshot" | "visual-diff";
+    projectRelativePath: string;
+    targetId: string;
+    role: "diff" | "overlay";
+    packet: ImplementationReviewPacket;
+    attempt: number;
+    timestamp: string;
+  }): Promise<ArtifactRef> {
+    const blob = await this.dependencies.artifactStore.writeBlob({
+      content: input.content,
+      mediaType: "image/png",
+      storedAt: input.timestamp,
+      label: path.posix.basename(input.projectRelativePath),
+    });
+    return ArtifactRefSchema.parse({
+      id: createArtifactId(),
+      kind: input.kind,
+      uri: blob.uri,
+      mediaType: "image/png",
+      digest: blob.digest,
+      producedBy: "orchestrator",
+      evidenceIds: [],
+      createdAt: input.timestamp,
+      metadata: {
+        adapter: "visual-comparison-v2",
+        projectRelativePath: input.projectRelativePath,
+        reviewPacketId: input.packet.id,
+        headSha: input.packet.headSha,
+        diffDigest: input.packet.diffDigest,
+        targetId: input.targetId,
+        visualRole: input.role,
+        visualComparisonAttempt: input.attempt,
+      },
+    });
+  }
+
   private async generateReport(runId: string): Promise<void> {
     const run = await this.dependencies.runStore.get(RunIdSchema.parse(runId));
+    await this.assertLegacyReferenceFresh(run);
     const timestamp = this.now();
     const packet = reviewPacketFromRun(run);
     if (packet === undefined) throw new Error("A current implementation review packet is required");
@@ -1490,40 +2480,198 @@ export class WorkflowService {
     if (unreviewed.length > 0) {
       throw new Error(`PR report requires review coverage for: ${unreviewed.join(", ")}`);
     }
+    const profile = deliveryProfileFromRun(run);
+    const sectionApplicability = reportSectionApplicabilityForRun(run, profile);
+    const sectionStatuses = readyReportSectionStatuses(sectionApplicability);
+    const legacyRootDigest = legacyRootDigestFromRun(run);
+    const legacyApiDiscoveryAdapters = legacyApiDiscoveryAdaptersFromRun(run);
+    const visualArtifact = currentVisualReport(run, packet.id);
+    let visualReport: Record<string, unknown> | undefined;
+    if (profile.requirements.visualComparison) {
+      if (visualArtifact?.metadata["visualStatus"] !== "passed") {
+        throw new Error("PR report requires a passing current-packet visual comparison");
+      }
+      visualReport = JSON.parse(
+        (await this.dependencies.artifactStore.readContent(visualArtifact.digest)).toString("utf8"),
+      ) as Record<string, unknown>;
+    }
+    const packetArtifacts = run.artifacts.filter(
+      (artifact) => artifact.metadata["reviewPacketId"] === packet.id,
+    );
     const evidencePaths = [
-      ...new Set([contracts, implementation, ...reviews].flatMap((item) => item.artifactPaths)),
+      ...new Set([
+        ...[contracts, implementation, ...reviews].flatMap((item) => item.artifactPaths),
+        ...packetArtifacts.flatMap((artifact) => {
+          const evidencePath = artifact.metadata["projectRelativePath"];
+          return typeof evidencePath === "string" ? [evidencePath] : [];
+        }),
+      ]),
     ];
-    const markdown = renderReadyWorkflowReport({
+    const featureEvidence =
+      implementation.featureEvidence === undefined
+        ? undefined
+        : {
+            ...implementation.featureEvidence,
+            testCount: await this.featureTestCountForRun(
+              run,
+              implementation.featureEvidence.resultPath,
+            ),
+          };
+    const apiGaps = implementation.apiCoverage
+      .filter((operation) => operation.status === "gap")
+      .map(
+        (operation) =>
+          `${operation.operationKey}: ${operation.notes ?? "gap reported without details"}`,
+      );
+    const report = PrReportV2Schema.parse({
+      schemaVersion: "pr-report-v2.1",
       runId: run.id,
-      reviewPacket: packet,
-      guidanceTrace: contracts.guidanceTrace,
-      requirementManifest: contracts.requirementManifest,
-      ...(contracts.legacyBaseline === undefined
-        ? {}
-        : { legacyBaseline: contracts.legacyBaseline }),
+      generatedAt: timestamp,
+      decision: "ready",
+      mode: profile.mode,
+      sectionStatuses,
+      binding: {
+        reviewPacketId: packet.id,
+        revision: packet.revision,
+        baseSha: packet.baseSha,
+        headSha: packet.headSha,
+        evidenceDigest: packet.evidenceDigest,
+        diffDigest: packet.diffDigest,
+      },
+      summary: {
+        title: `SpecToPR ${profile.mode} delivery`,
+        bullets: [implementation.summary],
+        exclusions: exclusionsForProfile(profile),
+      },
+      sources: publicSourceRows(profile, legacyRootDigest),
+      skills: {
+        hints: contracts.guidanceTrace.skillHints,
+        applied: contracts.guidanceTrace.appliedSkills,
+      },
+      requirements: contracts.requirementManifest.map((requirement) => ({
+        ...requirement,
+        implementationFiles: packet.changedFiles,
+        reviewVerdicts: reviews.flatMap((review) =>
+          review.requirements
+            .filter((candidate) => candidate.id === requirement.id)
+            .map((candidate) => `${review.kind}:${candidate.verdict}`),
+        ),
+      })),
+      changedFiles: packet.changedFiles,
+      implementationNotes: [implementation.summary],
+      api: {
+        applicable: sectionApplicability.api,
+        ...(profile.mode === "legacy" && legacyRootDigest !== undefined
+          ? { inventoryDigest: legacyRootDigest }
+          : {}),
+        ...(profile.mode === "legacy" ? { discoveryAdapters: legacyApiDiscoveryAdapters } : {}),
+        operations: implementation.apiCoverage,
+        gaps: apiGaps,
+      },
+      legacy: {
+        applicable: sectionApplicability.legacy,
+        coverage: implementation.legacyCoverage,
+      },
+      visual: {
+        applicable: sectionApplicability.visual,
+        ...(visualArtifact === undefined ? {} : { reportArtifactId: visualArtifact.id }),
+        attempt: typeof visualReport?.["attempt"] === "number" ? visualReport["attempt"] : 0,
+        status:
+          visualArtifact === undefined ? "not-applicable" : visualArtifact.metadata["visualStatus"],
+        results: Array.isArray(visualReport?.["results"]) ? visualReport["results"] : [],
+      },
+      reviews: reviews.map((review) => ({
+        kind: review.kind,
+        verdict: review.verdict,
+        summary: review.summary,
+        gates: review.gateResults,
+        findings: review.findings,
+      })),
+      performance: {
+        applicable: sectionApplicability.performance,
+        ...(implementation.performanceEvidence === undefined
+          ? {}
+          : { evidence: implementation.performanceEvidence }),
+      },
+      ...(featureEvidence === undefined ? {} : { featureEvidence }),
+      gaps: apiGaps,
+      blockers: [],
+      unrunValidations: [],
+      risks: reviews.flatMap((review) =>
+        review.findings.map((finding) => ({
+          likelihood: "review-observed",
+          impact: finding.severity,
+          mitigation: finding.title,
+          evidence: finding.evidence,
+        })),
+      ),
+      rollback: {
+        trigger: "A reviewed acceptance check or affected route regresses after merge.",
+        strategy: "Revert the delivery commit and redeploy the last known-good artifact.",
+        steps: [
+          "Revert the merged change without rewriting shared history.",
+          "Redeploy the previous known-good artifact.",
+        ],
+        dataImpact:
+          "No automatic data rollback is assumed; verify migrations and writes separately.",
+        postChecks: [
+          "Rerun the affected functional checks.",
+          "Verify the affected route and API health after rollback.",
+        ],
+      },
       evidencePaths,
-      reviews,
-      ...(implementation.featureEvidence === undefined
-        ? {}
-        : { featureVideoPath: implementation.featureEvidence.videoPath }),
+      artifactIds: [
+        ...new Set([
+          ...packetArtifacts.map((artifact) => artifact.id),
+          ...run.stages.flatMap((item) => item.artifactIds),
+        ]),
+      ],
     });
-    const blob = await this.dependencies.artifactStore.writeBlob({
+    assertCurrentPrReportV2(report);
+    const jsonBlob = await this.dependencies.artifactStore.writeBlob({
+      content: Buffer.from(`${JSON.stringify(report, null, 2)}\n`, "utf8"),
+      mediaType: "application/json",
+      storedAt: timestamp,
+      label: "pr-report-v2.1.json",
+    });
+    const jsonArtifact = ArtifactRefSchema.parse({
+      id: createArtifactId(),
+      kind: "pr-report",
+      uri: jsonBlob.uri,
+      mediaType: "application/json",
+      digest: jsonBlob.digest,
+      producedBy: "orchestrator",
+      evidenceIds: [],
+      createdAt: timestamp,
+      metadata: {
+        adapter: "pr-report-v2",
+        reportKind: "pr-report-v2-json",
+        reportSchemaVersion: "pr-report-v2.1",
+        reportIntent: "ready",
+        decision: "ready",
+        reviewPacketId: packet.id,
+        headSha: packet.headSha,
+        diffDigest: packet.diffDigest,
+      },
+    });
+    const markdown = renderPrReportV2Markdown(report);
+    const markdownBlob = await this.dependencies.artifactStore.writeBlob({
       content: Buffer.from(markdown, "utf8"),
       mediaType: "text/markdown",
       storedAt: timestamp,
       label: "pr-report.md",
     });
-    const artifact = ArtifactRefSchema.parse({
+    const markdownArtifact = ArtifactRefSchema.parse({
       id: createArtifactId(),
       kind: "pr-report",
-      uri: blob.uri,
+      uri: markdownBlob.uri,
       mediaType: "text/markdown",
-      digest: blob.digest,
+      digest: markdownBlob.digest,
       producedBy: "orchestrator",
       evidenceIds: [],
       createdAt: timestamp,
       metadata: {
-        adapter: "workflow-v2",
+        adapter: "pr-report-v2",
         ...WorkflowReportMetadataSchema.parse({
           reportKind: "pr-body-markdown",
           reportIntent: "ready",
@@ -1531,6 +2679,10 @@ export class WorkflowService {
         }),
         locale: "ko",
         reviewPacketId: packet.id,
+        headSha: packet.headSha,
+        diffDigest: packet.diffDigest,
+        reportSchemaVersion: "pr-report-v2.1",
+        reportJsonArtifactId: jsonArtifact.id,
       },
     });
 
@@ -1539,11 +2691,27 @@ export class WorkflowService {
         ...run,
         revision: run.revision + 1,
         updatedAt: timestamp,
-        artifacts: [...run.artifacts, artifact],
+        artifacts: [...run.artifacts, jsonArtifact, markdownArtifact],
       },
       run.revision,
     );
-    await this.completeStage(run.id, "report", [artifact.id]);
+    await this.completeStage(run.id, "report", [jsonArtifact.id, markdownArtifact.id]);
+  }
+
+  private async featureTestCountForRun(
+    run: RunManifest,
+    resultPath: string,
+  ): Promise<number | undefined> {
+    const artifact = [...run.artifacts]
+      .reverse()
+      .find((candidate) => candidate.metadata["projectRelativePath"] === resultPath);
+    if (artifact === undefined) return undefined;
+    const parsed = FeatureResultSchema.safeParse(
+      JSON.parse(
+        (await this.dependencies.artifactStore.readContent(artifact.digest)).toString("utf8"),
+      ),
+    );
+    return parsed.success ? parsed.data.testCount : undefined;
   }
 
   private async latestWorkflowSubmissions(
@@ -1567,6 +2735,203 @@ export class WorkflowService {
       if (parsed.success) submissions.set(kind, parsed.data);
     }
     return submissions;
+  }
+
+  private async materializeBlockedReport(
+    run: RunManifest,
+    blocker: WorkflowBlocker,
+    timestamp: string,
+  ) {
+    const profile = deliveryProfileFromRun(run);
+    const sectionApplicability = reportSectionApplicabilityForRun(run, profile);
+    const legacyRootDigest = legacyRootDigestFromRun(run);
+    const legacyApiDiscoveryAdapters = legacyApiDiscoveryAdaptersFromRun(run);
+    const submissions = await this.latestWorkflowSubmissions(run);
+    const contracts = submissions.get("contracts");
+    const implementation = submissions.get("implementation");
+    const rawPacket = reviewPacketFromRun(run);
+    let packet = rawPacket;
+    if (packet !== undefined) {
+      try {
+        await assertReviewPacketFresh(run);
+      } catch {
+        packet = undefined;
+      }
+    }
+    const reviews = [submissions.get("functional-review"), submissions.get("design-review")].filter(
+      (submission): submission is z.infer<typeof ReviewSubmissionSchema> =>
+        (submission?.kind === "functional-review" || submission?.kind === "design-review") &&
+        packet !== undefined &&
+        submission.reviewPacketId === packet.id,
+    );
+    const visualArtifact = packet === undefined ? undefined : currentVisualReport(run, packet.id);
+    let visualReport: Record<string, unknown> | undefined;
+    if (visualArtifact !== undefined) {
+      try {
+        visualReport = JSON.parse(
+          (await this.dependencies.artifactStore.readContent(visualArtifact.digest)).toString(
+            "utf8",
+          ),
+        ) as Record<string, unknown>;
+      } catch {
+        visualReport = undefined;
+      }
+    }
+    const contractSubmission = contracts?.kind === "contracts" ? contracts : undefined;
+    const implementationSubmission =
+      implementation?.kind === "implementation" ? implementation : undefined;
+    const featureEvidence = implementationSubmission?.featureEvidence;
+    const apiGaps = [
+      ...(implementationSubmission?.apiCoverage ?? [])
+        .filter((operation) => operation.status === "gap")
+        .map(
+          (operation) =>
+            `${operation.operationKey}: ${operation.notes ?? "gap reported without details"}`,
+        ),
+      ...run.gaps
+        .filter((gap) => gap.category === "api" && gap.status === "open")
+        .map((gap) => `${gap.title}: ${gap.observed}`),
+    ];
+    const evidencePaths = [
+      ...new Set([
+        ...blocker.evidencePaths,
+        ...(contractSubmission?.artifactPaths ?? []),
+        ...(implementationSubmission?.artifactPaths ?? []),
+        ...reviews.flatMap((review) => review.artifactPaths),
+      ]),
+    ];
+    const sectionStatuses = blockedReportSectionStatuses({
+      run,
+      profile,
+      sectionApplicability,
+      blocker,
+      implementation: implementationSubmission,
+      visualArtifact,
+      packetCurrent: packet !== undefined,
+    });
+
+    const report = PrReportV2Schema.parse({
+      schemaVersion: "pr-report-v2.1",
+      runId: run.id,
+      generatedAt: timestamp,
+      decision: "blocked",
+      mode: profile.mode,
+      sectionStatuses,
+      ...(packet === undefined
+        ? {}
+        : {
+            binding: {
+              reviewPacketId: packet.id,
+              revision: packet.revision,
+              baseSha: packet.baseSha,
+              headSha: packet.headSha,
+              evidenceDigest: packet.evidenceDigest,
+              diffDigest: packet.diffDigest,
+            },
+          }),
+      summary: {
+        title: `SpecToPR ${profile.mode} blocked delivery`,
+        bullets: [
+          ...blocker.completedWork,
+          ...(implementationSubmission === undefined ? [] : [implementationSubmission.summary]),
+        ],
+        exclusions: ["Work after the blocked stage was not executed."],
+      },
+      sources: publicSourceRows(profile, legacyRootDigest),
+      skills: {
+        hints: contractSubmission?.guidanceTrace.skillHints ?? profile.skillHints,
+        applied: contractSubmission?.guidanceTrace.appliedSkills ?? [],
+      },
+      requirements: (contractSubmission?.requirementManifest ?? []).map((requirement) => ({
+        ...requirement,
+        implementationFiles:
+          packet?.changedFiles ??
+          (rawPacket === undefined ? (implementationSubmission?.changedFiles ?? []) : []),
+        reviewVerdicts: reviews.flatMap((review) =>
+          review.requirements
+            .filter((candidate) => candidate.id === requirement.id)
+            .map((candidate) => `${review.kind}:${candidate.verdict}`),
+        ),
+      })),
+      changedFiles:
+        packet?.changedFiles ??
+        (rawPacket === undefined ? (implementationSubmission?.changedFiles ?? []) : []),
+      implementationNotes:
+        implementationSubmission === undefined ? [] : [implementationSubmission.summary],
+      api: {
+        applicable: sectionApplicability.api,
+        ...(profile.mode === "legacy" && legacyRootDigest !== undefined
+          ? { inventoryDigest: legacyRootDigest }
+          : {}),
+        ...(profile.mode === "legacy" ? { discoveryAdapters: legacyApiDiscoveryAdapters } : {}),
+        operations: implementationSubmission?.apiCoverage ?? [],
+        gaps: apiGaps,
+      },
+      legacy: {
+        applicable: sectionApplicability.legacy,
+        coverage: implementationSubmission?.legacyCoverage ?? [],
+      },
+      visual: {
+        applicable: sectionApplicability.visual,
+        ...(visualArtifact === undefined ? {} : { reportArtifactId: visualArtifact.id }),
+        attempt: typeof visualReport?.["attempt"] === "number" ? visualReport["attempt"] : 0,
+        status:
+          visualArtifact === undefined
+            ? sectionApplicability.visual
+              ? "not-run"
+              : "not-applicable"
+            : visualArtifact.metadata["visualStatus"],
+        results: Array.isArray(visualReport?.["results"]) ? visualReport.results : [],
+      },
+      reviews: reviews.map((review) => ({
+        kind: review.kind,
+        verdict: review.verdict,
+        summary: review.summary,
+        gates: review.gateResults,
+        findings: review.findings,
+      })),
+      performance: {
+        applicable: sectionApplicability.performance,
+        ...(implementationSubmission?.performanceEvidence === undefined
+          ? {}
+          : { evidence: implementationSubmission.performanceEvidence }),
+      },
+      ...(featureEvidence === undefined
+        ? {}
+        : {
+            featureEvidence: {
+              ...featureEvidence,
+              testCount: await this.featureTestCountForRun(run, featureEvidence.resultPath),
+            },
+          }),
+      gaps: apiGaps,
+      blockers: [`${blocker.stage}/${blocker.code}: ${blocker.summary}`],
+      unrunValidations: blocker.unrunValidations,
+      risks: reviews.flatMap((review) =>
+        review.findings.map((finding) => ({
+          likelihood: "review-observed",
+          impact: finding.severity,
+          mitigation: finding.title,
+          evidence: finding.evidence,
+        })),
+      ),
+      rollback: {
+        trigger: blocker.summary,
+        strategy: "Resolve the blocker and resume the same durable Run.",
+        steps: [blocker.exactUnblockAction],
+        dataImpact: "No automatic data rollback is performed by a blocked diagnostic.",
+        postChecks: ["Rerun every remaining required validation before ready publication."],
+      },
+      evidencePaths,
+      artifactIds: [
+        ...new Set([
+          ...run.stages.flatMap((item) => item.artifactIds),
+          ...(visualArtifact === undefined ? [] : [visualArtifact.id]),
+        ]),
+      ],
+    });
+    assertCurrentPrReportV2(report);
+    return report;
   }
 
   private async diagnosticPublicationForRun(run: RunManifest, blocker: WorkflowBlocker) {
@@ -1992,6 +3357,7 @@ export class WorkflowService {
       if (
         parsed.success &&
         parsed.data.kind !== "figma-bundle" &&
+        parsed.data.kind !== "visual-comparison" &&
         submissionOutcome(parsed.data) !== "passed"
       ) {
         return parsed.data;
@@ -2182,7 +3548,13 @@ function reconstructFailedSubmissionForPersistence(
   run: RunManifest,
   submission: WorkflowSubmission,
 ): WorkflowSubmission {
-  if (submission.kind === "figma-bundle" || submission.kind === "api-ready") return submission;
+  if (
+    submission.kind === "figma-bundle" ||
+    submission.kind === "api-ready" ||
+    submission.kind === "visual-comparison"
+  ) {
+    return submission;
+  }
   const successful =
     "verdict" in submission ? submission.verdict === "approved" : submission.status === "passed";
   if (successful) return submission;
@@ -2210,7 +3582,13 @@ function failureContextForSubmission(
       workflowFailureAttempt: number;
     }
   | undefined {
-  if (submission.kind === "figma-bundle" || submission.kind === "api-ready") return undefined;
+  if (
+    submission.kind === "figma-bundle" ||
+    submission.kind === "api-ready" ||
+    submission.kind === "visual-comparison"
+  ) {
+    return undefined;
+  }
   const successful =
     "verdict" in submission ? submission.verdict === "approved" : submission.status === "passed";
   if (successful) return undefined;
@@ -2319,7 +3697,7 @@ function deriveWorkflowBlocker(
     evidencePaths,
     attemptedRecovery: attemptedRecoveryForStage(failedStage),
     unrunValidations: remainingValidationsForRun(run, requiredValidations),
-    exactUnblockAction: genericUnblockAction(failedStage.name, kind),
+    exactUnblockAction: genericUnblockAction(failedStage.name, kind, failedStage.error.code),
   });
 }
 
@@ -2333,7 +3711,9 @@ function remainingValidationsForRun(run: RunManifest, requiredValidations: strin
 function completedValidationsForRun(run: RunManifest): Set<string> {
   const completed = new Set<string>();
   const artifacts = new Map(run.artifacts.map((artifact) => [artifact.id, artifact]));
-  const latestStageSubmission = (stageName: "contracts" | "functional-review" | "design-review") =>
+  const latestStageSubmission = (
+    stageName: "contracts" | "implementation" | "functional-review" | "design-review",
+  ) =>
     [...stage(run, stageName).artifactIds]
       .reverse()
       .map((artifactId) => artifacts.get(artifactId))
@@ -2378,6 +3758,14 @@ function completedValidationsForRun(run: RunManifest): Set<string> {
     ) {
       completed.add("legacy-baseline");
     }
+    const legacyCoverage = latestStageSubmission("contracts")?.metadata["legacyCoverage"];
+    if (
+      run.artifacts.some((artifact) => artifact.kind === "legacy-feature-inventory") &&
+      Array.isArray(legacyCoverage) &&
+      legacyCoverage.length > 0
+    ) {
+      completed.add("legacy-inventory");
+    }
   }
 
   const implementation = stage(run, "implementation");
@@ -2386,6 +3774,16 @@ function completedValidationsForRun(run: RunManifest): Set<string> {
       const role = artifacts.get(artifactId)?.metadata["featureEvidenceRole"];
       if (role === "result") completed.add("targeted-feature-e2e");
       if (role === "video") completed.add("feature-video");
+    }
+    const implementationSubmission = latestStageSubmission("implementation");
+    if (
+      Array.isArray(implementationSubmission?.metadata["apiCoverage"]) &&
+      implementationSubmission.metadata["apiCoverage"].length > 0
+    ) {
+      completed.add("api-coverage");
+    }
+    if (implementationSubmission?.metadata["performanceEvidence"] !== undefined) {
+      completed.add("performance-evidence");
     }
   }
   if (implementation.checkpoint?.data["apiReady"] === true) completed.add("api-ready");
@@ -2399,6 +3797,14 @@ function completedValidationsForRun(run: RunManifest): Set<string> {
     )
   ) {
     completed.add("figma-bundle");
+  }
+
+  const packet = reviewPacketFromRun(run);
+  if (
+    packet !== undefined &&
+    currentVisualReport(run, packet.id)?.metadata["visualStatus"] === "passed"
+  ) {
+    completed.add("visual-comparison");
   }
 
   if (
@@ -2423,6 +3829,7 @@ const KNOWN_DURABLE_BLOCKER_CODES = new Set([
   "PUBLISH_UNEXPECTED_ERROR",
   "ARCHIVE_FAILED",
   "ARCHIVE_UNEXPECTED_ERROR",
+  "LEGACY_API_METHOD_UNKNOWN",
 ]);
 
 function canonicalDurableBlockerCode(kind: WorkflowBlocker["kind"], rawCode: string): string {
@@ -2430,6 +3837,7 @@ function canonicalDurableBlockerCode(kind: WorkflowBlocker["kind"], rawCode: str
 }
 
 function blockerKindForStageError(stageName: RunStageName, code: string): WorkflowBlocker["kind"] {
+  if (code === "LEGACY_API_METHOD_UNKNOWN") return "missing-input";
   if (/UNEXPECTED/.test(code)) return "unexpected";
   if (code === "WORKFLOW_BLOCKED") return "unexpected";
   if (code === "REVIEW_CHANGES_REQUESTED") return "unexpected";
@@ -2466,7 +3874,14 @@ function genericBlockerSummary(stageName: RunStageName, kind: WorkflowBlocker["k
   return `The ${stageName} stage stopped because ${reason}.`;
 }
 
-function genericUnblockAction(stageName: RunStageName, kind: WorkflowBlocker["kind"]): string {
+function genericUnblockAction(
+  stageName: RunStageName,
+  kind: WorkflowBlocker["kind"],
+  code?: string,
+): string {
+  if (code === "LEGACY_API_METHOD_UNKNOWN") {
+    return "Add scoped runtime network evidence or OpenAPI that uniquely resolves every detected legacy API method/path, then restart intake.";
+  }
   if (kind === "missing-input") return `Provide the missing input and resume ${stageName}.`;
   if (kind === "missing-tool") return `Enable the required tool and resume ${stageName}.`;
   if (kind === "policy") return `Resolve the policy condition and retry ${stageName}.`;
@@ -2532,6 +3947,21 @@ function workloadFromRun(
   });
 }
 
+function deliveryPolicyForRun(
+  run: RunManifest,
+  scope: WorkflowScope,
+  profile: DeliveryProfile,
+): ReturnType<typeof resolveDeliveryPolicy> | undefined {
+  if (profile.mode === "auto") return undefined;
+  return resolveDeliveryPolicy({
+    mode: profile.mode,
+    hasOpenApi: profile.openApiPaths.length + profile.openApiUrls.length > 0,
+    legacyApiOperationCount: profile.mode === "legacy" ? profile.openApiOperations.length : 0,
+    ui: scope.ui,
+    workload: workloadFromRun(run, scope, profile).size,
+  });
+}
+
 function countIntakeRequirements(text: string): number {
   const explicitLines = text
     .split(/\r?\n/)
@@ -2547,16 +3977,23 @@ function countIntakeRequirements(text: string): number {
 }
 
 function requiredValidationsForRun(scope: WorkflowScope, profile: DeliveryProfile): string[] {
-  const validations: string[] = buildGatePlan(scope)
-    .filter((gate) => gate.applicability === "required")
-    .map((gate) => gate.id);
-  if (profile.requirements.legacyBaseline) validations.push("legacy-baseline");
-  if (profile.requirements.targetedFeatureE2E) validations.push("targeted-feature-e2e");
-  if (profile.requirements.featureVideo) validations.push("feature-video");
-  if (profile.requirements.figmaBundle) validations.push("figma-bundle");
-  if (scope.ui && scope.api) validations.push("api-ready");
-  if (profile.publication === "draft") validations.push("draft-publication-preflight");
-  return validations;
+  const explicitModePolicy =
+    profile.mode === "auto"
+      ? undefined
+      : resolveDeliveryPolicy({
+          mode: profile.mode,
+          hasOpenApi: profile.openApiPaths.length + profile.openApiUrls.length > 0,
+          legacyApiOperationCount: profile.mode === "legacy" ? profile.openApiOperations.length : 0,
+          ui: scope.ui,
+          workload: "M",
+        });
+  const validations = new Set<string>(explicitModePolicy?.modeValidations ?? []);
+  for (const gate of buildGatePlan(scope)) {
+    if (gate.applicability === "required") validations.add(gate.id);
+  }
+  if (explicitModePolicy === undefined && scope.ui && scope.api) validations.add("api-ready");
+  if (profile.publication === "draft") validations.add("draft-publication-preflight");
+  return [...validations];
 }
 
 function resumeContextForRun(run: RunManifest): WorkflowStatus["resumeContext"] {
@@ -2613,6 +4050,11 @@ function stage(run: RunManifest, name: RunStageName): StageState {
 }
 
 function actionsForRun(run: RunManifest, scope: WorkflowScope, profile: DeliveryProfile) {
+  if (stage(run, "intake").status !== "passed") return [];
+  const policy = deliveryPolicyForRun(run, scope, profile);
+  const parallelReviewers =
+    policy?.parallelReviewers ??
+    buildDelegationPolicy(workloadFromRun(run, scope, profile).size).parallelReviewers;
   if (isActionable(stage(run, "contracts"))) {
     return [WorkflowActionSchema.parse({ kind: "prepare-contracts", runId: run.id })];
   }
@@ -2621,7 +4063,8 @@ function actionsForRun(run: RunManifest, scope: WorkflowScope, profile: Delivery
       WorkflowActionSchema.parse({
         kind: "implement",
         runId: run.id,
-        requireApiReady: scope.ui && scope.api,
+        requireApiReady:
+          policy?.requireApiReady ?? (profile.mode === "auto" && scope.ui && scope.api),
       }),
     ];
   }
@@ -2634,6 +4077,22 @@ function actionsForRun(run: RunManifest, scope: WorkflowScope, profile: Delivery
   }
 
   const actions = [];
+  const currentVisual = currentVisualReport(run, packet.id);
+  if (
+    profile.requirements.visualComparison &&
+    currentVisual?.metadata["visualStatus"] !== "passed" &&
+    !hasInProgressVisualAttempt(run, packet.id) &&
+    visualComparisonAttemptCount(run, packet.id) < MAX_VISUAL_REPAIR_ATTEMPTS
+  ) {
+    actions.push(
+      WorkflowActionSchema.parse({
+        kind: "compare-visuals",
+        runId: run.id,
+        reviewPacketId: packet.id,
+        attempt: visualComparisonAttemptCount(run, packet.id) + 1,
+      }),
+    );
+  }
   if (isActionable(stage(run, "functional-review"))) {
     actions.push(
       WorkflowActionSchema.parse({
@@ -2643,7 +4102,14 @@ function actionsForRun(run: RunManifest, scope: WorkflowScope, profile: Delivery
       }),
     );
   }
-  if (scope.ui && isActionable(stage(run, "design-review"))) {
+  if (
+    scope.ui &&
+    isActionable(stage(run, "design-review")) &&
+    (parallelReviewers || stage(run, "functional-review").status === "passed") &&
+    (!profile.requirements.visualComparison ||
+      currentVisual?.metadata["visualStatus"] === "passed" ||
+      visualComparisonAttemptCount(run, packet.id) >= MAX_VISUAL_REPAIR_ATTEMPTS)
+  ) {
     actions.push(
       WorkflowActionSchema.parse({
         kind: "review-design",
@@ -2671,7 +4137,10 @@ function isActionable(value: StageState): boolean {
 }
 
 function stageForSubmission(
-  submission: Exclude<WorkflowSubmission, { kind: "figma-bundle" | "api-ready" }>,
+  submission: Exclude<
+    WorkflowSubmission,
+    { kind: "figma-bundle" | "api-ready" | "visual-comparison" }
+  >,
 ): RunStageName {
   if (submission.kind === "contracts") return "contracts";
   if (submission.kind === "implementation") return "implementation";
@@ -2679,9 +4148,56 @@ function stageForSubmission(
 }
 
 function assertSubmissionPrerequisites(run: RunManifest, submission: WorkflowSubmission): void {
+  if (stage(run, "intake").status !== "passed") {
+    throw new Error("The intake stage must pass before downstream evidence can be submitted");
+  }
   const profile = deliveryProfileFromRun(run);
+  if (submission.kind === "design-review") {
+    if (submission.verdict === "approved" && profile.requirements.visualComparison) {
+      assertCurrentVisualComparisonPassed(run, submission.reviewPacketId);
+    }
+    const scope = scopeFromRun(run);
+    const parallelReviewers =
+      deliveryPolicyForRun(run, scope, profile)?.parallelReviewers ??
+      buildDelegationPolicy(workloadFromRun(run, scope, profile).size).parallelReviewers;
+    if (!parallelReviewers && stage(run, "functional-review").status !== "passed") {
+      throw new Error("Functional review must pass before design review for XS, S, and M runs");
+    }
+  }
   if (submission.kind === "api-ready" && stage(run, "contracts").status !== "passed") {
     throw new Error("The contracts stage must pass before the api-ready checkpoint");
+  }
+  if (
+    submission.kind === "api-ready" &&
+    profile.requirements.apiCoverage &&
+    submission.operations.length === 0
+  ) {
+    throw new Error("Full delivery API-ready evidence requires operation-aware readiness");
+  }
+  if (submission.kind === "api-ready" && profile.requirements.apiCoverage) {
+    const authoritative = new Set(
+      profile.openApiOperations.map((operation) => operation.operationKey),
+    );
+    const submitted = new Set(submission.operations.map((operation) => operation.operationKey));
+    const missing = [...authoritative].filter((operationKey) => !submitted.has(operationKey));
+    const unknown = [...submitted].filter((operationKey) => !authoritative.has(operationKey));
+    if (authoritative.size === 0 || missing.length > 0 || unknown.length > 0) {
+      throw new Error(
+        `API-ready operations must exactly match the intake-pinned OpenAPI inventory; missing: ${missing.join(", ") || "none"}; unknown: ${unknown.join(", ") || "none"}`,
+      );
+    }
+  }
+  if (submission.kind === "visual-comparison") {
+    const packet = reviewPacketFromRun(run);
+    if (!profile.requirements.visualComparison) {
+      throw new Error("Visual comparison is not applicable to this delivery profile");
+    }
+    if (stage(run, "implementation").status !== "passed") {
+      throw new Error("Implementation must pass before visual comparison");
+    }
+    if (packet === undefined || packet.id !== submission.reviewPacketId) {
+      throw new Error("Visual comparison must reference the current implementation review packet");
+    }
   }
   if (
     submission.kind === "contracts" &&
@@ -2690,6 +4206,45 @@ function assertSubmissionPrerequisites(run: RunManifest, submission: WorkflowSub
     submission.legacyBaseline === undefined
   ) {
     throw new Error("Legacy mode requires a focused baseline before contracts can pass");
+  }
+  if (
+    submission.kind === "contracts" &&
+    submission.status === "passed" &&
+    profile.requirements.legacyBaseline &&
+    (submission.visualTargets.length === 0 ||
+      submission.visualTargets.some((target) => target.baselineKind !== "legacy-screenshot"))
+  ) {
+    throw new Error("Legacy mode requires one or more running legacy screenshot targets");
+  }
+  if (
+    submission.kind === "contracts" &&
+    submission.status === "passed" &&
+    profile.requirements.legacyInventory
+  ) {
+    const inventoryKeys = legacyFeatureKeysFromRun(run);
+    if (inventoryKeys.size === 0) {
+      throw new Error("Legacy migration requires a non-empty runtime-generated inventory");
+    }
+    if (submission.legacyScopeKeys.length === 0) {
+      throw new Error("Legacy migration requires explicit in-scope inventory feature keys");
+    }
+    const unknownKeys = submission.legacyScopeKeys.filter(
+      (featureKey) => !inventoryKeys.has(featureKey),
+    );
+    if (unknownKeys.length > 0) {
+      throw new Error(`Legacy scope references unknown feature keys: ${unknownKeys.join(", ")}`);
+    }
+    const requirementIds = new Set(
+      submission.requirementManifest.map((requirement) => requirement.id),
+    );
+    const unknownRequirements = submission.legacyCoverage.flatMap((coverage) =>
+      coverage.requirementIds.filter((requirementId) => !requirementIds.has(requirementId)),
+    );
+    if (unknownRequirements.length > 0) {
+      throw new Error(
+        `Legacy coverage references unknown requirements: ${[...new Set(unknownRequirements)].join(", ")}`,
+      );
+    }
   }
   if (
     submission.kind === "contracts" &&
@@ -2753,14 +4308,91 @@ function assertSubmissionPrerequisites(run: RunManifest, submission: WorkflowSub
       "User-facing feature mode requires targeted feature E2E evidence and one video",
     );
   }
+  if (
+    submission.kind === "implementation" &&
+    submission.status === "passed" &&
+    profile.requirements.mockData &&
+    submission.mockDataEvidence === undefined
+  ) {
+    throw new Error("Figma delivery requires deterministic mock manifest and fixture evidence");
+  }
+  if (
+    submission.kind === "implementation" &&
+    submission.status === "passed" &&
+    profile.requirements.legacyInventory
+  ) {
+    const scoped = legacyScopeKeysFromRun(run);
+    const covered = new Set(submission.legacyCoverage.map((coverage) => coverage.featureKey));
+    const requirementIds = contractRequirementIds(run);
+    const unknownRequirements = submission.legacyCoverage.flatMap((coverage) =>
+      coverage.requirementIds.filter((requirementId) => !requirementIds.has(requirementId)),
+    );
+    const missing = [...scoped].filter((featureKey) => !covered.has(featureKey));
+    const unknown = [...covered].filter((featureKey) => !scoped.has(featureKey));
+    if (
+      scoped.size === 0 ||
+      missing.length > 0 ||
+      unknown.length > 0 ||
+      unknownRequirements.length > 0
+    ) {
+      throw new Error(
+        `Implementation legacy coverage must exactly match contracted scope and requirements; missing: ${missing.join(", ") || "none"}; unknown: ${unknown.join(", ") || "none"}; unknown requirements: ${[...new Set(unknownRequirements)].join(", ") || "none"}`,
+      );
+    }
+  }
   if (submission.kind === "implementation" && stage(run, "contracts").status !== "passed") {
     throw new Error("The contracts stage must pass before implementation begins");
   }
   if (
     submission.kind === "implementation" &&
     submission.status === "passed" &&
-    scopeFromRun(run).ui &&
-    scopeFromRun(run).api &&
+    profile.requirements.apiCoverage
+  ) {
+    const readyOperationKeys = apiReadyOperationKeysFromRun(run);
+    const coveredOperationKeys = new Set(
+      submission.apiCoverage.map((coverage) => coverage.operationKey),
+    );
+    if (readyOperationKeys.size === 0 || submission.apiCoverage.length === 0) {
+      throw new Error("Full delivery implementation requires operation-aware API coverage");
+    }
+    const missing = [...readyOperationKeys].filter(
+      (operationKey) => !coveredOperationKeys.has(operationKey),
+    );
+    const unknown = [...coveredOperationKeys].filter(
+      (operationKey) => !readyOperationKeys.has(operationKey),
+    );
+    if (missing.length > 0 || unknown.length > 0) {
+      throw new Error(
+        `API coverage must exactly match API-ready operations; missing: ${missing.join(", ") || "none"}; unknown: ${unknown.join(", ") || "none"}`,
+      );
+    }
+  }
+  if (
+    submission.kind === "implementation" &&
+    submission.status === "passed" &&
+    profile.requirements.performanceEvidence
+  ) {
+    const lab = submission.performanceEvidence?.lab;
+    if (lab === undefined) {
+      throw new Error("Full delivery implementation requires labelled lab performance evidence");
+    }
+    const latency = lab.metrics.tbtMs ?? lab.metrics.interactionLatencyMs;
+    if (
+      lab.metrics.lcpMs > 2_500 ||
+      lab.metrics.cls > 0.1 ||
+      latency === undefined ||
+      latency > 200
+    ) {
+      throw new Error(
+        "Lab performance exceeds the default affected-route budget (LCP 2500 ms, CLS 0.1, TBT/interaction 200 ms)",
+      );
+    }
+  }
+  if (
+    submission.kind === "implementation" &&
+    submission.status === "passed" &&
+    (profile.requirements.apiCoverage ||
+      (profile.mode === "auto" && scopeFromRun(run).ui && scopeFromRun(run).api)) &&
     (stage(run, "implementation").checkpoint?.name !== "api-ready" ||
       !submission.apiReady ||
       submission.implementationContextId !==
@@ -2826,6 +4458,148 @@ function reviewPacketFromRun(run: RunManifest): ImplementationReviewPacket | und
     stage(run, "implementation").checkpoint?.data["reviewPacket"],
   );
   return parsed.success ? parsed.data : undefined;
+}
+
+function legacyFeatureKeysFromRun(run: RunManifest): Set<string> {
+  const rawKeys = [...run.artifacts]
+    .reverse()
+    .find((artifact) => artifact.kind === "legacy-feature-inventory")?.metadata["featureKeys"];
+  return new Set(
+    Array.isArray(rawKeys)
+      ? rawKeys.filter((featureKey): featureKey is string => typeof featureKey === "string")
+      : [],
+  );
+}
+
+function legacyScopeKeysFromRun(run: RunManifest): Set<string> {
+  const rawKeys = [...run.artifacts]
+    .reverse()
+    .find((artifact) => artifact.metadata["workflowSubmissionKind"] === "contracts")?.metadata[
+    "legacyScopeKeys"
+  ];
+  return new Set(
+    Array.isArray(rawKeys)
+      ? rawKeys.filter((featureKey): featureKey is string => typeof featureKey === "string")
+      : [],
+  );
+}
+
+function apiReadyOperationKeysFromRun(run: RunManifest): Set<string> {
+  const rawOperations = stage(run, "implementation").checkpoint?.data["operations"];
+  if (!Array.isArray(rawOperations)) return new Set();
+  return new Set(
+    rawOperations.flatMap((operation) => {
+      if (
+        typeof operation === "object" &&
+        operation !== null &&
+        "operationKey" in operation &&
+        typeof operation.operationKey === "string"
+      ) {
+        return [operation.operationKey];
+      }
+      return [];
+    }),
+  );
+}
+
+function visualTargetsFromRun(run: RunManifest): VisualTargetManifest[] {
+  const profile = deliveryProfileFromRun(run);
+  const expectedSubmissionKind = profile.requirements.legacyBaseline ? "contracts" : "figma-bundle";
+  for (const artifact of [...run.artifacts].reverse()) {
+    if (artifact.metadata["workflowSubmissionKind"] !== expectedSubmissionKind) continue;
+    const parsed = z
+      .array(VisualTargetManifestSchema)
+      .safeParse(artifact.metadata["visualTargets"]);
+    if (parsed.success && parsed.data.length > 0) return parsed.data;
+  }
+  return [];
+}
+
+function visualComparisonAttemptCount(run: RunManifest, reviewPacketId: string): number {
+  const reservations = visualAttemptReservations(run, reviewPacketId);
+  if (reservations.length > 0) return reservations.length;
+  return run.artifacts.filter(
+    (artifact) =>
+      artifact.kind === "visual-report" && artifact.metadata["reviewPacketId"] === reviewPacketId,
+  ).length;
+}
+
+function currentVisualReport(run: RunManifest, reviewPacketId: string): ArtifactRef | undefined {
+  const reports = run.artifacts.filter(
+    (artifact) =>
+      artifact.kind === "visual-report" && artifact.metadata["reviewPacketId"] === reviewPacketId,
+  );
+  return (
+    reports.find((artifact) => artifact.metadata["visualStatus"] === "passed") ??
+    [...reports].sort(
+      (left, right) =>
+        Number(right.metadata["visualComparisonAttempt"] ?? 0) -
+        Number(left.metadata["visualComparisonAttempt"] ?? 0),
+    )[0]
+  );
+}
+
+type VisualAttemptReservationState = {
+  submissionIdentity: string;
+  attempt: 1 | 2 | 3;
+  status: "in-progress" | "completed" | "failed";
+};
+
+function visualAttemptReservations(
+  run: RunManifest,
+  reviewPacketId: string,
+): VisualAttemptReservationState[] {
+  const byIdentity = new Map<string, VisualAttemptReservationState>();
+  for (const artifact of run.artifacts) {
+    if (
+      artifact.metadata["adapter"] !== "visual-attempt-reservation-v2" ||
+      artifact.metadata["reviewPacketId"] !== reviewPacketId
+    ) {
+      continue;
+    }
+    const submissionIdentity = artifact.metadata["submissionIdentity"];
+    const attempt = artifact.metadata["visualComparisonAttempt"];
+    const status = artifact.metadata["reservationStatus"];
+    if (
+      typeof submissionIdentity !== "string" ||
+      (attempt !== 1 && attempt !== 2 && attempt !== 3) ||
+      (status !== "in-progress" && status !== "completed" && status !== "failed")
+    ) {
+      continue;
+    }
+    byIdentity.set(submissionIdentity, { submissionIdentity, attempt, status });
+  }
+  return [...byIdentity.values()].sort((left, right) => left.attempt - right.attempt);
+}
+
+function hasInProgressVisualAttempt(run: RunManifest, reviewPacketId: string): boolean {
+  return visualAttemptReservations(run, reviewPacketId).some(
+    (reservation) => reservation.status === "in-progress",
+  );
+}
+
+function visualSubmissionIdentity(
+  reviewPacketId: string,
+  captures: Array<{ targetId: string; digest: string }>,
+): string {
+  const canonical = [...captures].sort((left, right) =>
+    left.targetId.localeCompare(right.targetId),
+  );
+  return `sha256:${createHash("sha256")
+    .update(JSON.stringify({ reviewPacketId, captures: canonical }))
+    .digest("hex")}`;
+}
+
+function assertCurrentVisualComparisonPassed(run: RunManifest, reviewPacketId: string): void {
+  const report = currentVisualReport(run, reviewPacketId);
+  if (report?.metadata["visualStatus"] === "passed") return;
+  const attempts = visualComparisonAttemptCount(run, reviewPacketId);
+  if (attempts >= MAX_VISUAL_REPAIR_ATTEMPTS) {
+    throw new Error(
+      `VISUAL_ATTEMPT_LIMIT_REACHED: design approval is blocked after ${MAX_VISUAL_REPAIR_ATTEMPTS} failed comparisons`,
+    );
+  }
+  throw new Error("Design approval requires a passing current-packet visual comparison");
 }
 
 function assertRequiredGateResults(
@@ -2912,6 +4686,126 @@ function assertPassingJsonResult(content: Buffer, evidencePath: string): void {
   }
 }
 
+function assertDeterministicMockManifest(
+  content: Buffer,
+  evidencePath: string,
+  expectedFixtures: Array<{ fixturePath: string; digest: string }>,
+): void {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content.toString("utf8"));
+  } catch {
+    throw new Error(`Mock data manifest must be strict JSON: ${evidencePath}`);
+  }
+  const result = z
+    .object({
+      deterministic: z.literal(true),
+      fixtures: z
+        .array(
+          z
+            .object({
+              path: z.string().trim().min(1),
+              sha256: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+            })
+            .strict(),
+        )
+        .min(1),
+    })
+    .strict()
+    .safeParse(parsed);
+  const expected = new Map(expectedFixtures.map((item) => [item.fixturePath, item.digest]));
+  const received = result.success
+    ? new Map(result.data.fixtures.map((fixture) => [fixture.path, fixture.sha256]))
+    : new Map<string, string>();
+  if (
+    !result.success ||
+    received.size !== result.data.fixtures.length ||
+    received.size !== expected.size ||
+    [...expected].some(([fixturePath, digest]) => received.get(fixturePath) !== digest)
+  ) {
+    throw new Error(
+      `Mock data manifest must bind deterministic=true to the exact fixture paths and SHA-256 digests: ${evidencePath}`,
+    );
+  }
+}
+
+function assertMockFixture(content: Buffer, evidencePath: string): void {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content.toString("utf8"));
+  } catch {
+    throw new Error(`Mock fixture must be strict JSON: ${evidencePath}`);
+  }
+  if (typeof parsed !== "object" || parsed === null) {
+    throw new Error(`Mock fixture must contain a JSON object or array: ${evidencePath}`);
+  }
+}
+
+function assertApiCoverageResult(
+  content: Buffer,
+  evidencePath: string,
+  expected: Array<{ operationKey: string; mockHandlers: string[] }>,
+): void {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content.toString("utf8"));
+  } catch {
+    throw new Error(`API coverage evidence must be passing structured JSON: ${evidencePath}`);
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`API coverage evidence must be passing structured JSON: ${evidencePath}`);
+  }
+  const result = parsed as Record<string, unknown>;
+  const operationKeys = result["operationKeys"];
+  const mockHandlers = result["mockHandlers"];
+  if (
+    result["status"] !== "passed" ||
+    !Array.isArray(operationKeys) ||
+    !Array.isArray(mockHandlers) ||
+    operationKeys.some((value) => typeof value !== "string") ||
+    mockHandlers.some((value) => typeof value !== "string") ||
+    expected.some(
+      (operation) =>
+        !operationKeys.includes(operation.operationKey) ||
+        operation.mockHandlers.some((handler) => !mockHandlers.includes(handler)),
+    )
+  ) {
+    throw new Error(
+      `API coverage evidence must name every exercised operation and mock handler: ${evidencePath}`,
+    );
+  }
+}
+
+function assertPerformanceResult(
+  content: Buffer,
+  evidencePath: string,
+  expectedMetrics: {
+    lcpMs: number;
+    cls: number;
+    tbtMs?: number | undefined;
+    interactionLatencyMs?: number | undefined;
+  },
+): void {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content.toString("utf8"));
+  } catch {
+    throw new Error(`Performance evidence must be passing structured JSON: ${evidencePath}`);
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`Performance evidence must be passing structured JSON: ${evidencePath}`);
+  }
+  const result = parsed as Record<string, unknown>;
+  if (
+    result["status"] !== "passed" ||
+    JSON.stringify(result["metrics"]) !== JSON.stringify(expectedMetrics)
+  ) {
+    throw new Error(
+      `Performance result metrics must exactly match the declared lab evidence: ${evidencePath}`,
+    );
+  }
+}
+
 function assertPassingFeatureResult(
   content: Buffer,
   evidencePath: string,
@@ -2956,19 +4850,15 @@ function assertFigmaManifest(
     parsed.data.capturedAt !== submission.capturedAt ||
     parsed.data.fileUrl !== submission.fileUrl ||
     JSON.stringify(parsed.data.nodeIds) !== JSON.stringify(submission.nodeIds) ||
-    JSON.stringify(parsed.data.visualPaths) !== JSON.stringify(expectedVisualPaths)
+    JSON.stringify(parsed.data.visualPaths) !== JSON.stringify(expectedVisualPaths) ||
+    JSON.stringify(parsed.data.visualTargets) !== JSON.stringify(submission.visualTargets)
   ) {
     throw new Error(`Figma manifest provenance does not match its submission: ${evidencePath}`);
   }
 }
 
-function assertPng(content: Buffer, evidencePath: string): void {
-  try {
-    const image = PNG.sync.read(content);
-    if (image.width < 1 || image.height < 1) throw new Error("empty image");
-  } catch {
-    throw new Error(`Figma visual must be a valid PNG image: ${evidencePath}`);
-  }
+async function assertPng(content: Buffer, evidencePath: string): Promise<void> {
+  await decodeBoundedPng(content, evidencePath);
 }
 
 function videoDurationMs(content: Buffer): number | undefined {
@@ -3050,7 +4940,9 @@ function webmDurationMs(content: Buffer): number | undefined {
   return duration !== undefined && Number.isFinite(duration) && duration > 0 ? duration : undefined;
 }
 
-function submissionOutcome(submission: Exclude<WorkflowSubmission, { kind: "figma-bundle" }>) {
+function submissionOutcome(
+  submission: Exclude<WorkflowSubmission, { kind: "figma-bundle" | "visual-comparison" }>,
+) {
   if ("verdict" in submission) {
     return submission.verdict === "approved"
       ? "passed"
@@ -3076,12 +4968,16 @@ type ProjectTextFile = {
 };
 
 type ProjectTextSource = ProjectTextFile & {
+  origin: "file" | "url";
   text: string;
   chunks: string[];
+  mediaType: string;
+  rawDigest: string;
 };
 
 type PreparedComposableSources = {
   brief?: ProjectTextSource;
+  legacyNetwork?: ProjectTextSource;
   docs: ProjectTextSource[];
   openApi: ProjectTextSource[];
   guidance: ProjectTextSource[];
@@ -3089,8 +4985,346 @@ type PreparedComposableSources = {
   skillHints: string[];
 };
 
+function resolveWorkflowDeliveryMode(
+  input: z.infer<typeof WorkflowStartInputSchema>,
+): z.infer<typeof DeliveryModeSchema> {
+  if (input.mode !== "auto") return input.mode;
+  if (input.legacyProjectRoot !== undefined) return "legacy";
+  if (input.briefPath !== undefined) return "brief";
+  if (input.figmaUrl !== undefined) return "figma";
+  return "auto";
+}
+
+type ReportSectionApplicability = Readonly<
+  Record<
+    | "api"
+    | "legacy"
+    | "visual"
+    | "functional-review"
+    | "design-review"
+    | "performance"
+    | "feature-evidence",
+    boolean
+  >
+>;
+
+function reportSectionApplicabilityForRun(
+  run: RunManifest,
+  profile: DeliveryProfile,
+): ReportSectionApplicability {
+  const scope = scopeFromRun(run);
+  const policy = deliveryPolicyForRun(run, scope, profile);
+  if (policy !== undefined) return policy.sectionApplicability;
+  return {
+    api: profile.requirements.apiCoverage || scope.api,
+    legacy: profile.requirements.legacyInventory,
+    visual: profile.requirements.visualComparison,
+    "functional-review": true,
+    "design-review": scope.ui,
+    performance: profile.requirements.performanceEvidence,
+    "feature-evidence": profile.requirements.targetedFeatureE2E,
+  };
+}
+
+function readyReportSectionStatuses(applicability: ReportSectionApplicability) {
+  return PrReportSectionStatusesSchema.parse(
+    Object.fromEntries(
+      Object.entries(applicability).map(([section, applicable]) => [
+        section,
+        applicable ? "complete" : "not-applicable",
+      ]),
+    ),
+  );
+}
+
+function blockedReportSectionStatuses(input: {
+  run: RunManifest;
+  profile: DeliveryProfile;
+  sectionApplicability: ReportSectionApplicability;
+  blocker: WorkflowBlocker;
+  implementation: Extract<WorkflowSubmission, { kind: "implementation" }> | undefined;
+  visualArtifact: ArtifactRef | undefined;
+  packetCurrent: boolean;
+}) {
+  const statusFromStage = (
+    section: keyof ReportSectionApplicability,
+    stageName: RunStageName,
+  ): PrReportSectionStatus => {
+    if (!input.sectionApplicability[section]) return "not-applicable";
+    const stageStatus = stage(input.run, stageName).status;
+    if (stageStatus === "passed") return "complete";
+    if (stageStatus === "failed" || stageStatus === "blocked") return "blocked";
+    return "not-run";
+  };
+  const implementationStatus = (
+    section: keyof ReportSectionApplicability,
+    complete: boolean,
+  ): PrReportSectionStatus => {
+    if (!input.sectionApplicability[section]) return "not-applicable";
+    if (complete) return "complete";
+    return statusFromStage(section, "implementation");
+  };
+  const visualStatus: PrReportSectionStatus = !input.sectionApplicability.visual
+    ? "not-applicable"
+    : input.visualArtifact?.metadata["visualStatus"] === "passed"
+      ? "complete"
+      : input.visualArtifact === undefined
+        ? "not-run"
+        : "blocked";
+  const unresolvedLegacyApi = input.run.gaps.some(
+    (gap) => gap.category === "api" && gap.status === "open",
+  );
+  const apiComplete =
+    (input.profile.mode === "legacy" &&
+      input.profile.openApiOperations.length === 0 &&
+      !unresolvedLegacyApi) ||
+    input.implementation?.status === "passed";
+
+  return PrReportSectionStatusesSchema.parse({
+    api:
+      input.blocker.code === "LEGACY_API_METHOD_UNKNOWN"
+        ? "blocked"
+        : implementationStatus("api", apiComplete),
+    legacy: implementationStatus("legacy", input.implementation?.status === "passed"),
+    visual: visualStatus,
+    "functional-review": input.packetCurrent
+      ? statusFromStage("functional-review", "functional-review")
+      : input.sectionApplicability["functional-review"]
+        ? "not-run"
+        : "not-applicable",
+    "design-review": input.packetCurrent
+      ? statusFromStage("design-review", "design-review")
+      : input.sectionApplicability["design-review"]
+        ? "not-run"
+        : "not-applicable",
+    performance: implementationStatus(
+      "performance",
+      input.implementation?.performanceEvidence !== undefined,
+    ),
+    "feature-evidence": implementationStatus(
+      "feature-evidence",
+      input.implementation?.featureEvidence !== undefined,
+    ),
+  });
+}
+
+function legacyRootDigestFromRun(run: RunManifest): string | undefined {
+  const digest = [...run.artifacts]
+    .reverse()
+    .find((artifact) => artifact.kind === "legacy-feature-inventory")?.metadata["rootDigest"];
+  return typeof digest === "string" && /^sha256:[a-f0-9]{64}$/.test(digest) ? digest : undefined;
+}
+
+function legacyApiDiscoveryAdaptersFromRun(run: RunManifest): string[] {
+  const value = [...run.artifacts]
+    .reverse()
+    .find((artifact) => artifact.kind === "legacy-feature-inventory")?.metadata[
+    "apiDiscoveryAdapters"
+  ];
+  return Array.isArray(value)
+    ? value.filter(
+        (adapter): adapter is string =>
+          typeof adapter === "string" && adapter.length > 0 && adapter.length <= 100,
+      )
+    : [];
+}
+
+function sourceProvenanceForPreparedSources(
+  sources: PreparedComposableSources,
+  capturedAt: string,
+) {
+  const row = (
+    kind: "brief" | "docs" | "openapi" | "guidance" | "legacy-network",
+    source: ProjectTextSource,
+  ) => ({
+    kind,
+    locator: source.path,
+    resolvedLocator: source.origin === "url" ? source.resolvedPath : source.path,
+    digest: source.rawDigest,
+    capturedAt,
+  });
+  return [
+    ...(sources.brief === undefined ? [] : [row("brief", sources.brief)]),
+    ...(sources.legacyNetwork === undefined ? [] : [row("legacy-network", sources.legacyNetwork)]),
+    ...sources.docs.map((source) => row("docs", source)),
+    ...sources.openApi.map((source) => row("openapi", source)),
+    ...sources.guidance.map((source) => row("guidance", source)),
+    ...sources.discoveredGuidance.map((source) => row("guidance", source)),
+  ];
+}
+
+type UnresolvedLegacyApiCandidate = Pick<
+  LegacyInventory["entries"][number],
+  "normalizedKey" | "sourcePath" | "symbol" | "apiAdapter" | "evidenceConfidence"
+>;
+
+function deriveLegacyApiOperations(
+  inventory: LegacyInventory,
+  openApi: DeliveryProfile["openApiOperations"],
+): {
+  operations: DeliveryProfile["openApiOperations"];
+  unresolved: UnresolvedLegacyApiCandidate[];
+} {
+  const operations: DeliveryProfile["openApiOperations"] = [];
+  const unresolved: UnresolvedLegacyApiCandidate[] = [];
+  const observed = inventory.entries.flatMap((entry) => {
+    if (entry.category !== "api") return [];
+    const match = /^(GET|PUT|POST|DELETE|OPTIONS|HEAD|PATCH|TRACE)\s+(.+)$/u.exec(
+      entry.normalizedKey,
+    );
+    if (match === null || !match[2]!.startsWith("/")) return [];
+    return [{ method: match[1]!, path: match[2]!.split(/[?#]/u, 1)[0]! }];
+  });
+  for (const entry of inventory.entries) {
+    if (entry.category !== "api") continue;
+    const match = /^([A-Za-z]+)\s+(.+)$/u.exec(entry.normalizedKey);
+    if (match === null) {
+      unresolved.push(entry);
+      continue;
+    }
+    const rawMethod = match[1]!.toUpperCase();
+    let locator = match[2]!;
+    if (/^\/\//u.test(locator)) {
+      try {
+        locator = new URL(`https:${locator}`).pathname;
+      } catch {
+        unresolved.push(entry);
+        continue;
+      }
+    } else if (/^https?:\/\//i.test(locator)) {
+      try {
+        locator = new URL(locator).pathname;
+      } catch {
+        unresolved.push(entry);
+        continue;
+      }
+    }
+    locator = locator.split(/[?#]/u, 1)[0]!;
+    const enriched = uniqueOperationMatches([
+      ...matchingOpenApiOperations(openApi, locator, rawMethod).map((operation) => ({
+        method: operation.method,
+        path: operation.path,
+      })),
+      ...observed.filter(
+        (operation) =>
+          locator.startsWith("/") &&
+          operation.path === locator &&
+          (rawMethod === "UNKNOWN" || operation.method === rawMethod),
+      ),
+    ]);
+    if (rawMethod === "UNKNOWN" || !locator.startsWith("/")) {
+      if (enriched.length !== 1) unresolved.push(entry);
+      continue;
+    }
+    if (!/^(?:GET|PUT|POST|DELETE|OPTIONS|HEAD|PATCH|TRACE)$/u.test(rawMethod)) {
+      unresolved.push(entry);
+      continue;
+    }
+    const method = rawMethod as DeliveryProfile["openApiOperations"][number]["method"];
+    operations.push({
+      operationKey: `${method} ${locator}`,
+      method,
+      path: locator,
+      sourceLocator: `external-legacy-project/${entry.sourcePath}`,
+    });
+  }
+  return { operations, unresolved };
+}
+
+function uniqueOperationMatches(
+  operations: Array<{ method: string; path: string }>,
+): Array<{ method: string; path: string }> {
+  return [
+    ...new Map(
+      operations.map((operation) => [`${operation.method} ${operation.path}`, operation]),
+    ).values(),
+  ];
+}
+
+function matchingOpenApiOperations(
+  openApi: DeliveryProfile["openApiOperations"],
+  locator: string,
+  method: string,
+): DeliveryProfile["openApiOperations"] {
+  if (locator.startsWith("operation:")) {
+    const operationId = locator.slice("operation:".length);
+    return openApi.filter(
+      (operation) =>
+        operation.operationId === operationId &&
+        (method === "UNKNOWN" || operation.method === method),
+    );
+  }
+  if (!locator.startsWith("/")) return [];
+  return openApi.filter(
+    (operation) =>
+      operation.path === locator && (method === "UNKNOWN" || operation.method === method),
+  );
+}
+
+function mergeDeliveryApiOperations(
+  openApi: DeliveryProfile["openApiOperations"],
+  legacy: DeliveryProfile["openApiOperations"],
+): DeliveryProfile["openApiOperations"] {
+  const merged = new Map(openApi.map((operation) => [operation.operationKey, operation]));
+  for (const operation of legacy) {
+    if (!merged.has(operation.operationKey)) merged.set(operation.operationKey, operation);
+  }
+  if (merged.size > 1_000) throw new Error("Combined API operation inventory exceeds 1000");
+  return [...merged.values()];
+}
+
+function exclusionsForProfile(profile: DeliveryProfile): string[] {
+  if (profile.mode === "feature") {
+    return ["The full-project E2E suite is excluded; only the declared feature selector is run."];
+  }
+  if (profile.mode === "figma") {
+    return [
+      "Real API integration is excluded; deterministic mock data is used.",
+      "Performance and feature-video evidence are not applicable.",
+    ];
+  }
+  if (profile.mode === "legacy") {
+    return ["Figma is not the visual baseline; the running legacy project is authoritative."];
+  }
+  if (profile.mode === "brief") {
+    return ["Full-project E2E video capture is not part of full-delivery brief mode."];
+  }
+  return ["Mode-specific evidence not activated by intake is excluded."];
+}
+
+async function canonicalLegacyDirectory(input: {
+  projectRoot: string;
+  legacyProjectRoot?: string;
+  required: boolean;
+}): Promise<string | undefined> {
+  if (input.legacyProjectRoot === undefined) {
+    if (input.required) throw new Error("legacy mode requires legacyProjectRoot");
+    return undefined;
+  }
+
+  let legacyRoot: string;
+  try {
+    legacyRoot = await realpath(input.legacyProjectRoot);
+  } catch {
+    throw new Error("Legacy project path does not exist: " + input.legacyProjectRoot);
+  }
+  const details = await stat(legacyRoot);
+  if (!details.isDirectory()) {
+    throw new Error("Legacy project path must reference a directory: " + input.legacyProjectRoot);
+  }
+
+  const targetRoot = await realpath(input.projectRoot);
+  if (directoriesOverlap(legacyRoot, targetRoot)) {
+    throw new Error(
+      "Legacy project and target project must be different, separate, non-overlapping directories",
+    );
+  }
+  return legacyRoot;
+}
+
 async function prepareComposableSources(
   input: z.infer<typeof WorkflowStartInputSchema>,
+  fetchOpenApiSource: (input: { url: string }) => Promise<RemoteOpenApiSource>,
 ): Promise<PreparedComposableSources> {
   const root = await realpath(input.projectRoot);
   const docsInput = uniqueInputValues([
@@ -3101,14 +5335,26 @@ async function prepareComposableSources(
     ...(input.openApiPath === undefined ? [] : [input.openApiPath]),
     ...input.openApiPaths,
   ]);
+  const openApiUrlInput = uniqueInputUrls([
+    ...(input.openApiUrl === undefined ? [] : [input.openApiUrl]),
+    ...input.openApiUrls,
+  ]);
   const guidanceInput = uniqueInputValues(input.guidancePaths);
   const skillHints = uniqueInputValues(input.skillHints);
   const brief =
     input.briefPath === undefined
       ? undefined
       : await readProjectTextFile(root, input.briefPath, "Brief");
+  const legacyNetwork =
+    input.legacyNetworkEvidencePath === undefined
+      ? undefined
+      : await readProjectTextFile(
+          root,
+          input.legacyNetworkEvidencePath,
+          "Legacy runtime network evidence",
+        );
   const docs = await readDistinctProjectTextFiles(root, docsInput, "Supporting document");
-  const openApi = await readDistinctProjectTextFiles(root, openApiInput, "OpenAPI");
+  const openApiFiles = await readDistinctProjectTextFiles(root, openApiInput, "OpenAPI");
   const guidance = await readDistinctProjectTextFiles(root, guidanceInput, "Guidance");
 
   const claimedFiles = new Map<string, string>();
@@ -3123,12 +5369,19 @@ async function prepareComposableSources(
   };
 
   if (brief !== undefined) claim(brief, "brief");
+  if (legacyNetwork !== undefined) claim(legacyNetwork, "legacy runtime network evidence");
   docs.forEach((file) => claim(file, "supporting documentation"));
-  openApi.forEach((file) => claim(file, "OpenAPI"));
+  openApiFiles.forEach((file) => claim(file, "OpenAPI"));
   guidance.forEach((file) => claim(file, "explicit guidance"));
 
   const occupiedInputPaths = new Set(
-    [input.briefPath, ...docsInput, ...openApiInput, ...guidanceInput]
+    [
+      input.briefPath,
+      input.legacyNetworkEvidencePath,
+      ...docsInput,
+      ...openApiInput,
+      ...guidanceInput,
+    ]
       .filter(isDefined)
       .map(normalizedInputPathKey),
   );
@@ -3146,8 +5399,21 @@ async function prepareComposableSources(
   const load = async (file: ProjectTextFile): Promise<ProjectTextSource> => {
     const existing = loaded.get(file.resolvedPath);
     if (existing !== undefined) return existing;
-    const text = await readFile(file.resolvedPath, "utf8");
-    const source = { ...file, text, chunks: buildParserSafeChunks(text) };
+    const rawContent = await readFile(file.resolvedPath);
+    const pdf =
+      path.extname(file.path).toLowerCase() === ".pdf"
+        ? await extractPdfText(rawContent)
+        : undefined;
+    const text = pdf?.text ?? rawContent.toString("utf8");
+    const source: ProjectTextSource = {
+      ...file,
+      origin: "file",
+      text,
+      chunks: buildParserSafeChunks(text),
+      mediaType: pdf?.mediaType ?? mediaTypeForPath(file.path),
+      rawDigest:
+        pdf?.sha256 ?? (`sha256:${createHash("sha256").update(rawContent).digest("hex")}` as const),
+    };
     loaded.set(file.resolvedPath, source);
     return source;
   };
@@ -3157,10 +5423,25 @@ async function prepareComposableSources(
     return sources;
   };
 
+  const remoteOpenApi: ProjectTextSource[] = [];
+  for (const sourceUrl of openApiUrlInput) {
+    const remote = await fetchOpenApiSource({ url: sourceUrl });
+    remoteOpenApi.push({
+      origin: "url",
+      path: remote.originalUrl,
+      resolvedPath: remote.resolvedUrl,
+      text: remote.text,
+      chunks: buildParserSafeChunks(remote.text),
+      mediaType: remote.mediaType,
+      rawDigest: remote.sha256,
+    });
+  }
+
   return {
     ...(brief === undefined ? {} : { brief: await load(brief) }),
+    ...(legacyNetwork === undefined ? {} : { legacyNetwork: await load(legacyNetwork) }),
     docs: await loadAll(docs),
-    openApi: await loadAll(openApi),
+    openApi: [...(await loadAll(openApiFiles)), ...remoteOpenApi],
     guidance: await loadAll(guidance),
     discoveredGuidance: await loadAll(discoveredGuidance),
     skillHints,
@@ -3245,47 +5526,20 @@ function intakeSourceLabel(
   return `${kind}:${basename}:${digest}${suffix}`.slice(0, 200);
 }
 
-function countOpenApiOperations(files: readonly ProjectTextSource[]): number {
-  let total = 0;
-  for (const file of files) {
-    let document: unknown;
-    try {
-      document = parseYaml(file.text);
-    } catch {
-      total += 1;
-      continue;
-    }
-
-    if (typeof document !== "object" || document === null) {
-      total += 1;
-      continue;
-    }
-    const paths = (document as { paths?: unknown }).paths;
-    if (typeof paths !== "object" || paths === null) {
-      total += 1;
-      continue;
-    }
-
-    let documentOperations = 0;
-    for (const pathItem of Object.values(paths)) {
-      if (typeof pathItem !== "object" || pathItem === null) continue;
-      documentOperations += Object.keys(pathItem).filter((key) =>
-        /^(?:get|put|post|delete|options|head|patch|trace)$/i.test(key),
-      ).length;
-      if (total + documentOperations >= MAX_OPENAPI_OPERATIONS) {
-        return MAX_OPENAPI_OPERATIONS;
-      }
-    }
-    total += Math.max(1, documentOperations);
-  }
-  return Math.min(total, MAX_OPENAPI_OPERATIONS);
-}
-
 function uniqueInputValues(values: readonly string[]): string[] {
   const unique = new Map<string, string>();
   values.forEach((value) => {
     const key = normalizedInputPathKey(value);
     if (!unique.has(key)) unique.set(key, value);
+  });
+  return [...unique.values()];
+}
+
+function uniqueInputUrls(values: readonly string[]): string[] {
+  const unique = new Map<string, string>();
+  values.forEach((value) => {
+    const canonical = new URL(value.trim()).toString();
+    if (!unique.has(canonical)) unique.set(canonical, canonical);
   });
   return [...unique.values()];
 }

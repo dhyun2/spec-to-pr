@@ -1,4 +1,10 @@
-import type { WorkflowBlocker } from "../workflow/workflow-contracts.js";
+import type { PrReportV2 } from "./pr-report-model.js";
+import {
+  markdownBullet,
+  markdownInline,
+  markdownTableCell,
+  redactSecretShapes,
+} from "./markdown-safe.js";
 
 export interface ReadyWorkflowReportInput {
   runId: string;
@@ -48,12 +54,6 @@ export interface ReadyWorkflowReportInput {
     }[];
   }[];
   featureVideoPath?: string;
-}
-
-export interface BlockedWorkflowReportInput {
-  runId: string;
-  projectRoot: string;
-  blocker: WorkflowBlocker;
 }
 
 export function renderReadyWorkflowReport(input: ReadyWorkflowReportInput): string {
@@ -156,57 +156,180 @@ export function renderReadyWorkflowReport(input: ReadyWorkflowReportInput): stri
   ].join("\n");
 }
 
-export function renderBlockedWorkflowReport(input: BlockedWorkflowReportInput): string {
-  const sanitizeIdentifier = (value: string) =>
-    markdownInlineValue(redactDiagnosticValue(value, input.projectRoot));
-  const sanitizeFreeText = (value: string) =>
-    markdownNeutralValue(redactDiagnosticValue(value, input.projectRoot));
-  const list = (values: readonly string[]) =>
-    values.length === 0
-      ? ["- None recorded."]
-      : values.map((value) => `- ${sanitizeFreeText(value)}`);
+export function renderPrReportV2Markdown(report: PrReportV2): string {
+  const bindingLines =
+    report.binding === undefined
+      ? ["- Review packet: not created before the blocker"]
+      : [
+          `- Review packet: ${markdownBullet(report.binding.reviewPacketId)}`,
+          `- Base / head: ${markdownBullet(report.binding.baseSha)} / ${markdownBullet(report.binding.headSha)}`,
+          `- Diff digest: ${markdownBullet(report.binding.diffDigest)}`,
+        ];
+  const visualRows = report.visual.results.map(
+    (result) =>
+      `| ${markdownTableCell(result.name)} | ${result.baselineKind} | ${markdownTableCell(result.route)} / ${markdownTableCell(result.state)} | ${result.viewport.width}×${result.viewport.height} @${result.deviceScaleFactor}x | ${(result.metrics.exactMatchRatio * 100).toFixed(2)}% | ${(result.metrics.reviewMatchRatio * 100).toFixed(2)}% | ${(result.metrics.threshold * 100).toFixed(2)}% | ${result.baselineArtifactId} / ${result.actualArtifactId} / ${result.diffArtifactId} / ${result.overlayArtifactId} |`,
+  );
+  const apiRows = report.api.operations.map(
+    (operation) =>
+      `| ${markdownTableCell(operation.operationKey)} | ${operation.status} | ${markdownTableCell(operation.productionCallSites.join(", ") || "—")} | ${markdownTableCell(operation.mockHandlers.join(", ") || "—")} | ${markdownTableCell(operation.executableEvidencePaths.join(", ") || "—")} |`,
+  );
+  const legacyRows = report.legacy.coverage.map(
+    (coverage) =>
+      `| ${coverage.featureKey} | ${coverage.status} | ${markdownTableCell(coverage.requirementIds.join(", "))} | ${markdownTableCell(coverage.targetFiles.join(", ") || "—")} | ${markdownTableCell(coverage.executableEvidencePaths.join(", ") || "—")} |`,
+  );
+  const feature = report.featureEvidence;
+  const lab = report.performance.evidence?.["lab"];
+  const field = report.performance.evidence?.["field"];
 
-  return [
-    `# SpecToPR Run ${sanitizeIdentifier(input.runId)}`,
+  const rendered = [
+    `# ${markdownInline(report.summary.title)}`,
     "",
-    "## Decision",
+    "## 1. Decision and review packet",
     "",
-    "Blocked. Diagnostic report only.",
+    `- Decision: ${report.decision}`,
+    `- Mode: ${markdownBullet(report.mode)}`,
+    `- Run: ${markdownBullet(report.runId)}`,
+    ...bindingLines,
     "",
-    "## Blocker",
+    "## 2. Change summary and exclusions",
     "",
-    `- Stage: ${sanitizeIdentifier(input.blocker.stage)}`,
-    `- Kind: ${sanitizeIdentifier(input.blocker.kind)}`,
-    `- Code: ${sanitizeIdentifier(input.blocker.code)}`,
-    `- Retryable: ${input.blocker.retryable ? "yes" : "no"}`,
-    `- Resumable: ${input.blocker.resumable ? "yes" : "no"}`,
-    `- Summary: ${sanitizeFreeText(input.blocker.summary)}`,
+    ...listOrNone(report.summary.bullets),
     "",
-    "## Completed work",
+    "### Explicit exclusions",
     "",
-    ...list(input.blocker.completedWork),
+    ...listOrNone(report.summary.exclusions),
     "",
-    "## Evidence",
+    "## 3. Input sources and pinned provenance",
     "",
-    ...list(input.blocker.evidencePaths),
+    "| Kind | Locator | Resolved | Digest | Captured |",
+    "| --- | --- | --- | --- | --- |",
+    ...report.sources.map(
+      (source) =>
+        `| ${source.kind} | ${markdownTableCell(source.locator)} | ${markdownTableCell(source.resolvedLocator ?? "—")} | ${markdownTableCell(source.digest ?? "—")} | ${markdownTableCell(source.capturedAt ?? "—")} |`,
+    ),
     "",
-    "## Attempted recovery",
+    "### Applied skills",
     "",
-    ...list(input.blocker.attemptedRecovery),
+    ...listOrNone(report.skills.applied),
     "",
-    "## Unrun validations",
+    "## 4. Requirement traceability",
     "",
-    ...list(input.blocker.unrunValidations),
+    "| Requirement | Acceptance criteria | Implementation | Review |",
+    "| --- | --- | --- | --- |",
+    ...report.requirements.map(
+      (requirement) =>
+        `| ${markdownTableCell(`${requirement.id}: ${requirement.title}`)} | ${markdownTableCell(requirement.acceptanceCriteria.join("\n"))} | ${markdownTableCell(requirement.implementationFiles.join(", ") || "—")} | ${markdownTableCell(requirement.reviewVerdicts.join(", ") || "—")} |`,
+    ),
     "",
-    "## Exact unblock action",
+    "## 5. Changed files and implementation notes",
     "",
-    sanitizeFreeText(input.blocker.exactUnblockAction),
+    ...listOrNone(report.changedFiles),
+    "",
+    ...listOrNone(report.implementationNotes),
+    "",
+    "## 6. API contract, usage, mocks, tests, and gaps",
+    "",
+    `- Section status: ${reportSectionStatus(report, "api", report.api.applicable)}`,
+    ...(report.api.inventoryDigest === undefined
+      ? []
+      : [`- Inventory digest: ${report.api.inventoryDigest}`]),
+    ...(report.api.discoveryAdapters === undefined
+      ? []
+      : [`- Discovery adapters: ${report.api.discoveryAdapters.join(", ")}`]),
+    report.api.applicable
+      ? "| Operation | Status | Production calls | Mocks | Executable evidence |"
+      : "Not applicable.",
+    ...(report.api.applicable ? ["| --- | --- | --- | --- | --- |", ...apiRows] : []),
+    ...(report.api.applicable && report.api.operations.length === 0
+      ? ["- No API operations detected by the bounded declared adapters."]
+      : []),
+    ...listOrNone(report.api.gaps),
+    "",
+    "## 7. Legacy migration coverage",
+    "",
+    `- Section status: ${reportSectionStatus(report, "legacy", report.legacy.applicable)}`,
+    report.legacy.applicable
+      ? "| Feature key | Status | Requirements | Target files | Executable evidence |"
+      : "Not applicable.",
+    ...(report.legacy.applicable ? ["| --- | --- | --- | --- | --- |", ...legacyRows] : []),
+    "",
+    "## 8. Visual fidelity",
+    "",
+    `- Section status: ${reportSectionStatus(report, "visual", report.visual.applicable)}`,
+    `- Status: ${report.visual.status}`,
+    `- Repair attempt: ${report.visual.attempt}`,
+    ...(report.visual.applicable
+      ? [
+          "",
+          "| Target | Baseline | Route / state | Viewport | Exact | Review | Threshold | Baseline / target / diff / overlay |",
+          "| --- | --- | --- | --- | --- | --- | --- | --- |",
+          ...visualRows,
+        ]
+      : ["- Not applicable."]),
+    "",
+    "## 9. Functional checks and independent review",
+    "",
+    `- Section status: ${reportSectionStatus(report, "functional-review", true)}`,
+    ...reviewLines(report, "functional-review"),
+    "",
+    "## 10. Design and accessibility review",
+    "",
+    `- Section status: ${reportSectionStatus(report, "design-review", report.visual.applicable)}`,
+    ...reviewLines(report, "design-review"),
+    "",
+    "## 11. Performance and Web Vitals",
+    "",
+    `- Section status: ${reportSectionStatus(report, "performance", report.performance.applicable)}`,
+    report.performance.applicable
+      ? `- Lab: ${markdownBullet(JSON.stringify(lab ?? {}))}`
+      : "- Not applicable.",
+    report.performance.applicable
+      ? `- Field: ${markdownBullet(JSON.stringify(field ?? { status: "unavailable" }))}`
+      : "",
+    "",
+    "## 12. Feature-targeted E2E and video",
+    "",
+    `- Section status: ${reportSectionStatus(report, "feature-evidence", feature !== undefined)}`,
+    ...(feature === undefined
+      ? ["Not applicable."]
+      : [
+          `- Selector: ${markdownBullet(String(feature["testSelector"] ?? "unavailable"))}`,
+          `- Command: ${markdownBullet(String(feature["testCommand"] ?? "unavailable"))}`,
+          `- Result: ${markdownBullet(String(feature["resultPath"] ?? "unavailable"))}`,
+          `- Video: ${markdownBullet(String(feature["videoPath"] ?? "unavailable"))}`,
+        ]),
+    "",
+    "## 13. Gaps, blockers, and unrun validations",
+    "",
+    ...listOrNone([
+      ...report.gaps.map((gap) => `Gap: ${gap}`),
+      ...report.blockers.map((blocker) => `Blocker: ${blocker}`),
+      ...report.unrunValidations.map((validation) => `Not run: ${validation}`),
+    ]),
+    "",
+    "## 14. Risks and mitigations",
+    "",
+    ...listOrNone(
+      report.risks.map(
+        (risk) =>
+          `${risk.likelihood}/${risk.impact}: ${risk.mitigation} (${risk.evidence.join(", ") || "no evidence"})`,
+      ),
+    ),
+    "",
+    report.decision === "ready" ? "## 15. Rollback" : "## 15. Rollback and exact unblock action",
+    "",
+    `- Trigger: ${markdownBullet(report.rollback.trigger)}`,
+    `- Strategy: ${markdownBullet(report.rollback.strategy)}`,
+    `- Data impact: ${markdownBullet(report.rollback.dataImpact)}`,
+    ...report.rollback.steps.map((step) => `- Step: ${markdownBullet(step)}`),
+    ...report.rollback.postChecks.map((check) => `- Post-check: ${markdownBullet(check)}`),
+    "",
+    "## Evidence index",
+    "",
+    ...listOrNone(report.evidencePaths),
     "",
   ].join("\n");
-}
-
-function markdownTableCell(value: string): string {
-  return value.replaceAll("\\", "\\\\").replaceAll("|", "\\|").replace(/\r?\n/g, "<br>");
+  return redactSecretShapes(rendered);
 }
 
 const MARKDOWN_LIST_CONTROL_CHARACTERS = new Set([
@@ -235,96 +358,32 @@ const MARKDOWN_LIST_CONTROL_CHARACTERS = new Set([
 ]);
 
 function markdownListValue(value: string): string {
-  return [...value]
-    .map((character) => {
-      if (character === "\r") return "&#92;r";
-      if (character === "\n") return "&#92;n";
-      return MARKDOWN_LIST_CONTROL_CHARACTERS.has(character)
-        ? `&#${character.charCodeAt(0)};`
-        : character;
-    })
-    .join("");
+  return markdownBullet(value);
 }
 
 function uniqueValues(values: readonly string[]): string[] {
   return [...new Set(values)];
 }
 
-function redactDiagnosticValue(value: string, projectRoot: string): string {
-  let redacted = value;
-  const rootVariants = [
-    projectRoot,
-    projectRoot.replaceAll("\\", "/"),
-    projectRoot.replaceAll("/", "\\"),
-  ]
-    .filter(Boolean)
-    .sort((left, right) => right.length - left.length);
-  for (const root of new Set(rootVariants)) {
-    redacted = redacted.replaceAll(root, "[project-root]");
-  }
-
-  redacted = redacted.replace(/\b(authorization)\s*[:=]\s*[^\r\n]*/gi, "$1: [REDACTED]");
-  redacted = redacted.replace(
-    /\b((?:[A-Za-z0-9]+[-_])*(?:api[-_]?key|token|secret|password|passwd|credential|private[-_]?key)(?:[-_][A-Za-z0-9]+)*)\s*([:=])\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi,
-    "$1$2[REDACTED]",
-  );
-  redacted = redacted.replace(
-    /\b(?:github_pat_[A-Za-z0-9_]{16,}|gh[pousr]_[A-Za-z0-9]{16,}|sk-[A-Za-z0-9_-]{16,}|xox[baprs]-[A-Za-z0-9-]{16,}|AKIA[A-Z0-9]{16})\b/g,
-    "[REDACTED]",
-  );
-  return redacted.replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/]+@/gi, "$1[REDACTED]@");
+function listOrNone(values: readonly string[]): string[] {
+  return values.length === 0 ? ["- None."] : values.map((value) => `- ${markdownBullet(value)}`);
 }
 
-function markdownInlineValue(value: string): string {
-  return value.replaceAll("\r", "&#92;r").replaceAll("\n", "&#92;n");
+function reviewLines(report: PrReportV2, kind: "functional-review" | "design-review"): string[] {
+  const review = report.reviews.find((candidate) => candidate.kind === kind);
+  if (review === undefined) return ["- Not applicable."];
+  return [
+    `- Verdict: ${markdownBullet(review.verdict)}`,
+    `- Summary: ${markdownBullet(review.summary)}`,
+    `- Gates: ${markdownBullet(JSON.stringify(review.gates))}`,
+    `- Findings: ${markdownBullet(JSON.stringify(review.findings))}`,
+  ];
 }
 
-const BLOCKED_MARKDOWN_CONTROL_CHARACTERS = new Set([
-  "\\",
-  "`",
-  "*",
-  "{",
-  "}",
-  "[",
-  "]",
-  "(",
-  ")",
-  "#",
-  "!",
-  "|",
-  ">",
-  "<",
-  "&",
-  "~",
-  "=",
-]);
-
-function markdownNeutralValue(value: string): string {
-  const characters = [...value];
-  const firstNonWhitespace = characters.findIndex((character) => !/\s/.test(character));
-  const orderedListMatch = value.match(/^(\s*\d+)([.)])(?=\s)/);
-  const orderedListDelimiter = orderedListMatch?.[1]?.length;
-  const neutral = characters
-    .map((character, index) => {
-      if (character === "\r") return "&#92;r";
-      if (character === "\n") return "&#92;n";
-      const codePoint = character.codePointAt(0)!;
-      if (codePoint < 32 || codePoint === 127) return `&#${codePoint};`;
-      if ((character === "-" || character === "+") && index === firstNonWhitespace) {
-        return `&#${codePoint};`;
-      }
-      if (character === "." && index === orderedListDelimiter) return "&#46;";
-      if (character === "_") {
-        const previous = characters[index - 1] ?? "";
-        const next = characters[index + 1] ?? "";
-        if (/[A-Za-z0-9]/.test(previous) && /[A-Za-z0-9]/.test(next)) return character;
-        return "&#95;";
-      }
-      return BLOCKED_MARKDOWN_CONTROL_CHARACTERS.has(character) ? `&#${codePoint};` : character;
-    })
-    .join("");
-
-  return neutral
-    .replaceAll("&#91;REDACTED&#93;", "[REDACTED]")
-    .replaceAll("&#91;project-root&#93;", "[project-root]");
+function reportSectionStatus(
+  report: PrReportV2,
+  section: keyof NonNullable<PrReportV2["sectionStatuses"]>,
+  applicable: boolean,
+): string {
+  return report.sectionStatuses?.[section] ?? (applicable ? "complete" : "not-applicable");
 }

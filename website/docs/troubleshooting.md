@@ -24,15 +24,17 @@ title: 트러블슈팅
 
 ### Brief, Figma, OpenAPI를 함께 주면 mode를 무엇으로 해야 하나
 
-Mode는 source 종류가 아니라 납품·증거 정책입니다. 사용자에게 보이는 기능을 targeted E2E, 영상 하나, 독립 review, draft PR까지 전달하려면 brief가 있어도 `feature`를 사용하고 `briefPath`, `figmaUrl`, `docsPaths`, `openApiPaths`, `guidancePaths`, `skillHints`를 함께 공급하세요. Figma URL이 있으면 feature mode에서도 real `figma-bundle`이 필수입니다.
+Mode는 source 종류가 아니라 납품·증거 정책입니다. 전체 프로세스 개발은 `brief`, 변경 기능만의 targeted E2E와 영상 한 개까지 필요하면 `feature`를 사용합니다. 두 모드 모두 `briefPath`, `figmaUrl`, `openApiPaths` 또는 `openApiUrls`를 빠짐없이 공급하세요. 추가 설명은 `docsPaths`, 프로젝트 규칙은 `guidancePaths`, 적용 후보 skill은 `skillHints`에 넣습니다. Figma URL이 있으면 real `figma-bundle`과 runtime 시각 비교가 필수입니다.
 
 ### Brief mode가 시작되지 않는다
 
-`briefPath`가 빠졌거나 대상 저장소에서 읽을 수 없는 경우입니다. Project-relative path를 명시하고 실제 파일을 확인하세요.
+`briefPath`, `figmaUrl`, OpenAPI 입력 중 하나가 빠졌거나 읽을 수 없는 경우입니다. 기획서는 project-relative regular file, OpenAPI는 project-relative YAML/JSON 경로 또는 credential 없는 HTTPS URL이어야 합니다. URL 입력은 `sourceProvenance`에 주소·조회 시각·content hash가 남습니다.
 
 ### Legacy mode가 너무 넓게 조사한다
 
-“레거시 개선” 대신 route/동작/오류 조건처럼 concrete delta를 적으세요. v2 policy는 요청 범위의 baseline과 affected checks만 요구하며 전체 inventory나 migration을 기본 실행하지 않습니다.
+`legacyProjectRoot`에는 대상 저장소와 다른 별도 레거시 프로젝트의 절대 경로를 넣고, route·동작·오류 조건처럼 concrete migration scope를 적으세요. Runtime은 레거시 프로젝트를 읽기 전용으로 bounded inventory하고, 해당 화면을 실행한 캡처를 새 결과 화면의 baseline으로 사용합니다. 저장소 전체를 무차별 현대화하거나 전체 E2E를 실행하지는 않지만, 요청 범위의 migration coverage와 시각 비교는 생략하지 않습니다.
+
+`LEGACY_API_METHOD_UNKNOWN`이면 source에서 method/path를 추측하지 않습니다. 대상 프로젝트 내부에 해당 flow만 캡처한 표준 HAR 또는 request JSON을 `legacyNetworkEvidencePath`로 지정하거나, 유일하게 매칭되는 scoped OpenAPI를 제공하세요. HAR/JSON은 1 MB·1,000 request 한도이며 blocked intake에서는 `nextActions`가 비고 downstream submission도 거부됩니다.
 
 ## Figma
 
@@ -60,7 +62,7 @@ Missing optional skills do not block the Run. `skillHints`는 host가 이름을 
 
 ### Guidance 때문에 UI/API gate가 잘못 켜졌다
 
-Project guidance는 durable instruction evidence이지만 scope classification에서 제외됩니다. `briefPath`, `docsPaths`, `openApiPaths`, request와 Figma source로 scope를 분류해야 합니다. PR report의 explicit/discovered guidance와 applied optional skills 목록은 traceability용이며 새 gate나 stage를 만들지 않습니다.
+Project guidance는 durable instruction evidence이지만 scope classification에서 제외됩니다. `briefPath`, `docsPaths`, `openApiPaths`, `openApiUrls`, `legacyProjectRoot`, request와 Figma source로 scope를 분류해야 합니다. PR report의 explicit/discovered guidance와 applied optional skills 목록은 traceability용이며 새 gate나 stage를 만들지 않습니다.
 
 ## Feature E2E와 영상
 
@@ -104,7 +106,7 @@ API-backed UI인데 명시적 `api-ready` checkpoint가 없거나 최종 `apiRea
 3. Chrome DevTools MCP는 console error, network request, performance trace, memory, live DOM을 조사할 때만 씁니다.
 4. Screenshot, video, DevTools trace, agent 관찰은 assertion을 대신하지 않습니다.
 
-Required browser command가 없거나 실행할 수 없으면 `BROWSER_NOT_RUN`입니다. Test path/tag/project selector, server start command, dependency/browser 설치와 실행 권한을 복구한 뒤 같은 Run에서 Playwright proof를 다시 제출하세요. Feature에는 변경 기능 E2E와 video 정확히 1개가 필요하지만 brief/legacy/Figma에는 이 profile 비용을 자동 추가하지 않습니다.
+Required browser command가 없거나 실행할 수 없으면 `BROWSER_NOT_RUN`입니다. Test path/tag/project selector, server start command, dependency/browser 설치와 실행 권한을 복구한 뒤 같은 Run에서 Playwright proof를 다시 제출하세요. Feature에는 변경 기능 E2E와 video 정확히 1개가 필요하지만 brief/legacy/Figma에는 이 profile 비용을 자동 추가하지 않습니다. Brief와 legacy는 대신 적용 가능한 lab Web Vitals와 field 데이터의 available/unavailable 근거를 PR에 남깁니다.
 
 ## Typed blocker 진단
 

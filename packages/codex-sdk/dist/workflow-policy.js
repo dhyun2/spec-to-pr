@@ -1,3 +1,4 @@
+import { parallelReviewersForWorkload } from "./generated/delivery-mode-policy.js";
 export const CODEX_WORKFLOW_TOOL_NAMES = [
     "workflow_info",
     "workflow_start",
@@ -25,7 +26,7 @@ export function scoutRoutingForWorkload(workloadSize) {
         independentReadHeavyOnly: true,
         allowNested: false,
         parallelWriters: false,
-        parallelReviewersAfterImplementation: workloadSize === "L" || workloadSize === "XL",
+        parallelReviewersAfterImplementation: parallelReviewersForWorkload(workloadSize),
     };
 }
 export function buildCodexActionEnvelopeInstructions(options) {

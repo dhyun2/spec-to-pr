@@ -3,7 +3,9 @@ import { z } from "zod";
 import { RunStageNameSchema } from "../run/stages.js";
 import { ArtifactIdSchema, RunIdSchema } from "../runtime/ids.js";
 import { GitObjectIdSchema, Sha256DigestSchema } from "../runtime/scalars.js";
+import { LegacyFeatureEntrySchema } from "../legacy/legacy-inventory.js";
 import { WorkloadEstimateSchema, WorkloadSignalsSchema } from "./workload-policy.js";
+import { VisualCaptureSchema, VisualTargetManifestSchema } from "../visual/visual-comparator.js";
 
 export const WorkflowScopeSchema = z
   .object({
@@ -40,6 +42,32 @@ export const FigmaFileUrlSchema = z
       /^\/(?:design|file|proto)\//i.test(parsed.pathname)
     );
   }, "Figma URL must be a figma.com design, file, or prototype URL");
+
+export const WorkflowSourceUrlSchema = z
+  .string()
+  .trim()
+  .url()
+  .max(2_000)
+  .superRefine((value, context) => {
+    const parsed = new URL(value);
+    if (parsed.protocol !== "https:") {
+      context.addIssue({ code: "custom", message: "Source URL must use HTTPS" });
+    }
+    if (parsed.username !== "" || parsed.password !== "") {
+      context.addIssue({
+        code: "custom",
+        message: "Source URL must not contain embedded credentials",
+      });
+    }
+    for (const name of parsed.searchParams.keys()) {
+      if (/token|secret|password|credential|api[_-]?key|authorization/i.test(name)) {
+        context.addIssue({
+          code: "custom",
+          message: "Source URL must not contain secret-shaped query parameters",
+        });
+      }
+    }
+  });
 
 export const ImplementationContextIdSchema = z
   .string()
@@ -80,7 +108,36 @@ function uniqueBoundedArray<T extends z.ZodTypeAny>(item: T, label: string, max 
 }
 
 const NormalizedSourcePathsSchema = uniqueBoundedArray(WorkflowSourcePathSchema, "Source path");
+const NormalizedSourceUrlsSchema = uniqueBoundedArray(WorkflowSourceUrlSchema, "Source URL");
 const NormalizedSkillHintsSchema = uniqueBoundedArray(SkillHintSchema, "Skill hint");
+const HttpMethodSchema = z.enum([
+  "GET",
+  "PUT",
+  "POST",
+  "DELETE",
+  "OPTIONS",
+  "HEAD",
+  "PATCH",
+  "TRACE",
+]);
+export const OpenApiOperationContractSchema = z
+  .object({
+    operationKey: z.string().trim().min(3).max(1_000),
+    method: HttpMethodSchema,
+    path: z.string().trim().startsWith("/").max(1_000),
+    operationId: z.string().trim().min(1).max(500).optional(),
+    sourceLocator: z.string().trim().min(1).max(2_000),
+  })
+  .strict()
+  .superRefine((operation, context) => {
+    if (operation.operationKey !== `${operation.method} ${operation.path}`) {
+      context.addIssue({
+        code: "custom",
+        path: ["operationKey"],
+        message: "OpenAPI operationKey must equal '<METHOD> <path>'",
+      });
+    }
+  });
 
 export const BlockerKindSchema = z.enum([
   "missing-input",
@@ -202,21 +259,44 @@ export const DeliveryProfileSchema = z
     mode: DeliveryModeSchema,
     changeKind: ChangeKindSchema,
     publication: PublicationIntentSchema,
+    legacyProjectRoot: z.string().trim().min(1).max(1_000).optional(),
+    legacyNetworkEvidencePath: WorkflowSourcePathSchema.optional(),
     briefPath: WorkflowSourcePathSchema.optional(),
     figmaUrl: FigmaFileUrlSchema.optional(),
     docsPaths: NormalizedSourcePathsSchema.default([]),
     openApiPaths: NormalizedSourcePathsSchema.default([]),
+    openApiUrls: NormalizedSourceUrlsSchema.default([]),
+    openApiOperations: z.array(OpenApiOperationContractSchema).max(1_000).default([]),
     guidancePaths: NormalizedSourcePathsSchema.default([]),
     discoveredGuidancePaths: NormalizedSourcePathsSchema.default([]),
+    sourceProvenance: z
+      .array(
+        z
+          .object({
+            kind: z.enum(["brief", "docs", "openapi", "guidance", "legacy-network"]),
+            locator: z.string().trim().min(1).max(2_000),
+            resolvedLocator: z.string().trim().min(1).max(2_000),
+            digest: Sha256DigestSchema,
+            capturedAt: z.string().datetime({ offset: true }),
+          })
+          .strict(),
+      )
+      .max(100)
+      .default([]),
     skillHints: NormalizedSkillHintsSchema.default([]),
     recommendedSkills: NormalizedSkillHintsSchema.default([]),
     requirements: z
       .object({
         brief: z.boolean(),
         legacyBaseline: z.boolean(),
+        legacyInventory: z.boolean().default(false),
         targetedFeatureE2E: z.boolean(),
         featureVideo: z.boolean(),
         figmaBundle: z.boolean(),
+        visualComparison: z.boolean().default(false),
+        apiCoverage: z.boolean().default(false),
+        performanceEvidence: z.boolean().default(false),
+        mockData: z.boolean().default(false),
       })
       .strict(),
   })
@@ -266,6 +346,17 @@ export const DeliveryProfileSchema = z
         message: "Combined explicit and discovered guidance cannot exceed 20 files",
       });
     }
+    const operationKeys = new Set<string>();
+    profile.openApiOperations.forEach((operation, index) => {
+      if (operationKeys.has(operation.operationKey)) {
+        context.addIssue({
+          code: "custom",
+          path: ["openApiOperations", index, "operationKey"],
+          message: `Duplicate authoritative OpenAPI operation ${operation.operationKey}`,
+        });
+      }
+      operationKeys.add(operation.operationKey);
+    });
   });
 
 export const ReviewVerdictSchema = z.enum(["approved", "changes-requested", "blocked"]);
@@ -326,6 +417,54 @@ const LegacyBaselineSchema = z
       .max(50),
   })
   .strict();
+
+const LegacyCoverageSchema = z
+  .object({
+    featureKey: z.string().regex(/^legacy_[a-f0-9]{24}$/),
+    requirementIds: z.array(z.string().trim().min(1).max(200)).min(1).max(50),
+    status: z.enum(["planned", "migrated", "intentionally-out-of-scope", "gap", "blocked"]),
+    targetFiles: z.array(z.string().trim().min(1).max(1_000)).max(100).default([]),
+    executableEvidencePaths: z.array(z.string().trim().min(1).max(1_000)).max(50).default([]),
+    rationale: z.string().trim().min(1).max(2_000),
+  })
+  .strict()
+  .superRefine((coverage, context) => {
+    if (
+      coverage.status === "migrated" &&
+      (coverage.targetFiles.length === 0 || coverage.executableEvidencePaths.length === 0)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Migrated legacy coverage requires target files and executable evidence",
+      });
+    }
+    if (
+      coverage.status === "planned" &&
+      (coverage.targetFiles.length > 0 || coverage.executableEvidencePaths.length > 0)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Planned legacy coverage cannot claim implementation files or evidence",
+      });
+    }
+  });
+
+const VisualTargetsSchema = z
+  .array(VisualTargetManifestSchema)
+  .max(50)
+  .superRefine((targets, context) => {
+    const ids = new Set<string>();
+    targets.forEach((target, index) => {
+      if (ids.has(target.targetId)) {
+        context.addIssue({
+          code: "custom",
+          path: [index, "targetId"],
+          message: `Duplicate visual target ${target.targetId}`,
+        });
+      }
+      ids.add(target.targetId);
+    });
+  });
 
 const ReviewFindingSchema = z
   .object({
@@ -466,6 +605,12 @@ export const ContractsSubmissionSchema = z
     baselinePaths: z.array(z.string().trim().min(1)).default([]),
     requirementManifest: z.array(RequirementContractSchema).default([]),
     legacyBaseline: LegacyBaselineSchema.optional(),
+    legacyScopeKeys: z
+      .array(z.string().regex(/^legacy_[a-f0-9]{24}$/))
+      .max(500)
+      .default([]),
+    legacyCoverage: z.array(LegacyCoverageSchema).max(500).default([]),
+    visualTargets: VisualTargetsSchema.default([]),
     workloadSignals: WorkloadSignalsSchema.optional(),
     guidanceTrace: GuidanceTraceSchema.default({
       explicit: [],
@@ -554,6 +699,57 @@ export const ContractsSubmissionSchema = z
         });
       }
     });
+    submission.visualTargets.forEach((target, index) => {
+      if (!submission.artifactPaths.includes(target.baselinePath)) {
+        context.addIssue({
+          code: "custom",
+          path: ["visualTargets", index, "baselinePath"],
+          message: "Every visual baseline must be included in artifactPaths",
+        });
+      }
+    });
+    const scopedKeys = new Set(submission.legacyScopeKeys);
+    if (scopedKeys.size !== submission.legacyScopeKeys.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["legacyScopeKeys"],
+        message: "Legacy scope keys must be unique",
+      });
+    }
+    const coverageKeys = new Set<string>();
+    submission.legacyCoverage.forEach((coverage, index) => {
+      if (coverageKeys.has(coverage.featureKey)) {
+        context.addIssue({
+          code: "custom",
+          path: ["legacyCoverage", index, "featureKey"],
+          message: `Duplicate legacy coverage ${coverage.featureKey}`,
+        });
+      }
+      if (!scopedKeys.has(coverage.featureKey)) {
+        context.addIssue({
+          code: "custom",
+          path: ["legacyCoverage", index, "featureKey"],
+          message: "Legacy coverage must reference an explicitly scoped feature key",
+        });
+      }
+      if (submission.status === "passed" && coverage.status !== "planned") {
+        context.addIssue({
+          code: "custom",
+          path: ["legacyCoverage", index, "status"],
+          message: "Passed contracts may only mark selected legacy scope as planned",
+        });
+      }
+      coverageKeys.add(coverage.featureKey);
+    });
+    submission.legacyScopeKeys.forEach((featureKey, index) => {
+      if (!coverageKeys.has(featureKey)) {
+        context.addIssue({
+          code: "custom",
+          path: ["legacyScopeKeys", index],
+          message: `Missing legacy coverage for ${featureKey}`,
+        });
+      }
+    });
   });
 
 const ApiArtifactsSchema = z
@@ -566,6 +762,48 @@ const ApiArtifactsSchema = z
   })
   .strict();
 
+const ApiOperationReadySchema = z
+  .object({
+    operationKey: z.string().trim().min(3).max(1_000),
+    method: HttpMethodSchema,
+    path: z.string().trim().startsWith("/").max(1_000),
+    operationId: z.string().trim().min(1).max(500).optional(),
+    requestTypes: z.array(z.string().trim().min(1).max(500)).max(50).default([]),
+    responseTypes: z.array(z.string().trim().min(1).max(500)).max(50).default([]),
+    schemaRefs: z.array(z.string().trim().min(1).max(1_000)).max(100).default([]),
+    clientSymbols: z.array(z.string().trim().min(1).max(500)).max(50).default([]),
+    mockHandlers: z.array(z.string().trim().min(1).max(1_000)).max(50).default([]),
+    contractEvidencePaths: z.array(z.string().trim().min(1).max(1_000)).max(50).default([]),
+    readiness: z.enum(["generated", "contract-tested", "intentionally-out-of-scope", "gap"]),
+    blocking: z.boolean().default(false),
+    notes: z.string().trim().min(1).max(2_000).optional(),
+  })
+  .strict()
+  .superRefine((operation, context) => {
+    if (operation.operationKey !== `${operation.method} ${operation.path}`) {
+      context.addIssue({
+        code: "custom",
+        path: ["operationKey"],
+        message: "API operationKey must equal '<METHOD> <path>'",
+      });
+    }
+    if (
+      (operation.readiness === "generated" || operation.readiness === "contract-tested") &&
+      (operation.clientSymbols.length === 0 || operation.mockHandlers.length === 0)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Generated API operations require client symbols and mock handlers",
+      });
+    }
+    if (operation.readiness === "contract-tested" && operation.contractEvidencePaths.length === 0) {
+      context.addIssue({ code: "custom", message: "Contract-tested operations require evidence" });
+    }
+    if (operation.readiness === "gap" && operation.notes === undefined) {
+      context.addIssue({ code: "custom", path: ["notes"], message: "API gaps require notes" });
+    }
+  });
+
 export const ApiReadySubmissionSchema = z
   .object({
     kind: z.literal("api-ready"),
@@ -574,6 +812,7 @@ export const ApiReadySubmissionSchema = z
     implementationContextId: ImplementationContextIdSchema,
     artifactPaths: z.array(z.string().trim().min(1)).min(1),
     apiArtifacts: ApiArtifactsSchema,
+    operations: z.array(ApiOperationReadySchema).max(1_000).default([]),
   })
   .strict()
   .superRefine((submission, context) => {
@@ -597,6 +836,33 @@ export const ApiReadySubmissionSchema = z
         categorizedPaths.add(artifactPath);
       });
     }
+    const operationKeys = new Set<string>();
+    submission.operations.forEach((operation, index) => {
+      if (operationKeys.has(operation.operationKey)) {
+        context.addIssue({
+          code: "custom",
+          path: ["operations", index, "operationKey"],
+          message: `Duplicate API operation ${operation.operationKey}`,
+        });
+      }
+      operation.contractEvidencePaths.forEach((evidencePath, evidenceIndex) => {
+        if (!submission.artifactPaths.includes(evidencePath)) {
+          context.addIssue({
+            code: "custom",
+            path: ["operations", index, "contractEvidencePaths", evidenceIndex],
+            message: "API operation evidence must be included in artifactPaths",
+          });
+        }
+      });
+      if (operation.readiness === "gap" && operation.blocking) {
+        context.addIssue({
+          code: "custom",
+          path: ["operations", index, "blocking"],
+          message: "A passed API-ready checkpoint cannot retain a blocking gap",
+        });
+      }
+      operationKeys.add(operation.operationKey);
+    });
   });
 
 const FeatureEvidenceSchema = z
@@ -623,6 +889,139 @@ const FeatureEvidenceSchema = z
   })
   .strict();
 
+const ApiOperationCoverageSchema = z
+  .object({
+    operationKey: z.string().trim().min(3).max(1_000),
+    method: HttpMethodSchema,
+    path: z.string().trim().startsWith("/").max(1_000),
+    operationId: z.string().trim().min(1).max(500).optional(),
+    status: z.enum(["exercised", "intentionally-out-of-scope", "gap"]),
+    productionCallSites: z.array(z.string().trim().min(1).max(1_000)).max(100).default([]),
+    mockHandlers: z.array(z.string().trim().min(1).max(1_000)).max(50).default([]),
+    executableEvidencePaths: z.array(z.string().trim().min(1).max(1_000)).max(50).default([]),
+    blocking: z.boolean().default(false),
+    notes: z.string().trim().min(1).max(2_000).optional(),
+  })
+  .strict()
+  .superRefine((operation, context) => {
+    if (operation.operationKey !== `${operation.method} ${operation.path}`) {
+      context.addIssue({
+        code: "custom",
+        path: ["operationKey"],
+        message: "API operationKey must equal '<METHOD> <path>'",
+      });
+    }
+    if (
+      operation.status === "exercised" &&
+      (operation.productionCallSites.length === 0 ||
+        operation.mockHandlers.length === 0 ||
+        operation.executableEvidencePaths.length === 0)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Exercised API operations require production, mock, and executable evidence",
+      });
+    }
+    if (operation.status !== "exercised" && operation.notes === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["notes"],
+        message: "API exclusions and gaps require notes",
+      });
+    }
+  });
+
+const LabPerformanceEvidenceSchema = z
+  .object({
+    route: z.string().trim().min(1).max(2_000),
+    tool: z.string().trim().min(1).max(200),
+    command: z.string().trim().min(1).max(2_000),
+    deviceProfile: z.string().trim().min(1).max(500),
+    throttling: z.string().trim().min(1).max(500),
+    sampleCount: z.number().int().positive().max(100),
+    resultPath: z.string().trim().min(1).max(1_000),
+    metrics: z
+      .object({
+        lcpMs: z.number().nonnegative(),
+        cls: z.number().nonnegative(),
+        tbtMs: z.number().nonnegative().optional(),
+        interactionLatencyMs: z.number().nonnegative().optional(),
+      })
+      .strict()
+      .refine(
+        (metrics) => metrics.tbtMs !== undefined || metrics.interactionLatencyMs !== undefined,
+        "Lab evidence requires TBT or measured interaction latency",
+      ),
+  })
+  .strict();
+
+const FieldPerformanceEvidenceSchema = z.discriminatedUnion("status", [
+  z
+    .object({
+      status: z.literal("available"),
+      source: z.enum(["crux", "rum"]),
+      sampleWindow: z.string().trim().min(1).max(500),
+      metrics: z
+        .object({
+          lcpMs: z.number().nonnegative(),
+          inpMs: z.number().nonnegative(),
+          cls: z.number().nonnegative(),
+        })
+        .strict(),
+    })
+    .strict(),
+  z
+    .object({
+      status: z.literal("unavailable"),
+      reason: z.string().trim().min(1).max(1_000),
+    })
+    .strict(),
+]);
+
+const PerformanceEvidenceSchema = z
+  .object({
+    lab: LabPerformanceEvidenceSchema,
+    field: FieldPerformanceEvidenceSchema,
+  })
+  .strict();
+
+const MockDataEvidenceSchema = z
+  .object({
+    manifestPath: z
+      .string()
+      .trim()
+      .regex(/\.json$/i, "Mock data manifest must be JSON"),
+    fixturePaths: z
+      .array(
+        z
+          .string()
+          .trim()
+          .min(1)
+          .max(1_000)
+          .regex(/\.json$/i, "Mock fixtures must be JSON"),
+      )
+      .min(1)
+      .max(100),
+  })
+  .strict()
+  .superRefine((evidence, context) => {
+    const unique = new Set(evidence.fixturePaths);
+    if (unique.size !== evidence.fixturePaths.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["fixturePaths"],
+        message: "Mock fixture paths must be unique",
+      });
+    }
+    if (unique.has(evidence.manifestPath)) {
+      context.addIssue({
+        code: "custom",
+        path: ["fixturePaths"],
+        message: "Mock manifest cannot also be a fixture",
+      });
+    }
+  });
+
 export const ImplementationSubmissionSchema = z
   .object({
     kind: z.literal("implementation"),
@@ -634,6 +1033,10 @@ export const ImplementationSubmissionSchema = z
     changedFiles: z.array(z.string().trim().min(1)).default([]),
     artifactPaths: z.array(z.string().trim().min(1)).default([]),
     featureEvidence: FeatureEvidenceSchema.optional(),
+    apiCoverage: z.array(ApiOperationCoverageSchema).max(1_000).default([]),
+    legacyCoverage: z.array(LegacyCoverageSchema).max(500).default([]),
+    performanceEvidence: PerformanceEvidenceSchema.optional(),
+    mockDataEvidence: MockDataEvidenceSchema.optional(),
     blocker: WorkflowBlockerSchema.optional(),
   })
   .strict()
@@ -700,6 +1103,93 @@ export const ImplementationSubmissionSchema = z
         });
       }
     }
+    const coverageKeys = new Set<string>();
+    submission.apiCoverage.forEach((operation, index) => {
+      if (coverageKeys.has(operation.operationKey)) {
+        context.addIssue({
+          code: "custom",
+          path: ["apiCoverage", index, "operationKey"],
+          message: `Duplicate API coverage ${operation.operationKey}`,
+        });
+      }
+      operation.executableEvidencePaths.forEach((evidencePath, evidenceIndex) => {
+        if (!submission.artifactPaths.includes(evidencePath)) {
+          context.addIssue({
+            code: "custom",
+            path: ["apiCoverage", index, "executableEvidencePaths", evidenceIndex],
+            message: "API executable evidence must be included in artifactPaths",
+          });
+        }
+      });
+      if (submission.status === "passed" && operation.status === "gap" && operation.blocking) {
+        context.addIssue({
+          code: "custom",
+          path: ["apiCoverage", index, "blocking"],
+          message: "Passed implementation cannot retain a blocking API gap",
+        });
+      }
+      coverageKeys.add(operation.operationKey);
+    });
+    const legacyCoverageKeys = new Set<string>();
+    submission.legacyCoverage.forEach((coverage, index) => {
+      if (legacyCoverageKeys.has(coverage.featureKey)) {
+        context.addIssue({
+          code: "custom",
+          path: ["legacyCoverage", index, "featureKey"],
+          message: `Duplicate implemented legacy coverage ${coverage.featureKey}`,
+        });
+      }
+      coverage.targetFiles.forEach((targetFile, targetIndex) => {
+        if (!submission.changedFiles.includes(targetFile)) {
+          context.addIssue({
+            code: "custom",
+            path: ["legacyCoverage", index, "targetFiles", targetIndex],
+            message: "Legacy target files must be included in changedFiles",
+          });
+        }
+      });
+      coverage.executableEvidencePaths.forEach((evidencePath, evidenceIndex) => {
+        if (!submission.artifactPaths.includes(evidencePath)) {
+          context.addIssue({
+            code: "custom",
+            path: ["legacyCoverage", index, "executableEvidencePaths", evidenceIndex],
+            message: "Legacy executable evidence must be included in artifactPaths",
+          });
+        }
+      });
+      if (submission.status === "passed" && coverage.status !== "migrated") {
+        context.addIssue({
+          code: "custom",
+          path: ["legacyCoverage", index, "status"],
+          message: "Passed implementation requires every selected legacy feature to be migrated",
+        });
+      }
+      legacyCoverageKeys.add(coverage.featureKey);
+    });
+    if (submission.mockDataEvidence !== undefined) {
+      for (const evidencePath of [
+        submission.mockDataEvidence.manifestPath,
+        ...submission.mockDataEvidence.fixturePaths,
+      ]) {
+        if (!submission.artifactPaths.includes(evidencePath)) {
+          context.addIssue({
+            code: "custom",
+            path: ["mockDataEvidence"],
+            message: "Mock manifest and fixtures must be included in artifactPaths",
+          });
+        }
+      }
+    }
+    if (
+      submission.performanceEvidence !== undefined &&
+      !submission.artifactPaths.includes(submission.performanceEvidence.lab.resultPath)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["performanceEvidence", "lab", "resultPath"],
+        message: "Lab performance result must be included in artifactPaths",
+      });
+    }
   });
 
 export const FigmaBundleSubmissionSchema = z
@@ -713,6 +1203,7 @@ export const FigmaBundleSubmissionSchema = z
       .string()
       .trim()
       .regex(/\.json$/i, "Figma manifest must be a JSON file"),
+    visualTargets: VisualTargetsSchema.min(1),
     artifactPaths: z.array(z.string().trim().min(1)).min(1),
   })
   .strict()
@@ -744,6 +1235,76 @@ export const FigmaBundleSubmissionSchema = z
         message: "Figma bundle requires one JSON manifest and one or more PNG visuals",
       });
     }
+    submission.visualTargets.forEach((target, index) => {
+      if (target.baselineKind !== "figma") {
+        context.addIssue({
+          code: "custom",
+          path: ["visualTargets", index, "baselineKind"],
+          message: "Figma bundle targets must use the Figma baseline kind",
+        });
+      }
+      if (!submission.artifactPaths.includes(target.baselinePath)) {
+        context.addIssue({
+          code: "custom",
+          path: ["visualTargets", index, "baselinePath"],
+          message: "Every Figma target baseline must be included in artifactPaths",
+        });
+      }
+    });
+  });
+
+export const VisualComparisonSubmissionSchema = z
+  .object({
+    kind: z.literal("visual-comparison"),
+    reviewPacketId: ReviewPacketIdSchema,
+    captures: z.array(VisualCaptureSchema).min(1).max(50),
+    artifactPaths: z.array(z.string().trim().min(1)).min(1).max(50),
+  })
+  .strict()
+  .superRefine((submission, context) => {
+    const targetIds = new Set<string>();
+    const actualPaths = new Set<string>();
+    submission.captures.forEach((capture, index) => {
+      if (targetIds.has(capture.targetId)) {
+        context.addIssue({
+          code: "custom",
+          path: ["captures", index, "targetId"],
+          message: `Duplicate visual capture ${capture.targetId}`,
+        });
+      }
+      if (actualPaths.has(capture.actualPath)) {
+        context.addIssue({
+          code: "custom",
+          path: ["captures", index, "actualPath"],
+          message: "Each visual target requires a distinct actual PNG",
+        });
+      }
+      const expectedDirectory = `visual/actual/${submission.reviewPacketId}/`;
+      const fileName = capture.actualPath.slice(expectedDirectory.length);
+      if (
+        !capture.actualPath.startsWith(expectedDirectory) ||
+        fileName.includes("/") ||
+        !/^[a-z0-9][a-z0-9._:-]*\.png$/i.test(fileName)
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["captures", index, "actualPath"],
+          message: `Visual actual must use the packet-specific directory: ${expectedDirectory}`,
+        });
+      }
+      targetIds.add(capture.targetId);
+      actualPaths.add(capture.actualPath);
+    });
+    if (
+      submission.artifactPaths.length !== actualPaths.size ||
+      submission.artifactPaths.some((artifactPath) => !actualPaths.has(artifactPath))
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["artifactPaths"],
+        message: "Visual comparison artifactPaths must exactly match submitted actual PNGs",
+      });
+    }
   });
 
 export const WorkflowSubmissionSchema = z.union([
@@ -752,6 +1313,7 @@ export const WorkflowSubmissionSchema = z.union([
   ImplementationSubmissionSchema,
   ReviewSubmissionSchema,
   FigmaBundleSubmissionSchema,
+  VisualComparisonSubmissionSchema,
 ]);
 
 export const WorkflowActionSchema = z.discriminatedUnion("kind", [
@@ -761,6 +1323,14 @@ export const WorkflowActionSchema = z.discriminatedUnion("kind", [
       kind: z.literal("implement"),
       runId: RunIdSchema,
       requireApiReady: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("compare-visuals"),
+      runId: RunIdSchema,
+      reviewPacketId: ReviewPacketIdSchema,
+      attempt: z.number().int().min(1).max(3),
     })
     .strict(),
   z
@@ -840,6 +1410,16 @@ export const WorkflowStatusSchema = z
     blockers: z.array(z.string().trim().min(1)),
     blockerDetails: z.array(WorkflowBlockerSchema),
     diagnosticPublication: DiagnosticPublicationSchema.optional(),
+    legacyInventory: z
+      .object({
+        artifactId: ArtifactIdSchema,
+        rootDigest: Sha256DigestSchema,
+        truncated: z.boolean(),
+        apiDiscoveryAdapters: z.array(z.string().trim().min(1).max(100)).max(20),
+        entries: z.array(LegacyFeatureEntrySchema).max(500),
+      })
+      .strict()
+      .optional(),
     resumeContext: WorkflowResumeContextSchema,
   })
   .strict();

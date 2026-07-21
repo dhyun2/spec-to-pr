@@ -258,6 +258,7 @@ export class PublisherService {
       ...(input.host === undefined ? {} : { host: input.host }),
     });
     const target = detected.target as PublishTarget;
+    const reviewPacketId = reportArtifact.metadata["reviewPacketId"];
     const payload = ReviewRequestPayloadSchema.parse({
       runId: run.id,
       title: publishTitle({
@@ -271,6 +272,11 @@ export class PublisherService {
       ...(input.headSha === undefined || input.intent === "blocked-diagnostic"
         ? {}
         : { headSha: input.headSha }),
+      ...(input.intent === "ready" &&
+      typeof reviewPacketId === "string" &&
+      /^packet_[a-f0-9]{64}$/.test(reviewPacketId)
+        ? { reviewPacketId }
+        : {}),
       mode: input.mode,
       labels: publishLabels(input.labels, input.intent),
       reviewers: input.reviewers,
@@ -809,12 +815,15 @@ export class PublisherService {
     run: Awaited<ReturnType<RunStore["get"]>>,
     payload: ReviewRequestPayload,
   ): Promise<ReviewRequestAsset | undefined> {
+    const reportArtifact = requireArtifact(run.artifacts, payload.reportArtifactId);
+    const reviewPacketId = reportArtifact.metadata["reviewPacketId"];
     const artifact = [...run.artifacts]
       .reverse()
       .find(
         (item) =>
           item.metadata["workflowSubmissionKind"] === "implementation" &&
-          item.metadata["featureEvidenceRole"] === "video",
+          item.metadata["featureEvidenceRole"] === "video" &&
+          (reviewPacketId === undefined || item.metadata["reviewPacketId"] === reviewPacketId),
       );
 
     if (artifact === undefined) return undefined;
@@ -841,7 +850,9 @@ export class PublisherService {
     report?: VisualReport;
     assets: ReviewRequestAsset[];
   }> {
-    const reportArtifact = latestVisualReportArtifact(run.artifacts);
+    const prReportArtifact = requireArtifact(run.artifacts, payload.reportArtifactId);
+    const reviewPacketId = prReportArtifact.metadata["reviewPacketId"];
+    const reportArtifact = latestVisualReportArtifact(run.artifacts, reviewPacketId);
 
     if (reportArtifact === undefined) {
       return {
@@ -849,9 +860,10 @@ export class PublisherService {
       };
     }
 
-    const report = VisualReportSchema.parse(
-      JSON.parse((await this.artifactStore.readContent(reportArtifact.digest)).toString("utf8")),
+    const rawReport = JSON.parse(
+      (await this.artifactStore.readContent(reportArtifact.digest)).toString("utf8"),
     );
+    const report = normalizeVisualReport(rawReport);
     const policy = await this.readVisualPreviewPolicy(run.artifacts);
     const assets: ReviewRequestAsset[] = [];
     const labels = visualPreviewLabels(report);
@@ -1169,13 +1181,63 @@ function latestPublishResultArtifact(artifacts: ArtifactRef[]): ArtifactRef {
   return artifact;
 }
 
-function latestVisualReportArtifact(artifacts: ArtifactRef[]): ArtifactRef | undefined {
+function latestVisualReportArtifact(
+  artifacts: ArtifactRef[],
+  reviewPacketId: unknown,
+): ArtifactRef | undefined {
   return artifacts
     .filter(
       (item) =>
-        item.kind === "visual-report" && item.metadata["reportKind"] === "visual-report-json",
+        item.kind === "visual-report" &&
+        (item.metadata["reportKind"] === "visual-report-json" ||
+          item.metadata["reportKind"] === "visual-report-v2-json") &&
+        (reviewPacketId === undefined || item.metadata["reviewPacketId"] === reviewPacketId),
     )
     .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))[0];
+}
+
+function normalizeVisualReport(rawReport: unknown): VisualReport {
+  const legacy = VisualReportSchema.safeParse(rawReport);
+  if (legacy.success) return legacy.data;
+  if (typeof rawReport !== "object" || rawReport === null || Array.isArray(rawReport)) {
+    throw new Error("Visual report is not a supported report object");
+  }
+  const report = rawReport as Record<string, unknown>;
+  const rawResults = report["results"];
+  if (!Array.isArray(rawResults)) throw new Error("Visual report is missing results");
+  const results = rawResults.map((rawResult) => {
+    if (typeof rawResult !== "object" || rawResult === null || Array.isArray(rawResult)) {
+      throw new Error("Visual report contains an invalid result");
+    }
+    const result = rawResult as Record<string, unknown>;
+    return {
+      targetId: result["targetId"],
+      status: result["status"],
+      figmaScreenshotArtifactId: result["baselineArtifactId"],
+      browserScreenshotArtifactId: result["actualArtifactId"],
+      overlayArtifactId: result["overlayArtifactId"],
+      diffArtifactId: result["diffArtifactId"],
+      metrics: result["metrics"],
+      gapIds: [],
+      notes: [],
+    };
+  });
+  const baselineKind =
+    typeof rawResults[0] === "object" && rawResults[0] !== null
+      ? (rawResults[0] as Record<string, unknown>)["baselineKind"]
+      : "figma";
+  return VisualReportSchema.parse({
+    runId: report["runId"],
+    changeName: "review-packet-visual-comparison",
+    visualBaseline: baselineKind,
+    comparisonScope: "screen",
+    generatedAt: report["generatedAt"],
+    targetCount: results.length,
+    passedCount: results.filter((result) => result.status === "passed").length,
+    failedCount: results.filter((result) => result.status === "failed").length,
+    reviewNeededCount: 0,
+    results,
+  });
 }
 
 function injectVisualEvidencePreview(input: {

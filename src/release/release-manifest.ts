@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+import path from "node:path";
+
+export const MCP_ENTRY_MAX_BYTES = 2 * 1024 * 1024;
+export const MCP_TOTAL_JS_MAX_BYTES = Math.floor(4.5 * 1024 * 1024);
+
 export const ReleaseFeatureStatusSchema = z.enum([
   "verified",
   "implemented",
@@ -56,11 +61,45 @@ export const RELEASE_FILE_ALLOWLIST = [
 
 export const RELEASE_DIRECTORY_ALLOWLIST = [
   ".codex/agents/",
+  "dist/mcp/",
   "skills/",
   "agents/",
   "schemas/runtime/",
   "packages/codex-sdk/dist/",
 ] as const;
+
+export function validateMcpBundleFiles(files: ReadonlyMap<string, Buffer>): string[] {
+  const failures: string[] = [];
+  const runtimeFiles = [...files.entries()].filter(([file]) => file.startsWith("dist/mcp/"));
+  const javascriptFiles = runtimeFiles.filter(([file]) => /^dist\/mcp\/[^/]+\.js$/u.test(file));
+  for (const [file] of runtimeFiles) {
+    if (!/^dist\/mcp\/[^/]+\.js$/u.test(file)) {
+      failures.push(`Unexpected MCP runtime file: ${file}`);
+    }
+  }
+  const entry = files.get("dist/mcp/server.js");
+  if (entry === undefined) {
+    failures.push("MCP entry missing: dist/mcp/server.js");
+  } else if (entry.byteLength > MCP_ENTRY_MAX_BYTES) {
+    failures.push(`MCP entry uses ${entry.byteLength} bytes; maximum is ${MCP_ENTRY_MAX_BYTES}.`);
+  }
+  const totalBytes = javascriptFiles.reduce((total, [, content]) => total + content.byteLength, 0);
+  if (totalBytes > MCP_TOTAL_JS_MAX_BYTES) {
+    failures.push(`MCP JavaScript uses ${totalBytes} bytes; maximum is ${MCP_TOTAL_JS_MAX_BYTES}.`);
+  }
+
+  const localImportPattern = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s*)["'](\.[^"']+)["']/gu;
+  for (const [file, content] of javascriptFiles) {
+    for (const match of content.toString("utf8").matchAll(localImportPattern)) {
+      const specifier = match[1]!;
+      const target = path.posix.normalize(path.posix.join(path.posix.dirname(file), specifier));
+      if (!target.startsWith("dist/mcp/") || !files.has(target)) {
+        failures.push(`MCP local import is missing from the package: ${file} -> ${specifier}`);
+      }
+    }
+  }
+  return failures;
+}
 
 export const RELEASE_FORBIDDEN_PATTERNS = [
   "node_modules/",

@@ -15,15 +15,17 @@ The runner passes one delivery profile to the shared v2 workflow:
 
 | `--mode`  | Delivery/evidence condition                                     |
 | --------- | --------------------------------------------------------------- |
-| `brief`   | requires a brief and preserves its acceptance criteria          |
-| `legacy`  | captures a focused current-behavior baseline                    |
-| `feature` | runs only the changed-feature E2E and records exactly one video |
-| `figma`   | treats Figma as primary and submits one real `figma-bundle`     |
+| `brief`   | requires brief + Figma + OpenAPI and full API/UI evidence       |
+| `legacy`  | migrates from a separate read-only `legacyProjectRoot`          |
+| `feature` | full delivery plus changed-feature E2E and exactly one video    |
+| `figma`   | mock-backed Figma implementation and measured visual comparison |
 | `auto`    | activates no mode-specific evidence by default                  |
 
 The modes share one pipeline. They do not add tools, durable stages, implementation lanes, or reviewers.
 
-Delivery mode controls delivery and evidence; sources compose independently. `briefPath`, `figmaUrl`, repeated `docsPaths`, repeated `openApiPaths`, `guidancePaths`, and optional `skillHints` can coexist in one profile. Use `mode: feature` for zero-to-100 user-facing delivery even when a brief is supplied. Any supplied Figma URL requires one real `figma-bundle`, including in feature mode.
+Brief/feature require `briefPath`, `figmaUrl`, and at least one repeated local `openApiPaths` or HTTPS `openApiUrls`. Legacy requires `legacyProjectRoot` and optionally accepts a project-local `legacyNetworkEvidencePath` containing bounded HAR/request JSON when source discovery is ambiguous. Figma needs only Figma and deterministic mocks. `docsPaths`, `guidancePaths`, and optional `skillHints` compose independently.
+
+Use `mode: feature` for zero-to-100 user-facing delivery when invoking the workflow directly; the CLI equivalent is `--mode feature`.
 
 ## CLI
 
@@ -55,9 +57,12 @@ Options:
 | `--mode <mode>`          | `auto`, `brief`, `legacy`, `feature`, or `figma`                                  |
 | `--change-kind <kind>`   | `auto`, `feature`, `fix`, `refactor`, `migration`, `design`, or `docs`            |
 | `--brief <path>`         | brief/spec source                                                                 |
+| `--legacy-project <p>`   | separate read-only legacy project root                                            |
+| `--legacy-network <p>`   | project-local bounded HAR/request JSON for the scoped legacy flow                 |
 | `--docs <path>`          | repeatable supporting documentation source                                        |
 | `--figma <url>`          | Figma file or node URL                                                            |
 | `--openapi <path>`       | repeatable OpenAPI source                                                         |
+| `--openapi-url <url>`    | repeatable HTTPS OpenAPI or Swagger UI source                                     |
 | `--guidance <path>`      | repeatable explicit project-guidance source                                       |
 | `--skill <name>`         | repeatable optional installed-skill hint                                          |
 | `--publish`              | create or update a draft PR/MR when ready                                         |
@@ -69,9 +74,11 @@ Options:
 | `--no-usage-calibration` | disable calibration reads and writes                                              |
 | `--no-review-agents`     | omit independent reviewer instructions                                            |
 
-Without an explicit mode, a Figma URL resolves to `figma`, a brief resolves to `brief`, and other requests resolve to `auto`. Brief, legacy, and feature profiles request draft publication unless `--no-publish` is supplied. Figma profile defaults to implementation without publication; use `--publish` when a draft PR/MR is wanted.
+Without an explicit mode, a legacy root resolves to `legacy`, a brief resolves to `brief`, a Figma URL resolves to `figma`, and other requests resolve to `auto`. All four explicit profiles request draft publication unless `--no-publish` is supplied.
 
 The delivery profile records `docsPaths`, `openApiPaths`, explicit `guidancePaths`, automatically populated `discoveredGuidancePaths`, and `skillHints`. Guidance discovery checks only `AGENTS.md`, `CLAUDE.md`, `README.md`, `docs/architecture/ARCHITECTURE.md`, and `docs/etc/folder-structure.md`; it does not scan the repository recursively. Explicit sources must exist. Missing automatic candidates and optional skills are ignored. Precedence is: current user request; explicit `guidancePaths`; automatically discovered project guidance; applicable installed skills; SpecToPR defaults. Guidance is traceable but excluded from scope classification.
+
+Raw runtime network headers, cookies, bodies, and query strings are never copied into durable intake/report artifacts. The file is validated before Run creation; only its project-relative locator, digest, normalized method/path, and adapter remain. Store it under a gitignored project-local evidence directory so publication preflight stays clean.
 
 ## Feature evidence boundary
 
@@ -88,6 +95,8 @@ It never asks for the full-project E2E suite by default. A broad command, missin
 ## Figma boundary
 
 The runner does not call a SpecToPR Figma microtool. Whenever `figmaUrl` is supplied, Codex uses the Figma capability connected to its host, captures real nodes/screenshots/variables/assets/component context, writes project-local evidence, and submits exactly one `figma-bundle` through `workflow_submit`. The bundle declares `provider: host-connected-figma`, ISO `capturedAt`, matching `fileUrl`, non-empty `nodeIds`, `manifestPath`, and one or more real PNG artifacts. The strict manifest repeats the provenance and lists the PNG `visualPaths`. URL-only assertions, malformed images, repeated bundles, and provider polling are rejected.
+
+Intake pins timestamped `sourceProvenance`. Brief/feature pin the supplied OpenAPI operations; legacy derives bounded API candidates through reported source adapters and uses optional OpenAPI only as enrichment. `--legacy-network` accepts standard HAR JSON, `{requests:[{method,url}]}`, or `[{method,url}]`, bounded to 1 MB and 1,000 requests; runtime binds its digest and adapter into the inventory. A zero-operation legacy inventory produces a complete API section bound to the adapter list and inventory digest. An ambiguous method/path resolves only from a unique scoped OpenAPI/runtime match; otherwise intake returns a durable blocker with no downstream action or submission bypass. Figma and running-legacy baselines declare `visualTargets`; every `compare-visuals` capture repeats target route/state/viewport/device-scale/fixture and records provider, ISO capture time, actual PNG path, and `sha256:` digest. Runtime rejects target drift or digest mismatch and computes alpha-aware exact/review ratios, diff, overlay, a minimum 98% threshold, at most 20% justified masking, and three total comparison attempts (the initial comparison plus at most two repairs). Figma-only uses digest-bound JSON fixtures. Canonical `pr-report-v2.1` JSON and Markdown use 15 sections with explicit section status and stale-packet exclusion; historical v2.1 remains readable, but current publication requires the adapter/digest evidence. GitHub media reuses `spec-to-pr/evidence` and returns upload-commit-SHA-pinned URLs.
 
 ## Workflow contract
 
@@ -119,7 +128,7 @@ When `resumeThreadId` or `--resume` is supplied, the first turn recovers the lat
 
 Calibration history must remain outside the enclosing Git worktree, even when `workingDirectory` is a nested package. An enabled `usageHistoryPath` inside that root is rejected using canonical existing-ancestor paths, including symlink aliases, and an existing multiply linked history file is rejected so it cannot mutate a repository file through a hard link. Relative paths are resolved from `workingDirectory`.
 
-Implementation remains in one Codex context. For API-backed UI, Codex submits `kind: "api-ready"` with a stable `implementationContextId`, distinct physical non-empty `apiArtifacts.types`, `schemas`, `wrappers`, `mocks`, and a JSON `contractTests` result reporting `status: passed`; path, symlink, and hard-link aliases are rejected. Final implementation repeats the ID. A final `apiReady: true` flag alone cannot satisfy the checkpoint. After implementation, the orchestrator passes an immutable `workflow_status` snapshot, contracts, diff, and evidence paths to independent reviewers. Reviewers return schema-shaped payloads without calling workflow tools. Code scope receives `functional-reviewer`; UI scope additionally receives `design-reviewer`. Brief mode does not imply UI scope by itself.
+Implementation remains in one Codex context. For API-backed UI, Codex submits `kind: "api-ready"` with a stable `implementationContextId`, distinct physical non-empty `apiArtifacts.types`, `schemas`, `wrappers`, `mocks`, a passing JSON `contractTests` result, and operation-aware `operations`. Final implementation repeats the ID and supplies exact `apiCoverage`. After implementation, the orchestrator passes an immutable packet to the read-only `functional-reviewer` and, for all four explicit UI profiles, `design-reviewer`.
 
 The SDK pins the first accepted durable Run ID and stops with `run-mismatch` if a later boundary reports another Run. The first structured status becomes authoritative for validation applicability; later statuses may add validations but cannot remove them.
 

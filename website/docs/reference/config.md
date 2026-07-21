@@ -9,20 +9,23 @@ title: 설정 · CLI · 환경변수
 
 Mode는 납품·증거 동작을 정하고 source는 독립적으로 조합됩니다.
 
-| 필드                      | 값                                                                  | 의미                                       |
-| ------------------------- | ------------------------------------------------------------------- | ------------------------------------------ |
-| `mode`                    | `auto`, `brief`, `legacy`, `feature`, `figma`                       | delivery/evidence profile                  |
-| `changeKind`              | `auto`, `feature`, `fix`, `refactor`, `migration`, `design`, `docs` | 변경 성격                                  |
-| `publication`             | `draft`, `none`                                                     | draft 발행 여부                            |
-| `briefPath`               | project-relative path                                               | 단일 brief source                          |
-| `figmaUrl`                | URL                                                                 | 단일 Figma source                          |
-| `docsPaths`               | project-relative path 배열                                          | 보조 문서, 최대 20개                       |
-| `openApiPaths`            | project-relative path 배열                                          | OpenAPI 문서, 최대 20개                    |
-| `guidancePaths`           | project-relative path 배열                                          | 명시적 project guidance, 최대 20개         |
-| `discoveredGuidancePaths` | 정규화된 project-relative path 배열                                 | runtime이 발견해 profile에 기록한 guidance |
-| `skillHints`              | 설치 skill 이름 배열                                                | 선택적 가용성 확인, 최대 20개              |
+| 필드                        | 값                                                                  | 의미                                           |
+| --------------------------- | ------------------------------------------------------------------- | ---------------------------------------------- |
+| `mode`                      | `auto`, `brief`, `legacy`, `feature`, `figma`                       | delivery/evidence profile                      |
+| `changeKind`                | `auto`, `feature`, `fix`, `refactor`, `migration`, `design`, `docs` | 변경 성격                                      |
+| `publication`               | `draft`, `none`                                                     | draft 발행 여부                                |
+| `briefPath`                 | project-relative path                                               | 단일 brief source                              |
+| `legacyProjectRoot`         | absolute directory                                                  | 별도 read-only legacy source                   |
+| `legacyNetworkEvidencePath` | project-relative HAR/JSON                                           | 모호한 legacy API를 해소하는 선택 runtime 증거 |
+| `figmaUrl`                  | URL                                                                 | 단일 Figma source                              |
+| `docsPaths`                 | project-relative path 배열                                          | 보조 문서, 최대 20개                           |
+| `openApiPaths`              | project-relative path 배열                                          | OpenAPI 문서, 최대 20개                        |
+| `openApiUrls`               | HTTPS URL 배열                                                      | OpenAPI/Swagger UI URL, 최대 20개              |
+| `guidancePaths`             | project-relative path 배열                                          | 명시적 project guidance, 최대 20개             |
+| `discoveredGuidancePaths`   | 정규화된 project-relative path 배열                                 | runtime이 발견해 profile에 기록한 guidance     |
+| `skillHints`                | 설치 skill 이름 배열                                                | 선택적 가용성 확인, 최대 20개                  |
 
-`feature` mode가 UI scope일 때 `targetedFeatureE2E`와 `featureVideo` requirement가 켜집니다. `legacy`는 focused baseline이 필요합니다. Mode와 관계없이 `figmaUrl`이 있으면 real `figma-bundle`이 contracts 통과 조건입니다. Brief, 보조 문서, OpenAPI는 scope/workload 분류에 참여하지만 project guidance는 추적만 하고 scope classification에서 제외합니다.
+`brief`/`feature`는 brief + Figma + OpenAPI를, `legacy`는 별도 `legacyProjectRoot`와 running legacy baseline을, `figma`는 deterministic mock manifest/fixture를 요구합니다. Feature만 `targetedFeatureE2E`/`featureVideo`를 추가합니다. Intake는 조회 시각이 있는 `sourceProvenance`와 OpenAPI 전체 operation을 고정합니다. Legacy inventory는 실행한 bounded API adapter와 candidate confidence를 기록합니다. 선택 `legacyNetworkEvidencePath`는 표준 HAR/request JSON을 1 MB·1,000 request로 제한하고 digest와 `runtime-network-har` adapter를 고정합니다. 유일하게 해소되지 않은 method/path는 downstream action/submission을 열지 않는 durable intake blocker입니다. Contracts는 `visualTargets`와 legacy planned coverage를, implementation은 current-packet legacy/API coverage와 `performanceEvidence`를 담당합니다. Visual capture는 target route/state/viewport/device scale/fixture, provider, ISO capture time, PNG path, digest를 반복하며 runtime이 target drift·digest mismatch를 거부하고 최소 98%·mask 최대 20% `compare-visuals`를 계산합니다. Report는 ready/blocked 15-section JSON/Markdown을 만들고, 새 발행은 legacy adapter 목록과 inventory digest를 검증합니다.
 
 ### Bounded guidance discovery
 
@@ -56,9 +59,12 @@ node packages/codex-sdk/dist/cli.js \
 | `--mode <mode>`          | delivery mode                    |
 | `--change-kind <kind>`   | 변경 분류                        |
 | `--brief <path>`         | brief/spec 입력                  |
+| `--legacy-project <p>`   | 별도 legacy project root         |
+| `--legacy-network <p>`   | project-local bounded HAR/JSON   |
 | `--docs <path>`          | 반복 가능한 보조 문서 입력       |
 | `--figma <url>`          | Figma file/node URL              |
 | `--openapi <path>`       | 반복 가능한 OpenAPI 입력         |
+| `--openapi-url <url>`    | 반복 가능한 HTTPS OpenAPI URL    |
 | `--guidance <path>`      | 반복 가능한 명시적 guidance      |
 | `--skill <name>`         | 반복 가능한 선택 skill hint      |
 | `--publish`              | 준비되면 draft PR/MR 발행        |
@@ -70,7 +76,7 @@ node packages/codex-sdk/dist/cli.js \
 | `--no-usage-calibration` | usage 보정 읽기/쓰기 비활성화    |
 | `--no-review-agents`     | 독립 reviewer instruction 생략   |
 
-Mode를 생략하면 Figma URL은 `figma`, brief path는 `brief`, 나머지는 `auto`로 분류됩니다. Figma는 기본적으로 구현까지만 진행하고 `--publish`가 있을 때 draft를 발행합니다. 다른 명시적 delivery mode는 `--no-publish`가 없으면 draft publication을 요청합니다.
+Mode를 생략하면 legacy root는 `legacy`, brief path는 `brief`, Figma URL은 `figma`, 나머지는 `auto`로 분류됩니다. 네 명시적 delivery mode 모두 `--no-publish`가 없으면 draft publication을 요청합니다.
 
 SDK가 workload class 기본 최대값을 자동 hard limit으로 사용합니다. 사용자가 숫자 한도를 지정하지 않고 calibration도 이 limit을 바꾸지 않습니다. Contracts에서 size가 바뀌면 SDK가 runtime estimate와 전체 `requiredValidations`를 다음 경계부터 반영합니다. 완료된 action turn 뒤 80%를 넘으면 compact checkpoint로 fresh thread를 시작합니다. Hard limit이면 크기와 관계없이 `split-required`를 반환하고 독립적으로 검증 가능한 범위로 나눕니다. Usage가 없으면 `usage-unavailable`이며 required validation은 유지됩니다. Calibration은 표시 범위만 보정하고 과거에 다른 hard limit으로 기록된 표본은 제외합니다.
 

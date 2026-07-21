@@ -4,15 +4,20 @@ title: 4. Figma → 디자인 구현
 description: 실제 Figma 증거로 디자인을 구현하고 검증하는 방법
 ---
 
+import RunPipeline from "@site/src/components/guide/RunPipeline";
+import NextStep from "@site/src/components/guide/NextStep";
+
 Intake 직후 `XS`~`XL` workload, 예상 token range, confidence와 근거가 표시됩니다. 이는 고정 약속이 아닙니다. 80% 경계에서는 checkpoint와 compact context로 이어가며, 한계에 도달해도 `requiredValidations`를 빼지 않고 범위를 나누거나 사용자의 결정을 기다립니다.
 
 ## 이 케이스를 쓰는 경우 <span id="use-this-case-figma"></span>
 
-Figma가 primary source이고 화면 구현과 디자인 검증이 주목적일 때 사용합니다. 연결된 호스트에서 실제 node와 시각 evidence를 읽어 기존 디자인 시스템에 매핑합니다. **기본 결과는 구현·리뷰 보고서이며 PR 발행은 없음**입니다.
+Figma가 primary source이고 실제 API 없이 mock 데이터로 화면을 구현할 때 사용합니다. 연결된 호스트에서 node와 PNG baseline을 읽어 기존 디자인 시스템에 매핑하고, 결과 화면과 수치 비교한 뒤 **기본 draft PR**을 만듭니다.
 
-:::tip 입력 / 결과
-**입력:** 저장소 + 유효한 Figma URL · **결과:** real Figma evidence 기반 UI 구현, 시각·반응형·interaction·accessibility 검증; 명시한 경우에만 draft PR
+:::tip[입력 / 결과]
+**입력:** 저장소 + 유효한 Figma URL · **결과:** mock-backed UI, Figma 일치율/diff/overlay, 독립 리뷰, 15개 섹션 draft PR
 :::
+
+<RunPipeline locale="ko" mode="figma" />
 
 ## 반드시 제공할 것 <span id="required-inputs-figma"></span>
 
@@ -22,16 +27,14 @@ Figma가 primary source이고 화면 구현과 디자인 검증이 주목적일 
 | `mode`        | `figma`                                          |
 | `scope`       | `ui` 필수                                        |
 | `figmaUrl`    | 접근 가능한 file URL과 가능하면 구체적 `node-id` |
-| `publication` | 기본 `none`; PR을 원한다고 명시할 때만 `draft`   |
+| `publication` | 기본값은 `draft`; 구현·리뷰까지만이면 `none`     |
 | 요청          | 구현할 화면·상태·반응형 범위를 지정              |
 
 ## 선택 입력 <span id="optional-inputs-figma"></span>
 
-- `briefPath`, `docsPaths`: 화면의 수용 조건, 문구, business rule을 보충합니다.
-- `openApiPaths`: 화면이 API-backed라면 API-ready 계약을 추가합니다.
+- `briefPath`, `docsPaths`: 화면의 문구와 상태 설명을 보충합니다.
 - `guidancePaths`: design-system 사용법, architecture, folder-structure를 명시합니다.
 - `skillHints`: 설치된 `design-system`, React/Next 성능, accessibility 관련 skill을 적용하도록 요청합니다.
-- `publication: draft`: 디자인 구현을 draft PR까지 받고 싶을 때만 명시합니다.
 
 ## 최소 프롬프트 <span id="minimal-prompt-figma"></span>
 
@@ -40,8 +43,8 @@ Figma가 primary source이고 화면 구현과 디자인 검증이 주목적일 
 mode: figma
 scope: ui
 figmaUrl: https://www.figma.com/design/FILE/checkout?node-id=12-345
-publication: none
-Figma를 기존 디자인 시스템에 맞춰 구현하고 시각·반응형·접근성을 검증해줘.
+publication: draft
+Figma를 deterministic mock 데이터로 구현하고 결과 화면과 98% 기준으로 비교한 뒤 draft PR로 발행해줘.
 ```
 
 ## 전체 프롬프트 예시 <span id="full-prompt-figma"></span>
@@ -51,15 +54,14 @@ Figma를 기존 디자인 시스템에 맞춰 구현하고 시각·반응형·�
 mode: figma
 scope: ui
 figmaUrl: https://www.figma.com/design/FILE/checkout?node-id=12-345
-briefPath: docs/checkout-copy.md
-openApiPaths: [docs/openapi.yaml]
 docsPaths: [docs/checkout-states.md]
 guidancePaths: [docs/design-system.md, docs/etc/folder-structure.md]
 skillHints: [design-system, react-best-practices, accessibility-auditor]
-changeKind: feature
+changeKind: design
 publication: draft
 node 12:345의 desktop/mobile과 loading/error/success 상태를 기존 컴포넌트로 구현해줘.
-실제 Figma bundle, 시각·interaction·accessibility 증거와 독립 리뷰를 만든 뒤 draft PR로 발행해줘.
+실제 Figma bundle과 `visualTargets`를 만들고 mock으로 모든 상태를 고정해.
+결과 화면의 exact/review ratio, diff, overlay와 독립 리뷰를 만든 뒤 draft PR로 발행해줘.
 ```
 
 ## SpecToPR이 진행하는 과정 <span id="process-figma"></span>
@@ -67,24 +69,26 @@ node 12:345의 desktop/mobile과 loading/error/success 상태를 기존 컴포�
 1. **Intake:** URL, node, 화면/상태 범위, publication intent와 workload 추정을 확인합니다.
 2. **Figma contracts:** 연결된 호스트에서 node IDs, variables, component context, screenshots, assets를 읽고 project-local strict manifest를 만듭니다.
 3. **Design-system mapping:** 새 custom markup 전에 기존 component/token과 상태를 대응시킵니다.
-4. **Implementation:** 반응형 layout, interaction, loading/error/empty/success와 필요한 API 연결을 같은 `implementationContextId`에서 구현합니다.
-5. **Reviews:** 관련 기능 검증과 독립 design review로 시각 충실도, accessibility, interaction을 판정합니다.
-6. **Report / optional publish:** `publication: none`이면 보고서에서 끝나고, 명시적 `draft`일 때만 발행 preflight와 PR을 수행합니다.
+4. **Implementation:** `{deterministic:true, fixtures:[{path, sha256}]}` 형태의 strict mock JSON manifest와 별도 fixture를 제출합니다. 각 `sha256:` digest로 fixture 내용을 고정하고 반응형 layout, interaction, loading/error/empty/success 상태를 구현합니다.
+5. **Compare / reviews:** 각 actual capture는 target의 route/state/viewport/device scale/fixture를 반복하고 provider, ISO capture time, PNG path, `sha256:` digest를 기록합니다. `compare-visuals`는 target drift·digest mismatch를 거부한 뒤 같은 viewport의 exact/review ratio, masks, diff, overlay를 계산합니다. 런타임 최소 98%, 정당한 mask 최대 20%, 비교 총 3회(최초 1회 + repair 최대 2회)이며 reviewer가 접근성과 interaction을 별도 판정합니다.
+6. **Report / publish:** `pr-report-v2.1` 15개 섹션을 만들고 draft PR을 발행합니다.
+
+각 보고서 섹션은 `complete`, `not-run`, `blocked`, `not-applicable` 중 하나입니다. 현재 review packet에 속하지 않는 stale path는 PR에서 생략합니다. GitHub 이미지·diff·overlay는 실행별 branch가 아니라 단일 관리 branch `spec-to-pr/evidence`의 immutable 경로에 올리고 upload commit SHA로 고정합니다.
 
 ## 실행 정책: stage, agent, skill, tool
 
-| Durable stage       | 이 케이스의 정확한 동작                                                                                    |
-| ------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `intake`            | Figma file/node, UI 상태·반응형 범위, publication과 workload를 고정합니다.                                 |
-| `contracts`         | connected host에서 실제 node/variables/assets/screenshot을 읽고 strict `figma-bundle`을 제출합니다.        |
-| `implementation`    | 한 명의 implementation writer가 기존 design system에 매핑하고 같은 context에서 필요한 API/UI를 구현합니다. |
-| `functional-review` | read-only `functional-reviewer`가 상태 동작과 관련 project check를 판정합니다.                             |
-| `design-review`     | read-only `design-reviewer`가 Figma 대비 visual/interaction/responsive/accessibility를 판정합니다.         |
-| `report`            | provenance, 구현 차이, validation, reviewer verdict와 blocker를 local/canonical report로 만듭니다.         |
-| `publish`           | 기본 `publication: none`이면 skipped; `draft`를 명시하고 ready일 때만 draft를 만듭니다.                    |
-| `archive`           | 발행한 draft가 merge된 뒤 authoritative evidence와 별도 요청으로만 실행합니다.                             |
+| Durable stage       | 이 케이스의 정확한 동작                                                                                  |
+| ------------------- | -------------------------------------------------------------------------------------------------------- |
+| `intake`            | Figma file/node, UI 상태·반응형 범위, publication과 workload를 고정합니다.                               |
+| `contracts`         | connected host에서 실제 node/variables/assets/screenshot을 읽고 strict `figma-bundle`을 제출합니다.      |
+| `implementation`    | 한 명의 implementation writer가 기존 design system에 매핑하고 deterministic mock-backed UI를 구현합니다. |
+| `functional-review` | read-only `functional-reviewer`가 상태 동작과 관련 project check를 판정합니다.                           |
+| `design-review`     | read-only `design-reviewer`가 Figma 대비 visual/interaction/responsive/accessibility를 판정합니다.       |
+| `report`            | `pr-report-v2.1` 15개 섹션에 provenance, visual ratio/assets, review, gap, blocker를 기록합니다.         |
+| `publish`           | ready이면 packet-bound body와 visual assets를 포함한 draft를 만듭니다.                                   |
+| `archive`           | 발행한 draft가 merge된 뒤 authoritative evidence와 별도 요청으로만 실행합니다.                           |
 
-Agent 정책은 XS/S read-only scout 0명, M 최대 1명, L/XL 최대 2명입니다. Scout는 큰 Figma/repository mapping의 독립적인 read-heavy discovery만 수행합니다. 한 implementation writer만 편집하며 **no nesting**, **parallel writer 금지**입니다. 두 reviewer는 implementation 뒤에만 병렬일 수 있습니다.
+Agent 정책은 XS/S read-only scout 0명, M 최대 1명, L/XL 최대 2명입니다. Scout는 큰 Figma/repository mapping의 독립적인 read-heavy discovery만 수행합니다. 한 implementation writer만 편집하며 **no nesting**, **parallel writer 금지**입니다. 두 reviewer는 L/XL의 implementation 뒤에만 병렬일 수 있습니다.
 
 - `stageSkillRoute`: public action은 `intake-contracts` → `implement` → `review-functional`/`review-design` 순서이며 draft면 `publish`로 이어집니다. 이 routing은 `deliveryProfile.recommendedSkills`가 아닙니다.
 - `recommendedSkills`: `figmaUrl` → `figma`, `design-system`; `openApiPaths` → `api-generator`; 감지된 React/Next package → `react-best-practices`, `next-best-practices` optional candidate입니다.
@@ -95,7 +99,7 @@ Agent 정책은 XS/S read-only scout 0명, M 최대 1명, L/XL 최대 2명입니
 
 ### Ready, blocked diagnostic, resume
 
-`publication: none`의 정상 결과는 reviewed local report이고, draft를 요청했다면 `workflow_publish intent: ready`가 evidence-backed draft를 만듭니다. Figma/browser required evidence가 없으면 `BROWSER_NOT_RUN` 같은 typed `blockerDetails`와 exact unblock action을 남깁니다. Preflight가 허용할 때만 `workflow_publish intent: blocked-diagnostic` draft를 만들며 계속 `status: blocked`입니다. 기본 none이거나 clean/non-target/authenticated/supported remote, committed delta, target보다 한 commit ahead 조건이 없거나 `PUBLISH_NO_DELTA`면 empty commit/issue fallback 없이 **local blocked report**를 반환합니다.
+정상 결과는 `workflow_publish intent: ready`의 evidence-backed draft입니다. 정상/blocked 모두 같은 `pr-report-v2.1` 15개 섹션을 사용합니다. Figma/browser evidence가 없으면 `BROWSER_NOT_RUN` 같은 typed `blockerDetails`, 미실행 검증, exact unblock action을 남깁니다. Preflight가 허용할 때만 `workflow_publish intent: blocked-diagnostic` draft를 만들며 계속 `status: blocked`입니다. 조건이 없거나 `PUBLISH_NO_DELTA`면 empty commit/issue fallback 없이 **local blocked report**를 반환합니다.
 
 명시적으로 draft를 요청한 실행이 `diagnostic-publication-uncertain`이면 자동 재발행하지 않습니다. GitHub/GitLab에서 matching draft를 확인해 사용자에게 보여주고, 명시적 승인을 받은 경우에만 같은 `workflow_publish`를 `recoverUncertain: true`로 호출합니다.
 
@@ -107,6 +111,8 @@ Agent 정책은 XS/S read-only scout 0명, M 최대 1명, L/XL 최대 2명입니
 | ---------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | bundle                 | `evidence/figma/figma-bundle.json`                                   | `provider: host-connected-figma`, ISO `capturedAt`, matching `fileUrl`, non-empty `nodeIds` |
 | manifest/visuals       | `evidence/figma/manifest.json`, `evidence/figma/checkout-mobile.png` | project-local strict manifest와 실제 PNG `visualPaths`                                      |
+| visual comparison      | `evidence/visual/figma-report.json`                                  | exact/review ratio ≥ 98%, baseline/target/diff/overlay                                      |
+| mock fixtures          | `evidence/fixtures/checkout.json`                                    | deterministic loading/error/empty/success 데이터                                            |
 | responsive/interaction | `evidence/design/responsive.json`, `interaction.json`                | 지정 viewport와 상태 전이가 검증됨                                                          |
 | accessibility          | `evidence/design/accessibility.json`                                 | semantic/keyboard/focus/contrast 검사가 성공                                                |
 | design review          | `evidence/reviews/design.json`                                       | 고정된 diff와 evidence에 대한 독립 approved verdict                                         |
@@ -115,14 +121,11 @@ Figma mode는 기능 개발용 targeted E2E와 영상을 자동으로 요구하�
 
 ## 예상 브랜치와 커밋 <span id="branch-and-commits-figma"></span>
 
-- `publication: none`: 기존 작업 브랜치에서 검증된 working-tree 구현과 보고서로 종료할 수 있습니다.
-- draft를 명시한 예상 브랜치: `codex/figma-checkout`
+- 예상 브랜치: `codex/figma-checkout`
 - 커밋 예상 예시: `feat: implement checkout from Figma`
 - draft 발행 전에는 다른 케이스와 동일하게 committed source branch와 clean tree가 필수입니다.
 
 ## 예상 Draft PR <span id="expected-pr-figma"></span>
-
-기본값에는 PR이 없습니다. 아래는 `publication: draft`를 명시했을 때의 **예상 예시**입니다.
 
 **예상 예시 제목:** `feat: implement checkout from Figma`
 
@@ -139,6 +142,8 @@ Figma mode는 기능 개발용 targeted E2E와 영상을 자동으로 요구하�
 
 ## Design validation
 
+- exact match: 97.84%; review match: 99.12%; threshold: 98%
+- baseline / target / diff / overlay links
 - responsive / interaction / accessibility: passed
 - design-reviewer: approved
 
@@ -161,11 +166,20 @@ Figma mode는 기능 개발용 targeted E2E와 영상을 자동으로 요구하�
 
 - URL만으로 node, variable, component를 봤다고 주장하지 않습니다.
 - Figma를 polling하거나 별도 runtime microtool을 추가하지 않습니다.
-- 명시적 draft intent 없이 PR을 만들지 않습니다.
+- 실제 API client, API gap, Web Vitals, feature E2E와 영상을 기본 계약에 추가하지 않습니다.
 - 기능 개발 모드의 full feature E2E와 영상 계약을 암묵적으로 추가하지 않습니다.
+
+<NextStep
+  eyebrow="점수의 근거 보기"
+  title="Figma 일치율은 사람이 적는 숫자가 아닙니다"
+  description="실제 baseline·actual·diff·overlay와 digest가 production comparator의 metrics에 어떻게 묶이는지 확인하세요."
+  href="/concepts/visual-verification"
+  label="시각 검증 보기"
+  secondary={{ label: "리뷰 역할 보기", href: "/concepts/reviews" }}
+/>
 
 ## 다른 사용법
 
 - [기획서 → draft PR](./brief)
-- [레거시 변경 → draft PR](./legacy)
+- [레거시 마이그레이션 → draft PR](./legacy)
 - [기능 개발 → E2E·영상·draft PR](./feature)

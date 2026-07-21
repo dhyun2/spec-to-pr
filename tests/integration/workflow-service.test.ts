@@ -53,10 +53,17 @@ describe("WorkflowService", () => {
       "test-results/unit.json",
       "test-results/contract.json",
       "test-results/api-contract.json",
+      "test-results/api-coverage.json",
+      "test-results/performance.json",
       "visual/diff.png",
+      "visual/actual.png",
+      "visual/legacy.png",
       "contracts/requirements.json",
       "contracts/legacy-baseline.md",
+      "docs/openapi.yaml",
       "figma/design-context.json",
+      "mocks/manifest.json",
+      "mocks/checkout.json",
       "test-results/checkout.json",
       "test-results/checkout.mp4",
       "briefs/checkout.md",
@@ -75,8 +82,45 @@ describe("WorkflowService", () => {
       "utf8",
     );
     await writeFile(
+      path.join(directory, "docs/openapi.yaml"),
+      "openapi: 3.1.0\npaths:\n  /checkout:\n    post:\n      operationId: checkout\n      responses: {}\n",
+      "utf8",
+    );
+    await writeFile(
       path.join(directory, "test-results/api-contract.json"),
       JSON.stringify({ status: "passed" }),
+      "utf8",
+    );
+    await writeFile(
+      path.join(directory, "test-results/api-coverage.json"),
+      JSON.stringify({
+        status: "passed",
+        operationKeys: ["POST /checkout"],
+        mockHandlers: ["generated/mock.ts#checkout"],
+      }),
+      "utf8",
+    );
+    await writeFile(
+      path.join(directory, "test-results/performance.json"),
+      JSON.stringify({
+        status: "passed",
+        metrics: { lcpMs: 2_100, cls: 0.04, tbtMs: 120 },
+      }),
+      "utf8",
+    );
+    const mockFixture = Buffer.from(JSON.stringify({ state: "checkout" }), "utf8");
+    await writeFile(path.join(directory, "mocks/checkout.json"), mockFixture);
+    await writeFile(
+      path.join(directory, "mocks/manifest.json"),
+      JSON.stringify({
+        deterministic: true,
+        fixtures: [
+          {
+            path: "mocks/checkout.json",
+            sha256: `sha256:${createHash("sha256").update(mockFixture).digest("hex")}`,
+          },
+        ],
+      }),
       "utf8",
     );
     await writeFile(
@@ -100,8 +144,16 @@ describe("WorkflowService", () => {
       PNG.sync.write(new PNG({ width: 1, height: 1 })),
     );
     await writeFile(
+      path.join(directory, "visual/actual.png"),
+      PNG.sync.write(new PNG({ width: 1, height: 1 })),
+    );
+    await writeFile(
+      path.join(directory, "visual/legacy.png"),
+      PNG.sync.write(new PNG({ width: 1, height: 1 })),
+    );
+    await writeFile(
       path.join(directory, ".gitignore"),
-      "artifacts/\nsources/\nruns.sqlite3*\nprofiles/\n",
+      "artifacts/\nsources/\nruns.sqlite3*\nprofiles/\nvisual/actual/\n",
       "utf8",
     );
     await execFileAsync("git", ["init", "-q"], { cwd: directory });
@@ -244,6 +296,52 @@ describe("WorkflowService", () => {
         sourceBranch: "codex/ready-report",
       }),
     ).rejects.toThrow(/report.*current review packet/i);
+    expect(plan).not.toHaveBeenCalled();
+  });
+
+  it("rejects a legacy pr-report-v2 JSON artifact at ready publication", async () => {
+    const runId = await preparePublishReadyWorkflow(service, directory);
+    const run = await store.get(runId);
+    const jsonArtifact = run.artifacts.find(
+      (artifact) => artifact.metadata["reportKind"] === "pr-report-v2-json",
+    );
+    if (jsonArtifact === undefined) throw new Error("Missing ready report JSON");
+    const legacyReport = JSON.parse(
+      (await artifactStore.readContent(jsonArtifact.digest)).toString("utf8"),
+    ) as Record<string, unknown>;
+    legacyReport["schemaVersion"] = "pr-report-v2";
+    delete legacyReport["sectionStatuses"];
+    const legacyBlob = await artifactStore.writeBlob({
+      content: Buffer.from(`${JSON.stringify(legacyReport, null, 2)}\n`, "utf8"),
+      mediaType: "application/json",
+      storedAt: run.updatedAt,
+      label: "pr-report-v2.json",
+    });
+    await store.save(
+      {
+        ...run,
+        revision: run.revision + 1,
+        artifacts: run.artifacts.map((artifact) =>
+          artifact.id === jsonArtifact.id
+            ? { ...artifact, uri: legacyBlob.uri, digest: legacyBlob.digest }
+            : artifact,
+        ),
+      },
+      run.revision,
+    );
+    const plan = vi.fn();
+    service = new WorkflowService({
+      ...dependencies,
+      publisherService: { plan } as unknown as PublisherService,
+    });
+
+    await expect(
+      service.publish({
+        runId,
+        mode: "preview",
+        sourceBranch: "codex/legacy-report",
+      }),
+    ).rejects.toThrow(/current pr-report-v2\.1/i);
     expect(plan).not.toHaveBeenCalled();
   });
 
@@ -1237,6 +1335,9 @@ describe("WorkflowService", () => {
       publisherService: { publish } as unknown as PublisherService,
     });
 
+    const currentReadyReport = [...(await store.get(runId)).artifacts]
+      .reverse()
+      .find((artifact) => artifact.metadata["reportIntent"] === "ready")!;
     const retried = (await service.publish(publishInput(runId))) as {
       status: Awaited<ReturnType<WorkflowService["status"]>>;
     };
@@ -1244,7 +1345,7 @@ describe("WorkflowService", () => {
     expect(publish).toHaveBeenCalledWith(
       expect.objectContaining({
         intent: "ready",
-        reportArtifactId: readyReport.id,
+        reportArtifactId: currentReadyReport.id,
         confirm: true,
       }),
     );
@@ -1794,7 +1895,7 @@ describe("WorkflowService", () => {
     );
     expect(diagnostics).toHaveLength(1);
     expect(first.metadata).toMatchObject({
-      adapter: "workflow-v2",
+      adapter: "pr-report-v2",
       reportKind: "pr-body-markdown",
       reportIntent: "blocked-diagnostic",
       decision: "blocked",
@@ -1807,9 +1908,28 @@ describe("WorkflowService", () => {
     expect(reportedRun.revision).toBe(blockedRun.revision + 1);
     expect(reportedRun.stages.find((item) => item.name === "report")).toEqual(reportStageBefore);
     const markdown = (await artifactStore.readContent(first.digest)).toString("utf8");
-    expect(markdown).toContain("Blocked. Diagnostic report only.");
-    expect(markdown).toContain("## Exact unblock action");
+    expect(markdown).toContain("- Decision: blocked");
+    expect(markdown).toContain("## 15. Rollback and exact unblock action");
     expect(markdown).not.toContain(directory);
+    const jsonArtifact = reportedRun.artifacts.find(
+      (artifact) => artifact.id === first.metadata["reportJsonArtifactId"],
+    );
+    if (jsonArtifact === undefined) throw new Error("Missing blocked pr-report-v2 JSON");
+    expect(
+      JSON.parse((await artifactStore.readContent(jsonArtifact.digest)).toString("utf8")),
+    ).toMatchObject({
+      schemaVersion: "pr-report-v2.1",
+      decision: "blocked",
+      sectionStatuses: {
+        api: "not-applicable",
+        legacy: "not-applicable",
+        visual: "not-applicable",
+        "functional-review": "not-run",
+        "design-review": "not-applicable",
+        performance: "not-applicable",
+        "feature-evidence": "not-applicable",
+      },
+    });
   });
 
   it("reports only genuinely remaining validations in a late design blocker diagnostic", async () => {
@@ -1842,7 +1962,8 @@ describe("WorkflowService", () => {
         artifactPaths: ["test-results/unit.json"],
       },
     });
-    await service.submit({
+    expect(implemented.nextActions.map((action) => action.kind)).toEqual(["review-functional"]);
+    const functionallyReviewed = await service.submit({
       runId: started.runId,
       submission: {
         kind: "functional-review",
@@ -1865,13 +1986,18 @@ describe("WorkflowService", () => {
       runId: started.runId,
       submission: {
         kind: "design-review",
-        reviewPacketId: reviewPacketId(implemented, "review-design"),
+        reviewPacketId: reviewPacketId(functionallyReviewed, "review-design"),
         verdict: "blocked",
         summary: "Design review needs an external tool.",
         findings: [],
         requirements: [{ id: "checkout", verdict: "blocked" }],
         artifactPaths: ["visual/diff.png"],
         gateResults: [
+          {
+            id: "visual",
+            status: "passed",
+            evidencePaths: ["visual/diff.png"],
+          },
           {
             id: "accessibility",
             status: "passed",
@@ -1898,12 +2024,116 @@ describe("WorkflowService", () => {
     const diagnostic = await service.ensureBlockedDiagnosticReport({ runId: started.runId });
     const markdown = (await artifactStore.readContent(diagnostic.digest)).toString("utf8");
     const unrunSection = markdown.slice(
-      markdown.indexOf("## Unrun validations"),
-      markdown.indexOf("## Exact unblock action"),
+      markdown.indexOf("## 13. Gaps, blockers, and unrun validations"),
+      markdown.indexOf("## 14. Risks and mitigations"),
     );
-    expect(unrunSection).toContain("- draft-publication-preflight");
-    expect(unrunSection).not.toContain("- functional");
-    expect(unrunSection).not.toContain("- accessibility");
+    expect(unrunSection).toContain("- Not run: draft-publication-preflight");
+    expect(unrunSection).not.toContain("- Not run: functional");
+    expect(unrunSection).not.toContain("- Not run: accessibility");
+    const functionalSection = markdown.slice(
+      markdown.indexOf("## 9. Functional checks and independent review"),
+      markdown.indexOf("## 10. Design and accessibility review"),
+    );
+    expect(functionalSection).toContain("Functional validation passed.");
+  });
+
+  it("omits stale packet, review, visual, and changed-file claims from blocked reports", async () => {
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Update the checkout screen",
+      scope: "ui",
+      publication: "draft",
+    });
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "contracts",
+        status: "passed",
+        summary: "Checkout requirements ready.",
+        artifactPaths: ["contracts/requirements.json"],
+        requirementManifest: requirements("checkout"),
+      },
+    });
+    await changeSource(directory, "src/checkout.tsx", "export const checkout = 'reviewed';\n");
+    const implemented = await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "implementation",
+        status: "passed",
+        summary: "Checkout updated.",
+        apiReady: false,
+        uiChanged: true,
+        changedFiles: ["src/checkout.tsx"],
+        artifactPaths: ["test-results/unit.json"],
+      },
+    });
+    const functionallyReviewed = await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "functional-review",
+        reviewPacketId: reviewPacketId(implemented, "review-functional"),
+        verdict: "approved",
+        summary: "Old functional review passed.",
+        findings: [],
+        requirements: [{ id: "checkout", verdict: "accepted" }],
+        artifactPaths: ["test-results/unit.json"],
+        gateResults: [
+          { id: "functional", status: "passed", evidencePaths: ["test-results/unit.json"] },
+        ],
+      },
+    });
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "design-review",
+        reviewPacketId: reviewPacketId(functionallyReviewed, "review-design"),
+        verdict: "blocked",
+        summary: "Design tooling is unavailable.",
+        findings: [],
+        requirements: [{ id: "checkout", verdict: "blocked" }],
+        artifactPaths: ["visual/diff.png"],
+        gateResults: [
+          { id: "visual", status: "passed", evidencePaths: ["visual/diff.png"] },
+          { id: "accessibility", status: "passed", evidencePaths: ["visual/diff.png"] },
+        ],
+        blocker: {
+          stage: "design-review",
+          code: "MISSING_DESIGN_TOOL",
+          kind: "missing-tool",
+          summary: "The design tool is unavailable.",
+          retryable: false,
+          resumable: true,
+          completedWork: [],
+          evidencePaths: ["visual/diff.png"],
+          attemptedRecovery: [],
+          unrunValidations: [],
+          exactUnblockAction: "Enable the design tool and rerun both current-diff reviews.",
+        },
+      },
+    });
+    await changeSource(directory, "src/checkout.tsx", "export const checkout = 'changed-again';\n");
+
+    const markdownArtifact = await service.ensureBlockedDiagnosticReport({ runId: started.runId });
+    const reportedRun = await store.get(started.runId);
+    const jsonArtifact = reportedRun.artifacts.find(
+      (artifact) => artifact.id === markdownArtifact.metadata["reportJsonArtifactId"],
+    );
+    if (jsonArtifact === undefined) throw new Error("Missing blocked report JSON");
+    const report = JSON.parse(
+      (await artifactStore.readContent(jsonArtifact.digest)).toString("utf8"),
+    ) as Record<string, unknown>;
+
+    expect(report).not.toHaveProperty("binding");
+    expect(report).toMatchObject({
+      changedFiles: [],
+      reviews: [],
+      visual: { status: "not-applicable", results: [] },
+      sectionStatuses: {
+        "functional-review": "not-run",
+        "design-review": "not-run",
+      },
+    });
+    expect(JSON.stringify(report)).not.toContain("Old functional review passed.");
   });
 
   it("reports a second zero-based stage execution as two attempts", async () => {
@@ -2088,6 +2318,7 @@ describe("WorkflowService", () => {
       mode: "feature",
       changeKind: "feature",
       publication: "none",
+      briefPath: "briefs/checkout.md",
       figmaUrl: FIGMA_URL,
       openApiPaths: ["docs/openapi.yaml"],
     });
@@ -2138,7 +2369,7 @@ describe("WorkflowService", () => {
       },
     });
     const packetId = implemented.nextActions.find(
-      (action) => action.kind === "review-design",
+      (action) => action.kind === "review-functional",
     )?.reviewPacketId;
     expect(packetId).toMatch(/^packet_[a-f0-9]{64}$/);
     if (packetId === undefined) throw new Error("Missing review packet");
@@ -2161,25 +2392,6 @@ describe("WorkflowService", () => {
     ).rejects.toThrow(/packet.*stale|diff.*match/i);
     await changeSource(directory, "src/checkout.tsx", "implemented checkout state\n");
 
-    await service.submit({
-      runId: started.runId,
-      submission: {
-        kind: "design-review",
-        reviewPacketId: packetId,
-        verdict: "approved",
-        summary: "Design evidence passed.",
-        findings: [],
-        requirements: [{ id: "checkout-state", verdict: "accepted" }],
-        artifactPaths: ["visual/diff.png"],
-        gateResults: [
-          {
-            id: "accessibility",
-            status: "passed",
-            evidencePaths: ["visual/diff.png"],
-          },
-        ],
-      },
-    });
     const reopened = await service.submit({
       runId: started.runId,
       submission: {
@@ -2354,6 +2566,85 @@ describe("WorkflowService", () => {
     expect(many.workload.score).toBeGreaterThan(one.workload.score);
   });
 
+  it("ingests an HTTPS OpenAPI URL into the same full-delivery contract", async () => {
+    const text = "openapi: 3.1.0\npaths:\n  /checkout:\n    post:\n      operationId: checkout\n";
+    const fetchOpenApiSource = vi.fn(async ({ url }: { url: string }) => ({
+      originalUrl: url,
+      resolvedUrl: "https://cdn.example.com/contracts/checkout.yaml",
+      mediaType: "application/yaml",
+      text,
+      sha256: "sha256:" + createHash("sha256").update(text).digest("hex"),
+    }));
+    service = new WorkflowService({ ...dependencies, fetchOpenApiSource });
+
+    const status = await service.start({
+      projectRoot: directory,
+      requestText: "Implement checkout from the supplied sources",
+      scope: "ui",
+      mode: "brief",
+      changeKind: "feature",
+      briefPath: "briefs/checkout.md",
+      figmaUrl: FIGMA_URL,
+      openApiUrl: "https://api.example.com/docs",
+    });
+
+    expect(fetchOpenApiSource).toHaveBeenCalledWith({
+      url: "https://api.example.com/docs",
+    });
+    expect(status.deliveryProfile).toMatchObject({
+      openApiPaths: [],
+      openApiUrls: ["https://api.example.com/docs"],
+      requirements: { apiCoverage: true },
+    });
+    expect(status.scope).toMatchObject({ api: true, specification: true });
+  });
+
+  it("pins every OpenAPI operation at intake and rejects a partial API-ready inventory", async () => {
+    await writeFile(
+      path.join(directory, "docs/openapi.yaml"),
+      "openapi: 3.1.0\npaths:\n  /checkout:\n    post:\n      operationId: checkout\n      responses: {}\n  /checkout/{id}:\n    get:\n      operationId: checkoutById\n      responses: {}\n",
+      "utf8",
+    );
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Implement the full checkout contract",
+      scope: "ui",
+      mode: "brief",
+      briefPath: "briefs/checkout.md",
+      figmaUrl: FIGMA_URL,
+      openApiPaths: ["docs/openapi.yaml"],
+    });
+    expect(started.deliveryProfile.openApiOperations.map((item) => item.operationKey)).toEqual([
+      "POST /checkout",
+      "GET /checkout/{id}",
+    ]);
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "figma-bundle",
+        provider: "host-connected-figma",
+        capturedAt: "2026-07-13T00:00:00.000Z",
+        fileUrl: FIGMA_URL,
+        nodeIds: ["1:2"],
+        manifestPath: "figma/design-context.json",
+        visualTargets: figmaVisualTargets(),
+        artifactPaths: ["figma/design-context.json", "visual/diff.png"],
+      },
+    });
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "contracts",
+        status: "passed",
+        summary: "Checkout contracts ready.",
+        artifactPaths: ["contracts/requirements.json"],
+        requirementManifest: requirements("checkout"),
+      },
+    });
+
+    await expect(submitApiReady(service, started.runId)).rejects.toThrow(/GET \/checkout\/\{id\}/);
+  });
+
   it("makes both XS and XL reachable at intake and reports every required validation", async () => {
     const tiny = await service.start({
       projectRoot: directory,
@@ -2373,18 +2664,29 @@ describe("WorkflowService", () => {
       mode: "feature",
       changeKind: "feature",
       publication: "draft",
+      briefPath: "briefs/checkout.md",
+      figmaUrl: FIGMA_URL,
+      openApiPaths: ["docs/openapi.yaml"],
     });
 
     expect(tiny.workload.size).toBe("XS");
     expect(complex.workload.size).toBe("XL");
-    expect(complex.requiredValidations).toEqual([
-      "functional",
-      "accessibility",
-      "targeted-feature-e2e",
-      "feature-video",
-      "api-ready",
-      "draft-publication-preflight",
-    ]);
+    expect(complex.requiredValidations).toEqual(
+      expect.arrayContaining([
+        "functional",
+        "visual",
+        "accessibility",
+        "performance",
+        "figma-bundle",
+        "visual-comparison",
+        "api-coverage",
+        "performance-evidence",
+        "targeted-feature-e2e",
+        "feature-video",
+        "api-ready",
+        "draft-publication-preflight",
+      ]),
+    );
   });
 
   it("refines the intake workload from contract signals without adding a stage", async () => {
@@ -2396,6 +2698,21 @@ describe("WorkflowService", () => {
       changeKind: "feature",
       publication: "draft",
       briefPath: "briefs/checkout.md",
+      figmaUrl: FIGMA_URL,
+      openApiPaths: ["docs/openapi.yaml"],
+    });
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "figma-bundle",
+        provider: "host-connected-figma",
+        capturedAt: "2026-07-13T00:00:00.000Z",
+        fileUrl: FIGMA_URL,
+        nodeIds: ["1:2"],
+        manifestPath: "figma/design-context.json",
+        visualTargets: figmaVisualTargets(),
+        artifactPaths: ["figma/design-context.json", "visual/diff.png"],
+      },
     });
 
     const refined = await service.submit({
@@ -2442,6 +2759,8 @@ describe("WorkflowService", () => {
         requestText: "Implement the supplied product brief",
         mode: "brief",
         briefPath,
+        figmaUrl: FIGMA_URL,
+        openApiPaths: ["docs/openapi.yaml"],
       }),
     ).rejects.toThrow(/briefPath|1,000|too_big/i);
 
@@ -2457,6 +2776,12 @@ describe("WorkflowService", () => {
       await mkdir(path.dirname(canonicalBrief), { recursive: true });
       await writeFile(canonicalBrief, "Implement the supplied product brief.\n", "utf8");
       await symlink(canonicalBriefPath, path.join(compactProjectRoot, "brief.md"));
+      await mkdir(path.join(compactProjectRoot, "docs"), { recursive: true });
+      await writeFile(
+        path.join(compactProjectRoot, "docs", "openapi.yaml"),
+        "openapi: 3.1.0\npaths: {}\n",
+        "utf8",
+      );
 
       await expect(
         service.start({
@@ -2464,6 +2789,8 @@ describe("WorkflowService", () => {
           requestText: "Implement the supplied product brief",
           mode: "brief",
           briefPath: "brief.md",
+          figmaUrl: FIGMA_URL,
+          openApiPaths: ["docs/openapi.yaml"],
         }),
       ).rejects.toThrow(/briefPath|Source path|1,000|too_big/i);
 
@@ -2482,6 +2809,8 @@ describe("WorkflowService", () => {
       changeKind: "feature",
       publication: "draft",
       briefPath: "briefs/checkout.md",
+      figmaUrl: FIGMA_URL,
+      openApiPaths: ["docs/openapi.yaml"],
     });
 
     expect(status.stages).toHaveLength(8);
@@ -2490,6 +2819,13 @@ describe("WorkflowService", () => {
       changeKind: "feature",
       publication: "draft",
       briefPath: "briefs/checkout.md",
+      figmaUrl: FIGMA_URL,
+      openApiPaths: ["docs/openapi.yaml"],
+      requirements: {
+        visualComparison: true,
+        apiCoverage: true,
+        performanceEvidence: true,
+      },
     });
     expect(status.scope).toMatchObject({ ui: true, api: true });
     const stored = await store.get(status.runId);
@@ -2499,6 +2835,406 @@ describe("WorkflowService", () => {
           source.locator.type === "inline" && source.locator.label === "brief:briefs/checkout.md",
       ),
     ).toBe(true);
+  });
+
+  it("extracts a PDF brief with page provenance before intake classification", async () => {
+    await writeFile(
+      path.join(directory, "briefs", "checkout.pdf"),
+      minimalTextPdf("Acceptance criterion: the checkout submits exactly once."),
+    );
+
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Implement the supplied checkout brief",
+      mode: "brief",
+      briefPath: "briefs/checkout.pdf",
+      figmaUrl: FIGMA_URL,
+      openApiPaths: ["docs/openapi.yaml"],
+    });
+    const run = await store.get(started.runId);
+    const briefSource = run.sources.find(
+      (source) =>
+        source.locator.type === "inline" && source.locator.label === "brief:briefs/checkout.pdf",
+    );
+
+    expect(briefSource).toBeDefined();
+    expect(
+      run.evidence.some(
+        (evidence) =>
+          evidence.sourceId === briefSource!.id &&
+          evidence.excerpt?.includes("[Page 1]") === true &&
+          evidence.excerpt.includes("checkout submits exactly once"),
+      ),
+    ).toBe(true);
+    expect(JSON.stringify(run.evidence)).not.toContain("%PDF-1.4");
+  });
+
+  it("canonicalizes a separate legacy project and forces a visual migration profile", async () => {
+    const legacyRoot = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-legacy-"));
+    try {
+      await writeFile(path.join(legacyRoot, "package.json"), '{"name":"legacy"}\n', "utf8");
+
+      const started = await service.start({
+        projectRoot: directory,
+        legacyProjectRoot: legacyRoot,
+        requestText: "Migrate the checkout screen from the legacy project",
+        mode: "legacy",
+        changeKind: "migration",
+      });
+
+      expect(started).toMatchObject({
+        scope: { ui: true, hasVisualBaseline: true },
+        deliveryProfile: {
+          mode: "legacy",
+          legacyProjectRoot: await import("node:fs/promises").then(({ realpath }) =>
+            realpath(legacyRoot),
+          ),
+          publication: "draft",
+          requirements: {
+            legacyBaseline: true,
+            legacyInventory: true,
+            visualComparison: true,
+            apiCoverage: false,
+            performanceEvidence: true,
+          },
+        },
+      });
+      expect(started.requiredValidations).toEqual(
+        expect.arrayContaining([
+          "visual",
+          "accessibility",
+          "legacy-baseline",
+          "legacy-inventory",
+          "performance-evidence",
+          "draft-publication-preflight",
+        ]),
+      );
+    } finally {
+      await rm(legacyRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("derives legacy API operations without requiring a separate OpenAPI source", async () => {
+    const legacyRoot = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-legacy-api-"));
+    try {
+      await mkdir(path.join(legacyRoot, "src"));
+      await writeFile(
+        path.join(legacyRoot, "src", "checkout.ts"),
+        'export async function submit(){ return checkoutClient.post("/API/Checkout"); }\n',
+        "utf8",
+      );
+
+      const started = await service.start({
+        projectRoot: directory,
+        legacyProjectRoot: legacyRoot,
+        requestText: "Migrate the checkout screen and its existing API integration",
+        mode: "legacy",
+        changeKind: "migration",
+      });
+
+      expect(started.deliveryProfile.openApiPaths).toEqual([]);
+      expect(started.deliveryProfile.openApiOperations).toEqual([
+        expect.objectContaining({
+          operationKey: "POST /API/Checkout",
+          path: "/API/Checkout",
+          sourceLocator: "external-legacy-project/src/checkout.ts",
+        }),
+      ]);
+      expect(started.deliveryProfile.requirements.apiCoverage).toBe(true);
+      expect(started.requiredValidations).toEqual(
+        expect.arrayContaining(["api-ready", "api-coverage"]),
+      );
+    } finally {
+      await rm(legacyRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves an ambiguous legacy API method from uniquely matching OpenAPI", async () => {
+    const legacyRoot = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-legacy-api-unknown-"));
+    try {
+      await mkdir(path.join(legacyRoot, "src"));
+      await writeFile(
+        path.join(legacyRoot, "src", "checkout.ts"),
+        'export async function load(){ return http.request({ url: "//user:password@api.example/API/Checkout?access_token=do-not-persist#fragment" }); }\n',
+        "utf8",
+      );
+
+      await writeFile(
+        path.join(directory, "docs/openapi.yaml"),
+        "openapi: 3.1.0\npaths:\n  /API/Checkout:\n    post:\n      operationId: checkout\n      responses: {}\n",
+        "utf8",
+      );
+      const started = await service.start({
+        projectRoot: directory,
+        legacyProjectRoot: legacyRoot,
+        requestText: "Migrate the checkout API",
+        mode: "legacy",
+        changeKind: "migration",
+        openApiPaths: ["docs/openapi.yaml"],
+      });
+
+      expect(started.deliveryProfile.openApiOperations).toEqual([
+        expect.objectContaining({ operationKey: "POST /API/Checkout" }),
+      ]);
+      expect(started.status).not.toBe("blocked");
+    } finally {
+      await rm(legacyRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves an ambiguous legacy API method from scoped runtime network evidence", async () => {
+    const legacyRoot = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-legacy-api-runtime-"));
+    try {
+      await mkdir(path.join(legacyRoot, "src"));
+      await writeFile(
+        path.join(legacyRoot, "src", "checkout.ts"),
+        'export async function load(){ return http.request({ url: "/API/Checkout" }); }\n',
+        "utf8",
+      );
+      await mkdir(path.join(directory, "evidence"), { recursive: true });
+      await writeFile(
+        path.join(directory, "evidence", "legacy.har"),
+        JSON.stringify({
+          log: {
+            entries: [
+              {
+                request: {
+                  method: "POST",
+                  url: "https://legacy.example/API/Checkout?access_token=do-not-persist",
+                  headers: [{ name: "Authorization", value: "Bearer do-not-persist" }],
+                },
+              },
+            ],
+          },
+        }),
+        "utf8",
+      );
+
+      const started = await service.start({
+        projectRoot: directory,
+        legacyProjectRoot: legacyRoot,
+        legacyNetworkEvidencePath: "evidence/legacy.har",
+        requestText: "Migrate the checkout API",
+        mode: "legacy",
+        changeKind: "migration",
+      });
+
+      expect(started.status).not.toBe("blocked");
+      expect(started.deliveryProfile).toMatchObject({
+        legacyNetworkEvidencePath: "evidence/legacy.har",
+        openApiOperations: [expect.objectContaining({ operationKey: "POST /API/Checkout" })],
+      });
+      expect(started.legacyInventory?.apiDiscoveryAdapters).toContain("runtime-network-har");
+      expect(JSON.stringify(await store.get(started.runId))).not.toContain("do-not-persist");
+      await writeFile(
+        path.join(directory, "evidence", "legacy.har"),
+        JSON.stringify([{ method: "GET", url: "/API/Checkout" }]),
+        "utf8",
+      );
+      await expect(
+        service.submit({
+          runId: started.runId,
+          submission: {
+            kind: "contracts",
+            status: "passed",
+            summary: "Attempted contracts after changing the pinned network evidence.",
+            artifactPaths: ["contracts/requirements.json"],
+            requirementManifest: requirements("checkout-api"),
+          },
+        }),
+      ).rejects.toThrow(/LEGACY_RUNTIME_EVIDENCE_CHANGED/);
+    } finally {
+      await rm(legacyRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects malformed runtime network evidence before creating a durable Run", async () => {
+    const legacyRoot = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-legacy-api-runtime-"));
+    try {
+      await mkdir(path.join(legacyRoot, "src"));
+      await writeFile(path.join(legacyRoot, "src", "checkout.ts"), "export const api = 1;\n");
+      await mkdir(path.join(directory, "evidence"), { recursive: true });
+      await writeFile(path.join(directory, "evidence", "legacy.har"), "not-json", "utf8");
+
+      await expect(
+        service.start({
+          projectRoot: directory,
+          legacyProjectRoot: legacyRoot,
+          legacyNetworkEvidencePath: "evidence/legacy.har",
+          requestText: "Migrate the checkout API",
+          mode: "legacy",
+          changeKind: "migration",
+        }),
+      ).rejects.toThrow(/JSON/i);
+      await expect(store.list()).resolves.toHaveLength(0);
+    } finally {
+      await rm(legacyRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("persists an unresolved legacy API candidate as a durable intake blocker", async () => {
+    const legacyRoot = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-legacy-api-unknown-"));
+    try {
+      await mkdir(path.join(legacyRoot, "src"));
+      await writeFile(
+        path.join(legacyRoot, "src", "checkout.ts"),
+        'export async function load(){ return http.request({ url: "//user:password@api.example/API/Checkout?access_token=do-not-persist#fragment" }); }\n',
+        "utf8",
+      );
+
+      const started = await service.start({
+        projectRoot: directory,
+        legacyProjectRoot: legacyRoot,
+        requestText: "Migrate the checkout API",
+        mode: "legacy",
+        changeKind: "migration",
+      });
+
+      expect(started).toMatchObject({
+        status: "blocked",
+        currentStage: "intake",
+        nextActions: [],
+        blockerDetails: [
+          expect.objectContaining({
+            code: "LEGACY_API_METHOD_UNKNOWN",
+            exactUnblockAction: expect.stringMatching(/OpenAPI|runtime/i),
+          }),
+        ],
+      });
+      expect(started.legacyInventory?.entries).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ normalizedKey: "UNKNOWN //api.example/API/Checkout" }),
+        ]),
+      );
+      expect(JSON.stringify(started)).not.toContain("do-not-persist");
+      expect(JSON.stringify(started)).not.toContain("password@");
+      const diagnostic = await service.ensureBlockedDiagnosticReport({ runId: started.runId });
+      expect((await artifactStore.readContent(diagnostic.digest)).toString("utf8")).not.toContain(
+        "do-not-persist",
+      );
+      const diagnosticArtifacts = (await store.get(started.runId)).artifacts.filter(
+        (artifact) => artifact.kind === "pr-report",
+      );
+      for (const artifact of diagnosticArtifacts) {
+        expect((await artifactStore.readContent(artifact.digest)).toString("utf8")).not.toContain(
+          "do-not-persist",
+        );
+        expect((await artifactStore.readContent(artifact.digest)).toString("utf8")).not.toContain(
+          "password@",
+        );
+      }
+      await expect(
+        service.submit({
+          runId: started.runId,
+          submission: {
+            kind: "contracts",
+            status: "passed",
+            summary: "Attempted to bypass the blocked intake.",
+            artifactPaths: ["contracts/requirements.json"],
+            requirementManifest: requirements("checkout-api"),
+          },
+        }),
+      ).rejects.toThrow(/intake.*pass/i);
+    } finally {
+      await rm(legacyRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects missing, non-directory, and target-equivalent legacy project roots", async () => {
+    await expect(
+      service.start({
+        projectRoot: directory,
+        legacyProjectRoot: path.join(directory, "missing"),
+        requestText: "Migrate the legacy screen",
+        mode: "legacy",
+      }),
+    ).rejects.toThrow(/legacy project.*exist/i);
+
+    await expect(
+      service.start({
+        projectRoot: directory,
+        legacyProjectRoot: path.join(directory, "briefs", "checkout.md"),
+        requestText: "Migrate the legacy screen",
+        mode: "legacy",
+      }),
+    ).rejects.toThrow(/legacy project.*directory/i);
+
+    await expect(
+      service.start({
+        projectRoot: directory,
+        legacyProjectRoot: directory,
+        requestText: "Migrate the legacy screen",
+        mode: "legacy",
+      }),
+    ).rejects.toThrow(/different/i);
+
+    const aliasRoot = path.join(os.tmpdir(), "spec-to-pr-target-alias-" + path.basename(directory));
+    await symlink(directory, aliasRoot);
+    try {
+      await expect(
+        service.start({
+          projectRoot: directory,
+          legacyProjectRoot: aliasRoot,
+          requestText: "Migrate the legacy screen",
+          mode: "legacy",
+        }),
+      ).rejects.toThrow(/different/i);
+    } finally {
+      await rm(aliasRoot, { force: true });
+    }
+
+    await expect(store.list()).resolves.toHaveLength(0);
+  });
+
+  it("rejects nested legacy/target roots and detects legacy mutation after intake", async () => {
+    const nestedLegacy = path.join(directory, "nested-legacy");
+    await mkdir(nestedLegacy);
+    await expect(
+      service.start({
+        projectRoot: directory,
+        legacyProjectRoot: nestedLegacy,
+        requestText: "Migrate the legacy screen",
+        mode: "legacy",
+      }),
+    ).rejects.toThrow(/overlap|separate/i);
+    await expect(
+      service.start({
+        projectRoot: directory,
+        legacyProjectRoot: path.dirname(directory),
+        requestText: "Migrate the legacy screen",
+        mode: "legacy",
+      }),
+    ).rejects.toThrow(/overlap|separate/i);
+
+    const legacyRoot = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-legacy-fresh-"));
+    try {
+      await mkdir(path.join(legacyRoot, "src"));
+      const legacySource = path.join(legacyRoot, "src", "route.ts");
+      await writeFile(legacySource, 'export const route = { path: "/before" };\n', "utf8");
+      const started = await service.start({
+        projectRoot: directory,
+        legacyProjectRoot: legacyRoot,
+        requestText: "Migrate the legacy screen",
+        mode: "legacy",
+      });
+      await writeFile(legacySource, 'export const route = { path: "/after" };\n', "utf8");
+
+      await expect(
+        service.submit({
+          runId: started.runId,
+          submission: {
+            kind: "contracts",
+            status: "passed",
+            summary: "Attempted stale contracts.",
+            artifactPaths: ["contracts/requirements.json"],
+            baselinePaths: [],
+            requirementManifest: requirements("legacy-freshness"),
+          },
+        }),
+      ).rejects.toThrow(/LEGACY_SOURCE_CHANGED/);
+    } finally {
+      await rm(legacyRoot, { recursive: true, force: true });
+    }
   });
 
   it("composes feature, brief, Figma, supporting docs, OpenAPI, and guidance sources", async () => {
@@ -2528,6 +3264,7 @@ describe("WorkflowService", () => {
       publication: "draft",
       briefPath: "briefs/checkout.md",
       figmaUrl: FIGMA_URL,
+      openApiPaths: ["docs/openapi.yaml"],
       docsPath: "docs/business-rules.md",
       docsPaths: ["docs/business-rules.md"],
       openApiPath: "docs/openapi.yaml",
@@ -2904,14 +3641,26 @@ describe("WorkflowService", () => {
   });
 
   it("blocks legacy contracts without a focused baseline", async () => {
+    const legacyRoot = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-legacy-contract-"));
+    await mkdir(path.join(legacyRoot, "src"), { recursive: true });
+    const legacySourcePath = path.join(legacyRoot, "src", "parser.ts");
+    const legacySource = 'export const parserRoute = { path: "/parser" };\n';
+    await writeFile(legacySourcePath, legacySource, "utf8");
+    await writeFile(
+      path.join(directory, "test-results", "unit.json"),
+      JSON.stringify({ status: "passed" }),
+      "utf8",
+    );
     const started = await service.start({
       projectRoot: directory,
-      requestText: "Fix parsing behavior in the existing project",
-      scope: "non-ui",
+      legacyProjectRoot: legacyRoot,
+      requestText: "Migrate parsing behavior from the legacy project",
       mode: "legacy",
-      changeKind: "fix",
+      changeKind: "migration",
       publication: "draft",
     });
+    const legacyFeatureKey = started.legacyInventory?.entries[0]?.featureKey;
+    if (legacyFeatureKey === undefined) throw new Error("Missing runtime legacy inventory");
 
     await expect(
       service.submit({
@@ -2933,9 +3682,39 @@ describe("WorkflowService", () => {
         kind: "contracts",
         status: "passed",
         summary: "Captured current behavior and the requested delta.",
-        artifactPaths: ["contracts/requirements.json", "contracts/legacy-baseline.md"],
-        baselinePaths: ["contracts/legacy-baseline.md"],
+        artifactPaths: [
+          "contracts/requirements.json",
+          "contracts/legacy-baseline.md",
+          "visual/legacy.png",
+          "test-results/unit.json",
+        ],
+        baselinePaths: ["contracts/legacy-baseline.md", "visual/legacy.png"],
         requirementManifest: requirements("legacy-fix"),
+        legacyScopeKeys: [legacyFeatureKey],
+        legacyCoverage: [
+          {
+            featureKey: legacyFeatureKey,
+            requirementIds: ["legacy-fix"],
+            status: "planned",
+            targetFiles: [],
+            executableEvidencePaths: [],
+            rationale: "The parser route is explicitly planned for migration.",
+          },
+        ],
+        visualTargets: [
+          {
+            targetId: "legacy-parser",
+            name: "Legacy parser",
+            state: "default",
+            route: "/parser",
+            baselineKind: "legacy-screenshot",
+            baselinePath: "visual/legacy.png",
+            viewport: { width: 1, height: 1 },
+            deviceScaleFactor: 1,
+            fixture: "legacy:parser-default",
+            masks: [],
+          },
+        ],
         legacyBaseline: {
           scope: "parser behavior changed by this fix",
           evidencePaths: ["contracts/legacy-baseline.md"],
@@ -2951,6 +3730,77 @@ describe("WorkflowService", () => {
     });
 
     expect(accepted.nextActions[0]?.kind).toBe("implement");
+    await writeFile(legacySourcePath, 'export const parserRoute = { path: "/changed" };\n');
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "implementation",
+          status: "passed",
+          summary: "Attempted implementation against a changed legacy source.",
+          apiReady: false,
+          uiChanged: true,
+          changedFiles: ["src/parser.ts", "test-results/unit.json"],
+          artifactPaths: ["test-results/unit.json"],
+        },
+      }),
+    ).rejects.toThrow(/LEGACY_SOURCE_CHANGED/);
+    await writeFile(legacySourcePath, legacySource, "utf8");
+    await changeSource(directory, "src/parser.ts", "export const parser = 'migrated';\n");
+    const performanceEvidence = {
+      lab: {
+        route: "/parser",
+        tool: "Lighthouse",
+        command: "pnpm lighthouse /parser",
+        deviceProfile: "mobile",
+        throttling: "simulated-4g",
+        sampleCount: 3,
+        resultPath: "test-results/performance.json",
+        metrics: { lcpMs: 2_100, cls: 0.04, tbtMs: 120 },
+      },
+      field: { status: "unavailable", reason: "No production field source." },
+    } as const;
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "implementation",
+          status: "passed",
+          summary: "Migration claimed without current coverage.",
+          apiReady: false,
+          uiChanged: true,
+          changedFiles: ["src/parser.ts", "test-results/unit.json"],
+          artifactPaths: ["test-results/unit.json", "test-results/performance.json"],
+          performanceEvidence,
+        },
+      }),
+    ).rejects.toThrow(/legacy coverage/i);
+    const implemented = await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "implementation",
+        status: "passed",
+        summary: "Parser migration implemented and verified.",
+        apiReady: false,
+        uiChanged: true,
+        changedFiles: ["src/parser.ts", "test-results/unit.json"],
+        artifactPaths: ["test-results/unit.json", "test-results/performance.json"],
+        legacyCoverage: [
+          {
+            featureKey: legacyFeatureKey,
+            requirementIds: ["legacy-fix"],
+            status: "migrated",
+            targetFiles: ["src/parser.ts"],
+            executableEvidencePaths: ["test-results/unit.json"],
+            rationale:
+              "Current packet contains the migrated route and passing regression evidence.",
+          },
+        ],
+        performanceEvidence,
+      },
+    });
+    expect(implemented.nextActions.map((action) => action.kind)).toContain("compare-visuals");
+    await rm(legacyRoot, { recursive: true, force: true });
   });
 
   it("blocks Figma contracts until a real bundle is submitted", async () => {
@@ -2963,7 +3813,7 @@ describe("WorkflowService", () => {
       changeKind: "design",
       figmaUrl,
     });
-    expect(started.deliveryProfile.publication).toBe("none");
+    expect(started.deliveryProfile.publication).toBe("draft");
 
     await expect(
       service.submit({
@@ -2987,6 +3837,7 @@ describe("WorkflowService", () => {
         fileUrl: figmaUrl,
         nodeIds: ["1:2"],
         manifestPath: "figma/design-context.json",
+        visualTargets: figmaVisualTargets(),
         artifactPaths: ["figma/design-context.json", "visual/diff.png"],
       },
     });
@@ -3006,6 +3857,7 @@ describe("WorkflowService", () => {
           fileUrl: figmaUrl,
           nodeIds: ["1:2"],
           manifestPath: "figma/design-context.json",
+          visualTargets: figmaVisualTargets(),
           artifactPaths: ["figma/design-context.json", "visual/diff.png"],
         },
       }),
@@ -3052,8 +3904,24 @@ describe("WorkflowService", () => {
       mode: "feature",
       changeKind: "feature",
       publication: "draft",
+      briefPath: "briefs/checkout.md",
+      figmaUrl: FIGMA_URL,
+      openApiPaths: ["docs/openapi.yaml"],
       guidancePaths: ["docs/architecture/ARCHITECTURE.md", markdownBearingGuidancePath],
       skillHints: ["react-best-practices", "api-generator", "not-installed"],
+    });
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "figma-bundle",
+        provider: "host-connected-figma",
+        capturedAt: "2026-07-13T00:00:00.000Z",
+        fileUrl: FIGMA_URL,
+        nodeIds: ["1:2"],
+        manifestPath: "figma/design-context.json",
+        visualTargets: figmaVisualTargets(),
+        artifactPaths: ["figma/design-context.json", "visual/diff.png"],
+      },
     });
     await service.submit({
       runId: started.runId,
@@ -3067,7 +3935,32 @@ describe("WorkflowService", () => {
           explicit: ["docs/architecture/ARCHITECTURE.md", markdownBearingGuidancePath],
           discovered: ["AGENTS.md"],
           skillHints: ["react-best-practices", "api-generator"],
+          appliedSkills: ["react-best-practices", "api-generator"],
         },
+      },
+    });
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "api-ready",
+        status: "passed",
+        summary: "Checkout API artifacts and contract test are ready.",
+        implementationContextId: FEATURE_CONTEXT_ID,
+        artifactPaths: [
+          "generated/api.ts",
+          "generated/schema.ts",
+          "generated/wrapper.ts",
+          "generated/mock.ts",
+          "test-results/api-contract.json",
+        ],
+        apiArtifacts: {
+          types: ["generated/api.ts"],
+          schemas: ["generated/schema.ts"],
+          wrappers: ["generated/wrapper.ts"],
+          mocks: ["generated/mock.ts"],
+          contractTests: ["test-results/api-contract.json"],
+        },
+        operations: checkoutApiReadyOperations(),
       },
     });
 
@@ -3078,7 +3971,8 @@ describe("WorkflowService", () => {
           kind: "implementation",
           status: "passed",
           summary: "Feature implemented without targeted evidence.",
-          apiReady: false,
+          apiReady: true,
+          implementationContextId: FEATURE_CONTEXT_ID,
           uiChanged: true,
           changedFiles: ["src/checkout.tsx"],
           artifactPaths: ["test-results/unit.json"],
@@ -3090,13 +3984,15 @@ describe("WorkflowService", () => {
       kind: "implementation",
       status: "passed",
       summary: "Feature implemented with one targeted E2E recording.",
-      apiReady: false,
+      apiReady: true,
       uiChanged: true,
       changedFiles: ["src/checkout.tsx"],
       artifactPaths: [
         "test-results/contract.json",
         "test-results/checkout.json",
         "test-results/checkout.mp4",
+        "test-results/api-coverage.json",
+        "test-results/performance.json",
       ],
       implementationContextId: FEATURE_CONTEXT_ID,
       featureEvidence: {
@@ -3105,6 +4001,35 @@ describe("WorkflowService", () => {
         testCommand: "playwright test e2e/checkout.spec.ts",
         resultPath: "test-results/checkout.json",
         videoPath: "test-results/checkout.mp4",
+      },
+      apiCoverage: [
+        {
+          operationKey: "POST /checkout",
+          method: "POST",
+          path: "/checkout",
+          operationId: "checkout",
+          status: "exercised",
+          productionCallSites: ["src/checkout.tsx#submitCheckout"],
+          mockHandlers: ["generated/mock.ts#checkout"],
+          executableEvidencePaths: ["test-results/api-coverage.json"],
+          blocking: false,
+        },
+      ],
+      performanceEvidence: {
+        lab: {
+          route: "/checkout",
+          tool: "Lighthouse",
+          command: "pnpm lighthouse /checkout",
+          deviceProfile: "mobile",
+          throttling: "simulated-4g",
+          sampleCount: 3,
+          resultPath: "test-results/performance.json",
+          metrics: { lcpMs: 2_100, cls: 0.04, tbtMs: 120 },
+        },
+        field: {
+          status: "unavailable",
+          reason: "No existing CrUX or authorized RUM source.",
+        },
       },
     } as const;
 
@@ -3152,20 +4077,93 @@ describe("WorkflowService", () => {
     });
 
     expect(implemented.nextActions.map((action) => action.kind).sort()).toEqual([
+      "compare-visuals",
+      "review-functional",
+    ]);
+    const visualAction = implemented.nextActions.find(
+      (action) => action.kind === "compare-visuals",
+    );
+    if (visualAction === undefined || !("reviewPacketId" in visualAction)) {
+      throw new Error("Missing visual comparison action");
+    }
+    const featureActualPath = `visual/actual/${visualAction.reviewPacketId}/checkout.png`;
+    await mkdir(path.dirname(path.join(directory, featureActualPath)), { recursive: true });
+    const featureActualBytes = PNG.sync.write(new PNG({ width: 1, height: 1 }));
+    await writeFile(path.join(directory, featureActualPath), featureActualBytes);
+    const featureCapture = {
+      targetId: "checkout-default",
+      route: "/checkout",
+      state: "default",
+      viewport: { width: 1, height: 1 },
+      deviceScaleFactor: 1,
+      fixture: "mock:checkout",
+      provider: "playwright",
+      capturedAt: "2026-07-20T00:00:00.000Z",
+      actualPath: featureActualPath,
+      actualDigest: `sha256:${createHash("sha256").update(featureActualBytes).digest("hex")}`,
+    };
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "visual-comparison",
+          reviewPacketId: visualAction.reviewPacketId,
+          captures: [{ ...featureCapture, route: "/wrong" }],
+          artifactPaths: [featureActualPath],
+        },
+      }),
+    ).rejects.toThrow(/capture manifest.*target/i);
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "visual-comparison",
+          reviewPacketId: visualAction.reviewPacketId,
+          captures: [{ ...featureCapture, actualDigest: `sha256:${"0".repeat(64)}` }],
+          artifactPaths: [featureActualPath],
+        },
+      }),
+    ).rejects.toThrow(/VISUAL_CAPTURE_DIGEST_MISMATCH/);
+    const visuallyCompared = await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "visual-comparison",
+        reviewPacketId: visualAction.reviewPacketId,
+        captures: [featureCapture],
+        artifactPaths: [featureActualPath],
+      },
+    });
+    expect(visuallyCompared.nextActions.map((action) => action.kind).sort()).toEqual([
       "review-design",
       "review-functional",
     ]);
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "visual-comparison",
+          reviewPacketId: visualAction.reviewPacketId,
+          captures: [featureCapture],
+          artifactPaths: [featureActualPath],
+        },
+      }),
+    ).rejects.toThrow(/already has a passing visual comparison/);
     await service.submit({
       runId: started.runId,
       submission: {
         kind: "design-review",
-        reviewPacketId: reviewPacketId(implemented, "review-design"),
+        reviewPacketId: reviewPacketId(visuallyCompared, "review-design"),
         verdict: "approved",
         summary: "Feature design passed.",
         findings: [],
         requirements: [{ id: "checkout-feature", verdict: "accepted" }],
         artifactPaths: ["visual/diff.png"],
         gateResults: [
+          {
+            id: "visual",
+            status: "passed",
+            evidencePaths: ["visual/diff.png"],
+          },
           {
             id: "accessibility",
             status: "passed",
@@ -3190,32 +4188,73 @@ describe("WorkflowService", () => {
             status: "passed",
             evidencePaths: ["test-results/checkout.json"],
           },
+          {
+            id: "performance",
+            status: "passed",
+            evidencePaths: ["test-results/checkout.json"],
+          },
         ],
       },
     });
     await service.advance({ runId: started.runId, until: "report" });
     const report = await reportMarkdown(store, artifactStore, started.runId);
-    expect(report).toContain("## Project guidance");
-    expect(report).toContain("### Explicit");
-    const explicitGuidanceSection = report.slice(
-      report.indexOf("### Explicit"),
-      report.indexOf("### Automatically discovered"),
-    );
-    expect(explicitGuidanceSection.split("\n").filter((line) => line.startsWith("- "))).toEqual([
-      "- docs/architecture/ARCHITECTURE.md",
-      "- docs/rules&#92;n&#35;&#35; Injected heading&#92;n&#60;&#33;&#45;&#45; injected&#45;comment &#45;&#45;&#62; &#91;label&#93;&#40;target&#41;.md",
-    ]);
-    expect(explicitGuidanceSection).not.toContain("\n## Injected heading");
-    expect(explicitGuidanceSection).not.toContain("<!-- injected-comment -->");
-    expect(report).toContain("### Automatically discovered");
+    expect(report).toContain("## 3. Input sources and pinned provenance");
+    expect(report).toContain("docs/architecture/ARCHITECTURE.md");
+    expect(report).toContain("docs/rules&#92;n&#35;&#35; Injected heading");
+    expect(report).not.toContain("\n## Injected heading");
+    expect(report).not.toContain("<!-- injected-comment -->");
     expect(report).toContain("AGENTS.md");
-    expect(report).toContain("## Applied optional skills");
+    expect(report).toContain("### Applied skills");
     expect(report).toContain("react-best-practices");
     expect(report).toContain("api-generator");
     expect(report).not.toContain("not-installed");
-    expect(report).toContain("## Requirement traceability");
-    expect(report).toContain("## Feature E2E video");
+    expect(report).toContain("## 4. Requirement traceability");
+    expect(report).toContain("## 12. Feature-targeted E2E and video");
     expect(report).toContain("test-results/checkout.mp4");
+    const readyRun = await store.get(started.runId);
+    const jsonReportArtifact = readyRun.artifacts.find(
+      (artifact) => artifact.metadata["reportKind"] === "pr-report-v2-json",
+    );
+    if (jsonReportArtifact === undefined) throw new Error("Missing pr-report-v2 JSON");
+    const jsonReport = JSON.parse(
+      (await artifactStore.readContent(jsonReportArtifact.digest)).toString("utf8"),
+    ) as Record<string, unknown>;
+    expect(jsonReport).toMatchObject({
+      schemaVersion: "pr-report-v2.1",
+      sectionStatuses: {
+        api: "complete",
+        legacy: "not-applicable",
+        visual: "complete",
+        "functional-review": "complete",
+        "design-review": "complete",
+        performance: "complete",
+        "feature-evidence": "complete",
+      },
+      mode: "feature",
+      api: {
+        applicable: true,
+        operations: [expect.objectContaining({ operationKey: "POST /checkout" })],
+      },
+      visual: {
+        applicable: true,
+        status: "passed",
+        results: [
+          expect.objectContaining({
+            targetId: "checkout-default",
+            metrics: expect.objectContaining({ threshold: 0.98 }),
+          }),
+        ],
+      },
+      performance: {
+        applicable: true,
+        evidence: {
+          field: { status: "unavailable" },
+          lab: { metrics: { tbtMs: 120 } },
+        },
+      },
+      featureEvidence: { testCount: 1, videoPath: "test-results/checkout.mp4" },
+    });
+    expect(JSON.stringify(jsonReport)).not.toContain('"inpMs":120');
   });
 
   it("rejects malformed Figma manifests and fake visual files", async () => {
@@ -3234,6 +4273,7 @@ describe("WorkflowService", () => {
       fileUrl: FIGMA_URL,
       nodeIds: ["1:2"],
       manifestPath: "figma/design-context.json",
+      visualTargets: figmaVisualTargets(),
       artifactPaths: ["figma/design-context.json", "visual/diff.png"],
     } as const;
 
@@ -3271,6 +4311,7 @@ describe("WorkflowService", () => {
         fileUrl: FIGMA_URL,
         nodeIds: ["1:2"],
         manifestPath: "figma/design-context.json",
+        visualTargets: figmaVisualTargets(),
         artifactPaths: ["figma/design-context.json", "visual/diff.png"],
       },
     } as const;
@@ -3282,6 +4323,216 @@ describe("WorkflowService", () => {
     expect(
       run.artifacts.filter((artifact) => artifact.kind === "figma-design-context"),
     ).toHaveLength(1);
+  });
+
+  it("computes visual evidence in the runtime, binds it to the packet, and caps repairs at three", async () => {
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Implement the supplied checkout design",
+      scope: "ui",
+      mode: "figma",
+      changeKind: "design",
+      figmaUrl: FIGMA_URL,
+    });
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "figma-bundle",
+        provider: "host-connected-figma",
+        capturedAt: "2026-07-13T00:00:00.000Z",
+        fileUrl: FIGMA_URL,
+        nodeIds: ["1:2"],
+        manifestPath: "figma/design-context.json",
+        visualTargets: figmaVisualTargets(),
+        artifactPaths: ["figma/design-context.json", "visual/diff.png"],
+      },
+    });
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "contracts",
+        status: "passed",
+        summary: "Design contract ready.",
+        artifactPaths: ["contracts/requirements.json"],
+        requirementManifest: requirements("figma-screen"),
+      },
+    });
+    await changeSource(directory, "src/checkout.tsx", "export const checkout = 'visual';\n");
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "implementation",
+          status: "passed",
+          summary: "Rendered without a deterministic mock contract.",
+          apiReady: false,
+          uiChanged: true,
+          changedFiles: ["src/checkout.tsx"],
+          artifactPaths: ["test-results/unit.json"],
+        },
+      }),
+    ).rejects.toThrow(/deterministic mock/i);
+    const implementationSubmission = {
+      kind: "implementation",
+      status: "passed",
+      summary: "Rendered the checkout target.",
+      apiReady: false,
+      uiChanged: true,
+      changedFiles: ["mocks/checkout.json", "mocks/manifest.json", "src/checkout.tsx"],
+      artifactPaths: ["test-results/unit.json", "mocks/manifest.json", "mocks/checkout.json"],
+      mockDataEvidence: {
+        manifestPath: "mocks/manifest.json",
+        fixturePaths: ["mocks/checkout.json"],
+      },
+    } as const;
+    for (const invalidFixture of ["not json", "null", "1", '"scalar"']) {
+      await writeFile(path.join(directory, "mocks/checkout.json"), invalidFixture, "utf8");
+      await expect(
+        service.submit({ runId: started.runId, submission: implementationSubmission }),
+      ).rejects.toThrow(/Mock fixture/i);
+    }
+    const validFixture = Buffer.from(JSON.stringify([{ state: "checkout" }]), "utf8");
+    await writeFile(path.join(directory, "mocks/checkout.json"), validFixture);
+    await writeFile(
+      path.join(directory, "mocks/manifest.json"),
+      JSON.stringify({
+        deterministic: true,
+        fixtures: [
+          {
+            path: "mocks/checkout.json",
+            sha256: `sha256:${"0".repeat(64)}`,
+          },
+        ],
+      }),
+      "utf8",
+    );
+    await expect(
+      service.submit({ runId: started.runId, submission: implementationSubmission }),
+    ).rejects.toThrow(/SHA-256 digests/i);
+    await writeFile(
+      path.join(directory, "mocks/manifest.json"),
+      JSON.stringify({
+        deterministic: true,
+        fixtures: [
+          {
+            path: "mocks/checkout.json",
+            sha256: `sha256:${createHash("sha256").update(validFixture).digest("hex")}`,
+          },
+        ],
+      }),
+      "utf8",
+    );
+    const implemented = await service.submit({
+      runId: started.runId,
+      submission: implementationSubmission,
+    });
+    const compareAction = implemented.nextActions.find(
+      (action) => action.kind === "compare-visuals",
+    );
+    if (compareAction === undefined || !("reviewPacketId" in compareAction)) {
+      throw new Error("Missing visual comparison action");
+    }
+
+    const actualDirectory = path.join(directory, "visual", "actual", compareAction.reviewPacketId);
+    await mkdir(actualDirectory, { recursive: true });
+    const visualSubmission = async (name: string, rgba: [number, number, number, number]) => {
+      const image = new PNG({ width: 1, height: 1 });
+      image.data.set(rgba);
+      const actualPath = `visual/actual/${compareAction.reviewPacketId}/${name}.png`;
+      const bytes = PNG.sync.write(image);
+      await writeFile(path.join(directory, actualPath), bytes);
+      return {
+        kind: "visual-comparison" as const,
+        reviewPacketId: compareAction.reviewPacketId,
+        captures: [
+          {
+            targetId: "checkout-default",
+            route: "/checkout",
+            state: "default",
+            viewport: { width: 1, height: 1 },
+            deviceScaleFactor: 1,
+            fixture: "mock:checkout",
+            provider: "playwright",
+            capturedAt: "2026-07-20T00:00:00.000Z",
+            actualPath,
+            actualDigest: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
+          },
+        ],
+        artifactPaths: [actualPath],
+      };
+    };
+
+    const submissions = await Promise.all([
+      visualSubmission("attempt-1", [255, 255, 255, 255]),
+      visualSubmission("attempt-2", [192, 192, 192, 255]),
+      visualSubmission("attempt-3", [128, 128, 128, 255]),
+      visualSubmission("attempt-4", [64, 64, 64, 255]),
+    ]);
+    const outcomes = await Promise.allSettled(
+      submissions.map((submission) => service.submit({ runId: started.runId, submission })),
+    );
+    expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(3);
+    const rejected = outcomes.find((outcome) => outcome.status === "rejected");
+    expect(String(rejected?.status === "rejected" ? rejected.reason : "")).toMatch(
+      /VISUAL_ATTEMPT_LIMIT_REACHED/,
+    );
+    const acceptedIndex = outcomes.findIndex((outcome) => outcome.status === "fulfilled");
+    if (acceptedIndex < 0) throw new Error("Expected an accepted visual submission");
+    await Promise.all([
+      service.submit({ runId: started.runId, submission: submissions[acceptedIndex]! }),
+      service.submit({ runId: started.runId, submission: submissions[acceptedIndex]! }),
+    ]);
+
+    const run = await store.get(started.runId);
+    const reports = run.artifacts.filter((artifact) => artifact.kind === "visual-report");
+    expect(reports).toHaveLength(3);
+    expect(
+      reports.every(
+        (artifact) =>
+          artifact.metadata["reviewPacketId"] === compareAction.reviewPacketId &&
+          artifact.metadata["visualStatus"] === "failed",
+      ),
+    ).toBe(true);
+    const thirdReport = reports.find(
+      (artifact) => artifact.metadata["visualComparisonAttempt"] === 3,
+    );
+    if (thirdReport === undefined) throw new Error("Missing third visual report");
+    const lastReport = JSON.parse(
+      (await artifactStore.readContent(thirdReport.digest)).toString("utf8"),
+    ) as Record<string, unknown>;
+    expect(lastReport).toMatchObject({
+      attempt: 3,
+      status: "failed",
+      reviewPacketId: compareAction.reviewPacketId,
+      results: [
+        expect.objectContaining({
+          targetId: "checkout-default",
+          metrics: expect.objectContaining({ reviewMatchRatio: 0, threshold: 0.98 }),
+        }),
+      ],
+    });
+
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "design-review",
+          reviewPacketId: compareAction.reviewPacketId,
+          verdict: "approved",
+          summary: "Caller claims the design passed.",
+          requirements: [{ id: "figma-screen", verdict: "accepted" }],
+          artifactPaths: ["visual/diff.png"],
+          gateResults: [
+            { id: "visual", status: "passed", evidencePaths: ["visual/diff.png"] },
+            {
+              id: "accessibility",
+              status: "passed",
+              evidencePaths: ["visual/diff.png"],
+            },
+          ],
+        },
+      }),
+    ).rejects.toThrow(/VISUAL_ATTEMPT_LIMIT_REACHED/);
   });
 
   it("enforces contracts and API-ready before accepting UI implementation", async () => {
@@ -3440,6 +4691,15 @@ describe("WorkflowService", () => {
           },
           ...requirements("checkout-submit"),
         ],
+        workloadSignals: {
+          requirements: 18,
+          relevantFiles: 35,
+          apiOperations: 10,
+          uiSurfaces: 8,
+          figmaNodes: 40,
+          testTargets: 12,
+          uncertainty: 0,
+        },
       },
     });
     await submitApiReady(service, started.runId);
@@ -3516,13 +4776,14 @@ describe("WorkflowService", () => {
     const report = await reportMarkdown(store, artifactStore, started.runId);
     expect(report).toContain("checkout-states");
     expect(report).toContain("Checkout \\| states");
-    expect(report).toContain("Empty \\| loading<br>Success states render.");
+    expect(report).toContain("Empty \\| loading&#92;nSuccess states render.");
     expect(report).toContain("checkout-submit");
     expect(report).toContain("src/checkout.tsx");
     expect(report).toMatch(/Diff digest: sha256:[a-f0-9]{64}/);
-    expect(report).toContain("functional-review/functional: passed");
-    expect(report).toContain("## Risks");
-    expect(report).not.toContain("## Feature E2E video");
+    expect(report).toContain("## 9. Functional checks and independent review");
+    expect(report).toContain("- Verdict: approved");
+    expect(report).toContain("## 14. Risks and mitigations");
+    expect(report).toContain("## 12. Feature-targeted E2E and video");
   });
 
   it("skips design review for non-UI scope", async () => {
@@ -4257,8 +5518,28 @@ async function submitApiReady(service: WorkflowService, runId: string) {
         mocks: ["generated/mock.ts"],
         contractTests: ["test-results/api-contract.json"],
       },
+      operations: checkoutApiReadyOperations(),
     },
   });
+}
+
+function checkoutApiReadyOperations() {
+  return [
+    {
+      operationKey: "POST /checkout",
+      method: "POST" as const,
+      path: "/checkout",
+      operationId: "checkout",
+      requestTypes: ["CheckoutRequest"],
+      responseTypes: ["CheckoutResponse"],
+      schemaRefs: ["#/components/schemas/CheckoutRequest"],
+      clientSymbols: ["generated/wrapper.ts#checkout"],
+      mockHandlers: ["generated/mock.ts#checkout"],
+      contractEvidencePaths: ["test-results/api-contract.json"],
+      readiness: "contract-tested" as const,
+      blocking: false,
+    },
+  ];
 }
 
 function publishInput(runId: string) {
@@ -4280,7 +5561,25 @@ function figmaManifest() {
     fileUrl: FIGMA_URL,
     nodeIds: ["1:2"],
     visualPaths: ["visual/diff.png"],
+    visualTargets: figmaVisualTargets(),
   };
+}
+
+function figmaVisualTargets() {
+  return [
+    {
+      targetId: "checkout-default",
+      name: "Checkout",
+      state: "default",
+      route: "/checkout",
+      baselineKind: "figma" as const,
+      baselinePath: "visual/diff.png",
+      viewport: { width: 1, height: 1 },
+      deviceScaleFactor: 1,
+      fixture: "mock:checkout",
+      masks: [],
+    },
+  ];
 }
 
 function requirements(...ids: string[]) {
@@ -4354,6 +5653,40 @@ function validMp4(): Buffer {
     box("moov", Buffer.concat([box("mvhd", movieHeader), box("trak", Buffer.alloc(8))])),
     box("mdat", Buffer.alloc(32, 1)),
   ]);
+}
+
+function minimalTextPdf(text: string): Buffer {
+  const escaped = text.replaceAll("\\", "\\\\").replaceAll("(", "\\(").replaceAll(")", "\\)");
+  const stream = "BT /F1 12 Tf 72 720 Td (" + escaped + ") Tj ET";
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    "<< /Length " +
+      String(Buffer.byteLength(stream, "latin1")) +
+      " >>\nstream\n" +
+      stream +
+      "\nendstream",
+  ];
+  let body = "%PDF-1.4\n";
+  const offsets = [0];
+  objects.forEach((object, index) => {
+    offsets.push(Buffer.byteLength(body, "latin1"));
+    body += String(index + 1) + " 0 obj\n" + object + "\nendobj\n";
+  });
+  const xrefOffset = Buffer.byteLength(body, "latin1");
+  body += "xref\n0 " + String(objects.length + 1) + "\n0000000000 65535 f \n";
+  offsets.slice(1).forEach((offset) => {
+    body += String(offset).padStart(10, "0") + " 00000 n \n";
+  });
+  body +=
+    "trailer\n<< /Size " +
+    String(objects.length + 1) +
+    " /Root 1 0 R >>\nstartxref\n" +
+    String(xrefOffset) +
+    "\n%%EOF\n";
+  return Buffer.from(body, "latin1");
 }
 
 class WorkflowFakePublisher implements ReviewRequestPublisher {

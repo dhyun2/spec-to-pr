@@ -187,6 +187,29 @@ describe("workflow v2 contracts", () => {
       }).success,
     ).toBe(true);
 
+    expect(
+      WorkflowStartInputSchema.safeParse({
+        ...base,
+        mode: "brief",
+        scope: "ui",
+        briefPath: "briefs/checkout.md",
+        figmaUrl: "https://www.figma.com/design/abc/file?node-id=1-2",
+        openApiUrl: "https://api.example.com/docs",
+      }).success,
+    ).toBe(true);
+    for (const openApiUrl of [
+      "http://api.example.com/openapi.yaml",
+      "https://user:secret@api.example.com/openapi.yaml",
+      "https://api.example.com/openapi.yaml?api_key=secret",
+    ]) {
+      expect(
+        WorkflowStartInputSchema.safeParse({
+          ...base,
+          openApiUrl,
+        }).success,
+      ).toBe(false);
+    }
+
     for (const field of ["docsPaths", "openApiPaths", "guidancePaths", "skillHints"] as const) {
       expect(
         WorkflowStartInputSchema.safeParse({
@@ -215,6 +238,104 @@ describe("workflow v2 contracts", () => {
         briefPath: "b".repeat(1_001),
       }).success,
     ).toBe(false);
+  });
+
+  it("enforces the four canonical start contracts and UI baseline fencing", () => {
+    const base = {
+      projectRoot: "/tmp/target",
+      requestText: "Implement checkout",
+    };
+    const fullSources = {
+      briefPath: "briefs/checkout.md",
+      figmaUrl: "https://www.figma.com/design/abc/file?node-id=1-2",
+      openApiPaths: ["docs/openapi.yaml"],
+    };
+
+    for (const mode of ["brief", "feature"] as const) {
+      expect(
+        WorkflowStartInputSchema.safeParse({
+          ...base,
+          mode,
+          scope: "ui",
+          ...fullSources,
+        }).success,
+      ).toBe(true);
+      expect(
+        WorkflowStartInputSchema.safeParse({
+          ...base,
+          mode,
+          scope: "non-ui",
+          ...fullSources,
+        }).success,
+      ).toBe(false);
+    }
+
+    expect(
+      WorkflowStartInputSchema.safeParse({
+        ...base,
+        mode: "brief",
+        briefPath: fullSources.briefPath,
+      }).success,
+    ).toBe(false);
+    expect(
+      WorkflowStartInputSchema.safeParse({
+        ...base,
+        mode: "feature",
+        ...fullSources,
+        openApiPaths: [],
+      }).success,
+    ).toBe(false);
+    expect(
+      WorkflowStartInputSchema.safeParse({
+        ...base,
+        mode: "legacy",
+        scope: "ui",
+      }).success,
+    ).toBe(false);
+    expect(
+      WorkflowStartInputSchema.safeParse({
+        ...base,
+        mode: "legacy",
+        scope: "ui",
+        legacyProjectRoot: "/tmp/legacy",
+        legacyNetworkEvidencePath: "evidence/legacy.har",
+      }).success,
+    ).toBe(true);
+    expect(
+      WorkflowStartInputSchema.safeParse({
+        ...base,
+        mode: "figma",
+        scope: "ui",
+        figmaUrl: fullSources.figmaUrl,
+        legacyNetworkEvidencePath: "evidence/legacy.har",
+      }).success,
+    ).toBe(false);
+    expect(
+      WorkflowStartInputSchema.safeParse({
+        ...base,
+        mode: "figma",
+        scope: "ui",
+        figmaUrl: fullSources.figmaUrl,
+      }).success,
+    ).toBe(true);
+
+    for (const scope of ["non-ui", "docs"] as const) {
+      expect(
+        WorkflowStartInputSchema.safeParse({
+          ...base,
+          scope,
+          figmaUrl: fullSources.figmaUrl,
+        }).success,
+      ).toBe(false);
+      expect(
+        WorkflowStartInputSchema.safeParse({
+          ...base,
+          mode: "legacy",
+          scope,
+          legacyProjectRoot: "/tmp/legacy",
+        }).success,
+      ).toBe(false);
+    }
   });
 
   it("keeps CRLF and Unicode graphemes intact across parser chunks", () => {
@@ -558,6 +679,59 @@ describe("workflow v2 contracts", () => {
     ).toBe(false);
   });
 
+  it("models API operation usage and labels lab versus field performance honestly", () => {
+    const implementation = {
+      kind: "implementation",
+      status: "passed",
+      summary: "Implemented and measured checkout.",
+      apiReady: true,
+      implementationContextId: "ctx_checkout_01",
+      uiChanged: true,
+      changedFiles: ["src/page.tsx"],
+      artifactPaths: ["test-results/api-coverage.json", "test-results/performance.json"],
+      apiCoverage: [
+        {
+          operationKey: "POST /checkout",
+          method: "POST",
+          path: "/checkout",
+          operationId: "checkout",
+          status: "exercised",
+          productionCallSites: ["src/page.tsx#submitCheckout"],
+          mockHandlers: ["generated/mock.ts#checkout"],
+          executableEvidencePaths: ["test-results/api-coverage.json"],
+          blocking: false,
+        },
+      ],
+      performanceEvidence: {
+        lab: {
+          route: "/checkout",
+          tool: "Lighthouse",
+          command: "pnpm lighthouse /checkout",
+          deviceProfile: "mobile",
+          throttling: "simulated-4g",
+          sampleCount: 3,
+          resultPath: "test-results/performance.json",
+          metrics: { lcpMs: 2100, cls: 0.04, tbtMs: 120 },
+        },
+        field: { status: "unavailable", reason: "No existing CrUX or authorized RUM source." },
+      },
+    };
+
+    expect(WorkflowSubmissionSchema.safeParse(implementation).success).toBe(true);
+    expect(
+      WorkflowSubmissionSchema.safeParse({
+        ...implementation,
+        performanceEvidence: {
+          ...implementation.performanceEvidence,
+          lab: {
+            ...implementation.performanceEvidence.lab,
+            metrics: { lcpMs: 2100, cls: 0.04, inpMs: 120 },
+          },
+        },
+      }).success,
+    ).toBe(false);
+  });
+
   it("rejects approved reviews with major findings", () => {
     const result = ReviewSubmissionSchema.safeParse({
       kind: "functional-review",
@@ -749,6 +923,20 @@ describe("workflow v2 contracts", () => {
       fileUrl: "https://www.figma.com/design/abc/file?node-id=1-2",
       nodeIds: ["1:2"],
       manifestPath: "figma/design-context.json",
+      visualTargets: [
+        {
+          targetId: "checkout",
+          name: "Checkout",
+          state: "default",
+          route: "/checkout",
+          baselineKind: "figma",
+          baselinePath: "visual/checkout.png",
+          viewport: { width: 1440, height: 900 },
+          deviceScaleFactor: 1,
+          fixture: "mock:checkout",
+          masks: [],
+        },
+      ],
     };
 
     expect(
@@ -770,5 +958,97 @@ describe("workflow v2 contracts", () => {
         artifactPaths: ["figma/design-context.json", "visual/checkout.png"],
       }).success,
     ).toBe(false);
+  });
+
+  it("accepts only visual captures and never caller-supplied scores or decisions", () => {
+    const reviewPacketId = `packet_${"a".repeat(64)}`;
+    const submission = {
+      kind: "visual-comparison",
+      reviewPacketId,
+      captures: [
+        {
+          targetId: "checkout",
+          route: "/checkout",
+          state: "default",
+          viewport: { width: 1440, height: 900 },
+          deviceScaleFactor: 1,
+          fixture: "mock:checkout",
+          provider: "playwright",
+          capturedAt: "2026-07-20T00:00:00.000Z",
+          actualPath: `visual/actual/${reviewPacketId}/checkout.png`,
+          actualDigest: `sha256:${"1".repeat(64)}`,
+        },
+      ],
+      artifactPaths: [`visual/actual/${reviewPacketId}/checkout.png`],
+    };
+
+    expect(WorkflowSubmissionSchema.safeParse(submission).success).toBe(true);
+    expect(
+      WorkflowSubmissionSchema.safeParse({
+        ...submission,
+        reviewMatchRatio: 1,
+        verdict: "passed",
+      }).success,
+    ).toBe(false);
+    expect(
+      WorkflowSubmissionSchema.safeParse({
+        ...submission,
+        captures: submission.captures.map(({ provider: _provider, ...capture }) => capture),
+      }).success,
+    ).toBe(false);
+    expect(
+      WorkflowSubmissionSchema.safeParse({
+        ...submission,
+        captures: submission.captures.map(({ capturedAt: _capturedAt, ...capture }) => capture),
+      }).success,
+    ).toBe(false);
+    expect(
+      WorkflowSubmissionSchema.safeParse({
+        ...submission,
+        captures: submission.captures.map(({ actualDigest: _actualDigest, ...capture }) => capture),
+      }).success,
+    ).toBe(false);
+    expect(
+      WorkflowSubmissionSchema.safeParse({
+        ...submission,
+        captures: [{ ...submission.captures[0], actualPath: "visual/baseline.png" }],
+        artifactPaths: ["visual/baseline.png"],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("requires unique JSON mock fixtures distinct from the manifest", () => {
+    const base = {
+      kind: "implementation",
+      status: "passed",
+      summary: "Implemented deterministic design data.",
+      apiReady: false,
+      uiChanged: true,
+      changedFiles: ["src/view.tsx"],
+      artifactPaths: ["test-results/unit.json", "mocks/manifest.json", "mocks/view.json"],
+    };
+
+    expect(
+      WorkflowSubmissionSchema.safeParse({
+        ...base,
+        mockDataEvidence: {
+          manifestPath: "mocks/manifest.json",
+          fixturePaths: ["mocks/view.json"],
+        },
+      }).success,
+    ).toBe(true);
+    for (const fixturePaths of [
+      ["mocks/view.ts"],
+      ["mocks/view.json", "mocks/view.json"],
+      ["mocks/manifest.json"],
+    ]) {
+      expect(
+        WorkflowSubmissionSchema.safeParse({
+          ...base,
+          artifactPaths: ["test-results/unit.json", "mocks/manifest.json", ...fixturePaths],
+          mockDataEvidence: { manifestPath: "mocks/manifest.json", fixturePaths },
+        }).success,
+      ).toBe(false);
+    }
   });
 });

@@ -1,7 +1,11 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 
+import { PNG } from "pngjs";
 import { describe, expect, it } from "vitest";
+
+import { compareVisualPngs } from "../../src/visual/visual-comparator.js";
 
 const root = process.cwd();
 
@@ -11,6 +15,15 @@ describe("v2 documentation", () => {
     const navbar = JSON.parse(
       readFileSync(path.join(root, "website/i18n/en/docusaurus-theme-classic/navbar.json"), "utf8"),
     ) as Record<string, { message: string }>;
+    const sidebar = JSON.parse(
+      readFileSync(
+        path.join(root, "website/i18n/en/docusaurus-plugin-content-docs/current.json"),
+        "utf8",
+      ),
+    ) as Record<string, { message: string }>;
+    const footer = JSON.parse(
+      readFileSync(path.join(root, "website/i18n/en/docusaurus-theme-classic/footer.json"), "utf8"),
+    ) as Record<string, { message: string }>;
 
     expect(config).toContain('defaultLocale: "ko"');
     expect(config).toContain('locales: ["ko", "en"]');
@@ -18,6 +31,27 @@ describe("v2 documentation", () => {
     expect(config).toContain('ko: { label: "한국어"');
     expect(config).toContain('en: { label: "English"');
     expect(navbar["item.label.사용법"]?.message).toBe("Usage");
+    expect(sidebar["sidebar.guideSidebar.category.시작하기"]?.message).toBe("Getting started");
+    expect(sidebar["sidebar.guideSidebar.category.사용법"]?.message).toBe("Usage");
+    expect(sidebar["sidebar.guideSidebar.category.핵심 개념"]?.message).toBe("Core concepts");
+    expect(sidebar["sidebar.guideSidebar.category.레퍼런스"]?.message).toBe("Reference");
+    expect(footer["link.title.시작하기"]?.message).toBe("Get started");
+    expect(footer["link.item.label.설정 · CLI"]?.message).toBe("Configuration · CLI");
+    for (const [file, title] of [
+      ["getting-started/prerequisites.md", "title: Prerequisites"],
+      ["getting-started/installation.mdx", "title: Installation"],
+      ["getting-started/quickstart.md", "title: Quickstart — first draft PR"],
+      ["usage/index.mdx", "title: Choose your delivery"],
+      ["concepts/reviews.mdx", "title: Agent reviews and evidence ownership"],
+      ["concepts/visual-verification.mdx", "title: Visual verification"],
+      ["reference/config.md", "title: Configuration · CLI · environment"],
+    ] as const) {
+      const translated = readFileSync(
+        path.join(root, "website/i18n/en/docusaurus-plugin-content-docs/current", file),
+        "utf8",
+      );
+      expect(translated, file).toContain(title);
+    }
   });
 
   it("publishes a bilingual comparison route from verified primary sources", () => {
@@ -69,7 +103,14 @@ describe("v2 documentation", () => {
       "https://github.com/ChromeDevTools/chrome-devtools-mcp/blob/main/docs/tool-reference.md",
     ]);
 
-    expect(sidebar).toContain('items: ["concepts/pipeline", "concepts/comparison"]');
+    for (const concept of [
+      "concepts/pipeline",
+      "concepts/reviews",
+      "concepts/visual-verification",
+      "concepts/comparison",
+    ]) {
+      expect(sidebar).toContain(`"${concept}"`);
+    }
     for (const file of comparisonPaths) {
       expect(existsSync(path.join(root, file)), file).toBe(true);
       const comparison = readFileSync(path.join(root, file), "utf8");
@@ -140,12 +181,13 @@ describe("v2 documentation", () => {
       config,
     ].join("\n");
 
-    expect(sidebar).toContain(
-      'items: ["usage/brief", "usage/legacy", "usage/feature", "usage/figma"]',
-    );
+    expect(sidebar).toContain('"usage/index"');
+    for (const caseName of ["brief", "legacy", "feature", "figma"]) {
+      expect(sidebar).toContain(`"usage/${caseName}"`);
+    }
     expect(sidebar).not.toContain('items: ["usage/recipes"]');
-    expect(config).toContain('{ to: "/usage/brief", position: "left", label: "사용법" }');
-    expect(config).toContain('{ label: "사용법", to: "/usage/brief" }');
+    expect(config).toContain('{ to: "/usage/", position: "left", label: "사용법" }');
+    expect(config).toContain('{ label: "사용법", to: "/usage/" }');
     expect(navbar["item.label.사용법"]?.message).toBe("Usage");
     expect(maintained).not.toContain("/usage/recipes");
     expect(readFileSync(path.join(root, "README.md"), "utf8")).toContain(
@@ -154,6 +196,174 @@ describe("v2 documentation", () => {
     expect(readFileSync(path.join(root, "README.ko.md"), "utf8")).toContain(
       "https://dhyun2.github.io/spec-to-pr/usage/brief",
     );
+  });
+
+  it("builds a progressive guide experience around authentic runtime evidence", async () => {
+    const componentDirectory = path.join(root, "website/src/components/guide");
+    const expectedComponents = [
+      "AgentReviewMap.tsx",
+      "GuideHero.tsx",
+      "ModeChooser.tsx",
+      "NextStep.tsx",
+      "RunPipeline.tsx",
+      "VisualProof.tsx",
+      "guide.module.css",
+    ];
+    expect(readdirSync(componentDirectory).sort()).toEqual(expectedComponents);
+
+    const localizedPages = [
+      [
+        "ko",
+        "website/docs/intro.md",
+        "website/docs/usage/index.mdx",
+        "website/docs/concepts/pipeline.md",
+        "website/docs/concepts/reviews.mdx",
+        "website/docs/concepts/visual-verification.mdx",
+      ],
+      [
+        "en",
+        "website/i18n/en/docusaurus-plugin-content-docs/current/intro.md",
+        "website/i18n/en/docusaurus-plugin-content-docs/current/usage/index.mdx",
+        "website/i18n/en/docusaurus-plugin-content-docs/current/concepts/pipeline.md",
+        "website/i18n/en/docusaurus-plugin-content-docs/current/concepts/reviews.mdx",
+        "website/i18n/en/docusaurus-plugin-content-docs/current/concepts/visual-verification.mdx",
+      ],
+    ] as const;
+
+    for (const [locale, ...files] of localizedPages) {
+      const contents = files.map((file) => readFileSync(path.join(root, file), "utf8")).join("\n");
+      for (const component of [
+        "GuideHero",
+        "ModeChooser",
+        "RunPipeline",
+        "AgentReviewMap",
+        "VisualProof",
+        "NextStep",
+      ]) {
+        expect(contents, `${locale}:${component}`).toContain(component);
+      }
+      for (const fact of [
+        "pngjs",
+        "RGBA",
+        "0.02",
+        "98%",
+        "20%",
+        "functional reviewer",
+        "design reviewer",
+      ]) {
+        expect(contents, `${locale}:${fact}`).toContain(fact);
+      }
+      expect(contents, `${locale}:three comparisons`).toMatch(
+        locale === "ko" ? /비교 총 3회/ : /three total comparisons/,
+      );
+      expect(contents, `${locale}:immutable packet`).toMatch(
+        locale === "ko" ? /immutable packet|불변 packet/ : /immutable packet/,
+      );
+      expect(contents, `${locale}:one writer`).toMatch(
+        locale === "ko"
+          ? /implementation writer 한 명|한 명의 implementation writer/
+          : /one implementation writer/,
+      );
+    }
+
+    const pipelineComponent = readFileSync(
+      path.join(componentDirectory, "RunPipeline.tsx"),
+      "utf8",
+    );
+    expect(pipelineComponent).toContain("aria-pressed={activeStage === stage.id}");
+    expect(pipelineComponent).toContain('data-testid="run-pipeline"');
+    expect(pipelineComponent).toContain('data-testid="pipeline-noscript"');
+    expect(pipelineComponent).toContain("action:");
+    expect(pipelineComponent).toContain("passCondition:");
+    expect(readFileSync(path.join(componentDirectory, "guide.module.css"), "utf8")).toContain(
+      "prefers-reduced-motion",
+    );
+
+    const visualDirectory = path.join(root, "website/static/img/guide/visual-proof");
+    const visualDigests: Record<string, string> = {};
+    for (const file of ["baseline.png", "actual.png", "diff.png", "overlay.png"]) {
+      const content = readFileSync(path.join(visualDirectory, file));
+      expect(content.length, file).toBeGreaterThan(100);
+      expect(() => PNG.sync.read(content), file).not.toThrow();
+      visualDigests[file] = `sha256:${createHash("sha256").update(content).digest("hex")}`;
+    }
+    const metrics = JSON.parse(
+      readFileSync(path.join(visualDirectory, "metrics.json"), "utf8"),
+    ) as {
+      schemaVersion: string;
+      status: string;
+      attempt: number;
+      metrics: {
+        width: number;
+        height: number;
+        comparedPixelCount: number;
+        maskedPixelCount: number;
+        maskedAreaRatio: number;
+        exactMatchRatio: number;
+        reviewMatchRatio: number;
+        meanDistance: number;
+        maxDistance: number;
+        pixelTolerance: number;
+        threshold: number;
+      };
+      maskReasons: string[];
+      files: Record<string, { path: string; digest: string }>;
+    };
+    expect(metrics.schemaVersion).toBe("guide-visual-proof-v1");
+    expect(metrics.status).toBe("passed");
+    expect(metrics.attempt).toBe(1);
+    expect(metrics.metrics.reviewMatchRatio).toBeGreaterThanOrEqual(0.98);
+    expect(metrics.metrics.pixelTolerance).toBe(0.02);
+    for (const [name, file] of Object.entries(metrics.files)) {
+      expect(file.path).toBe(`${name}.png`);
+      expect(file.digest).toBe(visualDigests[`${name}.png`]);
+    }
+
+    const recomputed = await compareVisualPngs({
+      baseline: readFileSync(path.join(visualDirectory, "baseline.png")),
+      actual: readFileSync(path.join(visualDirectory, "actual.png")),
+    });
+    expect(recomputed.status).toBe(metrics.status);
+    expect(recomputed.metrics).toEqual(metrics.metrics);
+    expect(recomputed.maskReasons).toEqual(metrics.maskReasons);
+    expect(recomputed.diff).toEqual(readFileSync(path.join(visualDirectory, "diff.png")));
+    expect(recomputed.overlay).toEqual(readFileSync(path.join(visualDirectory, "overlay.png")));
+
+    const visualComponent = readFileSync(path.join(componentDirectory, "VisualProof.tsx"), "utf8");
+    expect(visualComponent).toContain("metrics.json");
+    expect(visualComponent).toContain("reviewMatchRatio");
+    expect(visualComponent).toContain("meanDistance");
+    expect(visualComponent).toContain("maxDistance");
+
+    const packageJson = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")) as {
+      scripts: Record<string, string>;
+    };
+    expect(packageJson.scripts["guide:assets"]).toBe("tsx scripts/build-guide-visual-assets.ts");
+    expect(readFileSync(path.join(root, "scripts/build-guide-visual-assets.ts"), "utf8")).toContain(
+      "compareVisualPngs",
+    );
+    expect(readFileSync(path.join(root, "website/docusaurus.config.ts"), "utf8")).toContain(
+      'format: "mdx"',
+    );
+
+    for (const directory of [
+      path.join(root, "website", "docs"),
+      path.join(root, "website", "i18n", "en", "docusaurus-plugin-content-docs", "current"),
+    ]) {
+      for (const file of relativeFiles(directory)) {
+        const contents = readFileSync(path.join(directory, file), "utf8");
+        expect(contents, `${file}:admonition title syntax`).not.toMatch(
+          /^:::(?:note|tip|info|warning|danger)\s+[^[]/m,
+        );
+      }
+    }
+
+    for (const forbiddenDirectory of ["docs/design", "docs/superpowers"]) {
+      if (existsSync(path.join(root, forbiddenDirectory))) {
+        expect(relativeFiles(path.join(root, forbiddenDirectory))).toEqual([]);
+      }
+    }
+    expect(existsSync(path.join(root, "PLAN.md"))).toBe(false);
   });
 
   it("documents four separate usage cases in Korean and English", () => {
@@ -194,6 +404,16 @@ describe("v2 documentation", () => {
         }
         expect(guide).toContain("requiredValidations");
         expect(guide).toContain("80%");
+        expect(guide).toContain("pr-report-v2.1");
+        expect(guide).toContain("complete");
+        expect(guide).toContain("not-run");
+        expect(guide).toContain("not-applicable");
+        expect(guide).toContain("spec-to-pr/evidence");
+        expect(guide).toMatch(
+          locale === "ko"
+            ? /비교 총 3회\(최초 1회 \+ repair 최대 2회\)/
+            : /three total comparison attempts \(the initial comparison plus at most two repairs\)/,
+        );
         for (const stage of [
           "intake",
           "contracts",
@@ -258,7 +478,35 @@ describe("v2 documentation", () => {
       expect(guides.feature).toContain("featureVideo: required");
       expect(guides.feature).toContain("full-project E2E");
       expect(guides.figma).toContain("figma-bundle");
-      expect(guides.figma).toContain("publication: none");
+      expect(guides.figma).toContain("publication: draft");
+      expect(guides.brief).toContain("briefPath");
+      expect(guides.brief).toContain("figmaUrl");
+      expect(guides.brief).toMatch(/openApiPaths|openApiUrls/);
+      expect(guides.brief).toContain("Web Vitals");
+      expect(guides.brief).toContain("API gap");
+      expect(guides.legacy).toContain("legacyProjectRoot");
+      expect(guides.legacy).toContain("legacyNetworkEvidencePath");
+      expect(guides.legacy).toContain("1,000");
+      expect(guides.legacy).toContain("legacy inventory");
+      expect(guides.legacy).toContain("running legacy");
+      expect(guides.legacy).toContain("source-fetch-literal");
+      expect(guides.legacy).toMatch(/durable|Run ID/);
+      expect(guides.legacy).toMatch(/empty-inventory|빈 inventory/);
+      expect(guides.legacy).toMatch(/Optional OpenAPI|선택 OpenAPI/);
+      expect(guides.legacy).not.toMatch(
+        /API gaps? when OpenAPI is supplied|OpenAPI 제공 시 API gap|OpenAPI를 제공한 경우에만|required only when OpenAPI was supplied/,
+      );
+      expect(guides.figma).toContain("mock");
+      expect(guides.figma).toContain("sha256");
+      expect(guides.figma).toContain("98%");
+      for (const caseName of cases) {
+        expect(guides[caseName]).toContain("pr-report-v2.1");
+        expect(guides[caseName]).toContain("15");
+        expect(guides[caseName]).toContain("blocked");
+        expect(guides[caseName]).toContain("`none`");
+        expect(guides[caseName]).toContain("sha256");
+        expect(guides[caseName]).toMatch(/provider/);
+      }
       for (const caseName of ["brief", "legacy", "figma"]) {
         expect(guides[caseName]).not.toContain("featureVideo: required");
       }
@@ -289,10 +537,13 @@ describe("v2 documentation", () => {
       "035-use-coarse-workflow-facade-and-split-reviews.md",
       "036-use-delivery-profiles-not-mode-specific-pipelines.md",
       "037-use-boundary-budgeting-and-numeric-calibration.md",
+      "038-harden-evidence-trust-and-unify-delivery-policy.md",
     ]);
     expect(relativeFiles(path.join(root, "website", "docs"))).toEqual([
       "concepts/comparison.mdx",
       "concepts/pipeline.md",
+      "concepts/reviews.mdx",
+      "concepts/visual-verification.mdx",
       "getting-started/installation.mdx",
       "getting-started/prerequisites.md",
       "getting-started/quickstart.md",
@@ -303,6 +554,7 @@ describe("v2 documentation", () => {
       "usage/brief.mdx",
       "usage/feature.mdx",
       "usage/figma.mdx",
+      "usage/index.mdx",
       "usage/legacy.mdx",
       "usage/recipes.mdx",
     ]);
@@ -390,6 +642,14 @@ describe("v2 documentation", () => {
     expect(contents).toContain("requiredValidations");
     expect(contents).toContain("resumeContext");
     expect(contents).toContain("outputFormatting");
+    expect(contents).toContain("openApiUrls");
+    expect(contents).toContain("sourceProvenance");
+    expect(contents).toContain("visualTargets");
+    expect(contents).toContain("compare-visuals");
+    expect(contents).toContain("legacyInventory");
+    expect(contents).toContain("apiCoverage");
+    expect(contents).toContain("pr-report-v2");
+    expect(contents).toContain("98%");
   });
 
   it("synchronizes the eight public skills, blocked diagnostics, and release labels", () => {
@@ -429,9 +689,9 @@ describe("v2 documentation", () => {
       expect(contents).toContain("recommendedSkills");
       expect(contents).toContain("appliedSkills");
     }
-    expect(readme).toContain("Released 0.2.1");
-    expect(readmeKo).toContain("릴리스 0.2.1");
-    expect(config).toContain("Released 0.2.1");
+    expect(readme).toContain("Unreleased");
+    expect(readmeKo).toContain("Unreleased");
+    expect(config).toContain("Development docs");
     expect(intro).toContain("skill 8개");
     expect(adr).toContain("eight public marketplace skills");
 

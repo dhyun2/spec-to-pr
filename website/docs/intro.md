@@ -1,65 +1,52 @@
 ---
 slug: /
 sidebar_position: 1
-title: SpecToPR 소개
+title: SpecToPR
+hide_title: true
+description: 기획서, 레거시, 기능, Figma를 검증된 draft PR로 연결하는 가장 짧은 시작점
 ---
 
-# SpecToPR
+import GuideHero from "@site/src/components/guide/GuideHero";
+import ModeChooser from "@site/src/components/guide/ModeChooser";
+import RunPipeline from "@site/src/components/guide/RunPipeline";
+import NextStep from "@site/src/components/guide/NextStep";
 
-SpecToPR은 기획서, 레거시 변경 요청, 사용자 기능, Figma 디자인을 검증된 구현과 draft PR/MR로 연결하는 Claude Code · Codex 플러그인입니다.
+<GuideHero
+eyebrow="Specification to evidence-backed PR"
+title="SpecToPR"
+summary="기획서·레거시·기능·Figma 중 출발점만 고르면, 구현과 독립 리뷰를 거쳐 근거가 연결된 draft PR까지 이어집니다."
+primary={{ label: "5분 퀵스타트", href: "/getting-started/quickstart" }}
+secondary={{ label: "내 케이스 고르기", href: "/usage/" }}
+/>
 
-:::info 버전 표기
-이 사이트는 `main` 브랜치의 **릴리스 0.2.1(Released 0.2.1)** 동작을 설명합니다.
+:::info[지금 읽고 있는 버전]
+이 사이트는 패키지 `0.2.1` 위에서 개발 중인 **Unreleased** 동작을 설명합니다. 공개 표면은 7 MCP tools, 8 durable stages, skill 8개, 독립 reviewer 2개로 유지합니다.
 :::
 
-```mermaid
-flowchart LR
-    B["brief"] --> W["하나의 v2 workflow"]
-    L["legacy change"] --> W
-    F["user-facing feature"] --> W
-    G["Figma URL"] --> W
-    W --> I["API·UI 한 context"]
-    I --> R1["functional review"]
-    I --> R2["UI일 때 design review"]
-    R1 --> D["draft PR/MR"]
-    R2 --> D
-```
+## 입력을 고르면 나머지는 같은 Run입니다
 
-## 네 가지 모드
+네 가지 케이스는 서로 다른 파이프라인이 아닙니다. 입력과 필요한 증거만 달라지고, 계약 → 구현 → 기능·디자인 검증 → draft 발행이라는 한 흐름을 공유합니다.
 
-| 모드      | 주는 것                     | 추가로 확인하는 것              | 결과                             |
-| --------- | --------------------------- | ------------------------------- | -------------------------------- |
-| `brief`   | 기획서/명세 + 저장소        | 수용 조건과 계약                | draft PR/MR                      |
-| `legacy`  | 저장소 + 구체적인 변경 요청 | 요청 범위의 현재 동작 baseline  | draft PR/MR                      |
-| `feature` | 사용자에게 보이는 기능 요청 | 해당 기능 E2E + 영상 정확히 1개 | 영상 링크가 있는 draft PR/MR     |
-| `figma`   | Figma URL + 저장소          | 실제 Figma context와 시각 증거  | 디자인 구현, 요청 시 draft PR/MR |
+<ModeChooser locale="ko" />
 
-`feature` 모드만 변경 기능을 고른 단일 Playwright E2E를 실행합니다. 명령 체이닝, `--list`/`--pass-with-no-tests`, 프로젝트 전체 E2E는 거부하며, `status: passed`·정확한 selector·같은 `implementationContextId`·양수 `testCount`만 담은 strict JSON과 재생 시간이 0보다 큰 구조적으로 유효한 영상 하나를 요구합니다. 다른 모드에는 feature 영상 비용을 붙이지 않습니다.
+## 한 변경이 PR이 되기까지
 
-Figma는 호스트에 연결된 기능으로 읽고 `provider: host-connected-figma`, ISO `capturedAt`, 같은 `fileUrl`, 비어 있지 않은 `nodeIds`, JSON `manifestPath`, strict manifest의 PNG `visualPaths`를 실제 산출물과 함께 `figma-bundle` 한 번으로 제출합니다. SpecToPR runtime에 Figma 전용 microtool이나 polling을 두지 않습니다.
+아래 stage를 눌러 각 단계가 무엇을 받고 무엇을 남기는지 확인해 보세요. API와 UI는 한 명의 implementation writer가 같은 `implementationContextId`에서 구현합니다. 구현이 끝난 뒤에만 read-only functional reviewer와 UI 범위의 design reviewer가 immutable packet을 독립적으로 읽습니다.
 
-## 작게 유지한 실행 표면
+<RunPipeline locale="ko" />
 
-- MCP tool 7개
-- durable stage 8개
-- skill 8개
-- reviewer 2개
+## 결과물은 “완료”보다 근거가 먼저입니다
 
-API와 UI는 한 구현 context에서 처리합니다. API 기반 UI는 물리적으로 서로 다른 비어 있지 않은 type, schema, wrapper, mock 파일과 passing contract-test JSON을 `implementationContextId`와 함께 `api-ready`로 먼저 기록하고 최종 구현에 같은 ID를 씁니다. Path, symlink, hard link alias는 별도 증거가 아니며 `apiReady: true`만으로는 부족합니다. Orchestrator가 immutable status/contracts/diff/evidence packet을 넘기므로 functional/design reviewer는 workflow tool 없이 독립적으로 판정합니다. Design review는 UI 범위에만 적용됩니다.
+- 기획서·Figma·OpenAPI는 `sourceProvenance`와 계약으로 고정됩니다.
+- Figma 또는 실행한 레거시 화면은 같은 route·state·viewport·fixture로 캡처해 `compare-visuals`가 직접 비교합니다.
+- 정상과 blocked 결과 모두 15개 섹션의 `pr-report-v2.1`을 사용하므로, 멈춘 경우에도 완료된 일·미실행 검증·정확한 재개 방법이 남습니다.
+- SpecToPR은 draft만 만들거나 갱신합니다. approve, ready 전환, merge는 사람이 결정합니다.
 
-검증은 변경 범위에 비례합니다. 필요한 증거가 없거나 실패하면 막고, 선택 사항인 검사를 무조건 실행하지 않습니다. 전체 matrix와 package 검증은 release 작업에만 둡니다.
-
-Intake가 끝나면 `XS`~`XL` 작업량과 예상 token range/confidence가 바로 보입니다. SDK는 workflow 경계별 actual usage로 estimate를 보정하고, 80%에서 compact checkpoint, hard limit에서 scope split 또는 명시적 budget 승인을 요구합니다. 이때도 필수 검증은 줄이지 않습니다.
-
-:::info Draft까지만
-SpecToPR은 target이 아닌 `codex/*` source branch에 의도한 변경을 commit한 뒤 draft PR/MR을 만들거나 갱신할 수 있습니다. Runtime은 clean tree와 target보다 한 개 이상 앞선 commit을 확인하며 merge, approve, close, ready 전환은 하지 않습니다.
-:::
-
-## 시작하기
-
-1. [사전 준비물](/getting-started/prerequisites)
-2. [설치](/getting-started/installation)
-3. [퀵스타트](/getting-started/quickstart)
-4. [기획서 → draft PR 사용법](/usage/brief)
-
-내부 계약은 [파이프라인](/concepts/pipeline), 전체 skill은 [스킬 레퍼런스](/reference/skills), 공식 1차 자료 기반 도구 비교와 채택/거절 근거는 [비교와 채택 정책](/concepts/comparison)에서 확인할 수 있습니다.
+<NextStep
+eyebrow="첫 번째 Run"
+title="작은 예제로 전체 흐름을 먼저 보세요"
+description="설치 확인부터 복사할 프롬프트, 예상 draft PR까지 약 5분 분량으로 정리했습니다."
+href="/getting-started/quickstart"
+label="퀵스타트 열기"
+secondary={{ label: "네 가지 케이스 비교", href: "/usage/" }}
+/>

@@ -46,12 +46,16 @@ export type SpecToPrCodexRunInput = {
   changeKind?: "auto" | "feature" | "fix" | "refactor" | "migration" | "design" | "docs";
   publication?: "draft" | "none";
   prompt?: string;
+  legacyProjectRoot?: string;
+  legacyNetworkEvidencePath?: string;
   briefPath?: string;
   docsPath?: string;
   docsPaths?: string[];
   figmaUrl?: string;
   openApiPath?: string;
   openApiPaths?: string[];
+  openApiUrl?: string;
+  openApiUrls?: string[];
   guidancePaths?: string[];
   skillHints?: string[];
   resumeThreadId?: string;
@@ -120,7 +124,7 @@ export async function runSpecToPrWithCodex(
     promptLength: input.prompt?.length ?? 0,
     hasBrief: input.briefPath !== undefined,
     hasFigma: input.figmaUrl !== undefined,
-    hasOpenApi: composableSources.openApiPaths.length > 0,
+    hasOpenApi: composableSources.openApiPaths.length + composableSources.openApiUrls.length > 0,
   });
   const repositoryRoot = resolveRepositoryRoot(input.workingDirectory);
   const usageStore = new UsageCalibrationStore(resolveUsageHistoryPath(input), {
@@ -253,10 +257,13 @@ export function buildSpecToPrPrompt(input: SpecToPrCodexRunInput): string {
   validateSpecToPrRunInput(input);
   const composableSources = normalizeComposableSources(input);
   const sources = [
+    formatSource("Legacy project", input.legacyProjectRoot),
+    formatSource("Legacy runtime network evidence", input.legacyNetworkEvidencePath),
     formatSource("Brief", input.briefPath),
     ...composableSources.docsPaths.map((sourcePath) => formatSource("Docs", sourcePath)),
     formatSource("Figma", input.figmaUrl),
     ...composableSources.openApiPaths.map((sourcePath) => formatSource("OpenAPI", sourcePath)),
+    ...composableSources.openApiUrls.map((sourceUrl) => formatSource("OpenAPI URL", sourceUrl)),
     ...composableSources.guidancePaths.map((sourcePath) =>
       formatSource("Project guidance", sourcePath),
     ),
@@ -270,7 +277,7 @@ export function buildSpecToPrPrompt(input: SpecToPrCodexRunInput): string {
     "Run the spec-to-pr workflow from intake through evidence-backed implementation planning.";
   const hasUiScope = isUiScope(input, userPrompt);
   const deliveryMode = resolveDeliveryMode(input);
-  const publication = input.publication ?? (deliveryMode === "figma" ? "none" : "draft");
+  const publication = input.publication ?? "draft";
   const changeKind = input.changeKind ?? defaultChangeKind(deliveryMode);
   const startFields = [
     `projectRoot: ${JSON.stringify(input.workingDirectory)}`,
@@ -279,6 +286,12 @@ export function buildSpecToPrPrompt(input: SpecToPrCodexRunInput): string {
     `mode: ${JSON.stringify(deliveryMode)}`,
     `changeKind: ${JSON.stringify(changeKind)}`,
     `publication: ${JSON.stringify(publication)}`,
+    ...(input.legacyProjectRoot === undefined
+      ? []
+      : [`legacyProjectRoot: ${JSON.stringify(input.legacyProjectRoot)}`]),
+    ...(input.legacyNetworkEvidencePath === undefined
+      ? []
+      : [`legacyNetworkEvidencePath: ${JSON.stringify(input.legacyNetworkEvidencePath)}`]),
     ...(input.briefPath === undefined ? [] : [`briefPath: ${JSON.stringify(input.briefPath)}`]),
     ...(input.figmaUrl === undefined ? [] : [`figmaUrl: ${JSON.stringify(input.figmaUrl)}`]),
     ...(composableSources.docsPaths.length === 0
@@ -287,6 +300,9 @@ export function buildSpecToPrPrompt(input: SpecToPrCodexRunInput): string {
     ...(composableSources.openApiPaths.length === 0
       ? []
       : [`openApiPaths: ${JSON.stringify(composableSources.openApiPaths)}`]),
+    ...(composableSources.openApiUrls.length === 0
+      ? []
+      : [`openApiUrls: ${JSON.stringify(composableSources.openApiUrls)}`]),
     ...(composableSources.guidancePaths.length === 0
       ? []
       : [`guidancePaths: ${JSON.stringify(composableSources.guidancePaths)}`]),
@@ -309,7 +325,9 @@ export function buildSpecToPrPrompt(input: SpecToPrCodexRunInput): string {
       includeReviewAgents: input.enableReviewAgents !== false,
       includeDesignReview: hasUiScope,
     }),
-    'For API-backed UI, generate distinct physical non-empty project-local types, schemas, wrappers, mocks, and a passing JSON contract-test result before UI work and UI completion evidence; path, symlink, and hard-link aliases do not count separately. Submit workflow_submit with kind: "api-ready", status: "passed", one stable implementationContextId, artifactPaths, and apiArtifacts containing nonempty types, schemas, wrappers, mocks, and contractTests arrays. Continue UI in the same context and repeat that implementationContextId on final implementation only after workflow_status records the checkpoint; apiReady: true alone is not evidence.',
+    'For API-backed UI, generate distinct physical non-empty project-local types, schemas, wrappers, mocks, and a passing JSON contract-test result before UI work and UI completion evidence; path, symlink, and hard-link aliases do not count separately. Submit workflow_submit with kind: "api-ready", status: "passed", one stable implementationContextId, artifactPaths, apiArtifacts with nonempty types/schemas/wrappers/mocks/contractTests arrays, and operation-aware operations. Continue UI in the same context and repeat that implementationContextId on final implementation only after workflow_status records the checkpoint; apiReady: true alone is not evidence. Final implementation must include apiCoverage mapping every documented operation to production call sites, mock handlers, and executable evidence, or an explicit blocking gap.',
+    "Treat deliveryProfile.sourceProvenance as immutable pinned input evidence. For each UI state, declare visualTargets with baseline kind/path, route, state, fixture, viewport, deviceScaleFactor, and only justified masks. After capturing a target screenshot, answer compare-visuals with a capture manifest that repeats targetId, route, state, viewport, deviceScaleFactor, and fixture and records provider, ISO capturedAt, actualPath, and its sha256 actualDigest. The runtime rejects target drift or digest mismatch, then computes alpha-aware exact/review scores, diff, and overlay, requires at least 98%, and permits three total comparison attempts: the initial comparison plus at most two repairs. Never submit caller-computed scores or verdicts.",
+    "For brief, legacy, and feature delivery, include measured lab performance and Web Vitals evidence plus an explicit field-data source or unavailable reason. The final canonical pr-report-v2.1 binds source provenance, requirements, changed files, API coverage/gaps, legacy coverage, visual ratios/assets, both independent reviews, performance, feature evidence when applicable, blockers, risks, rollback, and the evidence index to the immutable review packet. Every section is complete, not-run, blocked, or not-applicable; stale packet paths are omitted. A blocked diagnostic uses the same 15-section PR shape and identifies the stopped stage and exact unblock action.",
     "Run the fast default gates selected by workflow applicability. Run full matrices, hardening suites, package verification, and cross-host manifest validation only for an explicit release workflow.",
     "",
     "User request:",
@@ -387,9 +405,30 @@ export function validateSpecToPrRunInput(input: SpecToPrCodexRunInput): void {
     throw new Error("workingDirectory is required");
   }
   const mode = resolveDeliveryMode(input);
+  const composableSources = normalizeComposableSources(input);
+  validateComposableSources(input);
   if (input.resumeThreadId === undefined) {
-    if (mode === "brief" && (input.briefPath === undefined || input.briefPath.trim() === "")) {
-      throw new Error("brief mode requires briefPath");
+    const fullDelivery = mode === "brief" || mode === "feature";
+    if (fullDelivery && (input.briefPath === undefined || input.briefPath.trim() === "")) {
+      throw new Error(mode + " mode requires briefPath");
+    }
+    if (fullDelivery && (input.figmaUrl === undefined || input.figmaUrl.trim() === "")) {
+      throw new Error(mode + " mode requires figmaUrl");
+    }
+    if (
+      fullDelivery &&
+      composableSources.openApiPaths.length + composableSources.openApiUrls.length === 0
+    ) {
+      throw new Error(mode + " mode requires at least one OpenAPI source");
+    }
+    if (
+      mode === "legacy" &&
+      (input.legacyProjectRoot === undefined || input.legacyProjectRoot.trim() === "")
+    ) {
+      throw new Error("legacy mode requires legacyProjectRoot");
+    }
+    if (input.legacyNetworkEvidencePath !== undefined && mode !== "legacy") {
+      throw new Error("legacyNetworkEvidencePath is only valid for legacy mode");
     }
     if (mode === "figma" && (input.figmaUrl === undefined || input.figmaUrl.trim() === "")) {
       throw new Error("figma mode requires figmaUrl");
@@ -398,13 +437,12 @@ export function validateSpecToPrRunInput(input: SpecToPrCodexRunInput): void {
       (mode === "legacy" || mode === "feature") &&
       (input.prompt === undefined || input.prompt.trim().length < 3)
     ) {
-      throw new Error(`${mode} mode requires a concrete prompt describing the requested change`);
+      throw new Error(mode + " mode requires a concrete prompt describing the requested change");
     }
   }
   if (input.maxTurns !== undefined && (!Number.isInteger(input.maxTurns) || input.maxTurns <= 0)) {
     throw new Error("maxTurns must be a positive integer");
   }
-  validateComposableSources(input);
   if (input.usageCalibration !== false) {
     const usageHistoryPath = resolveUsageHistoryPath(input);
     if (
@@ -417,6 +455,21 @@ export function validateSpecToPrRunInput(input: SpecToPrCodexRunInput): void {
     }
     if (isHardLinkedFile(usageHistoryPath)) {
       throw new Error("usageHistoryPath must not be a hard-linked file");
+    }
+  }
+  if (input.legacyProjectRoot !== undefined && input.additionalDirectories !== undefined) {
+    const legacyRoot = canonicalizeThroughExistingAncestor(input.legacyProjectRoot);
+    const overlap = input.additionalDirectories.some((candidate) => {
+      const absoluteCandidate = path.isAbsolute(candidate)
+        ? candidate
+        : path.resolve(input.workingDirectory, candidate);
+      const writableRoot = canonicalizeThroughExistingAncestor(absoluteCandidate);
+      return (
+        isWithinDirectory(legacyRoot, writableRoot) || isWithinDirectory(writableRoot, legacyRoot)
+      );
+    });
+    if (overlap) {
+      throw new Error("Writable additionalDirectories must not overlap the legacy project");
     }
   }
 }
@@ -575,22 +628,40 @@ function requiredValidationsForInput(input: SpecToPrCodexRunInput): string[] {
   const mode = resolveDeliveryMode(input);
   const composableSources = normalizeComposableSources(input);
   const ui = isUiScope(input, prompt);
-  const validations = ["functional"];
-  if (ui) validations.push("accessibility");
-  if (input.figmaUrl !== undefined) validations.push("visual", "figma-bundle");
-  if (mode === "legacy") validations.push("legacy-baseline");
-  if (mode === "feature") validations.push("targeted-feature-e2e", "feature-video");
+  const validations = new Set<string>(["functional"]);
+  if (ui) validations.add("accessibility");
+  if (input.figmaUrl !== undefined) {
+    validations.add("visual");
+    validations.add("figma-bundle");
+    validations.add("visual-comparison");
+  }
+  if (mode === "legacy") {
+    validations.add("visual");
+    validations.add("legacy-baseline");
+    validations.add("legacy-inventory");
+    validations.add("visual-comparison");
+  }
+  if (mode === "brief" || mode === "legacy" || mode === "feature") {
+    validations.add("api-coverage");
+    validations.add("performance");
+    validations.add("performance-evidence");
+  }
+  if (mode === "figma") validations.add("mock-data");
+  if (mode === "feature") {
+    validations.add("targeted-feature-e2e");
+    validations.add("feature-video");
+  }
   if (
     ui &&
-    (composableSources.openApiPaths.length > 0 ||
+    (composableSources.openApiPaths.length + composableSources.openApiUrls.length > 0 ||
       /\b(api|openapi|endpoint|schema|mock)\b/i.test(prompt))
   ) {
-    validations.push("api-ready");
+    validations.add("api-ready");
   }
-  if ((input.publication ?? (mode === "figma" ? "none" : "draft")) === "draft") {
-    validations.push("draft-publication-preflight");
+  if ((input.publication ?? "draft") === "draft") {
+    validations.add("draft-publication-preflight");
   }
-  return validations;
+  return [...validations];
 }
 
 function buildCodexOptions(input: SpecToPrCodexRunInput): CodexOptions {
@@ -617,9 +688,8 @@ function buildThreadOptions(input: SpecToPrCodexRunInput): ThreadOptions {
   if (input.model !== undefined) {
     options.model = input.model;
   }
-  if (input.additionalDirectories !== undefined) {
-    options.additionalDirectories = input.additionalDirectories;
-  }
+  const additionalDirectories = uniqueInputValues(input.additionalDirectories ?? []);
+  if (additionalDirectories.length > 0) options.additionalDirectories = additionalDirectories;
 
   return options;
 }
@@ -638,6 +708,7 @@ const SKILL_HINT_PATTERN = /^[a-z0-9][a-z0-9._ -]*(?::[a-z0-9][a-z0-9._ -]*)?$/i
 type NormalizedComposableSources = {
   docsPaths: string[];
   openApiPaths: string[];
+  openApiUrls: string[];
   guidancePaths: string[];
   skillHints: string[];
 };
@@ -651,6 +722,10 @@ function normalizeComposableSources(input: SpecToPrCodexRunInput): NormalizedCom
     openApiPaths: uniqueInputValues([
       ...(input.openApiPath === undefined ? [] : [input.openApiPath]),
       ...(input.openApiPaths ?? []),
+    ]),
+    openApiUrls: uniqueUrlValues([
+      ...(input.openApiUrl === undefined ? [] : [input.openApiUrl]),
+      ...(input.openApiUrls ?? []),
     ]),
     guidancePaths: uniqueInputValues(input.guidancePaths ?? []),
     skillHints: uniqueInputValues(input.skillHints ?? []),
@@ -672,6 +747,17 @@ function validateComposableSources(input: SpecToPrCodexRunInput): void {
   if (input.docsPath !== undefined) validateSourcePath(input.docsPath, "docsPath");
   if (input.openApiPath !== undefined) validateSourcePath(input.openApiPath, "openApiPath");
   if (input.briefPath !== undefined) validateSourcePath(input.briefPath, "briefPath");
+  if (input.legacyNetworkEvidencePath !== undefined) {
+    validateSourcePath(input.legacyNetworkEvidencePath, "legacyNetworkEvidencePath");
+  }
+  const openApiUrls = [
+    ...(input.openApiUrl === undefined ? [] : [input.openApiUrl]),
+    ...(input.openApiUrls ?? []),
+  ];
+  if (openApiUrls.length > MAX_COMPOSABLE_SOURCE_PATHS) {
+    throw new Error(`openApiUrls cannot contain more than ${MAX_COMPOSABLE_SOURCE_PATHS} URLs`);
+  }
+  openApiUrls.forEach((value) => validateSourceUrl(value, "openApiUrls"));
 
   const skillHints = input.skillHints ?? [];
   if (skillHints.length > MAX_COMPOSABLE_SOURCE_PATHS) {
@@ -696,10 +782,22 @@ function validateComposableSources(input: SpecToPrCodexRunInput): void {
       );
     }
   }
+  if (
+    normalized.openApiPaths.length + normalized.openApiUrls.length >
+    MAX_COMPOSABLE_SOURCE_PATHS
+  ) {
+    throw new Error(
+      `OpenAPI paths and URLs cannot contain more than ${MAX_COMPOSABLE_SOURCE_PATHS} distinct sources`,
+    );
+  }
 
   const roles = new Map<string, string>();
   for (const [role, values] of [
     ["briefPath", input.briefPath === undefined ? [] : [input.briefPath]],
+    [
+      "legacyNetworkEvidencePath",
+      input.legacyNetworkEvidencePath === undefined ? [] : [input.legacyNetworkEvidencePath],
+    ],
     ["docsPaths", [input.docsPath, ...(input.docsPaths ?? [])].filter(isDefined)],
     ["openApiPaths", [input.openApiPath, ...(input.openApiPaths ?? [])].filter(isDefined)],
     ["guidancePaths", input.guidancePaths ?? []],
@@ -722,11 +820,48 @@ function validateSourcePath(value: string, field: string): void {
   }
 }
 
+function validateSourceUrl(value: string, field: string): void {
+  const normalized = value.trim();
+  if (normalized.length === 0 || normalized.length > 2_000) {
+    throw new Error(`${field} entries must be between 1 and 2000 characters`);
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    throw new Error(`${field} entries must be valid URLs`);
+  }
+  if (parsed.protocol !== "https:") throw new Error(`${field} entries must use HTTPS`);
+  if (parsed.username !== "" || parsed.password !== "") {
+    throw new Error(`${field} entries must not contain embedded credentials`);
+  }
+  for (const name of parsed.searchParams.keys()) {
+    if (/token|secret|password|credential|api[_-]?key|authorization/i.test(name)) {
+      throw new Error(`${field} entries must not contain secret-shaped query parameters`);
+    }
+  }
+}
+
 function uniqueInputValues(values: readonly string[]): string[] {
   const unique = new Map<string, string>();
   values.forEach((value) => {
     const trimmed = value.trim();
     const key = normalizedInputPathKey(trimmed);
+    if (!unique.has(key)) unique.set(key, trimmed);
+  });
+  return [...unique.values()];
+}
+
+function uniqueUrlValues(values: readonly string[]): string[] {
+  const unique = new Map<string, string>();
+  values.forEach((value) => {
+    const trimmed = value.trim();
+    let key = trimmed;
+    try {
+      key = new URL(trimmed).toString();
+    } catch {
+      // Validation reports malformed URLs after normalization.
+    }
     if (!unique.has(key)) unique.set(key, trimmed);
   });
   return [...unique.values()];
@@ -741,7 +876,8 @@ function isDefined<T>(value: T | undefined): value is T {
 }
 
 function isUiScope(input: SpecToPrCodexRunInput, prompt: string): boolean {
-  if (input.deliveryMode === "feature" || input.deliveryMode === "figma") {
+  const mode = resolveDeliveryMode(input);
+  if (mode === "brief" || mode === "legacy" || mode === "feature" || mode === "figma") {
     return true;
   }
   if (input.figmaUrl !== undefined && input.figmaUrl.trim() !== "") {
@@ -757,8 +893,11 @@ function resolveDeliveryMode(
   input: SpecToPrCodexRunInput,
 ): NonNullable<SpecToPrCodexRunInput["deliveryMode"]> {
   if (input.deliveryMode !== undefined) return input.deliveryMode;
-  if (input.figmaUrl !== undefined && input.figmaUrl.trim() !== "") return "figma";
+  if (input.legacyProjectRoot !== undefined && input.legacyProjectRoot.trim() !== "") {
+    return "legacy";
+  }
   if (input.briefPath !== undefined && input.briefPath.trim() !== "") return "brief";
+  if (input.figmaUrl !== undefined && input.figmaUrl.trim() !== "") return "figma";
   return "auto";
 }
 
@@ -766,27 +905,28 @@ function defaultChangeKind(
   mode: NonNullable<SpecToPrCodexRunInput["deliveryMode"]>,
 ): NonNullable<SpecToPrCodexRunInput["changeKind"]> {
   if (mode === "feature" || mode === "brief") return "feature";
+  if (mode === "legacy") return "migration";
   if (mode === "figma") return "design";
   return "auto";
 }
 
 function modeInstructions(mode: NonNullable<SpecToPrCodexRunInput["deliveryMode"]>): string {
   if (mode === "brief") {
-    return "Brief mode: read the supplied project-local brief before workflow_start, preserve its acceptance criteria, set scope=ui when applicable, and include a compact faithful UI/API scope summary in requestText. The runtime also reads briefPath for classification; do not invent missing requirements.";
+    return "Brief mode is full delivery: require the supplied brief, Figma source, and local OpenAPI path or HTTPS openApiUrls source before workflow_start; preserve acceptance criteria; implement API and UI in one context; produce sourceProvenance, visualTargets, API gap, apiCoverage, compare-visuals, accessibility, Web Vitals/performance, and pr-report-v2.1 evidence; do not invent missing requirements.";
   }
   if (mode === "legacy") {
-    return "Legacy mode: capture a focused baseline for the requested behavior and verify only the affected regression scope by default.";
+    return "Legacy mode is cross-project migration: require a separate legacyProjectRoot, treat it as read-only, inspect workflow_status.legacyInventory, map every in-scope stable feature key through legacyCoverage, derive API candidates from the explicitly listed bounded source adapters, run both projects, use the running legacy screen as the mandatory visual baseline, compare the target at the same route/state/viewport through compare-visuals, and report migration/API/performance gaps in pr-report-v2.1. When source discovery leaves an ambiguous method or path, optionally supply a project-local legacyNetworkEvidencePath containing bounded HAR JSON or a request array captured from the scoped legacy flow. API candidates require complete api-ready/apiCoverage evidence; zero candidates require a complete API section bound to the adapter list and inventory digest. Ambiguous methods/paths resolve only from a unique scoped OpenAPI/runtime match and otherwise remain a durable intake blocker. Optional OpenAPI enriches candidates but never controls API-section applicability.";
   }
   if (mode === "feature") {
     return [
-      "Feature mode: run a single targeted feature E2E selected by test path, tag, or project and record exactly one .webm or .mp4.",
+      "Feature mode: inherit the full brief/Figma/OpenAPI delivery contract including visualTargets, compare-visuals, apiCoverage, Web Vitals, and pr-report-v2.1, then run a single targeted feature E2E selected by test path, tag, or project and record exactly one .webm or .mp4.",
       "Never run the full-project E2E suite by default.",
       "Run one unchained Playwright command without --list or --pass-with-no-tests. Use a stable implementationContextId and write a strict JSON result containing only status=passed, the exact selector, that same implementationContextId, and a positive testCount. Record a structurally valid non-zero-duration WebM/MP4 container up to 25 MB.",
       "Submit featureEvidence with scope=targeted-feature, testSelector, testCommand, resultPath, and videoPath on implementation.",
     ].join(" ");
   }
   if (mode === "figma") {
-    return "Figma mode: use the connected Figma capability to capture real nodes, variables, screenshots, and component context; before contracts submit exactly one figma-bundle with provider=host-connected-figma, ISO capturedAt, matching fileUrl, nonempty nodeIds, a declared JSON manifestPath, and one or more actual PNG artifacts. The strict manifest repeats that provenance and exactly lists the PNG visualPaths. Do not replace intake with URL-only claims, repeat the bundle, or poll at runtime.";
+    return "Figma mode: use the connected Figma capability to capture real nodes, variables, screenshots, and component context; implement deterministic mock data; before contracts submit exactly one figma-bundle with provider=host-connected-figma, ISO capturedAt, matching fileUrl, nonempty nodeIds, a declared JSON manifestPath, one or more actual PNG artifacts, and visualTargets. The strict Figma manifest repeats that provenance and exactly lists the PNG visualPaths. The separate mock manifest is {deterministic:true, fixtures:[{path, sha256}]} and binds every fixture by digest. Run compare-visuals against Figma, require at least 98%, and publish a draft with pr-report-v2.1; do not add real API, full performance, or feature-video work by default.";
   }
   return "Auto mode: keep evidence proportional to the classified change and do not activate mode-specific gates without explicit input.";
 }

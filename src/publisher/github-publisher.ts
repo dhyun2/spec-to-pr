@@ -13,10 +13,20 @@ import {
   type ReviewRequestAsset,
   type ReviewRequestPublisher,
 } from "./publisher-port.js";
+import { GitObjectIdSchema } from "../runtime/scalars.js";
 
 type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 type AbortableRequestInit = Omit<RequestInit, "signal"> & {
   signal?: AbortSignal | undefined;
+};
+
+export const GITHUB_EVIDENCE_BRANCH = "spec-to-pr/evidence" as const;
+const GITHUB_EVIDENCE_REF = `refs/heads/${GITHUB_EVIDENCE_BRANCH}` as const;
+const MAX_EVIDENCE_UPLOAD_ATTEMPTS = 3;
+
+type ValidatedEvidenceRef = {
+  ref: typeof GITHUB_EVIDENCE_REF;
+  sha: string;
 };
 
 export class GitHubPublisherAdapter implements ReviewRequestPublisher {
@@ -160,6 +170,11 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
     signal?: AbortSignal | undefined;
   }): Promise<PublishedReviewAsset[]> {
     assertGitHub(input.target);
+    if (input.payload.headSha === undefined || input.payload.reviewPacketId === undefined) {
+      throw new Error(
+        "EVIDENCE_REF_CONFLICT: review assets require a packet-bound head SHA and packet ID",
+      );
+    }
 
     const published: PublishedReviewAsset[] = [];
 
@@ -170,47 +185,39 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
       token: input.token,
       signal: input.signal,
     });
+    const assetBranch = await this.ensureEvidenceBranch({
+      target: input.target,
+      payload: input.payload,
+      token: input.token,
+      signal: input.signal,
+    });
 
     for (const asset of input.assets) {
       const assetPath = [
         ".spec-to-pr",
         asset.role === "e2e-video" ? "feature-evidence" : "visual-assets",
         input.payload.runId,
+        input.payload.reviewPacketId,
         safePathSegment(asset.targetId),
+        asset.artifactId,
         asset.filename,
       ].join("/");
-      const existingSha = await this.findContentSha({
+      const response = await this.uploadEvidenceAsset({
         target: input.target,
-        path: assetPath,
-        branch: input.payload.sourceBranch,
+        asset,
+        assetPath,
+        assetBranch,
         token: input.token,
         signal: input.signal,
       });
-      const response = await this.githubFetch(
-        `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}/contents/${encodePath(assetPath)}`,
-        input.token,
-        {
-          method: "PUT",
-          signal: input.signal,
-          body: JSON.stringify({
-            message: `chore(spec-to-pr): publish review evidence ${asset.artifactId}`,
-            content: asset.content.toString("base64"),
-            branch: input.payload.sourceBranch,
-            ...(existingSha === undefined ? {} : { sha: existingSha }),
-          }),
-        },
-      );
-
-      if (!response.ok) {
-        throw new Error(
-          `GitHub upload review asset failed: ${response.status} ${await response.text()}`,
-        );
-      }
 
       const uploaded = (await response.json()) as Record<string, unknown>;
       const content = uploaded["content"] as Record<string, unknown> | undefined;
       const commit = uploaded["commit"] as Record<string, unknown> | undefined;
-      const commitSha = typeof commit?.["sha"] === "string" ? (commit["sha"] as string) : undefined;
+      const commitSha = GitObjectIdSchema.safeParse(commit?.["sha"]);
+      if (!commitSha.success) {
+        throw new Error("GitHub upload review asset did not return a valid commit SHA");
+      }
 
       // Public repos: pin the raw URL to the commit SHA so it survives branch
       // deletion after merge. Private repos: raw URLs 404 for unauthenticated
@@ -218,10 +225,9 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
       // non-embeddable for the review-body renderer.
       const embeddable = !isPrivate && asset.role !== "e2e-video";
       const url = isPrivate
-        ? String(content?.["html_url"] ?? content?.["download_url"] ?? "")
-        : commitSha !== undefined
-          ? `https://raw.githubusercontent.com/${input.target.owner}/${input.target.repo}/${commitSha}/${assetPath}`
-          : String(content?.["download_url"] ?? content?.["html_url"] ?? "");
+        ? `${input.target.webBaseUrl}/${input.target.owner}/${input.target.repo}/blob/${commitSha.data}/${assetPath}`
+        : `https://raw.githubusercontent.com/${input.target.owner}/${input.target.repo}/${commitSha.data}/${assetPath}`;
+      void content;
 
       published.push(
         PublishedReviewAssetSchema.parse({
@@ -236,6 +242,103 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
     }
 
     return published;
+  }
+
+  private async ensureEvidenceBranch(input: {
+    target: PublishTarget & { owner: string; repo: string };
+    payload: ReviewRequestPayload;
+    token: string;
+    signal?: AbortSignal | undefined;
+  }): Promise<typeof GITHUB_EVIDENCE_BRANCH> {
+    if (input.payload.headSha === undefined) {
+      throw new Error("EVIDENCE_REF_CONFLICT: evidence branch requires a reviewed head SHA");
+    }
+    const existing = await this.githubFetch(
+      `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}/git/ref/heads/${encodePath(GITHUB_EVIDENCE_BRANCH)}`,
+      input.token,
+      { method: "GET", signal: input.signal },
+    );
+    if (existing.ok) {
+      validateEvidenceRef(await existing.json());
+      return GITHUB_EVIDENCE_BRANCH;
+    }
+    if (existing.status !== 404) {
+      throw new Error(
+        `GitHub inspect evidence ref failed: ${existing.status} ${await existing.text()}`,
+      );
+    }
+    const created = await this.githubFetch(
+      `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}/git/refs`,
+      input.token,
+      {
+        method: "POST",
+        signal: input.signal,
+        body: JSON.stringify({
+          ref: GITHUB_EVIDENCE_REF,
+          sha: input.payload.headSha,
+        }),
+      },
+    );
+    if (created.ok) {
+      validateEvidenceRef(await created.json());
+      return GITHUB_EVIDENCE_BRANCH;
+    }
+    if (created.status !== 422) {
+      throw new Error(
+        `GitHub create evidence ref failed: ${created.status} ${await created.text()}`,
+      );
+    }
+    const winner = await this.githubFetch(
+      `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}/git/ref/heads/${encodePath(GITHUB_EVIDENCE_BRANCH)}`,
+      input.token,
+      { method: "GET", signal: input.signal },
+    );
+    if (!winner.ok) {
+      throw new Error(
+        `EVIDENCE_REF_CONFLICT: create raced but the managed ref is unavailable (${winner.status})`,
+      );
+    }
+    validateEvidenceRef(await winner.json());
+    return GITHUB_EVIDENCE_BRANCH;
+  }
+
+  private async uploadEvidenceAsset(input: {
+    target: PublishTarget & { owner: string; repo: string };
+    asset: ReviewRequestAsset;
+    assetPath: string;
+    assetBranch: typeof GITHUB_EVIDENCE_BRANCH;
+    token: string;
+    signal?: AbortSignal | undefined;
+  }): Promise<Response> {
+    for (let attempt = 1; attempt <= MAX_EVIDENCE_UPLOAD_ATTEMPTS; attempt += 1) {
+      const existingSha = await this.findContentSha({
+        target: input.target,
+        path: input.assetPath,
+        branch: input.assetBranch,
+        token: input.token,
+        signal: input.signal,
+      });
+      const response = await this.githubFetch(
+        `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}/contents/${encodePath(input.assetPath)}`,
+        input.token,
+        {
+          method: "PUT",
+          signal: input.signal,
+          body: JSON.stringify({
+            message: `chore(spec-to-pr): publish review evidence ${input.asset.artifactId}`,
+            content: input.asset.content.toString("base64"),
+            branch: input.assetBranch,
+            ...(existingSha === undefined ? {} : { sha: existingSha }),
+          }),
+        },
+      );
+      if (response.ok) return response;
+      if (response.status === 409 && attempt < MAX_EVIDENCE_UPLOAD_ATTEMPTS) continue;
+      throw new Error(
+        `GitHub upload review asset failed: ${response.status} ${await response.text()}`,
+      );
+    }
+    throw new Error("GitHub upload review asset failed after bounded conflict retries");
   }
 
   private async isPrivateRepo(input: {
@@ -400,4 +503,21 @@ function safePathSegment(value: string): string {
   const safe = value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
 
   return safe === "" ? "target" : safe;
+}
+
+function validateEvidenceRef(raw: unknown): ValidatedEvidenceRef {
+  if (typeof raw !== "object" || raw === null) {
+    throw new Error("EVIDENCE_REF_CONFLICT: managed evidence ref response is malformed");
+  }
+  const ref = raw as Record<string, unknown>;
+  const object = ref["object"];
+  if (typeof object !== "object" || object === null) {
+    throw new Error("EVIDENCE_REF_CONFLICT: managed evidence ref has no Git object");
+  }
+  const gitObject = object as Record<string, unknown>;
+  const sha = GitObjectIdSchema.safeParse(gitObject["sha"]);
+  if (ref["ref"] !== GITHUB_EVIDENCE_REF || gitObject["type"] !== "commit" || !sha.success) {
+    throw new Error("EVIDENCE_REF_CONFLICT: managed evidence ref is not the expected commit ref");
+  }
+  return { ref: GITHUB_EVIDENCE_REF, sha: sha.data };
 }

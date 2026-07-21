@@ -17,13 +17,18 @@ const sidebars: SidebarsConfig = {
       type: "category",
       label: "사용법",
       collapsed: false,
-      items: ["usage/brief", "usage/legacy", "usage/feature", "usage/figma"],
+      items: ["usage/index", "usage/brief", "usage/legacy", "usage/feature", "usage/figma"],
     },
     {
       type: "category",
       label: "핵심 개념",
       collapsed: false,
-      items: ["concepts/pipeline", "concepts/comparison"],
+      items: [
+        "concepts/pipeline",
+        "concepts/reviews",
+        "concepts/visual-verification",
+        "concepts/comparison",
+      ],
     },
     {
       type: "category",

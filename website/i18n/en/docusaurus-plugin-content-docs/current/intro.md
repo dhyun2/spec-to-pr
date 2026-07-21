@@ -1,42 +1,52 @@
 ---
 slug: /
 sidebar_position: 1
-title: Introducing SpecToPR
+title: SpecToPR
+hide_title: true
+description: The shortest path from a brief, legacy app, feature, or Figma design to an evidence-backed draft PR
 ---
 
-# SpecToPR
+import GuideHero from "@site/src/components/guide/GuideHero";
+import ModeChooser from "@site/src/components/guide/ModeChooser";
+import RunPipeline from "@site/src/components/guide/RunPipeline";
+import NextStep from "@site/src/components/guide/NextStep";
 
-SpecToPR is a Claude Code and Codex plugin that turns a brief, a legacy change request, a user-facing feature, or a Figma design into verified implementation and, when requested, a draft PR/MR.
+<GuideHero
+eyebrow="Specification to evidence-backed PR"
+title="SpecToPR"
+summary="Choose where you are starting—brief, legacy app, feature, or Figma—and move through implementation and independent review to a draft PR with traceable evidence."
+primary={{ label: "5-minute quickstart", href: "/getting-started/quickstart" }}
+secondary={{ label: "Choose a delivery", href: "/usage/" }}
+/>
 
-:::info Version labels
-This site describes **Released 0.2.1** behavior from the `main` branch.
+:::info[The version you are reading]
+This site describes **Unreleased** behavior under development on package `0.2.1`. The public surface stays deliberately small: 7 MCP tools, 8 durable stages, 8 skills, and 2 independent reviewers.
 :::
 
-## Four delivery modes
+## Choose the input; keep one Run
 
-| Mode      | Input                       | Additional evidence                        | Result                         |
-| --------- | --------------------------- | ------------------------------------------ | ------------------------------ |
-| `brief`   | brief/spec and repository   | acceptance criteria and contracts          | draft PR/MR                    |
-| `legacy`  | repository and narrow delta | focused current-behavior baseline          | draft PR/MR                    |
-| `feature` | user-facing feature         | changed-feature E2E plus exactly one video | video-linked draft PR/MR       |
-| `figma`   | Figma URL and repository    | real Figma context and visual evidence     | implementation; optional draft |
+The four cases are not four pipelines. Their inputs and required evidence differ, while contracts → implementation → functional and design review → draft publication stays the same.
 
-Only `feature` inherits the targeted Playwright E2E and exactly-one-video delivery cost. A supplied Figma URL always requires one strict `figma-bundle` from the host-connected Figma capability.
+<ModeChooser locale="en" />
 
-## Deliberately small surface
+## Follow one change into a PR
 
-- 7 MCP tools
-- 8 durable stages
-- 8 public marketplace skills
-- 2 independent, read-only reviewers
+Select a stage to see what it receives and what it leaves behind. One implementation writer owns API and UI in the same `implementationContextId`. Only after implementation do the read-only functional reviewer and UI-only design reviewer inspect the immutable packet independently.
 
-One implementation writer owns API and UI in one `implementationContextId`. Read-only scouts are workload-gated, reviewer parallelism begins only after implementation, and the publisher only creates or updates drafts. Required evidence never becomes optional because a host skill, browser, budget, or diagnostic tool is unavailable.
+<RunPipeline locale="en" />
 
-## Start
+## Evidence comes before “done”
 
-1. [Prerequisites](/getting-started/prerequisites)
-2. [Installation](/getting-started/installation)
-3. [Quickstart](/getting-started/quickstart)
-4. [Brief → draft PR](/usage/brief)
+- Briefs, Figma, and OpenAPI are pinned through `sourceProvenance` and accepted contracts.
+- Figma or a running legacy screen is captured at the same route, state, viewport, and fixture; `compare-visuals` performs the comparison.
+- Ready and blocked outcomes share the 15-section `pr-report-v2.1`, so a stopped Run still shows completed work, unrun checks, and the exact resume action.
+- SpecToPR only creates or updates drafts. People retain approval, ready, and merge authority.
 
-Read the [pipeline](/concepts/pipeline), [skills reference](/reference/skills), and the official-source [comparison and adoption policy](/concepts/comparison).
+<NextStep
+eyebrow="Your first Run"
+title="See the whole path with one small example"
+description="The quickstart covers installation checks, a copyable prompt, and the expected draft PR in about five minutes."
+href="/getting-started/quickstart"
+label="Open the quickstart"
+secondary={{ label: "Compare all four cases", href: "/usage/" }}
+/>

@@ -8,6 +8,9 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   ReleasePackageBuilder,
+  MCP_ENTRY_MAX_BYTES,
+  MCP_TOTAL_JS_MAX_BYTES,
+  validateMcpBundleFiles,
   verifyReleaseArchive,
   verifyReleasePackageFiles,
   verifyReviewerProfileParity,
@@ -178,6 +181,35 @@ describe("release verifier", () => {
     expect(result.status).toBe("failed");
     expect(result.failures.some((failure) => failure.includes("node_modules"))).toBe(true);
   });
+
+  it("requires every MCP chunk, validates local imports, and enforces size budgets", () => {
+    expect(
+      validateMcpBundleFiles(
+        new Map([
+          ["dist/mcp/server.js", Buffer.from('import("./png-CODEC.js");')],
+          ["dist/mcp/png-CODEC.js", Buffer.from("export {};\n")],
+        ]),
+      ),
+    ).toEqual([]);
+    expect(
+      validateMcpBundleFiles(
+        new Map([["dist/mcp/server.js", Buffer.from('import("./missing.js");')]]),
+      ),
+    ).toContain("MCP local import is missing from the package: dist/mcp/server.js -> ./missing.js");
+    expect(
+      validateMcpBundleFiles(
+        new Map([["dist/mcp/server.js", Buffer.alloc(MCP_ENTRY_MAX_BYTES + 1)]]),
+      ).some((failure) => failure.includes("MCP entry uses")),
+    ).toBe(true);
+    expect(
+      validateMcpBundleFiles(
+        new Map([
+          ["dist/mcp/server.js", Buffer.from("export {};\n")],
+          ["dist/mcp/huge.js", Buffer.alloc(MCP_TOTAL_JS_MAX_BYTES)],
+        ]),
+      ).some((failure) => failure.includes("MCP JavaScript uses")),
+    ).toBe(true);
+  });
 });
 
 function requiredReleaseInventory(): string[] {
@@ -192,12 +224,15 @@ function requiredReleaseInventory(): string[] {
     "CHANGELOG.md",
     "agents/design-reviewer.md",
     "agents/functional-reviewer.md",
+    "dist/mcp/chunk-TEST1234.js",
     "dist/mcp/server.js",
     "package.json",
     "packages/codex-sdk/dist/boundary-runner.d.ts",
     "packages/codex-sdk/dist/boundary-runner.js",
     "packages/codex-sdk/dist/cli.d.ts",
     "packages/codex-sdk/dist/cli.js",
+    "packages/codex-sdk/dist/generated/delivery-mode-policy.d.ts",
+    "packages/codex-sdk/dist/generated/delivery-mode-policy.js",
     "packages/codex-sdk/dist/spec-to-pr-runner.d.ts",
     "packages/codex-sdk/dist/spec-to-pr-runner.js",
     "packages/codex-sdk/dist/usage-calibration.d.ts",
@@ -243,6 +278,8 @@ async function createArchiveFixture(): Promise<string> {
     [".agents/plugins/marketplace.json", "{}\n"],
     [".mcp.json", "{}\n"],
     ["CHANGELOG.md", "# Changelog\n"],
+    ["dist/mcp/server.js", 'import "./chunk-TEST1234.js";\n'],
+    ["dist/mcp/chunk-TEST1234.js", "export {};\n"],
   ]);
 
   for (const [file, content] of files) {

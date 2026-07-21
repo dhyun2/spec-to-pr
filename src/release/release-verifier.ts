@@ -6,7 +6,7 @@ import path from "node:path";
 
 import { z } from "zod";
 
-import { RELEASE_FORBIDDEN_PATTERNS } from "./release-manifest.js";
+import { RELEASE_FORBIDDEN_PATTERNS, validateMcpBundleFiles } from "./release-manifest.js";
 
 const DEFAULT_RUNTIME_SMOKE_TIMEOUT_MS = 10_000;
 const EXPECTED_WORKFLOW_TOOLS = [
@@ -155,6 +155,11 @@ export function verifyReleasePackageFiles(files: string[]): ReleaseVerificationR
     failures,
   });
   verifySdkRuntimeInventory(normalizedFiles, failures);
+  for (const file of normalizedFiles.filter((candidate) => candidate.startsWith("dist/mcp/"))) {
+    if (!/^dist\/mcp\/[^/]+\.js$/u.test(file)) {
+      failures.push(`Unexpected MCP runtime file included: ${file}`);
+    }
+  }
 
   return ReleaseVerificationResultSchema.parse({
     status: failures.length === 0 ? "passed" : "failed",
@@ -210,6 +215,7 @@ export async function verifyReleaseArchive(input: {
     }
 
     failures.push(...verifyReleaseVersionDeclarations(entries, input.expectedVersion));
+    failures.push(...validateMcpBundleFiles(entries));
 
     if (commitExists) {
       failures.push(
@@ -470,6 +476,7 @@ function verifySdkRuntimeInventory(files: string[], failures: string[]): void {
   const requiredModules = new Set([
     "boundary-runner",
     "cli",
+    "generated/delivery-mode-policy",
     "spec-to-pr-runner",
     "usage-calibration",
     "workflow-policy",

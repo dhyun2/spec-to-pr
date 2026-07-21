@@ -1,0 +1,47 @@
+---
+sidebar_position: 2
+title: 에이전트 리뷰와 증거 소유권
+hide_title: true
+description: orchestrator, implementation writer, functional reviewer, design reviewer가 무엇을 소유하고 검증하는지 설명합니다
+---
+
+import GuideHero from "@site/src/components/guide/GuideHero";
+import AgentReviewMap from "@site/src/components/guide/AgentReviewMap";
+import NextStep from "@site/src/components/guide/NextStep";
+
+<GuideHero
+  eyebrow="One writer, two independent verdicts"
+  title="에이전트는 무엇을 검증하나요?"
+  summary="구현 권한과 판정 권한을 분리합니다. 한 명의 implementation writer가 변경하고, 두 reviewer는 같은 불변 evidence를 읽기만 합니다."
+  primary={{ label: "시각 검증 보기", href: "/concepts/visual-verification" }}
+  secondary={{ label: "전체 Run 보기", href: "/concepts/pipeline" }}
+/>
+
+## 역할과 evidence 흐름
+
+<AgentReviewMap locale="ko" />
+
+## 순서는 권한 경계입니다
+
+1. Orchestrator가 accepted contracts, 현재 diff, 실행 결과, evidence path와 `workflow_status` snapshot을 immutable packet으로 고정합니다.
+2. 한 명의 implementation writer가 API-ready와 UI를 같은 `implementationContextId`로 제출합니다. API/UI parallel writer는 만들지 않습니다.
+3. `functional-reviewer`는 수용 조건, API coverage, 테스트, architecture/security gate와 레거시 coverage를 read-only로 판정합니다.
+4. UI scope의 `design-reviewer`는 baseline provenance, 실제 capture, visual report, interaction, responsive state, design-system, accessibility를 read-only로 판정합니다.
+5. 두 verdict가 적용 가능한 gate를 통과해야 `report`와 draft `publish`가 열립니다.
+
+:::info[리뷰어가 하지 않는 일]
+Reviewer는 workflow MCP를 호출하거나 코드를 고치거나 점수를 새로 계산하지 않습니다. 특히 design reviewer는 `compare-visuals`가 만든 수치·diff·overlay와 provenance가 현재 packet에 묶였는지 검증합니다.
+:::
+
+## Scout는 reviewer도 writer도 아닙니다
+
+XS/S에는 scout를 만들지 않습니다. M은 최대 1명, L/XL은 최대 2명의 read-only scout를 독립적인 탐색에만 쓸 수 있습니다. No nesting, browser 금지, workflow MCP 금지이며 구현을 병렬 작성하지 않습니다.
+
+<NextStep
+  eyebrow="검증을 더 깊게"
+  title="실제 픽셀 수치가 만들어지는 과정을 보세요"
+  description="baseline과 actual이 어떻게 고정되고, RGBA distance가 diff·overlay와 review ratio가 되는지 이어서 설명합니다."
+  href="/concepts/visual-verification"
+  label="시각 검증 열기"
+  secondary={{ label: "스킬 역할 보기", href: "/reference/skills" }}
+/>
