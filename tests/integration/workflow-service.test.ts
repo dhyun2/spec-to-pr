@@ -3032,7 +3032,7 @@ describe("WorkflowService", () => {
       expect(
         new Set(
           started.legacyInventory?.apiCandidates.map((candidate) =>
-            candidate.originRef?.kind === "environment" ? candidate.originRef.name : undefined,
+            candidate.originRef?.replace(/^process\.env:/u, ""),
           ),
         ),
       ).toEqual(

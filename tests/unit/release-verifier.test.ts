@@ -198,6 +198,21 @@ describe("release verifier", () => {
     ).toContain("MCP local import is missing from the package: dist/mcp/server.js -> ./missing.js");
     expect(
       validateMcpBundleFiles(
+        new Map([
+          [
+            "dist/mcp/server.js",
+            Buffer.from("const parserMessage = 'Only import x from \"./module\" is valid.';\n"),
+          ],
+        ]),
+      ),
+    ).toEqual([]);
+    expect(
+      validateMcpBundleFiles(
+        new Map([["dist/mcp/server.js", Buffer.from('export * from "./missing.js";')]]),
+      ),
+    ).toContain("MCP local import is missing from the package: dist/mcp/server.js -> ./missing.js");
+    expect(
+      validateMcpBundleFiles(
         new Map([["dist/mcp/server.js", Buffer.alloc(MCP_ENTRY_MAX_BYTES + 1)]]),
       ).some((failure) => failure.includes("MCP entry uses")),
     ).toBe(true);

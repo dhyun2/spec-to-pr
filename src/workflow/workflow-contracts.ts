@@ -3,11 +3,6 @@ import { z } from "zod";
 import { RunStageNameSchema } from "../run/stages.js";
 import { ArtifactIdSchema, RunIdSchema } from "../runtime/ids.js";
 import { GitObjectIdSchema, Sha256DigestSchema } from "../runtime/scalars.js";
-import { LegacyFeatureEntrySchema } from "../legacy/legacy-inventory.js";
-import {
-  LegacyApiCandidateSchema,
-  LegacySupportingDependencySchema,
-} from "../legacy/legacy-api-contracts.js";
 import { WorkloadEstimateSchema, WorkloadSignalsSchema } from "./workload-policy.js";
 import { VisualCaptureSchema, VisualTargetManifestSchema } from "../visual/visual-comparator.js";
 
@@ -1437,9 +1432,33 @@ export const WorkflowStatusSchema = z
         truncated: z.boolean(),
         apiState: z.enum(["not-detected", "detected", "truncated"]),
         apiDiscoveryAdapters: z.array(z.string().trim().min(1).max(100)).max(20),
-        entries: z.array(LegacyFeatureEntrySchema).max(500),
-        apiCandidates: z.array(LegacyApiCandidateSchema).max(500),
-        supportingDependencies: z.array(LegacySupportingDependencySchema).max(500),
+        entries: z
+          .array(
+            z
+              .object({
+                featureKey: z.string(),
+                category: z.string(),
+                normalizedKey: z.string(),
+                sourcePath: z.string(),
+                symbol: z.string(),
+              })
+              .strict(),
+          )
+          .max(500),
+        apiCandidates: z
+          .array(
+            z
+              .object({
+                operationKey: z.string(),
+                originRef: z.string().optional(),
+                origins: z.array(z.string()).max(20).optional(),
+                sourcePaths: z.array(z.string()).max(100),
+                transportRefs: z.array(z.string()).max(100),
+              })
+              .strict(),
+          )
+          .max(500),
+        supportingDependencies: z.array(z.string()).max(500),
       })
       .strict()
       .optional(),

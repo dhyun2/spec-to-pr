@@ -1134,9 +1134,58 @@ export class WorkflowService {
       truncated: inventory.truncated,
       apiState: inventory.apiState,
       apiDiscoveryAdapters: inventory.apiDiscoveryAdapters,
-      entries: inventory.entries.slice(0, 500),
-      apiCandidates: inventory.apiCandidates.slice(0, 500),
-      supportingDependencies: inventory.supportingDependencies.slice(0, 500),
+      entries: inventory.entries.slice(0, 500).map((entry) => ({
+        featureKey: entry.featureKey,
+        category: entry.category,
+        normalizedKey: entry.normalizedKey,
+        sourcePath: entry.sourcePath,
+        symbol: entry.symbol,
+      })),
+      apiCandidates: inventory.apiCandidates.slice(0, 500).map((candidate) => ({
+        operationKey: candidate.operationKey,
+        ...(candidate.originRef === undefined
+          ? {}
+          : {
+              originRef:
+                candidate.originRef.kind === "environment"
+                  ? `${candidate.originRef.runtime}:${candidate.originRef.name}`
+                  : candidate.originRef.kind === "openapi-server"
+                    ? `openapi:${candidate.originRef.sourceLocator}#${candidate.originRef.serverIndex}`
+                    : candidate.originRef.kind,
+              origins:
+                candidate.originRef.kind === "environment"
+                  ? [
+                      ...(candidate.originRef.sanitizedOrigin === undefined
+                        ? []
+                        : [candidate.originRef.sanitizedOrigin]),
+                      ...(candidate.originRef.sanitizedOrigins ?? []).map(
+                        (origin) => origin.origin,
+                      ),
+                    ].slice(0, 20)
+                  : candidate.originRef.kind === "literal" ||
+                      candidate.originRef.kind === "runtime-origin"
+                    ? [candidate.originRef.sanitizedOrigin]
+                    : [],
+            }),
+        sourcePaths: [
+          ...new Set(
+            candidate.callSites.flatMap((callSite) => [
+              callSite.ownerSourcePath,
+              callSite.terminalSourcePath,
+            ]),
+          ),
+        ].slice(0, 100),
+        transportRefs: [
+          ...new Set(
+            candidate.callSites.flatMap((callSite) =>
+              callSite.transportRef === undefined ? [] : [callSite.transportRef],
+            ),
+          ),
+        ].slice(0, 100),
+      })),
+      supportingDependencies: inventory.supportingDependencies
+        .slice(0, 500)
+        .map((dependency) => dependency.applicationRelativePath),
     };
   }
 

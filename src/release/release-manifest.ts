@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { parse } from "@babel/parser";
 
 import path from "node:path";
 
@@ -88,10 +89,15 @@ export function validateMcpBundleFiles(files: ReadonlyMap<string, Buffer>): stri
     failures.push(`MCP JavaScript uses ${totalBytes} bytes; maximum is ${MCP_TOTAL_JS_MAX_BYTES}.`);
   }
 
-  const localImportPattern = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s*)["'](\.[^"']+)["']/gu;
   for (const [file, content] of javascriptFiles) {
-    for (const match of content.toString("utf8").matchAll(localImportPattern)) {
-      const specifier = match[1]!;
+    let specifiers: string[];
+    try {
+      specifiers = localModuleSpecifiers(content.toString("utf8"));
+    } catch {
+      failures.push(`MCP JavaScript is not syntactically valid: ${file}`);
+      continue;
+    }
+    for (const specifier of specifiers) {
       const target = path.posix.normalize(path.posix.join(path.posix.dirname(file), specifier));
       if (!target.startsWith("dist/mcp/") || !files.has(target)) {
         failures.push(`MCP local import is missing from the package: ${file} -> ${specifier}`);
@@ -99,6 +105,65 @@ export function validateMcpBundleFiles(files: ReadonlyMap<string, Buffer>): stri
     }
   }
   return failures;
+}
+
+function localModuleSpecifiers(source: string): string[] {
+  const program = parse(source, { sourceType: "unambiguous" }).program;
+  const specifiers: string[] = [];
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (typeof value !== "object" || value === null) return;
+    const node = value as {
+      type?: unknown;
+      source?: unknown;
+      callee?: unknown;
+      arguments?: unknown;
+    };
+    if (
+      (node.type === "ImportDeclaration" ||
+        node.type === "ExportNamedDeclaration" ||
+        node.type === "ExportAllDeclaration") &&
+      isRelativeStringLiteral(node.source)
+    ) {
+      specifiers.push(node.source.value);
+    } else if (
+      node.type === "CallExpression" &&
+      isImportNode(node.callee) &&
+      Array.isArray(node.arguments) &&
+      isRelativeStringLiteral(node.arguments[0])
+    ) {
+      specifiers.push(node.arguments[0].value);
+    } else if (node.type === "ImportExpression" && isRelativeStringLiteral(node.source)) {
+      specifiers.push(node.source.value);
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (["loc", "start", "end", "extra", "comments", "tokens"].includes(key)) continue;
+      visit(child);
+    }
+  };
+  visit(program);
+  return specifiers;
+}
+
+function isImportNode(value: unknown): value is { type: "Import" } {
+  return (
+    typeof value === "object" && value !== null && (value as { type?: unknown }).type === "Import"
+  );
+}
+
+function isRelativeStringLiteral(
+  value: unknown,
+): value is { type: "StringLiteral"; value: string } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { type?: unknown }).type === "StringLiteral" &&
+    typeof (value as { value?: unknown }).value === "string" &&
+    (value as { value: string }).value.startsWith(".")
+  );
 }
 
 export const RELEASE_FORBIDDEN_PATTERNS = [
