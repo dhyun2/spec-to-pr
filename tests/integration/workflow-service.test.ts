@@ -4280,6 +4280,28 @@ describe("WorkflowService", () => {
         ],
       },
     });
+    const runWithVisualArtifacts = await store.get(started.runId);
+    const contractsReport = runWithVisualArtifacts.artifacts.find(
+      (artifact) =>
+        artifact.kind === "agent-result-report" &&
+        artifact.metadata["workflowSubmissionKind"] === "contracts",
+    );
+    if (contractsReport === undefined) throw new Error("Missing contracts report");
+    runWithVisualArtifacts.artifacts.push(
+      ArtifactRefSchema.parse({
+        ...contractsReport,
+        id: createArtifactId(),
+        kind: "screenshot",
+        metadata: {
+          adapter: "workflow-v2-evidence",
+          workflowSubmissionKind: "contracts",
+          visualRole: "baseline",
+        },
+      }),
+    );
+    runWithVisualArtifacts.revision += 1;
+    runWithVisualArtifacts.updatedAt = new Date().toISOString();
+    await store.save(runWithVisualArtifacts, runWithVisualArtifacts.revision - 1);
     await service.submit({
       runId: started.runId,
       submission: {

@@ -4639,9 +4639,7 @@ function assertSubmissionPrerequisites(
 }
 
 function contractRequirementIds(run: RunManifest): Set<string> {
-  const artifact = [...run.artifacts]
-    .reverse()
-    .find((item) => item.metadata["workflowSubmissionKind"] === "contracts");
+  const artifact = contractsSubmissionReport(run);
   const rawIds = artifact?.metadata["requirementIds"];
   if (!Array.isArray(rawIds) || rawIds.some((value) => typeof value !== "string")) {
     throw new Error("The contracts stage is missing its structured requirement manifest");
@@ -4668,16 +4666,22 @@ function legacyFeatureKeysFromRun(run: RunManifest): Set<string> {
 }
 
 function legacyScopeKeysFromRun(run: RunManifest): Set<string> {
-  const rawKeys = [...run.artifacts]
-    .reverse()
-    .find((artifact) => artifact.metadata["workflowSubmissionKind"] === "contracts")?.metadata[
-    "legacyScopeKeys"
-  ];
+  const rawKeys = contractsSubmissionReport(run)?.metadata["legacyScopeKeys"];
   return new Set(
     Array.isArray(rawKeys)
       ? rawKeys.filter((featureKey): featureKey is string => typeof featureKey === "string")
       : [],
   );
+}
+
+function contractsSubmissionReport(run: RunManifest): ArtifactRef | undefined {
+  return [...run.artifacts]
+    .reverse()
+    .find(
+      (artifact) =>
+        artifact.kind === "agent-result-report" &&
+        artifact.metadata["workflowSubmissionKind"] === "contracts",
+    );
 }
 
 function apiReadyOperationKeysFromRun(run: RunManifest): Set<string> {
