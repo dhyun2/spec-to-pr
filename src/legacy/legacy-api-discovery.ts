@@ -69,7 +69,10 @@ function bindingsFor(file: LegacyGraphFile): FileBindings {
     ) {
       variables.set(node.name.text, node.initializer);
       if (ts.isNewExpression(node.initializer)) {
-        receivers.set(node.name.text, expressionText(node.initializer.expression, sourceFile));
+        const constructorName = expressionText(node.initializer.expression, sourceFile);
+        if (looksLikeHttpReceiver(constructorName)) {
+          receivers.set(node.name.text, constructorName);
+        }
       } else if (
         ts.isCallExpression(node.initializer) &&
         propertyName(node.initializer.expression) === "create" &&
@@ -219,23 +222,31 @@ function endpointFromExpression(
     } else if (fragment.kind === "parameter") {
       rawPath += `{${fragment.value}}`;
     } else {
-      const reference = graph.environmentRefs.find(
-        (item) => item.runtime === fragment.runtime && item.name === fragment.value,
-      );
-      originRef = {
-        kind: "environment",
-        runtime: fragment.runtime,
-        name: fragment.value,
-        ...(reference?.sanitizedOrigin === undefined
-          ? {}
-          : { sanitizedOrigin: reference.sanitizedOrigin }),
-      };
+      if (isSafeUrlEnvironmentName(fragment.value)) {
+        const reference = graph.environmentRefs.find(
+          (item) => item.runtime === fragment.runtime && item.name === fragment.value,
+        );
+        originRef = {
+          kind: "environment",
+          runtime: fragment.runtime,
+          name: fragment.value,
+          ...(reference?.sanitizedOrigin === undefined
+            ? {}
+            : { sanitizedOrigin: reference.sanitizedOrigin }),
+        };
+      } else {
+        rawPath += "{dynamic}";
+        confidence = "low";
+      }
     }
   }
   const absolute = literalHttpUrl(rawPath);
   if (absolute !== undefined && originRef === undefined) {
     originRef = { kind: "literal", sanitizedOrigin: absolute.origin };
     rawPath = absolute.path;
+  }
+  if (originRef !== undefined && /^(?:https?:)?\/\//iu.test(rawPath)) {
+    return { originRef, confidence: "low" };
   }
   if (rawPath.includes("{dynamic}")) confidence = "medium";
   const pathTemplate = normalizedPathTemplate(rawPath);
@@ -380,7 +391,15 @@ function transportForReceiver(receiver: string, bindings: FileBindings): string 
 function looksLikeHttpReceiver(value: string): boolean {
   return (
     /^(?:axios|api|http|client|request)$/iu.test(value) ||
-    /(?:Api|Http|Axios|Request|Rest)(?:Client|Service|Instance)?$/u.test(value)
+    /(?:api|http|axios|request|rest)(?:client|service|instance)?$/iu.test(value) ||
+    /(?:client|service)(?:instance)?$/iu.test(value)
+  );
+}
+
+function isSafeUrlEnvironmentName(name: string): boolean {
+  return (
+    !/(?:^|_)(?:AUTH|COOKIE|CREDENTIAL|KEY|PASS|PASSWORD|SECRET|TOKEN)(?:_|$)/iu.test(name) &&
+    /(?:^|_)(?:API|BASE|ENDPOINT|GATEWAY|GW|HOST|ORIGIN|URI|URL)(?:_|$)/iu.test(name)
   );
 }
 
@@ -418,10 +437,10 @@ function expressionText(expression: ts.Expression, sourceFile: ts.SourceFile): s
 
 function literalHttpUrl(value: string): { origin: string; path: string } | undefined {
   try {
-    const parsed = new URL(value);
-    if (!/^https?:$/u.test(parsed.protocol) || parsed.username !== "" || parsed.password !== "") {
-      return undefined;
-    }
+    const parsed = new URL(value.startsWith("//") ? `https:${value}` : value);
+    if (!/^https?:$/u.test(parsed.protocol)) return undefined;
+    parsed.username = "";
+    parsed.password = "";
     return { origin: parsed.origin, path: parsed.pathname };
   } catch {
     return undefined;

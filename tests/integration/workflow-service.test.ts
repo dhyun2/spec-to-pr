@@ -3026,7 +3026,18 @@ describe("WorkflowService", () => {
           "PATCH /shop/{rgnNo}/favorite",
         ].sort(),
       );
-      expect(JSON.stringify(started.legacyInventory)).not.toMatch(/operation:|process\.env/u);
+      expect(JSON.stringify(started.legacyInventory)).not.toMatch(/operation:/u);
+      expect(started.legacyInventory).toMatchObject({ version: 3, apiState: "detected" });
+      expect(started.legacyInventory?.apiCandidates).toHaveLength(8);
+      expect(
+        new Set(
+          started.legacyInventory?.apiCandidates.map((candidate) =>
+            candidate.originRef?.kind === "environment" ? candidate.originRef.name : undefined,
+          ),
+        ),
+      ).toEqual(
+        new Set(["VUE_APP_API_GW_V1_URL", "VUE_APP_API_GW_V2_URL", "VUE_APP_API_GW_LOUNGE_API"]),
+      );
       expect(JSON.stringify(await store.get(started.runId))).not.toMatch(
         /must-not-appear|password@/u,
       );
@@ -3179,9 +3190,16 @@ describe("WorkflowService", () => {
       });
 
       expect(started).toMatchObject({
-        status: "blocked",
+        status: "needs-external-action",
         currentStage: "intake",
-        nextActions: [],
+        nextActions: [
+          {
+            kind: "collect-legacy-network-evidence",
+            runId: started.runId,
+            maxBytes: 1024 * 1024,
+            maxRequests: 1_000,
+          },
+        ],
         blockerDetails: [
           expect.objectContaining({
             code: "LEGACY_API_METHOD_UNKNOWN",
@@ -3196,33 +3214,35 @@ describe("WorkflowService", () => {
       );
       expect(JSON.stringify(started)).not.toContain("do-not-persist");
       expect(JSON.stringify(started)).not.toContain("password@");
-      const diagnostic = await service.ensureBlockedDiagnosticReport({ runId: started.runId });
-      expect((await artifactStore.readContent(diagnostic.digest)).toString("utf8")).not.toContain(
-        "do-not-persist",
-      );
-      const diagnosticArtifacts = (await store.get(started.runId)).artifacts.filter(
-        (artifact) => artifact.kind === "pr-report",
-      );
-      for (const artifact of diagnosticArtifacts) {
-        expect((await artifactStore.readContent(artifact.digest)).toString("utf8")).not.toContain(
-          "do-not-persist",
-        );
-        expect((await artifactStore.readContent(artifact.digest)).toString("utf8")).not.toContain(
-          "password@",
-        );
-      }
-      await expect(
-        service.submit({
-          runId: started.runId,
-          submission: {
-            kind: "contracts",
-            status: "passed",
-            summary: "Attempted to bypass the blocked intake.",
-            artifactPaths: ["contracts/requirements.json"],
-            requirementManifest: requirements("checkout-api"),
+      await mkdir(path.join(directory, "evidence"), { recursive: true });
+      await writeFile(
+        path.join(directory, "evidence", "legacy.har"),
+        JSON.stringify([
+          {
+            method: "POST",
+            url: "https://api.example/API/Checkout?access_token=do-not-persist",
           },
-        }),
-      ).rejects.toThrow(/intake.*pass/i);
+        ]),
+        "utf8",
+      );
+      const resumed = await service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "legacy-network-evidence",
+          evidencePath: "evidence/legacy.har",
+        },
+      });
+
+      expect(resumed.runId).toBe(started.runId);
+      expect(resumed.status).toBe("needs-external-action");
+      expect(resumed.currentStage).toBe("contracts");
+      expect(resumed.nextActions).toEqual([{ kind: "prepare-contracts", runId: started.runId }]);
+      expect(resumed.deliveryProfile.legacyNetworkEvidencePath).toBe("evidence/legacy.har");
+      expect(resumed.deliveryProfile.openApiOperations).toEqual([
+        expect.objectContaining({ operationKey: "POST /API/Checkout" }),
+      ]);
+      expect(JSON.stringify(await store.get(started.runId))).not.toContain("do-not-persist");
+      expect(JSON.stringify(await store.get(started.runId))).not.toContain("password@");
     } finally {
       await rm(legacyRoot, { recursive: true, force: true });
     }

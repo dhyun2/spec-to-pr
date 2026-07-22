@@ -19,7 +19,7 @@ afterEach(async () => {
   );
 });
 
-describe("legacy inventory v2", () => {
+describe("legacy inventory v3", () => {
   it("discovers bounded structural migration signals with stable feature keys", async () => {
     const root = await temporaryLegacyProject();
     await writeFile(
@@ -111,12 +111,12 @@ describe("legacy inventory v2", () => {
     expect(apiKeys).toEqual(
       expect.arrayContaining([
         "POST /API/Orders",
-        "GET //api.example/v4/Thing",
+        "GET /v4/Thing",
         "DELETE /API/Orders/1",
         "PUT /v1/Orders/1",
         "PATCH /v1/OrderItems",
         "UNKNOWN /v2/NeedsMethod",
-        "DELETE https://api.example/v3/AccountID",
+        "DELETE /v3/AccountID",
         "UNKNOWN dynamic:fetch:dynamicCheckoutUrl",
         "GET operation:getCheckout",
         "GET operation:getOrders",
@@ -193,6 +193,9 @@ describe("legacy inventory v2", () => {
     const inventory = await buildLegacyInventory(root);
     const apiEntries = inventory.entries.filter((entry) => entry.category === "api");
 
+    expect(inventory.version).toBe(3);
+    expect(inventory.apiState).toBe("detected");
+    expect(inventory.apiCandidates).toHaveLength(8);
     expect(apiEntries.map((entry) => entry.normalizedKey).sort()).toEqual(
       [
         "DELETE /shop/{rgnNo}/favorite",
@@ -214,6 +217,15 @@ describe("legacy inventory v2", () => {
       ),
     ).toBe(true);
     expect(JSON.stringify(apiEntries)).not.toMatch(/operation:|process\.env/u);
+    expect(
+      new Set(
+        inventory.apiCandidates.map((candidate) =>
+          candidate.originRef?.kind === "environment" ? candidate.originRef.name : undefined,
+        ),
+      ),
+    ).toEqual(
+      new Set(["VUE_APP_API_GW_V1_URL", "VUE_APP_API_GW_V2_URL", "VUE_APP_API_GW_LOUNGE_API"]),
+    );
   });
 
   it("normalizes only safe environment-base URL templates", async () => {
@@ -239,11 +251,15 @@ describe("legacy inventory v2", () => {
 
     expect(apiKeys).toContain("GET /orders/{orderId}");
     expect(apiKeys).toContain("POST /orders/{orderId}");
-    expect(apiKeys).toContain("GET ${process.env.API_TOKEN}orders/${orderId}");
-    expect(apiKeys).toContain("GET ${process.env.API_BASE_URL}orders/${buildOrderId()}");
-    expect(apiKeys).toContain("GET ${process.env.API_BASE_URL}orders/order-${orderId}");
-    expect(apiKeys).toContain("GET ${process.env.API_BASE_URL}https://other.example/orders");
-    expect(apiKeys).toContain("GET ${process.env.API_BASE_URL}//other.example/orders");
+    expect(apiKeys).toContain("GET /{dynamic}orders/{orderId}");
+    expect(apiKeys).toContain("GET /orders/{dynamic}");
+    expect(apiKeys).toContain("GET /orders/order-{orderId}");
+    expect(apiKeys).not.toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("process.env"),
+        expect.stringContaining("import.meta.env"),
+      ]),
+    );
     expect(JSON.stringify(inventory)).not.toContain("do-not-persist");
   });
 
@@ -260,6 +276,7 @@ describe("legacy inventory v2", () => {
       "source-http-client",
       "source-request-config",
       "source-generated-client",
+      "source-semantic-ast",
     ]);
   });
 

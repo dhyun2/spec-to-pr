@@ -4,6 +4,14 @@ import path from "node:path";
 
 import { z } from "zod";
 
+import { discoverLegacyApiCandidates } from "./legacy-api-discovery.js";
+import {
+  LegacyApiCandidateSchema,
+  LegacySupportingDependencySchema,
+  stableEndpointKey,
+} from "./legacy-api-contracts.js";
+import { discoverLegacySourceGraph } from "./legacy-source-graph.js";
+
 const MAX_LEGACY_FILE_BYTES = 2 * 1024 * 1024;
 export type LegacyInventoryLimits = {
   maxDirectories: number;
@@ -31,6 +39,7 @@ const SOURCE_API_DISCOVERY_ADAPTERS = [
   "source-http-client",
   "source-request-config",
   "source-generated-client",
+  "source-semantic-ast",
 ] as const;
 const API_DISCOVERY_ADAPTERS = [...SOURCE_API_DISCOVERY_ADAPTERS, "runtime-network-har"] as const;
 const ApiDiscoveryAdapterSchema = z.enum(API_DISCOVERY_ADAPTERS);
@@ -75,7 +84,7 @@ export const LegacyFeatureEntrySchema = z
 
 export const LegacyInventorySchema = z
   .object({
-    version: z.literal(2),
+    version: z.union([z.literal(2), z.literal(3)]),
     rootDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
     sourceDigest: z
       .string()
@@ -90,6 +99,9 @@ export const LegacyInventorySchema = z
       .array(ApiDiscoveryAdapterSchema)
       .default([...SOURCE_API_DISCOVERY_ADAPTERS]),
     entries: z.array(LegacyFeatureEntrySchema).max(20_000),
+    apiState: z.enum(["not-detected", "detected", "truncated"]).default("not-detected"),
+    apiCandidates: z.array(LegacyApiCandidateSchema).max(5_000).default([]),
+    supportingDependencies: z.array(LegacySupportingDependencySchema).max(5_000).default([]),
   })
   .strict();
 
@@ -101,12 +113,18 @@ export async function buildLegacyInventory(
   limitOverrides: Partial<LegacyInventoryLimits> = {},
 ): Promise<LegacyInventory> {
   const limits = { ...DEFAULT_LEGACY_INVENTORY_LIMITS, ...limitOverrides };
+  const graph = await discoverLegacySourceGraph(root, {
+    maxFiles: limits.maxSourceFiles,
+    maxBytes: limits.maxSourceBytes,
+    maxDepth: limits.maxDepth,
+    maxElapsedMs: limits.maxElapsedMs,
+  });
+  const apiCandidates = discoverLegacyApiCandidates(graph);
   const files = await collectSourceFiles(root, limits);
   const entries = new Map<string, LegacyFeatureEntry>();
-  const rootHash = createHash("sha256");
   let scannedBytes = 0;
   let scannedFiles = 0;
-  let truncated = files.truncated;
+  let truncated = files.truncated || graph.truncated;
 
   scan: for (const relativePath of files.paths) {
     const absolutePath = path.join(root, relativePath);
@@ -131,8 +149,15 @@ export async function buildLegacyInventory(
     const content = bytes.toString("utf8");
     scannedBytes += bytes.byteLength;
     scannedFiles += 1;
-    rootHash.update(relativePath).update("\0").update(content).update("\0");
     for (const entry of discoverFeatures(relativePath, content)) {
+      if (
+        entry.category === "api" &&
+        entry.apiAdapter !== "source-generated-client" &&
+        entry.apiAdapter !== "source-fetch-dynamic" &&
+        entry.apiAdapter !== "source-request-config"
+      ) {
+        continue;
+      }
       if (entries.has(entry.featureKey)) continue;
       if (entries.size >= limits.maxFeatures) {
         truncated = true;
@@ -142,21 +167,73 @@ export async function buildLegacyInventory(
     }
   }
 
-  const rootDigest = `sha256:${rootHash.digest("hex")}`;
+  for (const candidate of apiCandidates) {
+    const callSite = candidate.callSites[0]!;
+    const entry = LegacyFeatureEntrySchema.parse({
+      featureKey: stableFeatureKey("api", candidate.operationKey, callSite.ownerSourcePath),
+      category: "api",
+      normalizedKey: candidate.operationKey,
+      sourcePath: callSite.ownerSourcePath,
+      symbol: candidate.operationKey,
+      apiAdapter: semanticAdapter(candidate.terminalKind),
+      evidenceConfidence: candidate.confidence,
+    });
+    entries.set(entry.featureKey, entry);
+  }
+
+  const rootDigest = graph.sourceDigest;
+  const supportingDependencies = graph.edges.flatMap((edge) => {
+    const file = graph.files.find(
+      (candidate) => candidate.applicationRelativePath === edge.resolvedPath,
+    );
+    if (file === undefined || file.ownership !== "supporting-dependency") return [];
+    return [
+      LegacySupportingDependencySchema.parse({
+        dependencyKey: `dependency_${createHash("sha256")
+          .update(edge.importer)
+          .update("\0")
+          .update(edge.specifier)
+          .update("\0")
+          .update(edge.resolvedPath)
+          .digest("hex")
+          .slice(0, 24)}`,
+        applicationRelativePath: file.applicationRelativePath,
+        digest: file.digest,
+        resolver: edge.resolver,
+        importer: edge.importer,
+        specifier: edge.specifier,
+      }),
+    ];
+  });
   return LegacyInventorySchema.parse({
-    version: 2,
+    version: 3,
     rootDigest,
     sourceDigest: rootDigest,
     visitedDirectories: files.visitedDirectories,
     visitedEntries: files.visitedEntries,
-    scannedFiles,
-    scannedBytes,
+    scannedFiles: Math.max(scannedFiles, graph.files.length),
+    scannedBytes: Math.max(
+      scannedBytes,
+      graph.files.reduce((total, file) => total + Buffer.byteLength(file.content, "utf8"), 0),
+    ),
     truncated,
     apiDiscoveryAdapters: SOURCE_API_DISCOVERY_ADAPTERS,
     entries: [...entries.values()].sort((left, right) =>
       left.featureKey.localeCompare(right.featureKey),
     ),
+    apiState: truncated ? "truncated" : apiCandidates.length > 0 ? "detected" : "not-detected",
+    apiCandidates,
+    supportingDependencies,
   });
+}
+
+function semanticAdapter(
+  terminalKind: z.infer<typeof LegacyApiCandidateSchema>["terminalKind"],
+): z.infer<typeof ApiDiscoveryAdapterSchema> {
+  if (terminalKind === "fetch") return "source-fetch-literal";
+  if (terminalKind === "request-config") return "source-request-config";
+  if (terminalKind === "generated-client") return "source-generated-client";
+  return "source-http-client";
 }
 
 export async function assertLegacyInventoryFresh(
@@ -189,6 +266,9 @@ export function mergeLegacyRuntimeNetworkEvidence(
 ): LegacyInventory {
   const requests = parseLegacyRuntimeNetworkEvidence(rawContent);
   const entries = new Map(inventory.entries.map((entry) => [entry.featureKey, entry]));
+  const apiCandidates = new Map(
+    inventory.apiCandidates.map((candidate) => [candidate.endpointKey, candidate]),
+  );
   requests.forEach((request, index) => {
     const method = request.method.trim().toUpperCase();
     const operationPath = runtimeRequestPath(request.url, index);
@@ -203,6 +283,45 @@ export function mergeLegacyRuntimeNetworkEvidence(
       evidenceConfidence: "high",
     });
     entries.set(entry.featureKey, entry);
+    const runtimeOrigin = runtimeRequestOrigin(request.url);
+    const originRef =
+      runtimeOrigin === undefined
+        ? undefined
+        : ({ kind: "runtime-origin", sanitizedOrigin: runtimeOrigin } as const);
+    const endpointKey = stableEndpointKey({
+      method,
+      pathTemplate: operationPath,
+      ...(originRef === undefined ? {} : { originRef }),
+    });
+    const locator = `${sourcePath}#request-${index + 1}`;
+    apiCandidates.set(
+      endpointKey,
+      LegacyApiCandidateSchema.parse({
+        candidateKey: `candidate_${endpointKey.slice("endpoint_".length)}`,
+        endpointKey,
+        operationKey: normalizedKey,
+        method,
+        pathTemplate: operationPath,
+        ...(originRef === undefined ? {} : { originRef }),
+        confidence: "high",
+        terminalKind: "request-config",
+        callSites: [
+          {
+            callSiteKey: `call_runtime_${index + 1}`,
+            ownerSourcePath: sourcePath,
+            terminalSourcePath: sourcePath,
+            line: index + 1,
+            column: 1,
+            receiver: "runtime-network",
+            transportRef: "runtime-network-har",
+            wrapperChain: [],
+          },
+        ],
+        requestEvidence: { queryKeys: [], bodySymbols: [], headerKeys: [] },
+        responseEvidence: { selectors: [] },
+        witnesses: [{ kind: "runtime", locator }],
+      }),
+    );
   });
 
   const sourceDigest = inventory.sourceDigest ?? inventory.rootDigest;
@@ -223,6 +342,10 @@ export function mergeLegacyRuntimeNetworkEvidence(
     ],
     entries: [...entries.values()].sort((left, right) =>
       left.featureKey.localeCompare(right.featureKey),
+    ),
+    apiState: inventory.truncated ? "truncated" : "detected",
+    apiCandidates: [...apiCandidates.values()].sort((left, right) =>
+      left.endpointKey.localeCompare(right.endpointKey),
     ),
   });
 }
@@ -308,6 +431,19 @@ function runtimeRequestPath(rawUrl: string, index: number): string {
     return parsed.pathname;
   } catch {
     throw new Error(`Legacy runtime network request ${index + 1} requires an HTTP(S) URL or path`);
+  }
+}
+
+function runtimeRequestOrigin(rawUrl: string): string | undefined {
+  const value = rawUrl.trim();
+  try {
+    const parsed = new URL(value.startsWith("//") ? `https:${value}` : value);
+    if (!/^https?:$/u.test(parsed.protocol) || parsed.username !== "" || parsed.password !== "") {
+      return undefined;
+    }
+    return parsed.origin;
+  } catch {
+    return undefined;
   }
 }
 

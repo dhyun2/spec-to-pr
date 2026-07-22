@@ -25,6 +25,7 @@ import {
   validateLegacyRuntimeNetworkEvidence,
   type LegacyInventory,
 } from "../legacy/legacy-inventory.js";
+import { resolveLegacyApiCandidates } from "../legacy/legacy-api-resolver.js";
 import { renderPrReportV2Markdown } from "../pr-report/workflow-report-renderer.js";
 import { PublishIntentSchema, PublishResultSchema } from "../publisher/index.js";
 import { ArtifactRefSchema, type ArtifactRef } from "../runtime/artifact.js";
@@ -113,6 +114,7 @@ const ComposableSourceUrlsSchema = z
   .array(WorkflowSourceUrlSchema)
   .max(MAX_COMPOSABLE_SOURCE_PATHS)
   .default([]);
+type StandardWorkflowSubmission = Exclude<WorkflowSubmission, { kind: "legacy-network-evidence" }>;
 const NormalizedDeliveryProfilePathsSchema = z
   .object({
     briefPath: WorkflowSourcePathSchema.optional(),
@@ -653,7 +655,7 @@ export class WorkflowService {
           code: "LEGACY_API_METHOD_UNKNOWN",
           message:
             "A detected legacy API call needs scoped runtime network evidence or uniquely matching OpenAPI before migration can continue.",
-          retryable: false,
+          retryable: true,
         },
         gapIds: [gap.id],
         artifactIds: [
@@ -705,7 +707,7 @@ export class WorkflowService {
       content: Buffer.from(`${JSON.stringify(inventory, null, 2)}\n`, "utf8"),
       mediaType: "application/json",
       storedAt: timestamp,
-      label: "legacy-inventory-v2.json",
+      label: "legacy-inventory-v3.json",
     });
     const artifact = ArtifactRefSchema.parse({
       id: createArtifactId(),
@@ -717,7 +719,7 @@ export class WorkflowService {
       evidenceIds: [],
       createdAt: timestamp,
       metadata: {
-        adapter: "legacy-inventory-v2",
+        adapter: "legacy-inventory-v3",
         projectRelativePath: "contracts/legacy-inventory.json",
         rootDigest: inventory.rootDigest,
         sourceDigest: inventory.sourceDigest ?? inventory.rootDigest,
@@ -791,6 +793,9 @@ export class WorkflowService {
     const input = WorkflowSubmitInputSchema.parse(rawInput);
     const run = await this.dependencies.runStore.get(input.runId);
     const submission = input.submission;
+    if (submission.kind === "legacy-network-evidence") {
+      return this.submitLegacyNetworkEvidence(run, submission.evidencePath);
+    }
     if (
       submission.kind === "visual-comparison" ||
       ((submission.kind === "contracts" || submission.kind === "implementation") &&
@@ -933,6 +938,124 @@ export class WorkflowService {
     return this.status({ runId: run.id });
   }
 
+  private async submitLegacyNetworkEvidence(
+    run: RunManifest,
+    evidencePath: string,
+  ): Promise<WorkflowStatus> {
+    const intake = stage(run, "intake");
+    const profile = deliveryProfileFromRun(run);
+    if (
+      profile.mode !== "legacy" ||
+      profile.legacyProjectRoot === undefined ||
+      intake.status !== "blocked" ||
+      intake.error?.code !== "LEGACY_API_METHOD_UNKNOWN"
+    ) {
+      throw new Error(
+        "Legacy network evidence can only resume a legacy Run waiting at unresolved API intake",
+      );
+    }
+    const file = await readProjectTextFile(
+      run.projectRoot,
+      evidencePath,
+      "Legacy runtime network evidence",
+    );
+    const rawContent = await readFile(file.resolvedPath);
+    const text = rawContent.toString("utf8");
+    validateLegacyRuntimeNetworkEvidence(text);
+    const source: ProjectTextSource = {
+      ...file,
+      origin: "file",
+      text,
+      chunks: buildParserSafeChunks(text),
+      mediaType: mediaTypeForPath(file.path),
+      rawDigest: `sha256:${createHash("sha256").update(rawContent).digest("hex")}`,
+    };
+    const started = await this.dependencies.stageService.start({
+      runId: run.id,
+      stageName: "intake",
+      workerId: WORKER_ID,
+    });
+    const recorded = await this.recordLegacyInventory(run.id, profile.legacyProjectRoot, source);
+    const legacyApiResult = deriveLegacyApiOperations(
+      recorded.inventory,
+      profile.openApiOperations,
+    );
+    if (legacyApiResult.unresolved.length > 0) {
+      await this.dependencies.stageService.block({
+        runId: run.id,
+        stageName: "intake",
+        workerId: WORKER_ID,
+        leaseId: started.stage.lease!.id,
+        error: {
+          code: "LEGACY_API_METHOD_UNKNOWN",
+          message:
+            "The supplied runtime evidence did not uniquely resolve every dynamic legacy API call.",
+          retryable: true,
+        },
+        gapIds: intake.gapIds,
+        artifactIds: [recorded.artifact.id],
+        checkpoint: intake.checkpoint,
+      });
+      return this.status({ runId: run.id });
+    }
+    const scope = scopeFromRun(run);
+    const updatedProfile = DeliveryProfileSchema.parse({
+      ...profile,
+      legacyNetworkEvidencePath: source.path,
+      openApiOperations: mergeDeliveryApiOperations(
+        profile.openApiOperations,
+        legacyApiResult.operations,
+      ),
+      sourceProvenance: [
+        ...profile.sourceProvenance.filter((item) => item.kind !== "legacy-network"),
+        {
+          kind: "legacy-network",
+          locator: source.path,
+          resolvedLocator: source.path,
+          digest: source.rawDigest,
+          capturedAt: this.now(),
+        },
+      ],
+    });
+    const current = await this.dependencies.runStore.get(run.id);
+    const timestamp = this.now();
+    await this.dependencies.runStore.save(
+      {
+        ...current,
+        revision: current.revision + 1,
+        updatedAt: timestamp,
+        gaps: current.gaps.map((gap) =>
+          intake.gapIds.includes(gap.id)
+            ? GapSchema.parse({
+                ...gap,
+                status: "resolved",
+                resolutionArtifactIds: [recorded.artifact.id],
+                updatedAt: timestamp,
+              })
+            : gap,
+        ),
+      },
+      current.revision,
+    );
+    await this.dependencies.stageService.complete({
+      runId: run.id,
+      stageName: "intake",
+      workerId: WORKER_ID,
+      leaseId: started.stage.lease!.id,
+      artifactIds: [recorded.artifact.id],
+      checkpoint: {
+        name: "scope-classified",
+        data: {
+          scope,
+          gatePlan: buildGatePlan(scope),
+          deliveryProfile: updatedProfile,
+          workload: workloadFromRun(run, scope, updatedProfile),
+        },
+      },
+    });
+    return this.status({ runId: run.id });
+  }
+
   public async status(rawInput: unknown): Promise<WorkflowStatus> {
     const input = WorkflowStatusInputSchema.parse(rawInput);
     const run = await this.dependencies.runStore.get(input.runId);
@@ -1006,10 +1129,14 @@ export class WorkflowService {
     );
     return {
       artifactId: artifact.id,
+      version: inventory.version,
       rootDigest: inventory.rootDigest,
       truncated: inventory.truncated,
+      apiState: inventory.apiState,
       apiDiscoveryAdapters: inventory.apiDiscoveryAdapters,
-      entries: inventory.entries,
+      entries: inventory.entries.slice(0, 500),
+      apiCandidates: inventory.apiCandidates.slice(0, 500),
+      supportingDependencies: inventory.supportingDependencies.slice(0, 500),
     };
   }
 
@@ -1541,7 +1668,7 @@ export class WorkflowService {
 
   private async recordSubmissionArtifact(
     run: RunManifest,
-    submission: WorkflowSubmission,
+    submission: StandardWorkflowSubmission,
     evidenceArtifacts: ArtifactRef[],
     reviewPacket?: ImplementationReviewPacket,
   ): Promise<ArtifactRef> {
@@ -1783,7 +1910,7 @@ export class WorkflowService {
 
   private async ingestSubmissionEvidence(
     run: RunManifest,
-    submission: WorkflowSubmission,
+    submission: StandardWorkflowSubmission,
   ): Promise<ArtifactRef[]> {
     const root = await realpath(run.projectRoot);
     const timestamp = this.now();
@@ -3338,7 +3465,7 @@ export class WorkflowService {
   private async causativeWorkflowSubmission(
     run: RunManifest,
     failedStage: StageState,
-  ): Promise<WorkflowSubmission | undefined> {
+  ): Promise<StandardWorkflowSubmission | undefined> {
     const artifacts = new Map(run.artifacts.map((artifact) => [artifact.id, artifact]));
     for (const artifactId of [...failedStage.artifactIds].reverse()) {
       const artifact = artifacts.get(artifactId);
@@ -3356,6 +3483,7 @@ export class WorkflowService {
       );
       if (
         parsed.success &&
+        parsed.data.kind !== "legacy-network-evidence" &&
         parsed.data.kind !== "figma-bundle" &&
         parsed.data.kind !== "visual-comparison" &&
         submissionOutcome(parsed.data) !== "passed"
@@ -3540,14 +3668,16 @@ function publishStageError(result: PublisherResult) {
   };
 }
 
-function blockerFromSubmission(submission: WorkflowSubmission): WorkflowBlocker | undefined {
+function blockerFromSubmission(
+  submission: StandardWorkflowSubmission,
+): WorkflowBlocker | undefined {
   return "blocker" in submission ? submission.blocker : undefined;
 }
 
 function reconstructFailedSubmissionForPersistence(
   run: RunManifest,
-  submission: WorkflowSubmission,
-): WorkflowSubmission {
+  submission: StandardWorkflowSubmission,
+): StandardWorkflowSubmission {
   if (
     submission.kind === "figma-bundle" ||
     submission.kind === "api-ready" ||
@@ -3573,7 +3703,7 @@ function reconstructFailedSubmissionForPersistence(
 
 function failureContextForSubmission(
   run: RunManifest,
-  submission: WorkflowSubmission,
+  submission: StandardWorkflowSubmission,
 ):
   | {
       workflowStageName: RunStageName;
@@ -4050,7 +4180,19 @@ function stage(run: RunManifest, name: RunStageName): StageState {
 }
 
 function actionsForRun(run: RunManifest, scope: WorkflowScope, profile: DeliveryProfile) {
-  if (stage(run, "intake").status !== "passed") return [];
+  const intake = stage(run, "intake");
+  if (intake.status !== "passed") {
+    return intake.status === "blocked" && intake.error?.code === "LEGACY_API_METHOD_UNKNOWN"
+      ? [
+          WorkflowActionSchema.parse({
+            kind: "collect-legacy-network-evidence",
+            runId: run.id,
+            maxBytes: 1024 * 1024,
+            maxRequests: 1_000,
+          }),
+        ]
+      : [];
+  }
   const policy = deliveryPolicyForRun(run, scope, profile);
   const parallelReviewers =
     policy?.parallelReviewers ??
@@ -4139,7 +4281,9 @@ function isActionable(value: StageState): boolean {
 function stageForSubmission(
   submission: Exclude<
     WorkflowSubmission,
-    { kind: "figma-bundle" | "api-ready" | "visual-comparison" }
+    {
+      kind: "figma-bundle" | "api-ready" | "visual-comparison" | "legacy-network-evidence";
+    }
   >,
 ): RunStageName {
   if (submission.kind === "contracts") return "contracts";
@@ -4147,7 +4291,10 @@ function stageForSubmission(
   return submission.kind;
 }
 
-function assertSubmissionPrerequisites(run: RunManifest, submission: WorkflowSubmission): void {
+function assertSubmissionPrerequisites(
+  run: RunManifest,
+  submission: StandardWorkflowSubmission,
+): void {
   if (stage(run, "intake").status !== "passed") {
     throw new Error("The intake stage must pass before downstream evidence can be submitted");
   }
@@ -4941,7 +5088,7 @@ function webmDurationMs(content: Buffer): number | undefined {
 }
 
 function submissionOutcome(
-  submission: Exclude<WorkflowSubmission, { kind: "figma-bundle" | "visual-comparison" }>,
+  submission: Exclude<StandardWorkflowSubmission, { kind: "figma-bundle" | "visual-comparison" }>,
 ) {
   if ("verdict" in submission) {
     return submission.verdict === "approved"
@@ -4953,7 +5100,7 @@ function submissionOutcome(
   return submission.status;
 }
 
-function producerForSubmission(submission: WorkflowSubmission) {
+function producerForSubmission(submission: StandardWorkflowSubmission) {
   if (submission.kind === "implementation" || submission.kind === "api-ready") {
     return "implementation" as const;
   }
@@ -5165,8 +5312,48 @@ function deriveLegacyApiOperations(
   operations: DeliveryProfile["openApiOperations"];
   unresolved: UnresolvedLegacyApiCandidate[];
 } {
-  const operations: DeliveryProfile["openApiOperations"] = [];
-  const unresolved: UnresolvedLegacyApiCandidate[] = [];
+  const semantic = resolveLegacyApiCandidates({
+    candidates: inventory.apiCandidates,
+    openApiOperations: openApi.map((operation) => ({
+      method: operation.method,
+      path: operation.path,
+      sourceLocator: operation.sourceLocator,
+      ...(operation.operationId === undefined ? {} : { operationId: operation.operationId }),
+    })),
+    runtimeRequests: inventory.apiCandidates.flatMap((candidate) =>
+      candidate.method !== "UNKNOWN" &&
+      candidate.pathTemplate !== undefined &&
+      candidate.witnesses.some((witness) => witness.kind === "runtime")
+        ? [
+            {
+              method: candidate.method,
+              path: candidate.pathTemplate,
+              ...(candidate.originRef?.kind === "runtime-origin"
+                ? { origin: candidate.originRef.sanitizedOrigin }
+                : {}),
+            },
+          ]
+        : [],
+    ),
+  });
+  const operations: DeliveryProfile["openApiOperations"] = semantic.operations.map(
+    ({ operationKey, method, path, sourceLocator }) => ({
+      operationKey,
+      method,
+      path,
+      sourceLocator,
+    }),
+  );
+  const unresolved: UnresolvedLegacyApiCandidate[] = semantic.unresolved.map((candidate) => ({
+    normalizedKey: candidate.operationKey,
+    sourcePath: candidate.callSites[0]!.ownerSourcePath,
+    symbol: candidate.operationKey,
+    apiAdapter: "source-semantic-ast",
+    evidenceConfidence: candidate.confidence,
+  }));
+  const semanticOperationKeys = new Set(
+    inventory.apiCandidates.map((candidate) => candidate.operationKey),
+  );
   const observed = inventory.entries.flatMap((entry) => {
     if (entry.category !== "api") return [];
     const match = /^(GET|PUT|POST|DELETE|OPTIONS|HEAD|PATCH|TRACE)\s+(.+)$/u.exec(
@@ -5177,6 +5364,7 @@ function deriveLegacyApiOperations(
   });
   for (const entry of inventory.entries) {
     if (entry.category !== "api") continue;
+    if (semanticOperationKeys.has(entry.normalizedKey)) continue;
     const match = /^([A-Za-z]+)\s+(.+)$/u.exec(entry.normalizedKey);
     if (match === null) {
       unresolved.push(entry);

@@ -4,6 +4,10 @@ import { RunStageNameSchema } from "../run/stages.js";
 import { ArtifactIdSchema, RunIdSchema } from "../runtime/ids.js";
 import { GitObjectIdSchema, Sha256DigestSchema } from "../runtime/scalars.js";
 import { LegacyFeatureEntrySchema } from "../legacy/legacy-inventory.js";
+import {
+  LegacyApiCandidateSchema,
+  LegacySupportingDependencySchema,
+} from "../legacy/legacy-api-contracts.js";
 import { WorkloadEstimateSchema, WorkloadSignalsSchema } from "./workload-policy.js";
 import { VisualCaptureSchema, VisualTargetManifestSchema } from "../visual/visual-comparator.js";
 
@@ -1308,6 +1312,12 @@ export const VisualComparisonSubmissionSchema = z
   });
 
 export const WorkflowSubmissionSchema = z.union([
+  z
+    .object({
+      kind: z.literal("legacy-network-evidence"),
+      evidencePath: WorkflowSourcePathSchema,
+    })
+    .strict(),
   ContractsSubmissionSchema,
   ApiReadySubmissionSchema,
   ImplementationSubmissionSchema,
@@ -1317,6 +1327,14 @@ export const WorkflowSubmissionSchema = z.union([
 ]);
 
 export const WorkflowActionSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("collect-legacy-network-evidence"),
+      runId: RunIdSchema,
+      maxBytes: z.literal(1024 * 1024),
+      maxRequests: z.literal(1_000),
+    })
+    .strict(),
   z.object({ kind: z.literal("prepare-contracts"), runId: RunIdSchema }).strict(),
   z
     .object({
@@ -1413,10 +1431,14 @@ export const WorkflowStatusSchema = z
     legacyInventory: z
       .object({
         artifactId: ArtifactIdSchema,
+        version: z.union([z.literal(2), z.literal(3)]),
         rootDigest: Sha256DigestSchema,
         truncated: z.boolean(),
+        apiState: z.enum(["not-detected", "detected", "truncated"]),
         apiDiscoveryAdapters: z.array(z.string().trim().min(1).max(100)).max(20),
         entries: z.array(LegacyFeatureEntrySchema).max(500),
+        apiCandidates: z.array(LegacyApiCandidateSchema).max(500),
+        supportingDependencies: z.array(LegacySupportingDependencySchema).max(500),
       })
       .strict()
       .optional(),
