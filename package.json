@@ -37,10 +37,10 @@
     "plugin:validate:codex": "tsx scripts/validate-codex-plugin.ts"
   },
   "dependencies": {
+    "@babel/parser": "7.28.4",
     "@modelcontextprotocol/sdk": "1.29.0",
     "pdfjs-dist": "6.1.200",
     "pngjs": "^7.0.0",
-    "typescript": "^5.8.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {
@@ -50,6 +50,7 @@
     "prettier": "^3.9.0",
     "tsup": "^8.0.0",
     "tsx": "^4.22.4",
+    "typescript": "^5.9.3",
     "vitest": "^3.0.0",
     "yaml": "^2.9.0"
   },

@@ -110,10 +110,10 @@ describe("plugin layout", () => {
     };
 
     expect(Object.keys(packageJson.dependencies).sort()).toEqual([
+      "@babel/parser",
       "@modelcontextprotocol/sdk",
       "pdfjs-dist",
       "pngjs",
-      "typescript",
       "zod",
     ]);
     expect(packageJson.devDependencies).toHaveProperty("yaml");

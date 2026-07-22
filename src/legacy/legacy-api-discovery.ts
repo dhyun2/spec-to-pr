@@ -1,13 +1,23 @@
 import { createHash } from "node:crypto";
 
-import ts from "typescript";
-
 import {
   type LegacyApiCallSite,
   type LegacyApiCandidate,
   type LegacyOriginRef,
   stableEndpointKey,
 } from "./legacy-api-contracts.js";
+import {
+  type LegacyAstNode,
+  type ParsedLegacySource,
+  isLegacyAstNode,
+  legacyMemberObject,
+  legacyMemberProperty,
+  legacyNodeText,
+  legacyPropertyName,
+  parseLegacySource,
+  unwrapLegacyExpression,
+  walkLegacyAst,
+} from "./legacy-parser.js";
 import type { LegacyGraphFile, LegacySourceGraph } from "./legacy-source-graph.js";
 
 const HTTP_METHODS = new Set(["GET", "PUT", "POST", "DELETE", "OPTIONS", "HEAD", "PATCH"]);
@@ -23,14 +33,13 @@ type TerminalCall = EndpointExpression & {
   receiver: string;
   transportRef?: string;
   terminalKind: LegacyApiCandidate["terminalKind"];
-  node: ts.CallExpression;
-  urlNode?: ts.Expression;
-  optionsNode?: ts.Expression;
+  node: LegacyAstNode;
+  optionsNode?: LegacyAstNode;
 };
 
 type FileBindings = {
-  sourceFile: ts.SourceFile;
-  variables: Map<string, ts.Expression>;
+  parsed: ParsedLegacySource;
+  variables: Map<string, LegacyAstNode>;
   receivers: Map<string, string>;
 };
 
@@ -39,14 +48,11 @@ export function discoverLegacyApiCandidates(graph: LegacySourceGraph): LegacyApi
   for (const file of graph.ownedFiles) {
     if (!/\.(?:[cm]?[jt]sx?|vue|svelte)$/iu.test(file.absolutePath)) continue;
     const bindings = bindingsFor(file);
-    const visit = (node: ts.Node): void => {
-      if (ts.isCallExpression(node)) {
-        const terminal = terminalCall(node, bindings, graph);
-        if (terminal !== undefined) mergeCandidate(candidates, file, bindings, terminal);
-      }
-      ts.forEachChild(node, visit);
-    };
-    visit(bindings.sourceFile);
+    walkLegacyAst(bindings.parsed.root, (node) => {
+      if (!isCallNode(node)) return;
+      const terminal = terminalCall(node, bindings, graph);
+      if (terminal !== undefined) mergeCandidate(candidates, file, bindings, terminal);
+    });
   }
   return [...candidates.values()].sort((left, right) =>
     `${left.operationKey}:${left.endpointKey}`.localeCompare(
@@ -56,62 +62,64 @@ export function discoverLegacyApiCandidates(graph: LegacySourceGraph): LegacyApi
 }
 
 function bindingsFor(file: LegacyGraphFile): FileBindings {
-  const sourceFile = sourceFileFor(file.content, file.absolutePath);
-  const variables = new Map<string, ts.Expression>();
+  const parsed = parseLegacySource(file.content, file.absolutePath);
+  const variables = new Map<string, LegacyAstNode>();
   const receivers = new Map<string, string>([["axios", "axios"]]);
-  const visit = (node: ts.Node): void => {
-    if (
-      ts.isVariableDeclaration(node) &&
-      ts.isIdentifier(node.name) &&
-      node.initializer !== undefined
-    ) {
-      variables.set(node.name.text, node.initializer);
-      if (ts.isNewExpression(node.initializer)) {
-        const constructorName = expressionText(node.initializer.expression, sourceFile);
-        if (looksLikeHttpReceiver(constructorName)) {
-          receivers.set(node.name.text, constructorName);
-        }
+  walkLegacyAst(parsed.root, (node) => {
+    if (node.type === "VariableDeclarator") {
+      const name = identifierName(node["id"]);
+      const initializer = astNode(node["init"]);
+      if (name === undefined || initializer === undefined) return;
+      variables.set(name, initializer);
+      if (initializer.type === "NewExpression") {
+        const constructorNode = astNode(initializer["callee"]);
+        const constructorName =
+          constructorNode === undefined ? "" : legacyNodeText(constructorNode, parsed);
+        if (looksLikeHttpReceiver(constructorName)) receivers.set(name, constructorName);
       } else if (
-        ts.isCallExpression(node.initializer) &&
-        propertyName(node.initializer.expression) === "create" &&
-        expressionText(propertyReceiver(node.initializer.expression)!, sourceFile) === "axios"
+        isCallNode(initializer) &&
+        legacyMemberProperty(astNode(initializer["callee"])!) === "create"
       ) {
-        receivers.set(node.name.text, "axios");
+        const callee = astNode(initializer["callee"]);
+        const receiver = callee === undefined ? undefined : legacyMemberObject(callee);
+        if (receiver !== undefined && legacyNodeText(receiver, parsed) === "axios") {
+          receivers.set(name, "axios");
+        }
       }
     }
-    if (ts.isImportDeclaration(node) && node.importClause !== undefined) {
-      const names: string[] = [];
-      if (node.importClause.name !== undefined) names.push(node.importClause.name.text);
-      const bindings = node.importClause.namedBindings;
-      if (bindings !== undefined && ts.isNamespaceImport(bindings)) names.push(bindings.name.text);
-      if (bindings !== undefined && ts.isNamedImports(bindings)) {
-        names.push(...bindings.elements.map((element) => element.name.text));
-      }
-      for (const name of names) {
-        if (looksLikeHttpReceiver(name)) receivers.set(name, name);
+    if (node.type === "ImportDeclaration") {
+      const specifiers = node["specifiers"];
+      if (!Array.isArray(specifiers)) return;
+      for (const specifier of specifiers) {
+        if (!isLegacyAstNode(specifier)) continue;
+        const name = identifierName(specifier["local"]);
+        if (name !== undefined && looksLikeHttpReceiver(name)) receivers.set(name, name);
       }
     }
-    ts.forEachChild(node, visit);
-  };
-  visit(sourceFile);
-  return { sourceFile, variables, receivers };
+  });
+  return { parsed, variables, receivers };
 }
 
 function terminalCall(
-  node: ts.CallExpression,
+  node: LegacyAstNode,
   bindings: FileBindings,
   graph: LegacySourceGraph,
 ): TerminalCall | undefined {
-  if (isFetchExpression(node.expression, bindings.sourceFile)) {
-    const first = node.arguments[0];
+  const callee = astNode(node["callee"]);
+  const args = callArguments(node);
+  if (callee === undefined) return undefined;
+
+  if (isFetchExpression(callee, bindings.parsed)) {
+    const first = args[0];
     if (first === undefined) return undefined;
     const request =
-      ts.isNewExpression(first) &&
-      expressionText(first.expression, bindings.sourceFile) === "Request";
-    const urlNode = request ? first.arguments?.[0] : first;
+      first.type === "NewExpression" &&
+      astNode(first["callee"]) !== undefined &&
+      legacyNodeText(astNode(first["callee"])!, bindings.parsed) === "Request";
+    const requestArguments = request ? expressionArray(first["arguments"]) : [];
+    const urlNode = request ? requestArguments[0] : first;
     if (urlNode === undefined) return undefined;
-    const requestOptions = request ? first.arguments?.[1] : undefined;
-    const optionsNode = node.arguments[1] ?? requestOptions;
+    const optionsNode = args[1] ?? (request ? requestArguments[1] : undefined);
     return {
       ...endpointFromExpression(urlNode, bindings, graph),
       method: methodFromOptions(optionsNode, bindings) ?? "GET",
@@ -119,54 +127,55 @@ function terminalCall(
       transportRef: "fetch",
       terminalKind: "fetch",
       node,
-      urlNode,
       ...(optionsNode === undefined ? {} : { optionsNode }),
     };
   }
 
-  if (isDirectAxiosExpression(node.expression, bindings.sourceFile)) {
-    const first = node.arguments[0];
+  if (isDirectAxiosExpression(callee, bindings.parsed)) {
+    const first = args[0];
     if (first === undefined) return undefined;
-    if (ts.isObjectLiteralExpression(resolveExpression(first, bindings))) {
-      const config = resolveExpression(first, bindings) as ts.ObjectLiteralExpression;
-      const urlNode = objectProperty(config, ["url", "path"]);
+    const resolvedFirst = resolveExpression(first, bindings);
+    if (resolvedFirst.type === "ObjectExpression") {
+      const urlNode = objectProperty(resolvedFirst, ["url", "path"]);
       if (urlNode === undefined) return undefined;
       return {
         ...endpointFromExpression(urlNode, bindings, graph),
-        method: methodFromOptions(config, bindings) ?? "UNKNOWN",
+        method: methodFromOptions(resolvedFirst, bindings) ?? "UNKNOWN",
         receiver: "axios",
         transportRef: "axios",
         terminalKind: "request-config",
         node,
-        urlNode,
-        optionsNode: config,
+        optionsNode: resolvedFirst,
       };
     }
     return {
       ...endpointFromExpression(first, bindings, graph),
-      method: methodFromOptions(node.arguments[1], bindings) ?? "GET",
+      method: methodFromOptions(args[1], bindings) ?? "GET",
       receiver: "axios",
       transportRef: "axios",
       terminalKind: "http-client",
       node,
-      urlNode: first,
-      ...(node.arguments[1] === undefined ? {} : { optionsNode: node.arguments[1] }),
+      ...(args[1] === undefined ? {} : { optionsNode: args[1] }),
     };
   }
 
-  const methodName = propertyName(node.expression)?.toUpperCase();
-  const receiverNode = propertyReceiver(node.expression);
-  if (methodName === undefined || receiverNode === undefined || !HTTP_METHODS.has(methodName)) {
-    if (methodName !== "REQUEST" || receiverNode === undefined) return undefined;
+  const methodName = legacyMemberProperty(callee)?.toUpperCase();
+  const receiverNode = legacyMemberObject(callee);
+  if (
+    methodName === undefined ||
+    receiverNode === undefined ||
+    (!HTTP_METHODS.has(methodName) && methodName !== "REQUEST")
+  ) {
+    return undefined;
   }
-  const receiver = expressionText(receiverNode, bindings.sourceFile);
+  const receiver = legacyNodeText(receiverNode, bindings.parsed);
   const transportRef = transportForReceiver(receiver, bindings);
   if (transportRef === undefined) return undefined;
-  const first = node.arguments[0];
+  const first = args[0];
   if (first === undefined) return undefined;
   if (methodName === "REQUEST") {
     const resolvedFirst = resolveExpression(first, bindings);
-    if (ts.isObjectLiteralExpression(resolvedFirst)) {
+    if (resolvedFirst.type === "ObjectExpression") {
       const urlNode = objectProperty(resolvedFirst, ["url", "path"]);
       if (urlNode === undefined) return undefined;
       return {
@@ -176,19 +185,17 @@ function terminalCall(
         transportRef,
         terminalKind: "request-config",
         node,
-        urlNode,
         optionsNode: resolvedFirst,
       };
     }
     return {
       ...endpointFromExpression(first, bindings, graph),
-      method: methodFromOptions(node.arguments[1], bindings) ?? "UNKNOWN",
+      method: methodFromOptions(args[1], bindings) ?? "UNKNOWN",
       receiver,
       transportRef,
       terminalKind: "request-config",
       node,
-      urlNode: first,
-      ...(node.arguments[1] === undefined ? {} : { optionsNode: node.arguments[1] }),
+      ...(args[1] === undefined ? {} : { optionsNode: args[1] }),
     };
   }
   return {
@@ -198,47 +205,41 @@ function terminalCall(
     transportRef,
     terminalKind: "http-client",
     node,
-    urlNode: first,
-    ...(node.arguments[1] === undefined ? {} : { optionsNode: node.arguments[1] }),
+    ...(args[1] === undefined ? {} : { optionsNode: args[1] }),
   };
 }
 
 function endpointFromExpression(
-  expression: ts.Expression,
+  expression: LegacyAstNode,
   bindings: FileBindings,
   graph: LegacySourceGraph,
 ): EndpointExpression {
-  const resolved = resolveExpression(expression, bindings);
-  const fragments = endpointFragments(resolved, bindings);
+  const fragments = endpointFragments(resolveExpression(expression, bindings), bindings);
   if (fragments === undefined) return { confidence: "low" };
   let rawPath = "";
   let originRef: LegacyOriginRef | undefined;
   let confidence: EndpointExpression["confidence"] = "high";
   for (const fragment of fragments) {
-    if (fragment.kind === "text") {
-      rawPath += fragment.value;
-    } else if (fragment.kind === "parameter") {
-      rawPath += `{${fragment.value}}`;
+    if (fragment.kind === "text") rawPath += fragment.value;
+    else if (fragment.kind === "parameter") rawPath += `{${fragment.value}}`;
+    else if (isSafeUrlEnvironmentName(fragment.value)) {
+      const reference = graph.environmentRefs.find(
+        (item) => item.runtime === fragment.runtime && item.name === fragment.value,
+      );
+      originRef = {
+        kind: "environment",
+        runtime: fragment.runtime,
+        name: fragment.value,
+        ...(reference?.sanitizedOrigin === undefined
+          ? {}
+          : { sanitizedOrigin: reference.sanitizedOrigin }),
+        ...(reference?.sanitizedOrigins === undefined
+          ? {}
+          : { sanitizedOrigins: reference.sanitizedOrigins }),
+      };
     } else {
-      if (isSafeUrlEnvironmentName(fragment.value)) {
-        const reference = graph.environmentRefs.find(
-          (item) => item.runtime === fragment.runtime && item.name === fragment.value,
-        );
-        originRef = {
-          kind: "environment",
-          runtime: fragment.runtime,
-          name: fragment.value,
-          ...(reference?.sanitizedOrigin === undefined
-            ? {}
-            : { sanitizedOrigin: reference.sanitizedOrigin }),
-          ...(reference?.sanitizedOrigins === undefined
-            ? {}
-            : { sanitizedOrigins: reference.sanitizedOrigins }),
-        };
-      } else {
-        rawPath += "{dynamic}";
-        confidence = "low";
-      }
+      rawPath += "{dynamic}";
+      confidence = "low";
     }
   }
   const absolute = literalHttpUrl(rawPath);
@@ -264,62 +265,75 @@ type EndpointFragment =
   | { kind: "environment"; runtime: "process.env" | "import.meta.env"; value: string };
 
 function endpointFragments(
-  expression: ts.Expression,
+  expression: LegacyAstNode,
   bindings: FileBindings,
 ): EndpointFragment[] | undefined {
   const resolved = resolveExpression(expression, bindings);
-  if (ts.isStringLiteralLike(resolved)) return [{ kind: "text", value: resolved.text }];
-  if (ts.isTemplateExpression(resolved)) {
-    const result: EndpointFragment[] = [{ kind: "text", value: resolved.head.text }];
-    for (const span of resolved.templateSpans) {
-      result.push(fragmentForExpression(span.expression));
-      result.push({ kind: "text", value: span.literal.text });
+  if (resolved.type === "StringLiteral" && typeof resolved["value"] === "string") {
+    return [{ kind: "text", value: resolved["value"] }];
+  }
+  if (resolved.type === "TemplateLiteral") {
+    const quasis = Array.isArray(resolved["quasis"]) ? resolved["quasis"] : [];
+    const expressions = expressionArray(resolved["expressions"]);
+    const result: EndpointFragment[] = [];
+    for (let index = 0; index < quasis.length; index += 1) {
+      const quasi = quasis[index];
+      if (isLegacyAstNode(quasi)) {
+        const value = quasi["value"];
+        result.push({
+          kind: "text",
+          value:
+            typeof value === "object" && value !== null && "cooked" in value
+              ? String((value as { cooked?: unknown }).cooked ?? "")
+              : "",
+        });
+      }
+      const embedded = expressions[index];
+      if (embedded !== undefined) result.push(fragmentForExpression(embedded));
     }
     return result;
   }
-  if (ts.isBinaryExpression(resolved) && resolved.operatorToken.kind === ts.SyntaxKind.PlusToken) {
-    const left = endpointFragments(resolved.left, bindings);
-    const right = endpointFragments(resolved.right, bindings);
+  if (resolved.type === "BinaryExpression" && resolved["operator"] === "+") {
+    const leftNode = astNode(resolved["left"]);
+    const rightNode = astNode(resolved["right"]);
+    if (leftNode === undefined || rightNode === undefined) return undefined;
+    const left = endpointFragments(leftNode, bindings);
+    const right = endpointFragments(rightNode, bindings);
     return left === undefined || right === undefined ? undefined : [...left, ...right];
   }
   const environment = environmentExpression(resolved);
-  if (environment !== undefined) return [{ kind: "environment", ...environment }];
-  return undefined;
+  return environment === undefined ? undefined : [{ kind: "environment", ...environment }];
 }
 
-function fragmentForExpression(expression: ts.Expression): EndpointFragment {
+function fragmentForExpression(expression: LegacyAstNode): EndpointFragment {
   const environment = environmentExpression(expression);
-  if (environment !== undefined) return { kind: "environment", ...environment };
-  return { kind: "parameter", value: parameterName(expression) };
+  return environment === undefined
+    ? { kind: "parameter", value: parameterName(expression) }
+    : { kind: "environment", ...environment };
 }
 
 function environmentExpression(
-  expression: ts.Expression,
+  expression: LegacyAstNode,
 ): { runtime: "process.env" | "import.meta.env"; value: string } | undefined {
-  if (!ts.isPropertyAccessExpression(expression)) return undefined;
-  const env = expression.expression;
-  if (!ts.isPropertyAccessExpression(env) || env.name.text !== "env") return undefined;
-  if (ts.isIdentifier(env.expression) && env.expression.text === "process") {
-    return { runtime: "process.env", value: expression.name.text };
+  const name = legacyMemberProperty(expression);
+  const env = legacyMemberObject(expression);
+  if (name === undefined || env === undefined || legacyMemberProperty(env) !== "env")
+    return undefined;
+  const root = legacyMemberObject(env);
+  if (root?.type === "Identifier" && root["name"] === "process") {
+    return { runtime: "process.env", value: name };
   }
-  if (
-    ts.isMetaProperty(env.expression) &&
-    env.expression.keywordToken === ts.SyntaxKind.ImportKeyword
-  ) {
-    return { runtime: "import.meta.env", value: expression.name.text };
+  if (root?.type === "MetaProperty" && legacyPropertyName(astNode(root["meta"])) === "import") {
+    return { runtime: "import.meta.env", value: name };
   }
   return undefined;
 }
 
-function parameterName(expression: ts.Expression): string {
-  if (ts.isIdentifier(expression)) return safeParameter(expression.text);
-  if (ts.isPropertyAccessExpression(expression)) return safeParameter(expression.name.text);
-  if (ts.isElementAccessExpression(expression) && expression.argumentExpression !== undefined) {
-    if (ts.isStringLiteralLike(expression.argumentExpression)) {
-      return safeParameter(expression.argumentExpression.text);
-    }
-  }
-  return "dynamic";
+function parameterName(expression: LegacyAstNode): string {
+  const identifier = identifierName(expression);
+  if (identifier !== undefined) return safeParameter(identifier);
+  const member = legacyMemberProperty(expression);
+  return member === undefined ? "dynamic" : safeParameter(member);
 }
 
 function safeParameter(value: string): string {
@@ -327,57 +341,41 @@ function safeParameter(value: string): string {
 }
 
 function methodFromOptions(
-  expression: ts.Expression | undefined,
+  expression: LegacyAstNode | undefined,
   bindings: FileBindings,
 ): LegacyApiCandidate["method"] | undefined {
   if (expression === undefined) return undefined;
   const resolved = resolveExpression(expression, bindings);
-  if (!ts.isObjectLiteralExpression(resolved)) return undefined;
+  if (resolved.type !== "ObjectExpression") return undefined;
   const method = objectProperty(resolved, ["method"]);
   if (method === undefined) return undefined;
   const value = resolveExpression(method, bindings);
-  if (!ts.isStringLiteralLike(value)) return undefined;
-  const normalized = value.text.toUpperCase();
+  if (value.type !== "StringLiteral" || typeof value["value"] !== "string") return undefined;
+  const normalized = value["value"].toUpperCase();
   return HTTP_METHODS.has(normalized) ? (normalized as LegacyApiCandidate["method"]) : undefined;
 }
 
-function resolveExpression(expression: ts.Expression, bindings: FileBindings): ts.Expression {
-  let current = unwrapExpression(expression);
+function resolveExpression(expression: LegacyAstNode, bindings: FileBindings): LegacyAstNode {
+  let current = unwrapLegacyExpression(expression);
   const visited = new Set<string>();
-  while (
-    ts.isIdentifier(current) &&
-    bindings.variables.has(current.text) &&
-    !visited.has(current.text)
-  ) {
-    visited.add(current.text);
-    current = unwrapExpression(bindings.variables.get(current.text)!);
+  while (current.type === "Identifier" && typeof current["name"] === "string") {
+    const name = current["name"];
+    const next = bindings.variables.get(name);
+    if (next === undefined || visited.has(name)) break;
+    visited.add(name);
+    current = unwrapLegacyExpression(next);
   }
   return current;
 }
 
-function unwrapExpression(expression: ts.Expression): ts.Expression {
-  if (ts.isParenthesizedExpression(expression)) return unwrapExpression(expression.expression);
-  if (ts.isAsExpression(expression) || ts.isTypeAssertionExpression(expression)) {
-    return unwrapExpression(expression.expression);
-  }
-  return expression;
-}
-
-function objectProperty(
-  object: ts.ObjectLiteralExpression,
-  names: string[],
-): ts.Expression | undefined {
-  for (const property of object.properties) {
-    if (!ts.isPropertyAssignment(property)) continue;
-    const name = propertyNameText(property.name);
-    if (name !== undefined && names.includes(name)) return property.initializer;
-  }
-  return undefined;
-}
-
-function propertyNameText(name: ts.PropertyName): string | undefined {
-  if (ts.isIdentifier(name) || ts.isStringLiteralLike(name) || ts.isNumericLiteral(name)) {
-    return name.text;
+function objectProperty(object: LegacyAstNode, names: string[]): LegacyAstNode | undefined {
+  const properties = object["properties"];
+  if (!Array.isArray(properties)) return undefined;
+  for (const property of properties) {
+    if (!isLegacyAstNode(property) || property.type !== "ObjectProperty") continue;
+    const name = legacyPropertyName(astNode(property["key"]));
+    const value = astNode(property["value"]);
+    if (name !== undefined && names.includes(name) && value !== undefined) return value;
   }
   return undefined;
 }
@@ -404,36 +402,13 @@ function isSafeUrlEnvironmentName(name: string): boolean {
   );
 }
 
-function isFetchExpression(expression: ts.Expression, sourceFile: ts.SourceFile): boolean {
-  const text = expressionText(expression, sourceFile).replace(/\?\./gu, ".");
+function isFetchExpression(expression: LegacyAstNode, parsed: ParsedLegacySource): boolean {
+  const text = legacyNodeText(expression, parsed).replace(/\?\./gu, ".");
   return text === "fetch" || text === "globalThis.fetch" || text === "window.fetch";
 }
 
-function isDirectAxiosExpression(expression: ts.Expression, sourceFile: ts.SourceFile): boolean {
-  return expressionText(expression, sourceFile).replace(/\?\./gu, ".") === "axios";
-}
-
-function propertyName(expression: ts.Expression): string | undefined {
-  if (ts.isPropertyAccessExpression(expression)) return expression.name.text;
-  if (
-    ts.isElementAccessExpression(expression) &&
-    expression.argumentExpression !== undefined &&
-    ts.isStringLiteralLike(expression.argumentExpression)
-  ) {
-    return expression.argumentExpression.text;
-  }
-  return undefined;
-}
-
-function propertyReceiver(expression: ts.Expression): ts.Expression | undefined {
-  if (ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)) {
-    return expression.expression;
-  }
-  return undefined;
-}
-
-function expressionText(expression: ts.Expression, sourceFile: ts.SourceFile): string {
-  return expression.getText(sourceFile).replace(/\s+/gu, "");
+function isDirectAxiosExpression(expression: LegacyAstNode, parsed: ParsedLegacySource): boolean {
+  return legacyNodeText(expression, parsed).replace(/\?\./gu, ".") === "axios";
 }
 
 function literalHttpUrl(value: string): { origin: string; path: string } | undefined {
@@ -460,29 +435,21 @@ function mergeCandidate(
   bindings: FileBindings,
   terminal: TerminalCall,
 ): void {
-  const location = bindings.sourceFile.getLineAndCharacterOfPosition(
-    terminal.node.getStart(bindings.sourceFile),
-  );
-  const locator = `${file.sourcePath}:${location.line + 1}:${location.character + 1}`;
+  const start = terminal.node.loc?.start ?? { line: 1, column: 0 };
+  const locator = `${file.sourcePath}:${start.line}:${start.column + 1}`;
   const endpointKey =
     terminal.pathTemplate === undefined
-      ? `endpoint_${createHash("sha256")
-          .update("dynamic")
-          .update("\0")
-          .update(locator)
-          .digest("hex")
-          .slice(0, 24)}`
+      ? `endpoint_${createHash("sha256").update("dynamic").update("\0").update(locator).digest("hex").slice(0, 24)}`
       : stableEndpointKey(terminal);
-  const wrapperChain = enclosingWrappers(terminal.node, bindings.sourceFile);
   const callSite: LegacyApiCallSite = {
     callSiteKey: `call_${createHash("sha256").update(locator).digest("hex").slice(0, 24)}`,
     ownerSourcePath: file.sourcePath,
     terminalSourcePath: file.sourcePath,
-    line: location.line + 1,
-    column: location.character + 1,
+    line: start.line,
+    column: start.column + 1,
     receiver: terminal.receiver,
     ...(terminal.transportRef === undefined ? {} : { transportRef: terminal.transportRef }),
-    wrapperChain,
+    wrapperChain: [],
   };
   const existing = candidates.get(endpointKey);
   if (existing !== undefined) {
@@ -499,7 +466,7 @@ function mergeCandidate(
     endpointKey,
     operationKey: `${terminal.method} ${terminal.pathTemplate ?? "path:unknown"}`,
     method: terminal.method,
-    pathTemplate: terminal.pathTemplate,
+    ...(terminal.pathTemplate === undefined ? {} : { pathTemplate: terminal.pathTemplate }),
     ...(terminal.originRef === undefined ? {} : { originRef: terminal.originRef }),
     confidence: terminal.confidence,
     terminalKind: terminal.terminalKind,
@@ -519,7 +486,7 @@ function requestEvidence(
   const headerKeys: string[] = [];
   if (terminal.optionsNode !== undefined) {
     const options = resolveExpression(terminal.optionsNode, bindings);
-    if (ts.isObjectLiteralExpression(options)) {
+    if (options.type === "ObjectExpression") {
       const params = objectProperty(options, ["params", "query"]);
       const body = objectProperty(options, ["body", "data"]);
       const headers = objectProperty(options, ["headers"]);
@@ -535,55 +502,40 @@ function requestEvidence(
   };
 }
 
-function objectKeysOrSymbol(expression: ts.Expression, bindings: FileBindings): string[] {
+function objectKeysOrSymbol(expression: LegacyAstNode, bindings: FileBindings): string[] {
   const resolved = resolveExpression(expression, bindings);
-  if (ts.isObjectLiteralExpression(resolved)) {
-    return resolved.properties.flatMap((property) => {
-      if (!ts.isPropertyAssignment(property) && !ts.isShorthandPropertyAssignment(property))
-        return [];
-      const name = propertyNameText(property.name);
-      return name === undefined ? [] : [name];
+  if (resolved.type === "ObjectExpression" && Array.isArray(resolved["properties"])) {
+    return resolved["properties"].flatMap((property) => {
+      if (!isLegacyAstNode(property)) return [];
+      if (property.type === "ObjectProperty" || property.type === "ObjectMethod") {
+        const name = legacyPropertyName(astNode(property["key"]));
+        return name === undefined ? [] : [name];
+      }
+      return [];
     });
   }
-  return ts.isIdentifier(resolved) ? [resolved.text] : [];
+  const name = identifierName(resolved);
+  return name === undefined ? [] : [name];
 }
 
-function enclosingWrappers(node: ts.Node, sourceFile: ts.SourceFile): string[] {
-  const wrappers: string[] = [];
-  let current: ts.Node | undefined = node.parent;
-  while (current !== undefined) {
-    if (
-      (ts.isMethodDeclaration(current) || ts.isPropertyAssignment(current)) &&
-      current.name !== undefined
-    ) {
-      const name = propertyNameText(current.name);
-      if (name !== undefined) wrappers.unshift(`${sourceFile.fileName}#${name}`);
-    } else if (ts.isFunctionDeclaration(current) && current.name !== undefined) {
-      wrappers.unshift(`${sourceFile.fileName}#${current.name.text}`);
-    } else if (
-      (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) &&
-      ts.isVariableDeclaration(current.parent) &&
-      ts.isIdentifier(current.parent.name)
-    ) {
-      wrappers.unshift(`${sourceFile.fileName}#${current.parent.name.text}`);
-    }
-    current = current.parent;
-  }
-  return wrappers.slice(-32);
+function isCallNode(node: LegacyAstNode): boolean {
+  return node.type === "CallExpression" || node.type === "OptionalCallExpression";
 }
 
-function sourceFileFor(content: string, filePath: string): ts.SourceFile {
-  const script = /\.(?:vue|svelte)$/iu.test(filePath)
-    ? [...content.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/giu)]
-        .map((match) => match[1] ?? "")
-        .join("\n")
-    : content;
-  const kind = /\.tsx$/iu.test(filePath)
-    ? ts.ScriptKind.TSX
-    : /\.jsx$/iu.test(filePath)
-      ? ts.ScriptKind.JSX
-      : /\.tsx?$/iu.test(filePath)
-        ? ts.ScriptKind.TS
-        : ts.ScriptKind.JS;
-  return ts.createSourceFile(filePath, script, ts.ScriptTarget.Latest, true, kind);
+function callArguments(node: LegacyAstNode): LegacyAstNode[] {
+  return expressionArray(node["arguments"]);
+}
+
+function expressionArray(value: unknown): LegacyAstNode[] {
+  return Array.isArray(value) ? value.filter(isLegacyAstNode) : [];
+}
+
+function astNode(value: unknown): LegacyAstNode | undefined {
+  return isLegacyAstNode(value) ? value : undefined;
+}
+
+function identifierName(value: unknown): string | undefined {
+  return isLegacyAstNode(value) && value.type === "Identifier" && typeof value["name"] === "string"
+    ? value["name"]
+    : undefined;
 }

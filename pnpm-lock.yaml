@@ -10,6 +10,9 @@ overrides:
 importers:
   .:
     dependencies:
+      "@babel/parser":
+        specifier: 7.28.4
+        version: 7.28.4
       "@modelcontextprotocol/sdk":
         specifier: 1.29.0
         version: 1.29.0(zod@4.4.3)
@@ -19,9 +22,6 @@ importers:
       pngjs:
         specifier: ^7.0.0
         version: 7.0.0
-      typescript:
-        specifier: ^5.8.0
-        version: 5.9.3
       zod:
         specifier: ^4.0.0
         version: 4.4.3
@@ -44,6 +44,9 @@ importers:
       tsx:
         specifier: ^4.22.4
         version: 4.23.0
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
       vitest:
         specifier: ^3.0.0
         version: 3.2.7(@types/node@22.20.0)(tsx@4.23.0)(yaml@2.9.0)
@@ -52,6 +55,35 @@ importers:
         version: 2.9.0
 
 packages:
+  "@babel/helper-string-parser@7.29.7":
+    resolution:
+      {
+        integrity: sha512-Pb5ijPrZ89GDH8223L4UP8i6QApWxs04RbPQJTeWDV0/keR2E36MeKnyr6LYmUUvqRRI+Iv87SuF1W6ErINzYw==,
+      }
+    engines: { node: ">=6.9.0" }
+
+  "@babel/helper-validator-identifier@7.29.7":
+    resolution:
+      {
+        integrity: sha512-qehxGkRj55h/ff8EMaJ+cYhyaKlHIxqYDn682wQD7RNp9UujOQsHog2uS0r2vzr4pW+sXf90NeeayjcNaX3fFg==,
+      }
+    engines: { node: ">=6.9.0" }
+
+  "@babel/parser@7.28.4":
+    resolution:
+      {
+        integrity: sha512-yZbBqeM6TkpP9du/I2pUZnJsRMGGvOuIrhjzC1AwHwW+6he4mni6Bp/m8ijn0iOuZuPI2BfkCoSRunpyjnrQKg==,
+      }
+    engines: { node: ">=6.0.0" }
+    hasBin: true
+
+  "@babel/types@7.29.7":
+    resolution:
+      {
+        integrity: sha512-4zBIxpPzowiZpusoFkyGVwakdRJUyuH5PxQ/PrqghfdFWWasvnCdPfQXHrenDai+gyLARulZjZowCOj6fjT4pA==,
+      }
+    engines: { node: ">=6.9.0" }
+
   "@esbuild/aix-ppc64@0.28.1":
     resolution:
       {
@@ -1960,6 +1992,19 @@ packages:
       }
 
 snapshots:
+  "@babel/helper-string-parser@7.29.7": {}
+
+  "@babel/helper-validator-identifier@7.29.7": {}
+
+  "@babel/parser@7.28.4":
+    dependencies:
+      "@babel/types": 7.29.7
+
+  "@babel/types@7.29.7":
+    dependencies:
+      "@babel/helper-string-parser": 7.29.7
+      "@babel/helper-validator-identifier": 7.29.7
+
   "@esbuild/aix-ppc64@0.28.1":
     optional: true
 

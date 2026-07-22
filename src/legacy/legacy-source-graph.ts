@@ -2,7 +2,15 @@ import { createHash } from "node:crypto";
 import { lstat, opendir, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 
-import ts from "typescript";
+import {
+  type LegacyAstNode,
+  isLegacyAstNode,
+  legacyMemberObject,
+  legacyMemberProperty,
+  legacyPropertyName,
+  parseLegacySource,
+  walkLegacyAst,
+} from "./legacy-parser.js";
 
 const SOURCE_EXTENSION = /\.(?:[cm]?[jt]sx?|vue|svelte|css|scss|sass|less|json)$/i;
 const SCRIPT_EXTENSION = /\.(?:[cm]?[jt]sx?|vue|svelte)$/i;
@@ -238,10 +246,15 @@ async function loadSupportedAliases(applicationRoot: string): Promise<Record<str
   for (const configName of ["tsconfig.json", "jsconfig.json"]) {
     const configPath = path.join(applicationRoot, configName);
     if (!(await isRegularFile(configPath))) continue;
-    const parsed = ts.parseConfigFileTextToJson(configPath, await readFile(configPath, "utf8"));
-    if (parsed.error !== undefined || parsed.config === undefined) continue;
-    const compilerOptions = parsed.config.compilerOptions as
-      { baseUrl?: string; paths?: Record<string, string[]> } | undefined;
+    let parsed: { compilerOptions?: { baseUrl?: string; paths?: Record<string, string[]> } };
+    try {
+      parsed = JSON.parse(
+        jsonConfigurationText(await readFile(configPath, "utf8")),
+      ) as typeof parsed;
+    } catch {
+      continue;
+    }
+    const compilerOptions = parsed.compilerOptions;
     const baseUrl = path.resolve(applicationRoot, compilerOptions?.baseUrl ?? ".");
     for (const [key, targets] of Object.entries(compilerOptions?.paths ?? {})) {
       const first = targets[0];
@@ -260,6 +273,39 @@ async function loadSupportedAliases(applicationRoot: string): Promise<Record<str
     }
   }
   return Object.fromEntries([...aliases].sort(([left], [right]) => left.localeCompare(right)));
+}
+
+function jsonConfigurationText(content: string): string {
+  let result = "";
+  let quote: '"' | "'" | undefined;
+  let escaped = false;
+  for (let index = 0; index < content.length; index += 1) {
+    const current = content[index]!;
+    const next = content[index + 1];
+    if (quote !== undefined) {
+      result += current;
+      if (escaped) escaped = false;
+      else if (current === "\\") escaped = true;
+      else if (current === quote) quote = undefined;
+      continue;
+    }
+    if (current === '"' || current === "'") {
+      quote = current;
+      result += current;
+    } else if (current === "/" && next === "/") {
+      while (index < content.length && content[index] !== "\n") index += 1;
+      result += "\n";
+    } else if (current === "/" && next === "*") {
+      index += 2;
+      while (index < content.length && !(content[index] === "*" && content[index + 1] === "/")) {
+        index += 1;
+      }
+      index += 1;
+    } else {
+      result += current;
+    }
+  }
+  return result.replace(/,\s*([}\]])/gu, "$1");
 }
 
 async function collectOwnedSourceFiles(
@@ -290,27 +336,37 @@ async function collectOwnedSourceFiles(
 }
 
 function discoverModuleSpecifiers(content: string, filePath: string): string[] {
-  const sourceFile = sourceFileFor(content, filePath);
+  const parsed = parseLegacySource(content, filePath);
   const specifiers = new Set<string>();
-  const visit = (node: ts.Node): void => {
+  walkLegacyAst(parsed.root, (node) => {
     if (
-      (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
-      node.moduleSpecifier !== undefined &&
-      ts.isStringLiteralLike(node.moduleSpecifier)
+      ["ImportDeclaration", "ExportNamedDeclaration", "ExportAllDeclaration"].includes(node.type)
     ) {
-      specifiers.add(node.moduleSpecifier.text);
-    } else if (
-      ts.isCallExpression(node) &&
-      ts.isIdentifier(node.expression) &&
-      node.expression.text === "require" &&
-      node.arguments.length === 1 &&
-      ts.isStringLiteralLike(node.arguments[0]!)
-    ) {
-      specifiers.add(node.arguments[0]!.text);
+      const source = node["source"];
+      if (
+        isLegacyAstNode(source) &&
+        source.type === "StringLiteral" &&
+        typeof source["value"] === "string"
+      ) {
+        specifiers.add(source["value"]);
+      }
+    } else if (isCallNode(node)) {
+      const callee = node["callee"];
+      const args = node["arguments"];
+      if (
+        isLegacyAstNode(callee) &&
+        callee.type === "Identifier" &&
+        callee["name"] === "require" &&
+        Array.isArray(args) &&
+        args.length === 1 &&
+        isLegacyAstNode(args[0]) &&
+        args[0].type === "StringLiteral" &&
+        typeof args[0]["value"] === "string"
+      ) {
+        specifiers.add(args[0]["value"]);
+      }
     }
-    ts.forEachChild(node, visit);
-  };
-  visit(sourceFile);
+  });
   return [...specifiers].sort();
 }
 
@@ -318,12 +374,12 @@ function discoverEnvironmentReferences(
   content: string,
   filePath: string,
 ): Array<{ runtime: LegacyEnvironmentReference["runtime"]; name: string }> {
-  const sourceFile = sourceFileFor(content, filePath);
+  const parsed = parseLegacySource(content, filePath);
   const result = new Map<
     string,
     { runtime: LegacyEnvironmentReference["runtime"]; name: string }
   >();
-  const visit = (node: ts.Node): void => {
+  walkLegacyAst(parsed.root, (node) => {
     const processName = processEnvironmentName(node);
     if (processName !== undefined) {
       result.set(`process.env:${processName}`, { runtime: "process.env", name: processName });
@@ -335,45 +391,33 @@ function discoverEnvironmentReferences(
         name: importMetaName,
       });
     }
-    ts.forEachChild(node, visit);
-  };
-  visit(sourceFile);
+  });
   return [...result.values()];
 }
 
-function processEnvironmentName(node: ts.Node): string | undefined {
-  if (!ts.isPropertyAccessExpression(node)) return undefined;
-  const env = node.expression;
-  if (!ts.isPropertyAccessExpression(env) || env.name.text !== "env") return undefined;
-  return ts.isIdentifier(env.expression) && env.expression.text === "process"
-    ? node.name.text
+function processEnvironmentName(node: LegacyAstNode): string | undefined {
+  const name = legacyMemberProperty(node);
+  const env = legacyMemberObject(node);
+  if (name === undefined || env === undefined || legacyMemberProperty(env) !== "env")
+    return undefined;
+  const root = legacyMemberObject(env);
+  return root?.type === "Identifier" && root["name"] === "process" ? name : undefined;
+}
+
+function importMetaEnvironmentName(node: LegacyAstNode): string | undefined {
+  const name = legacyMemberProperty(node);
+  const env = legacyMemberObject(node);
+  if (name === undefined || env === undefined || legacyMemberProperty(env) !== "env")
+    return undefined;
+  const meta = legacyMemberObject(env);
+  return meta?.type === "MetaProperty" &&
+    legacyPropertyName(meta["meta"] as LegacyAstNode | undefined) === "import"
+    ? name
     : undefined;
 }
 
-function importMetaEnvironmentName(node: ts.Node): string | undefined {
-  if (!ts.isPropertyAccessExpression(node)) return undefined;
-  const env = node.expression;
-  if (!ts.isPropertyAccessExpression(env) || env.name.text !== "env") return undefined;
-  const meta = env.expression;
-  return ts.isMetaProperty(meta) && meta.keywordToken === ts.SyntaxKind.ImportKeyword
-    ? node.name.text
-    : undefined;
-}
-
-function sourceFileFor(content: string, filePath: string): ts.SourceFile {
-  const script = /\.(?:vue|svelte)$/i.test(filePath)
-    ? [...content.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/giu)]
-        .map((match) => match[1] ?? "")
-        .join("\n")
-    : content;
-  const kind = /\.tsx$/i.test(filePath)
-    ? ts.ScriptKind.TSX
-    : /\.jsx$/i.test(filePath)
-      ? ts.ScriptKind.JSX
-      : /\.tsx?$/i.test(filePath)
-        ? ts.ScriptKind.TS
-        : ts.ScriptKind.JS;
-  return ts.createSourceFile(filePath, script, ts.ScriptTarget.Latest, true, kind);
+function isCallNode(node: LegacyAstNode): boolean {
+  return node.type === "CallExpression" || node.type === "OptionalCallExpression";
 }
 
 async function resolveGraphDependency(input: {
