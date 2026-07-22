@@ -502,6 +502,9 @@ describe("v2 documentation", () => {
       expect(guides.legacy).toContain(
         locale === "ko" ? "지정한 레거시 범위" : "the selected legacy scope",
       );
+      expect(guides.legacy).toContain(
+        locale === "ko" ? "의존성 가시성 경계" : "dependency visibility boundary",
+      );
       expect(guides.figma).toContain("mock");
       expect(guides.figma).toContain("sha256");
       expect(guides.figma).toContain("98%");

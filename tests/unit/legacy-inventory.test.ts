@@ -88,7 +88,16 @@ describe("legacy inventory v2", () => {
         globalThis.fetch("https://user:password@api.example/v3/AccountID?token=do-not-persist#fragment", { method: "DELETE" });
         const backup = { url: "ftp://user:password@backup.example/archive?token=ftp-secret#fragment" };
         fetch(dynamicCheckoutUrl);
-        import { getCheckout } from "./generated/api-client";
+        import { useQuery } from "@apollo/client";
+        import { capitalize } from "capitalize";
+        import { getOrders } from "./api-client";
+        import { GeneratedApiClient, getCheckout } from "./generated/api-client";
+        import * as checkoutSdk from "./generated/sdk";
+        const generatedClient = new GeneratedApiClient();
+        const namespaceClient = new checkoutSdk.CheckoutApiClient();
+        useQuery({ query: "orders" });
+        capitalize("checkout");
+        getOrders();
         getCheckout();
       `,
       "utf8",
@@ -110,9 +119,14 @@ describe("legacy inventory v2", () => {
         "DELETE https://api.example/v3/AccountID",
         "UNKNOWN dynamic:fetch:dynamicCheckoutUrl",
         "GET operation:getCheckout",
+        "GET operation:getOrders",
       ]),
     );
     expect(apiKeys).not.toContain("GET /not-an-api");
+    expect(apiKeys).not.toContain("UNKNOWN operation:GeneratedApiClient");
+    expect(apiKeys).not.toContain("UNKNOWN operation:CheckoutApiClient");
+    expect(apiKeys).not.toContain("UNKNOWN operation:capitalize");
+    expect(apiKeys).not.toContain("UNKNOWN operation:useQuery");
     expect(JSON.stringify(inventory)).not.toContain("do-not-persist");
     expect(JSON.stringify(inventory)).not.toContain("password@");
     expect(JSON.stringify(inventory)).not.toContain("scheme-relative-secret");
@@ -131,6 +145,106 @@ describe("legacy inventory v2", () => {
         .filter((entry) => entry.category === "api")
         .every((entry) => entry.apiAdapter !== undefined && entry.evidenceConfidence !== undefined),
     ).toBe(true);
+  });
+
+  it("does not duplicate Shop transport calls through local facades or constructors", async () => {
+    const root = await temporaryLegacyProject();
+    await mkdir(path.join(root, "api"), { recursive: true });
+    await mkdir(path.join(root, "stores"), { recursive: true });
+    await writeFile(
+      path.join(root, "api", "ghomeApi.js"),
+      [
+        'import { httpService, defaultHttpService } from "@/api/httpService";',
+        "const axiosInstance = new httpService();",
+        "const defaultAxiosInstance = new defaultHttpService();",
+        "export default {",
+        "  getGhomeInfo(rgnNo, useDefault) {",
+        "    return useDefault",
+        "      ? defaultAxiosInstance.get(`${process.env.VUE_APP_API_GW_V2_URL}shop/${rgnNo}`)",
+        "      : axiosInstance.get(`${process.env.VUE_APP_API_GW_V2_URL}shop/${rgnNo}`);",
+        "  },",
+        "  getRecentNoticeList(params) { return defaultAxiosInstance.get(`${process.env.VUE_APP_API_GW_V2_URL}shop/${params.rgnNo}/notices`); },",
+        "  getTournamentList() { return defaultAxiosInstance.get(`${process.env.VUE_APP_API_GW_V1_URL}shop/glf`); },",
+        "  getShopRanking() { return defaultAxiosInstance.get(`${process.env.VUE_APP_API_GW_V1_URL}shop/ranking`); },",
+        "  getMyRanking() { return axiosInstance.get(`${process.env.VUE_APP_API_GW_V1_URL}shop/ranking/mine`); },",
+        "  deleteFavorite(rgnNo) { return axiosInstance.delete(`${process.env.VUE_APP_API_GW_V2_URL}shop/${rgnNo}/favorite`); },",
+        "  pickFavorite(rgnNo) { return axiosInstance.patch(`${process.env.VUE_APP_API_GW_V2_URL}shop/${rgnNo}/favorite`); },",
+        "  getGrxShopImageList(rgnNo) { return axiosInstance.get(`${process.env.VUE_APP_API_GW_LOUNGE_API}v1/franchise-reservation/shops/image/${rgnNo}`); },",
+        "};",
+      ].join("\n"),
+      "utf8",
+    );
+    await writeFile(
+      path.join(root, "stores", "ghome.js"),
+      [
+        'import ghomeApi from "../api/ghomeApi";',
+        "export const actions = {",
+        "  info: (rgnNo) => ghomeApi.getGhomeInfo(rgnNo),",
+        "  notices: (rgnNo) => ghomeApi.getRecentNoticeList(rgnNo),",
+        "  tournaments: () => ghomeApi.getTournamentList(),",
+        "  ranking: () => ghomeApi.getShopRanking(),",
+        "  mine: () => ghomeApi.getMyRanking(),",
+        "  images: (rgnNo) => ghomeApi.getGrxShopImageList(rgnNo),",
+        "};",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const inventory = await buildLegacyInventory(root);
+    const apiEntries = inventory.entries.filter((entry) => entry.category === "api");
+
+    expect(apiEntries.map((entry) => entry.normalizedKey).sort()).toEqual(
+      [
+        "DELETE /shop/{rgnNo}/favorite",
+        "GET /shop/glf",
+        "GET /shop/ranking",
+        "GET /shop/ranking/mine",
+        "GET /shop/{rgnNo}",
+        "GET /shop/{rgnNo}/notices",
+        "GET /v1/franchise-reservation/shops/image/{rgnNo}",
+        "PATCH /shop/{rgnNo}/favorite",
+      ].sort(),
+    );
+    expect(
+      apiEntries.every(
+        (entry) =>
+          entry.sourcePath === "api/ghomeApi.js" &&
+          entry.apiAdapter === "source-http-client" &&
+          entry.evidenceConfidence === "high",
+      ),
+    ).toBe(true);
+    expect(JSON.stringify(apiEntries)).not.toMatch(/operation:|process\.env/u);
+  });
+
+  it("normalizes only safe environment-base URL templates", async () => {
+    const root = await temporaryLegacyProject();
+    await writeFile(
+      path.join(root, "src", "api.ts"),
+      [
+        "apiClient.get(`${process.env.API_BASE_URL}orders/${params.orderId}?token=do-not-persist`);",
+        "apiClient.post(`${import.meta.env.VITE_API_BASE_URL}orders/${orderId}`);",
+        "apiClient.get(`${process.env.API_TOKEN}orders/${orderId}`);",
+        "apiClient.get(`${process.env.API_BASE_URL}orders/${buildOrderId()}`);",
+        "apiClient.get(`${process.env.API_BASE_URL}orders/order-${orderId}`);",
+        "apiClient.get(`${process.env.API_BASE_URL}https://other.example/orders`);",
+        "apiClient.get(`${process.env.API_BASE_URL}//other.example/orders`);",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const inventory = await buildLegacyInventory(root);
+    const apiKeys = inventory.entries
+      .filter((entry) => entry.category === "api")
+      .map((entry) => entry.normalizedKey);
+
+    expect(apiKeys).toContain("GET /orders/{orderId}");
+    expect(apiKeys).toContain("POST /orders/{orderId}");
+    expect(apiKeys).toContain("GET ${process.env.API_TOKEN}orders/${orderId}");
+    expect(apiKeys).toContain("GET ${process.env.API_BASE_URL}orders/${buildOrderId()}");
+    expect(apiKeys).toContain("GET ${process.env.API_BASE_URL}orders/order-${orderId}");
+    expect(apiKeys).toContain("GET ${process.env.API_BASE_URL}https://other.example/orders");
+    expect(apiKeys).toContain("GET ${process.env.API_BASE_URL}//other.example/orders");
+    expect(JSON.stringify(inventory)).not.toContain("do-not-persist");
   });
 
   it("lists every bounded API discovery adapter even when no operation is found", async () => {

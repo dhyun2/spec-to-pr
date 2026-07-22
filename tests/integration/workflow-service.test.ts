@@ -2949,6 +2949,94 @@ describe("WorkflowService", () => {
     }
   });
 
+  it("advances Shop-style legacy API intake from source evidence without OpenAPI or HAR", async () => {
+    const legacyRoot = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-legacy-shop-api-"));
+    const environmentName = "VUE_APP_API_GW_V2_URL";
+    const previousEnvironmentValue = process.env[environmentName];
+    process.env[environmentName] = "https://user:password@must-not-appear.invalid/";
+    try {
+      await mkdir(path.join(legacyRoot, "api"), { recursive: true });
+      await mkdir(path.join(legacyRoot, "stores"), { recursive: true });
+      await writeFile(
+        path.join(legacyRoot, "api", "ghomeApi.js"),
+        [
+          'import { httpService, defaultHttpService } from "@/api/httpService";',
+          "const axiosInstance = new httpService();",
+          "const defaultAxiosInstance = new defaultHttpService();",
+          "export default {",
+          "  getGhomeInfo(rgnNo, useDefault) {",
+          "    return useDefault",
+          "      ? defaultAxiosInstance.get(`${process.env.VUE_APP_API_GW_V2_URL}shop/${rgnNo}`)",
+          "      : axiosInstance.get(`${process.env.VUE_APP_API_GW_V2_URL}shop/${rgnNo}`);",
+          "  },",
+          "  getRecentNoticeList(params) { return defaultAxiosInstance.get(`${process.env.VUE_APP_API_GW_V2_URL}shop/${params.rgnNo}/notices`); },",
+          "  getTournamentList() { return defaultAxiosInstance.get(`${process.env.VUE_APP_API_GW_V1_URL}shop/glf`); },",
+          "  getShopRanking() { return defaultAxiosInstance.get(`${process.env.VUE_APP_API_GW_V1_URL}shop/ranking`); },",
+          "  getMyRanking() { return axiosInstance.get(`${process.env.VUE_APP_API_GW_V1_URL}shop/ranking/mine`); },",
+          "  deleteFavorite(rgnNo) { return axiosInstance.delete(`${process.env.VUE_APP_API_GW_V2_URL}shop/${rgnNo}/favorite`); },",
+          "  pickFavorite(rgnNo) { return axiosInstance.patch(`${process.env.VUE_APP_API_GW_V2_URL}shop/${rgnNo}/favorite`); },",
+          "  getGrxShopImageList(rgnNo) { return axiosInstance.get(`${process.env.VUE_APP_API_GW_LOUNGE_API}v1/franchise-reservation/shops/image/${rgnNo}`); },",
+          "};",
+        ].join("\n"),
+        "utf8",
+      );
+      await writeFile(
+        path.join(legacyRoot, "stores", "ghome.js"),
+        [
+          'import ghomeApi from "../api/ghomeApi";',
+          "export const actions = {",
+          "  info: (rgnNo) => ghomeApi.getGhomeInfo(rgnNo),",
+          "  notices: (rgnNo) => ghomeApi.getRecentNoticeList({ rgnNo }),",
+          "  tournaments: () => ghomeApi.getTournamentList(),",
+          "  ranking: () => ghomeApi.getShopRanking(),",
+          "  mine: () => ghomeApi.getMyRanking(),",
+          "  images: (rgnNo) => ghomeApi.getGrxShopImageList(rgnNo),",
+          "};",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const started = await service.start({
+        projectRoot: directory,
+        legacyProjectRoot: legacyRoot,
+        requestText: "Migrate the legacy Shop module",
+        mode: "legacy",
+        changeKind: "migration",
+      });
+      const operationKeys = started.deliveryProfile.openApiOperations
+        .map((operation) => operation.operationKey)
+        .sort();
+
+      expect(started.status).not.toBe("blocked");
+      expect(started.nextActions).toEqual([{ kind: "prepare-contracts", runId: started.runId }]);
+      expect(started.blockerDetails.map((blocker) => blocker.code)).not.toContain(
+        "LEGACY_API_METHOD_UNKNOWN",
+      );
+      expect(started.deliveryProfile.openApiPaths).toEqual([]);
+      expect(started.deliveryProfile.legacyNetworkEvidencePath).toBeUndefined();
+      expect(operationKeys).toEqual(
+        [
+          "DELETE /shop/{rgnNo}/favorite",
+          "GET /shop/glf",
+          "GET /shop/ranking",
+          "GET /shop/ranking/mine",
+          "GET /shop/{rgnNo}",
+          "GET /shop/{rgnNo}/notices",
+          "GET /v1/franchise-reservation/shops/image/{rgnNo}",
+          "PATCH /shop/{rgnNo}/favorite",
+        ].sort(),
+      );
+      expect(JSON.stringify(started.legacyInventory)).not.toMatch(/operation:|process\.env/u);
+      expect(JSON.stringify(await store.get(started.runId))).not.toMatch(
+        /must-not-appear|password@/u,
+      );
+    } finally {
+      if (previousEnvironmentValue === undefined) delete process.env[environmentName];
+      else process.env[environmentName] = previousEnvironmentValue;
+      await rm(legacyRoot, { recursive: true, force: true });
+    }
+  });
+
   it("resolves an ambiguous legacy API method from uniquely matching OpenAPI", async () => {
     const legacyRoot = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-legacy-api-unknown-"));
     try {

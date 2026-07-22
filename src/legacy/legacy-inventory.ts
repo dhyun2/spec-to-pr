@@ -516,7 +516,8 @@ function discoverFeatures(sourcePath: string, rawContent: string): LegacyFeature
   );
   for (const functionName of apiBindings.generatedFunctions) {
     const callPattern = new RegExp(`\\b${escapeRegExp(functionName)}\\s*\\(`, "g");
-    forEachMatch(content, callPattern, () => {
+    forEachMatch(content, callPattern, (match) => {
+      if (isConstructorCall(content, match.index)) return;
       const method = generatedMethod(functionName);
       add("api", `${method} operation:${functionName}`, functionName, {
         adapter: "source-generated-client",
@@ -530,6 +531,7 @@ function discoverFeatures(sourcePath: string, rawContent: string): LegacyFeature
       "g",
     );
     forEachMatch(content, callPattern, (match) => {
+      if (isConstructorCall(content, match.index)) return;
       if (/^(?:get|post|put|patch|delete|head|options|request)$/i.test(match[1]!)) return;
       add("api", `${generatedMethod(match[1]!)} operation:${match[1]}`, `${receiver}.${match[1]}`, {
         adapter: "source-generated-client",
@@ -602,32 +604,45 @@ function discoverApiBindings(content: string): {
     /\b(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:axios\.create\s*\(|(?:create|make)[A-Za-z0-9_$]*(?:Api|Http)[A-Za-z0-9_$]*(?:Client|Service)\s*\(|new\s+[A-Za-z0-9_$]*(?:Api|Http)[A-Za-z0-9_$]*(?:Client|Service)\s*\()/g,
     (match) => receivers.add(match[1]!),
   );
-  forEachMatch(
-    content,
-    /\bimport\s+([\s\S]{1,300}?)\s+from\s+["'`]([^"'`]*(?:api|client|generated|sdk|service)[^"'`]*)["'`]/gi,
-    (match) => {
-      const clause = match[1]!.trim();
-      const namespace = /^\*\s+as\s+([A-Za-z_$][A-Za-z0-9_$]*)$/u.exec(clause)?.[1];
-      if (namespace !== undefined) {
-        receivers.add(namespace);
-        generatedReceivers.add(namespace);
-        return;
+  forEachMatch(content, /\bimport\s+([\s\S]{1,300}?)\s+from\s+["'`]([^"'`]+)["'`]/gi, (match) => {
+    if (!isGeneratedClientImportSource(match[2]!)) return;
+    const clause = match[1]!.trim();
+    const namespace = /^\*\s+as\s+([A-Za-z_$][A-Za-z0-9_$]*)$/u.exec(clause)?.[1];
+    if (namespace !== undefined) {
+      receivers.add(namespace);
+      generatedReceivers.add(namespace);
+      return;
+    }
+    const named = /\{([\s\S]*?)\}/u.exec(clause)?.[1];
+    if (named !== undefined) {
+      for (const specifier of named.split(",")) {
+        const local = /(?:^|\s+as\s+)([A-Za-z_$][A-Za-z0-9_$]*)\s*$/u.exec(specifier.trim())?.[1];
+        if (local !== undefined) generatedFunctions.add(local);
       }
-      const named = /\{([\s\S]*?)\}/u.exec(clause)?.[1];
-      if (named !== undefined) {
-        for (const specifier of named.split(",")) {
-          const local = /(?:^|\s+as\s+)([A-Za-z_$][A-Za-z0-9_$]*)\s*$/u.exec(specifier.trim())?.[1];
-          if (local !== undefined) generatedFunctions.add(local);
-        }
-      }
-      const defaultImport = /^([A-Za-z_$][A-Za-z0-9_$]*)/u.exec(clause)?.[1];
-      if (defaultImport !== undefined) {
-        receivers.add(defaultImport);
-        generatedReceivers.add(defaultImport);
-      }
-    },
-  );
+    }
+    const defaultImport = /^([A-Za-z_$][A-Za-z0-9_$]*)/u.exec(clause)?.[1];
+    if (defaultImport !== undefined) {
+      receivers.add(defaultImport);
+      generatedReceivers.add(defaultImport);
+    }
+  });
   return { receivers, generatedReceivers, generatedFunctions };
+}
+
+function isGeneratedClientImportSource(source: string): boolean {
+  const normalized = source.replace(/\\/gu, "/");
+  const explicitGeneratedMarker =
+    /(?:^|[/@._-])(?:generated|codegen|openapi|swagger|sdk)(?:[/@._-]|$)/iu;
+  if (explicitGeneratedMarker.test(normalized)) return true;
+  // Standalone `api`, `client`, and `service` segments also describe handwritten facades
+  // such as `@apollo/client`; require compound client provenance before inferring operations.
+  return /(?:^|[/@._-])(?:(?:api|service)[._-]+client|client[._-]+api)(?:[/@._-]|$)/iu.test(
+    normalized,
+  );
+}
+
+function isConstructorCall(content: string, callIndex: number): boolean {
+  return /\bnew\s*$/u.test(content.slice(Math.max(0, callIndex - 80), callIndex));
 }
 
 function isApiReceiver(receiver: string, configured: Set<string>): boolean {
@@ -679,6 +694,8 @@ function normalizeKey(category: LegacyFeatureEntry["category"], value: string): 
 
 function safeApiLocator(rawLocator: string): string {
   const locator = rawLocator.trim();
+  const environmentTemplatePath = normalizeEnvironmentBaseTemplate(locator);
+  if (environmentTemplatePath !== undefined) return environmentTemplatePath;
   if (locator.startsWith("//")) {
     try {
       const parsed = new URL(`https:${locator}`);
@@ -698,6 +715,56 @@ function safeApiLocator(rawLocator: string): string {
     // Relative paths and symbolic locators are normalized below.
   }
   return locator.split(/[?#]/u, 1)[0]!;
+}
+
+function normalizeEnvironmentBaseTemplate(locator: string): string | undefined {
+  const match =
+    /^\$\{(?:process\.env|import\.meta\.env)\.([A-Za-z_$][A-Za-z0-9_$]*)\}([\s\S]+)$/u.exec(
+      locator,
+    );
+  if (match === null) return undefined;
+
+  const environmentName = match[1]!.toUpperCase();
+  if (
+    /(?:^|_)(?:AUTH|COOKIE|CREDENTIAL|KEY|PASS|PASSWORD|SECRET|TOKEN)(?:_|$)/u.test(
+      environmentName,
+    ) ||
+    !/(?:^|_)(?:API|BASE|GATEWAY|GW|HOST|ORIGIN|URI|URL)(?:_|$)/u.test(environmentName)
+  ) {
+    return undefined;
+  }
+
+  const suffix = match[2]!.split(/[?#]/u, 1)[0]!;
+  if (
+    suffix === "" ||
+    /[\u0000-\u0020\u007f\\]/u.test(suffix) ||
+    /^(?:\/\/|[A-Za-z][A-Za-z0-9+.-]*:)/u.test(suffix)
+  ) {
+    return undefined;
+  }
+
+  let safe = true;
+  const templatedPath = suffix
+    .split("/")
+    .map((segment) => {
+      if (!segment.includes("${")) return segment;
+      const placeholder = /^\$\{([A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*)\}$/u.exec(
+        segment,
+      );
+      if (placeholder === null) {
+        safe = false;
+        return segment;
+      }
+      return `{${placeholder[1]!.split(".").at(-1)!}}`;
+    })
+    .join("/");
+  if (!safe || templatedPath.includes("${")) return undefined;
+
+  const normalized = `/${templatedPath.replace(/^\/+/, "")}`;
+  if (normalized.split("/").some((segment) => segment === "." || segment === "..")) {
+    return undefined;
+  }
+  return normalized;
 }
 
 function stableFeatureKey(

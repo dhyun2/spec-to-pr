@@ -38,6 +38,10 @@ Use this case to migrate behavior from a separate legacy project into the target
 - `briefPath`, `docsPaths`, `openApiPaths`, and `openApiUrls` add migration evidence.
 - `guidancePaths` and `skillHints` specify project rules and applicable supporting skills.
 
+## Feature scope and dependency evidence <span id="scope-and-dependencies-legacy"></span>
+
+`legacyProjectRoot` is the **immutable feature boundary**, not a dependency visibility boundary. Select routes, screens, state, and user behavior only from that root's inventory. When in-root code directly references them through an import or configuration edge, inspect only the HTTP client, alias configuration, environment-name schema/example, package/type declaration, or enclosing build/start metadata needed to resolve and run that feature. This evidence explains an in-root feature; it does not add sibling features, and repository-wide keyword search cannot expand scope. Never read or persist actual secret values.
+
 ## Minimal prompt <span id="minimal-prompt-legacy"></span>
 
 ```text

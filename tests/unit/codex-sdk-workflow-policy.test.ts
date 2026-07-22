@@ -302,9 +302,10 @@ describe("Codex SDK workflow policy", () => {
     expect(legacy).toContain("running legacy screen");
     expect(legacy).toContain("legacyInventory");
     expect(legacy).toContain("legacyCoverage");
-    expect(legacy).toContain(
-      "Treat legacyProjectRoot and workflow_status.legacyInventory as the complete source boundary",
-    );
+    expect(legacy).toContain("immutable feature boundary");
+    expect(legacy).toContain("not a dependency visibility boundary");
+    expect(legacy).toContain("directly referenced dependency evidence");
+    expect(legacy).not.toContain("complete source boundary");
     expect(legacy).toContain("report an in-bound scope mismatch");
     expect(legacy).toContain('- Legacy project: "/tmp/legacy-project"');
   });

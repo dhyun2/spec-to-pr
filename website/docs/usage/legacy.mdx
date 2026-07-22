@@ -38,6 +38,10 @@ Intake 직후 `XS`~`XL` workload, 예상 token range, confidence와 근거가 �
 - `briefPath`, `docsPaths`, `openApiPaths`, `openApiUrls`: 이관 범위의 추가 계약 근거입니다.
 - `guidancePaths`, `skillHints`: 프로젝트 규칙과 적용 가능한 보조 skill을 명시합니다.
 
+## 기능 범위와 의존성 경계 <span id="scope-and-dependencies-legacy"></span>
+
+`legacyProjectRoot`는 **변경할 수 없는 기능 범위**이지 의존성 가시성 경계가 아닙니다. route·화면·상태·사용자 동작은 이 root의 inventory에서만 선택합니다. 다만 in-root 코드가 import/configuration으로 직접 참조한 HTTP client, alias 설정, 환경변수 이름의 schema/example, package/type 선언, 상위 build/start 설정은 해당 기능을 해석하고 실행하는 데 필요한 범위까지만 읽을 수 있습니다. 이 증거는 in-root 기능을 해석할 뿐 sibling 기능을 추가하지 않으며, repository-wide 키워드 검색으로 범위를 넓힐 수 없습니다. 실제 secret 값은 읽거나 artifact에 저장하지 않습니다.
+
 ## 최소 프롬프트 <span id="minimal-prompt-legacy"></span>
 
 ```text
