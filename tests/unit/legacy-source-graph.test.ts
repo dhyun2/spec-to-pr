@@ -8,7 +8,9 @@ import { discoverLegacySourceGraph } from "../../src/legacy/legacy-source-graph.
 const temporaryRoots: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(temporaryRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  await Promise.all(
+    temporaryRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
+  );
 });
 
 describe("legacy source graph", () => {
@@ -33,8 +35,7 @@ describe("legacy source graph", () => {
 
   it("records referenced environment names without exposing unrelated values", async () => {
     const project = await vueFixture({
-      "src/modules/shop/api.js":
-        "export const url = `${process.env.VUE_APP_API_GW_V2_URL}shop`;",
+      "src/modules/shop/api.js": "export const url = `${process.env.VUE_APP_API_GW_V2_URL}shop`;",
       ".env.qa":
         "VUE_APP_API_GW_V2_URL=https://fairway.example/v2/\nUNRELATED_SECRET=must-not-appear\n",
     });
@@ -49,6 +50,18 @@ describe("legacy source graph", () => {
       }),
     ]);
     expect(JSON.stringify(graph)).not.toContain("must-not-appear");
+  });
+
+  it("keeps ordinary app directories and falls back to the feature root without a package marker", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-legacy-graph-rootless-"));
+    temporaryRoots.push(root);
+    await mkdir(path.join(root, "app"), { recursive: true });
+    await writeFile(path.join(root, "app", "api.ts"), 'fetch("/inside-app")\n', "utf8");
+
+    const graph = await discoverLegacySourceGraph(root);
+
+    expect(graph.applicationRoot).toBe(await realpath(root));
+    expect(graph.ownedFiles.map((file) => file.sourcePath)).toContain("app/api.ts");
   });
 });
 

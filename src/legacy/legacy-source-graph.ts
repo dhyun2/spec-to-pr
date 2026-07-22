@@ -11,7 +11,6 @@ const SKIPPED_DIRECTORIES = new Set([
   ".next",
   ".nuxt",
   ".output",
-  "app",
   "build",
   "coverage",
   "dist",
@@ -118,17 +117,26 @@ export async function discoverLegacySourceGraph(
     const next = pending.shift()!;
     if (files.has(next.absolutePath)) continue;
     if (Date.now() - startedAt >= limits.maxElapsedMs) {
-      truncation = { limit: "maxElapsedMs", sourcePath: publicGraphPath(next.absolutePath, canonicalFeatureRoot, applicationRoot) };
+      truncation = {
+        limit: "maxElapsedMs",
+        sourcePath: publicGraphPath(next.absolutePath, canonicalFeatureRoot, applicationRoot),
+      };
       break;
     }
     if (files.size >= limits.maxFiles) {
-      truncation = { limit: "maxFiles", sourcePath: publicGraphPath(next.absolutePath, canonicalFeatureRoot, applicationRoot) };
+      truncation = {
+        limit: "maxFiles",
+        sourcePath: publicGraphPath(next.absolutePath, canonicalFeatureRoot, applicationRoot),
+      };
       break;
     }
     const details = await lstat(next.absolutePath);
     if (!details.isFile() || details.isSymbolicLink()) continue;
     if (scannedBytes + details.size > limits.maxBytes) {
-      truncation = { limit: "maxBytes", sourcePath: publicGraphPath(next.absolutePath, canonicalFeatureRoot, applicationRoot) };
+      truncation = {
+        limit: "maxBytes",
+        sourcePath: publicGraphPath(next.absolutePath, canonicalFeatureRoot, applicationRoot),
+      };
       break;
     }
     const content = await readFile(next.absolutePath, "utf8");
@@ -137,7 +145,10 @@ export async function discoverLegacySourceGraph(
     const graphFile: LegacyGraphFile = {
       absolutePath: next.absolutePath,
       sourcePath,
-      applicationRelativePath: path.relative(applicationRoot, next.absolutePath).split(path.sep).join("/"),
+      applicationRelativePath: path
+        .relative(applicationRoot, next.absolutePath)
+        .split(path.sep)
+        .join("/"),
       content,
       digest: `sha256:${createHash("sha256").update(content).digest("hex")}`,
       ownership: next.ownership,
@@ -165,7 +176,10 @@ export async function discoverLegacySourceGraph(
       edges.push({
         importer: sourcePath,
         specifier,
-        resolvedPath: path.relative(applicationRoot, resolved.absolutePath).split(path.sep).join("/"),
+        resolvedPath: path
+          .relative(applicationRoot, resolved.absolutePath)
+          .split(path.sep)
+          .join("/"),
         resolver: resolved.resolver,
       });
       pending.push({ absolutePath: resolved.absolutePath, ownership: "supporting-dependency" });
@@ -209,13 +223,11 @@ export async function discoverLegacySourceGraph(
 
 async function findEnclosingApplicationRoot(featureRoot: string): Promise<string> {
   let current = featureRoot;
-  let fallback = featureRoot;
   while (true) {
     if (await isRegularFile(path.join(current, "package.json"))) return current;
-    if (await isDirectory(path.join(current, ".git"))) return fallback;
+    if (await isDirectory(path.join(current, ".git"))) return featureRoot;
     const parent = path.dirname(current);
-    if (parent === current) return fallback;
-    fallback = current;
+    if (parent === current) return featureRoot;
     current = parent;
   }
 }
@@ -228,8 +240,7 @@ async function loadSupportedAliases(applicationRoot: string): Promise<Record<str
     const parsed = ts.parseConfigFileTextToJson(configPath, await readFile(configPath, "utf8"));
     if (parsed.error !== undefined || parsed.config === undefined) continue;
     const compilerOptions = parsed.config.compilerOptions as
-      | { baseUrl?: string; paths?: Record<string, string[]> }
-      | undefined;
+      { baseUrl?: string; paths?: Record<string, string[]> } | undefined;
     const baseUrl = path.resolve(applicationRoot, compilerOptions?.baseUrl ?? ".");
     for (const [key, targets] of Object.entries(compilerOptions?.paths ?? {})) {
       const first = targets[0];
@@ -240,7 +251,8 @@ async function loadSupportedAliases(applicationRoot: string): Promise<Record<str
   const vueConfig = path.join(applicationRoot, "vue.config.js");
   if (await isRegularFile(vueConfig)) {
     const content = await readFile(vueConfig, "utf8");
-    const expression = /["']([^"']+)["']\s*:\s*path\.(?:join|resolve)\s*\(\s*__dirname\s*,\s*["']([^"']+)["']/gu;
+    const expression =
+      /["']([^"']+)["']\s*:\s*path\.(?:join|resolve)\s*\(\s*__dirname\s*,\s*["']([^"']+)["']/gu;
     let match: RegExpExecArray | null;
     while ((match = expression.exec(content)) !== null) {
       aliases.set(match[1]!, path.resolve(applicationRoot, match[2]!));
@@ -306,7 +318,10 @@ function discoverEnvironmentReferences(
   filePath: string,
 ): Array<{ runtime: LegacyEnvironmentReference["runtime"]; name: string }> {
   const sourceFile = sourceFileFor(content, filePath);
-  const result = new Map<string, { runtime: LegacyEnvironmentReference["runtime"]; name: string }>();
+  const result = new Map<
+    string,
+    { runtime: LegacyEnvironmentReference["runtime"]; name: string }
+  >();
   const visit = (node: ts.Node): void => {
     const processName = processEnvironmentName(node);
     if (processName !== undefined) {
@@ -329,7 +344,9 @@ function processEnvironmentName(node: ts.Node): string | undefined {
   if (!ts.isPropertyAccessExpression(node)) return undefined;
   const env = node.expression;
   if (!ts.isPropertyAccessExpression(env) || env.name.text !== "env") return undefined;
-  return ts.isIdentifier(env.expression) && env.expression.text === "process" ? node.name.text : undefined;
+  return ts.isIdentifier(env.expression) && env.expression.text === "process"
+    ? node.name.text
+    : undefined;
 }
 
 function importMetaEnvironmentName(node: ts.Node): string | undefined {
@@ -436,7 +453,9 @@ async function enrichEnvironmentReferences(
         ...(sanitizedOrigin === undefined ? {} : { sanitizedOrigin }),
       };
     })
-    .sort((left, right) => `${left.runtime}:${left.name}`.localeCompare(`${right.runtime}:${right.name}`));
+    .sort((left, right) =>
+      `${left.runtime}:${left.name}`.localeCompare(`${right.runtime}:${right.name}`),
+    );
 }
 
 function environmentValue(content: string, name: string): string | undefined {
@@ -444,7 +463,10 @@ function environmentValue(content: string, name: string): string | undefined {
   const match = new RegExp(`^\\s*(?:export\\s+)?${escaped}\\s*=\\s*(.*?)\\s*$`, "mu").exec(content);
   if (match === null) return undefined;
   const value = match[1]!.trim();
-  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
     return value.slice(1, -1);
   }
   return value;
@@ -471,7 +493,11 @@ function sanitizedHttpOrigin(value: string): string | undefined {
   }
 }
 
-function publicGraphPath(absolutePath: string, featureRoot: string, applicationRoot: string): string {
+function publicGraphPath(
+  absolutePath: string,
+  featureRoot: string,
+  applicationRoot: string,
+): string {
   if (isWithin(featureRoot, absolutePath)) {
     return path.relative(featureRoot, absolutePath).split(path.sep).join("/");
   }
