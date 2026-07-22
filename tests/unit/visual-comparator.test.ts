@@ -5,6 +5,7 @@ import {
   compareVisualPngs,
   VisualTargetManifestSchema,
 } from "../../src/visual/visual-comparator.js";
+import { VisualComparisonMetricsSchema } from "../../src/visual/visual-model.js";
 
 describe("visual comparator v2", () => {
   it("computes exact and tolerant ratios from RGBA bytes and emits deterministic images", async () => {
@@ -25,6 +26,7 @@ describe("visual comparator v2", () => {
       threshold: 0.98,
     });
     expect(comparison.status).toBe("passed");
+    expect(() => VisualComparisonMetricsSchema.parse(comparison.metrics)).not.toThrow();
     expect(() => PNG.sync.read(comparison.diff)).not.toThrow();
     expect(() => PNG.sync.read(comparison.overlay)).not.toThrow();
   });

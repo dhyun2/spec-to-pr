@@ -170,6 +170,68 @@ describe("stage machine", () => {
     expect(retried.stage.attempt).toBe(1);
   });
 
+  it("repairs an exhausted legacy review-change retry budget when implementation restarts", () => {
+    const run = baseRun();
+    const legacyReopened = {
+      ...run,
+      stages: run.stages.map((stage) =>
+        stage.name === "implementation"
+          ? {
+              ...stage,
+              status: "failed" as const,
+              attempt: 3,
+              maxAttempts: 3,
+              completedAt: "2026-06-23T00:00:10.000Z",
+              error: {
+                code: "REVIEW_CHANGES_REQUESTED",
+                message: "The implementation needs another repair round.",
+                retryable: true,
+              },
+            }
+          : stage,
+      ),
+    };
+
+    const restarted = startStage(
+      legacyReopened,
+      { stageName: "implementation", workerId: "worker-2" },
+      () => "2026-06-23T00:00:20.000Z",
+    );
+
+    expect(restarted.stage).toMatchObject({ status: "running", attempt: 4, maxAttempts: 4 });
+  });
+
+  it("reopens an exhausted retryable publication after its precondition is repaired", () => {
+    const run = baseRun();
+    const failedPublication = {
+      ...run,
+      stages: run.stages.map((stage) =>
+        stage.name === "publish"
+          ? {
+              ...stage,
+              status: "failed" as const,
+              attempt: 3,
+              maxAttempts: 3,
+              completedAt: "2026-06-23T00:00:10.000Z",
+              error: {
+                code: "PUBLISH_FAILED",
+                message: "The publisher credential precondition was repaired.",
+                retryable: true,
+              },
+            }
+          : stage,
+      ),
+    };
+
+    const restarted = startStage(
+      failedPublication,
+      { stageName: "publish", workerId: "worker-2" },
+      () => "2026-06-23T00:00:20.000Z",
+    );
+
+    expect(restarted.stage).toMatchObject({ status: "running", attempt: 4, maxAttempts: 4 });
+  });
+
   it("reopens implementation and invalidates stale verification after review changes", () => {
     const run = baseRun();
     const prepared = {
@@ -181,6 +243,7 @@ describe("stage machine", () => {
               status: "passed" as const,
               completedAt: "2026-06-23T00:00:10.000Z",
               artifactIds: [],
+              ...(stage.name === "implementation" ? { attempt: 3, maxAttempts: 3 } : {}),
             }
           : stage,
       ),
@@ -194,8 +257,17 @@ describe("stage machine", () => {
 
     expect(reopened.stages.find((stage) => stage.name === "implementation")).toMatchObject({
       status: "failed",
+      attempt: 3,
+      maxAttempts: 4,
       error: { code: "REVIEW_CHANGES_REQUESTED", retryable: true },
     });
+    expect(
+      startStage(
+        reopened,
+        { stageName: "implementation", workerId: "worker-2" },
+        () => "2026-06-23T00:00:30.000Z",
+      ).stage,
+    ).toMatchObject({ status: "running", attempt: 4, maxAttempts: 4 });
     for (const name of ["functional-review", "design-review", "report", "publish"]) {
       expect(reopened.stages.find((stage) => stage.name === name)).toMatchObject({
         status: "pending",

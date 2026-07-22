@@ -22,7 +22,7 @@ const HOST_CONFIG: Record<ReviewHost, HostTokenConfig> = {
   gitlab: {
     label: "GitLab",
     envNames: ["GITLAB_TOKEN", "GITLAB_PRIVATE_TOKEN"],
-    cli: { command: "glab", args: ["auth", "token"] },
+    cli: { command: "glab", args: ["config", "get", "token", "--host"] },
   },
 };
 

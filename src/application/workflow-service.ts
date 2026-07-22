@@ -804,7 +804,10 @@ export class WorkflowService {
       await this.assertLegacyReferenceFresh(run);
     }
     assertSubmissionPrerequisites(run, submission);
-    if (submission.kind === "functional-review" || submission.kind === "design-review") {
+    if (
+      (submission.kind === "functional-review" || submission.kind === "design-review") &&
+      submission.verdict !== "changes-requested"
+    ) {
       await assertReviewPacketFresh(run);
     }
     const evidenceArtifacts = await this.ingestSubmissionEvidence(run, submission);
@@ -4881,7 +4884,14 @@ function assertPassingJsonResult(content: Buffer, evidencePath: string): void {
     throw new Error(`Evidence must be a passing JSON test result: ${evidencePath}`);
   }
   const result = parsed as Record<string, unknown>;
-  if (result["status"] !== "passed") {
+  const hasNoFailures =
+    (result["numFailedTests"] === undefined || result["numFailedTests"] === 0) &&
+    (result["numFailedTestSuites"] === undefined || result["numFailedTestSuites"] === 0);
+  const hasExecutedTests =
+    (typeof result["numPassedTests"] === "number" && result["numPassedTests"] > 0) ||
+    (typeof result["numTotalTests"] === "number" && result["numTotalTests"] > 0);
+  const frameworkReportPassed = result["success"] === true && hasNoFailures && hasExecutedTests;
+  if (result["status"] !== "passed" && !frameworkReportPassed) {
     throw new Error(`Evidence must be a passing targeted test result: ${evidencePath}`);
   }
 }

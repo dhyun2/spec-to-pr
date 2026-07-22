@@ -2333,7 +2333,7 @@ describe("WorkflowService", () => {
     ]);
   });
 
-  it("reopens implementation and rejects stale review packets after changes are requested", async () => {
+  it("reopens implementation when a stale current packet is rejected", async () => {
     const started = await service.start({
       projectRoot: directory,
       requestText: "Restyle the checkout form and its empty state",
@@ -2375,31 +2375,14 @@ describe("WorkflowService", () => {
     if (packetId === undefined) throw new Error("Missing review packet");
 
     await changeSource(directory, "src/checkout.tsx", "mutated after packet creation\n");
-    await expect(
-      service.submit({
-        runId: started.runId,
-        submission: {
-          kind: "functional-review",
-          reviewPacketId: packetId,
-          verdict: "changes-requested",
-          summary: "This packet is stale.",
-          findings: [],
-          requirements: [{ id: "checkout-state", verdict: "rejected" }],
-          artifactPaths: ["test-results/unit.json"],
-          gateResults: [],
-        },
-      }),
-    ).rejects.toThrow(/packet.*stale|diff.*match/i);
-    await changeSource(directory, "src/checkout.tsx", "implemented checkout state\n");
-
     const reopened = await service.submit({
       runId: started.runId,
       submission: {
         kind: "functional-review",
         reviewPacketId: packetId,
         verdict: "changes-requested",
-        summary: "The empty-state behavior is incorrect.",
-        findings: [{ severity: "major", title: "Wrong empty state", evidence: [] }],
+        summary: "The packet is stale because the empty-state repair changed the source.",
+        findings: [{ severity: "major", title: "Stale implementation packet", evidence: [] }],
         requirements: [{ id: "checkout-state", verdict: "rejected" }],
         artifactPaths: ["test-results/unit.json"],
         gateResults: [],
@@ -4753,6 +4736,42 @@ describe("WorkflowService", () => {
         },
       }),
     ).rejects.toThrow("api-ready");
+  });
+
+  it("accepts a passing Vitest JSON report as API contract evidence", async () => {
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Implement a checkout UI backed by an API",
+      scope: "ui",
+    });
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "contracts",
+        status: "passed",
+        summary: "API and UI contracts are ready.",
+        artifactPaths: ["contracts/requirements.json"],
+        requirementManifest: requirements("checkout-api-ui"),
+      },
+    });
+    await writeFile(
+      path.join(directory, "test-results/api-contract.json"),
+      JSON.stringify({
+        success: true,
+        numFailedTestSuites: 0,
+        numFailedTests: 0,
+        numPassedTests: 3,
+        numTotalTests: 3,
+      }),
+      "utf8",
+    );
+
+    const apiReady = await submitApiReady(service, started.runId);
+
+    expect(apiReady.stages.find((item) => item.name === "implementation")).toMatchObject({
+      status: "pending",
+      checkpoint: "api-ready",
+    });
   });
 
   it("rejects API-ready categories that alias one physical file", async () => {

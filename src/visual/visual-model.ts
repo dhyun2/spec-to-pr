@@ -60,10 +60,13 @@ export const VisualComparisonMetricsSchema = z
     height: z.number().int().positive(),
     comparedPixelCount: z.number().int().nonnegative(),
     maskedPixelCount: z.number().int().nonnegative(),
+    maskedAreaRatio: z.number().min(0).max(1).optional(),
     exactMatchRatio: z.number().min(0).max(1),
     reviewMatchRatio: z.number().min(0).max(1),
     meanDistance: z.number().nonnegative(),
     maxDistance: z.number().nonnegative(),
+    pixelTolerance: z.number().min(0).max(1).optional(),
+    threshold: z.number().min(0).max(1).optional(),
   })
   .strict();
 

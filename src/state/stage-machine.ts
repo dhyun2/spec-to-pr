@@ -111,13 +111,23 @@ export function startStage(
 
   assertTransition(stage, "running");
 
-  if (["failed", "blocked", "skipped"].includes(stage.status) && !canRetry(stage)) {
-    throw new StageRetryExhaustedError(stage.name);
+  const retryStage =
+    stage.status === "failed" &&
+    (stage.error?.code === "REVIEW_CHANGES_REQUESTED" ||
+      (stage.name === "publish" &&
+        stage.error?.code === "PUBLISH_FAILED" &&
+        stage.error.retryable)) &&
+    !canRetry(stage)
+      ? { ...stage, maxAttempts: stage.attempt + 1 }
+      : stage;
+
+  if (["failed", "blocked", "skipped"].includes(retryStage.status) && !canRetry(retryStage)) {
+    throw new StageRetryExhaustedError(retryStage.name);
   }
 
   return replaceStage(
     run,
-    withRunningLease(stage, command, nowIso, stage.status !== "pending"),
+    withRunningLease(retryStage, command, nowIso, retryStage.status !== "pending"),
     nowIso,
   );
 }
@@ -151,6 +161,7 @@ export function reopenImplementationForReviewChanges(
         return {
           ...stage,
           status: "failed",
+          maxAttempts: Math.max(stage.maxAttempts, stage.attempt + 1),
           lease: undefined,
           completedAt: nowIso,
           error: {
