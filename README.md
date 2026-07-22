@@ -47,6 +47,27 @@ Start every request with the target repository:
 
 Then copy the prompt from the guide for your use case. The guide explains required inputs, the execution pipeline, validation evidence, blockers, and the expected draft PR.
 
+## Current release
+
+SpecToPR exposes 7 MCP tools, 8 durable stages, 8 skills, and 2 independent reviewers. The four strict UI modes are `brief`, `legacy`, `feature`, and `figma`.
+
+Composable intake fields include `briefPath`, `figmaUrl`, `docsPaths`, `openApiPaths`, `openApiUrls`, `guidancePaths`, and `skillHints`. For example:
+
+```yaml
+mode: feature
+briefPath: docs/checkout.md
+figmaUrl: https://www.figma.com/design/FILE/checkout?node-id=12-345
+docsPaths: []
+openApiPaths:
+  - docs/openapi.yaml
+guidancePaths: []
+skillHints: []
+```
+
+Legacy intake preserves the selected feature boundary while following only its direct imports and configuration edges. Concrete source HTTP calls are authoritative; constructors and local facades are not API operations. Environment origins and transport callsites remain in `legacyInventory`. A genuinely dynamic unresolved call returns `collect-legacy-network-evidence`, so a bounded HAR can resume the same Run instead of forcing another start.
+
+The status surface includes `requiredValidations`, `resumeContext`, and `blockerDetails`. Reports use `pr-report-v2`; visual targets are submitted through `visualTargets` and `compare-visuals`, with runtime-computed similarity requiring at least 98%. Blocked draft runs may publish a local blocked report using `intent: blocked-diagnostic`; a `status: blocked` diagnostic can be updated on the same draft PR. Common local blockers include `PUBLISH_NO_DELTA` and `BROWSER_NOT_RUN`.
+
 ## Documentation
 
 **https://dhyun2.github.io/spec-to-pr/en/**

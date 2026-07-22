@@ -56,7 +56,7 @@ Intake pins timestamped local/remote `sourceProvenance` and the complete OpenAPI
 
 Instruction precedence is current user request → explicit `guidancePaths` → automatically discovered guidance → available/applicable installed skill → SpecToPR defaults. Missing optional skills do not block.
 
-Ambiguous legacy APIs resolve only from project-local `legacyNetworkEvidencePath` bounded HAR/request JSON (up to 1 MB and 1,000 requests) or uniquely matching scoped OpenAPI. Runtime evidence digest and adapter are pinned into the inventory; unresolved intake returns `nextActions: []` and rejects every downstream submission.
+Ambiguous legacy APIs resolve only from project-local bounded HAR/request JSON (up to 1 MB and 1,000 requests) or uniquely matching scoped OpenAPI. Runtime evidence digest and adapter are pinned into the inventory; `collect-legacy-network-evidence` accepts a `legacy-network-evidence` submission and resumes intake in the same Run.
 
 ## Delegation policy
 

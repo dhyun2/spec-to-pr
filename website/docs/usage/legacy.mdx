@@ -40,7 +40,7 @@ Intake 직후 `XS`~`XL` workload, 예상 token range, confidence와 근거가 �
 
 ## 기능 범위와 의존성 경계 <span id="scope-and-dependencies-legacy"></span>
 
-`legacyProjectRoot`는 **변경할 수 없는 기능 범위**이지 의존성 가시성 경계가 아닙니다. route·화면·상태·사용자 동작은 이 root의 inventory에서만 선택합니다. 다만 in-root 코드가 import/configuration으로 직접 참조한 HTTP client, alias 설정, 환경변수 이름의 schema/example, package/type 선언, 상위 build/start 설정은 해당 기능을 해석하고 실행하는 데 필요한 범위까지만 읽을 수 있습니다. 이 증거는 in-root 기능을 해석할 뿐 sibling 기능을 추가하지 않으며, repository-wide 키워드 검색으로 범위를 넓힐 수 없습니다. 실제 secret 값은 읽거나 artifact에 저장하지 않습니다.
+`legacyProjectRoot`는 **변경할 수 없는 기능 범위**이지 의존성 가시성 경계가 아닙니다. route·화면·상태·사용자 동작은 이 root의 inventory에서만 선택합니다. 다만 in-root 코드가 import/configuration으로 직접 참조한 HTTP client, alias 설정, 환경변수 이름의 schema/example, package/type 선언, 상위 build/start 설정은 해당 기능을 해석하고 실행하는 데 필요한 범위까지만 읽을 수 있습니다. 이 증거는 in-root 기능을 해석할 뿐 sibling 기능을 추가하지 않으며, repository-wide 키워드 검색으로 범위를 넓힐 수 없습니다. 실제 secret 값은 읽거나 artifact에 저장하지 않습니다. 환경 URL은 path로 잘라 버리지 않고 `originRef`로, 인증/비인증 client 차이는 transport callsite로 보존한 뒤 대상 프로젝트의 기존 env와 HTTP client 규칙에 대응시킵니다.
 
 ## 최소 프롬프트 <span id="minimal-prompt-legacy"></span>
 
@@ -76,9 +76,9 @@ publication: draft
 
 ## SpecToPR이 진행하는 과정 <span id="process-legacy"></span>
 
-1. **Intake / legacy inventory:** 별도 root를 read-only로 정규화하고 route/component/API/state/persistence/bridge/asset 등을 bounded `legacyInventory`로 만듭니다. 선택 HAR/JSON을 주면 raw digest, `runtime-network-har` adapter, 관측된 method/path를 같은 inventory digest에 고정합니다. Intake가 blocked이면 `nextActions`는 비어 있고 downstream submission도 거부됩니다.
+1. **Intake / legacy inventory:** 별도 root를 read-only로 정규화하고 route/component/API/state/persistence/bridge/asset 등을 bounded `legacyInventory`로 만듭니다. AST가 실제 terminal HTTP call만 `apiCandidates`로 만들며 생성자와 로컬 facade는 중복 operation으로 등록하지 않습니다. 선택 HAR/JSON을 주면 raw digest, `runtime-network-har` adapter, 관측된 method/path를 같은 inventory digest에 고정합니다. 정말 동적인 호출만 남으면 `collect-legacy-network-evidence`가 나오며 `legacy-network-evidence` submission으로 같은 Run을 재개합니다.
 2. **Contracts:** stable feature key를 수용 조건과 `planned` coverage로 연결하고 running legacy screenshot을 `visualTargets`로 고정합니다. 구현 전에는 migrated 파일이나 증거를 주장하지 않습니다.
-3. **Implementation:** 한 implementation writer가 대상 프로젝트 규칙에 맞게 이관하고 같은 stable key를 current-packet `migrated`/제외 coverage로 교체합니다. Legacy inventory는 `source-fetch-literal`, `source-fetch-dynamic`, `source-http-client`, `source-request-config`, `source-generated-client` bounded adapter로 API 후보와 confidence를 기록합니다. 후보가 있으면 operation별 client/mock/test와 정확히 일치하는 `apiCoverage`/`api-ready` 증거를 요구하고, 후보가 0개면 API 섹션을 adapter 목록과 inventory digest에 묶어 `complete`로 기록합니다. Method/path가 모호한 request는 추측하지 않으며, scoped runtime/OpenAPI가 유일하게 확정하면 병합하고 그렇지 않으면 `LEGACY_API_METHOD_UNKNOWN` durable intake blocker로 반환합니다. 선택 OpenAPI는 이 inventory를 보강하지만 적용 여부를 결정하지 않습니다.
+3. **Implementation:** 한 implementation writer가 대상 프로젝트 규칙에 맞게 이관하고 같은 stable key를 current-packet `migrated`/제외 coverage로 교체합니다. Legacy inventory는 semantic AST와 `source-fetch-literal`, `source-http-client`, `source-request-config` 같은 bounded adapter로 API 후보, environment origin, transport/callsite, confidence를 기록합니다. 후보가 있으면 operation별 client/mock/test와 정확히 일치하는 `apiCoverage`/`api-ready` 증거를 요구하고, 후보가 0개면 API 섹션을 adapter 목록과 inventory digest에 묶어 `complete`로 기록합니다. Method/path가 모호한 request는 추측하지 않으며 scoped runtime/OpenAPI가 유일하게 확정하면 병합합니다. 선택 OpenAPI는 이 inventory를 보강하지만 적용 여부를 결정하지 않습니다.
 4. **Compare / performance:** 두 앱을 같은 route/state/fixture/viewport로 실행합니다. 각 actual capture는 target의 route/state/viewport/device scale/fixture를 반복하고 provider, ISO capture time, PNG path, `sha256:` digest를 기록합니다. `compare-visuals`는 target drift·digest mismatch를 거부하고 exact/review ratio, diff, overlay를 계산합니다. 런타임 기준은 최소 98%, 정당한 mask 최대 20%, 비교 총 3회(최초 1회 + repair 최대 2회)입니다. Web Vitals도 측정합니다.
 5. **Independent reviews:** functional과 design reviewer가 migration coverage, 화면, interaction, accessibility를 독립 판정합니다.
 6. **Report / publish:** `pr-report-v2.1` 15개 섹션으로 migrated/out-of-scope/gap/blocked와 rollback을 공개하고 draft PR을 만듭니다.
@@ -163,15 +163,15 @@ Agent 정책은 XS/S read-only scout 0명, M 최대 1명, L/XL 최대 2명이며
 
 ## Run이 멈추는 경우 <span id="blockers-legacy"></span>
 
-| 중단 원인                                           | 사용자가 할 일                                       |
-| --------------------------------------------------- | ---------------------------------------------------- |
-| `legacyProjectRoot`가 없거나 대상과 같음            | 별도 레거시 디렉터리 절대 경로 제공                  |
-| `LEGACY_API_METHOD_UNKNOWN`                         | scoped OpenAPI 또는 `legacyNetworkEvidencePath` 제공 |
-| HAR/JSON이 1 MB·1,000 request 한도/형식을 위반      | 해당 flow만 다시 캡처해 bounded 형식으로 저장        |
-| 레거시/대상 앱을 실행할 수 없음                     | 실행 명령, fixture, 환경 조건 제공                   |
-| baseline과 source가 충돌                            | 기대 동작의 authoritative source를 선택              |
-| 검사 환경이 없어 required regression을 만들 수 없음 | 최소 실행 방법이나 승인된 대체 증거 제공             |
-| publication preflight 실패                          | 변경을 정리·커밋해 clean source branch로 재개        |
+| 중단 원인                                           | 사용자가 할 일                                |
+| --------------------------------------------------- | --------------------------------------------- |
+| `legacyProjectRoot`가 없거나 대상과 같음            | 별도 레거시 디렉터리 절대 경로 제공           |
+| `LEGACY_API_METHOD_UNKNOWN`                         | 액션이 요청한 scoped HAR을 같은 Run에 제출    |
+| HAR/JSON이 1 MB·1,000 request 한도/형식을 위반      | 해당 flow만 다시 캡처해 bounded 형식으로 저장 |
+| 레거시/대상 앱을 실행할 수 없음                     | 실행 명령, fixture, 환경 조건 제공            |
+| baseline과 source가 충돌                            | 기대 동작의 authoritative source를 선택       |
+| 검사 환경이 없어 required regression을 만들 수 없음 | 최소 실행 방법이나 승인된 대체 증거 제공      |
+| publication preflight 실패                          | 변경을 정리·커밋해 clean source branch로 재개 |
 
 ## 이 케이스가 하지 않는 것 <span id="exclusions-legacy"></span>
 

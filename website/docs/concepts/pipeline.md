@@ -94,7 +94,7 @@ Intake는 local/remote raw digest, 조회 시각, resolved locator를 `sourcePro
 
 Project instruction precedence는 current user request → explicit `guidancePaths` → automatically discovered guidance → available/applicable installed skill → SpecToPR defaults입니다. Missing optional skill은 blocker가 아니며 project guidance가 generic skill 조언보다 우선합니다.
 
-모호한 legacy API는 대상 프로젝트 내부 `legacyNetworkEvidencePath`의 bounded HAR/request JSON(최대 1 MB·1,000 request) 또는 유일한 scoped OpenAPI로만 해소합니다. Runtime evidence의 digest와 adapter는 inventory에 고정되며, 미해소 intake는 `nextActions: []`이고 모든 downstream submission을 거부합니다.
+모호한 legacy API는 대상 프로젝트 내부의 bounded HAR/request JSON(최대 1 MB·1,000 request) 또는 유일한 scoped OpenAPI로만 해소합니다. Runtime evidence의 digest와 adapter는 inventory에 고정되며, `collect-legacy-network-evidence` 액션에 `legacy-network-evidence`를 제출하면 같은 Run의 intake가 재개됩니다.
 
 ## 두 개의 독립 review
 

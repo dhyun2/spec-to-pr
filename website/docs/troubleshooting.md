@@ -34,7 +34,7 @@ Mode는 source 종류가 아니라 납품·증거 정책입니다. 전체 프로
 
 `legacyProjectRoot`에는 대상 저장소와 다른 별도 레거시 프로젝트의 절대 경로를 넣고, route·동작·오류 조건처럼 concrete migration scope를 적으세요. Runtime은 레거시 프로젝트를 읽기 전용으로 bounded inventory하고, 해당 화면을 실행한 캡처를 새 결과 화면의 baseline으로 사용합니다. 저장소 전체를 무차별 현대화하거나 전체 E2E를 실행하지는 않지만, 요청 범위의 migration coverage와 시각 비교는 생략하지 않습니다.
 
-`LEGACY_API_METHOD_UNKNOWN`이면 source에서 method/path를 추측하지 않습니다. 대상 프로젝트 내부에 해당 flow만 캡처한 표준 HAR 또는 request JSON을 `legacyNetworkEvidencePath`로 지정하거나, 유일하게 매칭되는 scoped OpenAPI를 제공하세요. HAR/JSON은 1 MB·1,000 request 한도이며 blocked intake에서는 `nextActions`가 비고 downstream submission도 거부됩니다.
+`LEGACY_API_METHOD_UNKNOWN`이면 source에서 method/path를 추측하지 않습니다. `nextActions`의 `collect-legacy-network-evidence`에 따라 대상 프로젝트 내부에 해당 flow만 캡처한 표준 HAR 또는 request JSON을 저장하고 `kind: legacy-network-evidence`, `evidencePath`로 제출하세요. HAR/JSON은 1 MB·1,000 request 한도이며 같은 Run의 intake가 재개됩니다.
 
 ## Figma
 
