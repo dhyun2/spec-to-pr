@@ -3,14 +3,14 @@
   "status": "passed",
   "attempt": 1,
   "target": {
-    "route": "/checkout/retry",
-    "state": "payment-declined",
+    "route": "/legacy/example",
+    "state": "fixture-ready",
     "viewport": {
       "width": 960,
       "height": 560
     },
     "deviceScaleFactor": 1,
-    "fixture": "guide-checkout-retry-v1"
+    "fixture": "guide-legacy-migration-v1"
   },
   "metrics": {
     "width": 960,
@@ -18,9 +18,9 @@
     "comparedPixelCount": 537600,
     "maskedPixelCount": 0,
     "maskedAreaRatio": 0,
-    "exactMatchRatio": 0.9897879464285714,
-    "reviewMatchRatio": 0.9898456101190476,
-    "meanDistance": 0.002450716120952015,
+    "exactMatchRatio": 0.9898177083333334,
+    "reviewMatchRatio": 0.9898623511904762,
+    "meanDistance": 0.0024418626045661436,
     "maxDistance": 0.2815072144964247,
     "pixelTolerance": 0.02,
     "threshold": 0.98
@@ -29,19 +29,19 @@
   "files": {
     "baseline": {
       "path": "baseline.png",
-      "digest": "sha256:22d115e13b5a3f2a72e841a11ca3208945234dab60ab9b51e26749b452572913"
+      "digest": "sha256:bf2c8c61ff53b4821838674156623edc26c55aeb572ea0feaee6757bfbc6715e"
     },
     "actual": {
       "path": "actual.png",
-      "digest": "sha256:9eb090e0e31dc4b34cd6f8fa5a79a104f64b15b398d25c20dba7dad4ad849a21"
+      "digest": "sha256:fd0068b46205174ab0374801fcd2ea638a17facf511c0a011c5c9100f40cff74"
     },
     "diff": {
       "path": "diff.png",
-      "digest": "sha256:b663e5766380bb7a270e1e8e5ae61be0d188b2b473c9ce6f4555f68e8d84f532"
+      "digest": "sha256:368ba627634dabb68ad6c2dcac67d72427887f4468e8f3cba7053bb080b399b5"
     },
     "overlay": {
       "path": "overlay.png",
-      "digest": "sha256:176c3fe77cbde8b8586ca733d26d517640be4d7db79b8bcb9d53fc94e429e1c2"
+      "digest": "sha256:772d8846a28038a630b98a4500e11d71799377631142397f66ed0cfe8314eacd"
     }
   }
 }

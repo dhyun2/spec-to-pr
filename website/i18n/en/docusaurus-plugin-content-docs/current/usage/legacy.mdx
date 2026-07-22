@@ -47,7 +47,7 @@ scope: ui
 legacyProjectRoot: /absolute/path/to/legacy-app
 changeKind: migration
 publication: draft
-Migrate the legacy payment-retry screen and behavior into the target architecture.
+Migrate the selected legacy scope into the target architecture.
 Run both apps, compare the same route/state/viewport, and publish the measured draft PR.
 ```
 
@@ -58,14 +58,14 @@ Run both apps, compare the same route/state/viewport, and publish the measured d
 mode: legacy
 scope: ui
 legacyProjectRoot: /absolute/path/to/legacy-app
-legacyNetworkEvidencePath: evidence/payment-retry.har
-docsPaths: [docs/payment-retry-rules.md]
-openApiPaths: [docs/payment-api.yaml]
+legacyNetworkEvidencePath: evidence/legacy-network.har
+docsPaths: [docs/legacy-migration-rules.md]
+openApiPaths: [docs/legacy-api.yaml]
 guidancePaths: [AGENTS.md, docs/architecture/ARCHITECTURE.md]
 skillHints: [api-generator]
 changeKind: migration
 publication: draft
-Inventory and migrate the payment-retry route, component, API, state, and persistence.
+Inventory and migrate the selected legacy scope's routes, components, APIs, state, and persistence.
 Run both projects and use the legacy screen as the visual baseline with the same fixture/viewport.
 Improve the target implementation without copying the old architecture blindly.
 ```
@@ -125,19 +125,19 @@ Filenames are an **Illustrative expectation**. UI or Figma sources add design ev
 
 ## Expected branch and commits <span id="branch-and-commits-legacy"></span>
 
-- Illustrative branch: `codex/payment-retry-notification`
-- Illustrative commit: `fix: prevent duplicate retry notification`
+- Illustrative branch: `codex/legacy-scope-migration`
+- Illustrative commit: `feat: migrate selected legacy scope`
 - Do not mix broad formatting, dependency upgrades, or unrelated cleanup into the commit.
 - Confirm a clean tree and source commit ahead of target before publication.
 
 ## Expected draft PR <span id="expected-pr-legacy"></span>
 
-**Illustrative expectation title:** `fix: prevent duplicate payment retry notification`
+**Illustrative expectation title:** `feat: migrate selected legacy scope`
 
 ```md
 ## Legacy migration coverage
 
-- legacy_checkout_retry: migrated → src/features/payment-retry
+- legacy_scope_feature: migrated → src/features/migrated-scope
 
 ## Visual fidelity
 
@@ -153,7 +153,7 @@ Filenames are an **Illustrative expectation**. UI or Figma sources add design ev
 
 ## Risk / rollback
 
-- no behavior outside the retry path changed
+- no behavior outside the selected legacy scope changed
 - single revertible commit
 ```
 

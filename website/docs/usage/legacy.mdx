@@ -47,7 +47,7 @@ scope: ui
 legacyProjectRoot: /absolute/path/to/legacy-app
 changeKind: migration
 publication: draft
-레거시 결제 재시도 화면과 동작을 대상 프로젝트 구조에 맞게 이관해줘.
+지정한 레거시 범위 전체를 대상 프로젝트 구조에 맞게 이관해줘.
 레거시와 결과를 같은 route/state/viewport로 실행해 화면 일치율까지 비교하고 draft PR로 발행해줘.
 ```
 
@@ -58,14 +58,14 @@ publication: draft
 mode: legacy
 scope: ui
 legacyProjectRoot: /absolute/path/to/legacy-app
-legacyNetworkEvidencePath: evidence/payment-retry.har
-docsPaths: [docs/payment-retry-rules.md]
-openApiPaths: [docs/payment-api.yaml]
+legacyNetworkEvidencePath: evidence/legacy-network.har
+docsPaths: [docs/legacy-migration-rules.md]
+openApiPaths: [docs/legacy-api.yaml]
 guidancePaths: [AGENTS.md, docs/architecture/ARCHITECTURE.md]
 skillHints: [api-generator]
 changeKind: migration
 publication: draft
-레거시의 결제 재시도 route, component, API, state, persistence를 inventory로 고정하고 대상 프로젝트로 이관해줘.
+지정한 레거시 범위의 route, component, API, state, persistence를 inventory로 고정하고 대상 프로젝트로 이관해줘.
 두 앱을 실행해 레거시 화면을 visual baseline으로 사용하고 같은 fixture/viewport의 결과와 비교해.
 이전 코드를 복사하지 말고 대상 architecture와 guidance에 맞게 개선하되 사용자 동작은 보존해.
 ```
@@ -125,19 +125,19 @@ Agent 정책은 XS/S read-only scout 0명, M 최대 1명, L/XL 최대 2명이며
 
 ## 예상 브랜치와 커밋 <span id="branch-and-commits-legacy"></span>
 
-- 브랜치 예상 예시: `codex/payment-retry-notification`
-- 커밋 예상 예시: `fix: prevent duplicate retry notification`
+- 브랜치 예상 예시: `codex/legacy-scope-migration`
+- 커밋 예상 예시: `feat: migrate selected legacy scope`
 - 큰 formatting, dependency upgrade, unrelated cleanup은 같은 커밋에 섞지 않습니다.
 - 발행 전에 clean tree와 target보다 앞선 source commit을 확인합니다.
 
 ## 예상 Draft PR <span id="expected-pr-legacy"></span>
 
-**예상 예시 제목:** `fix: prevent duplicate payment retry notification`
+**예상 예시 제목:** `feat: migrate selected legacy scope`
 
 ```md
 ## Legacy migration coverage
 
-- legacy_checkout_retry: migrated → src/features/payment-retry
+- legacy_scope_feature: migrated → src/features/migrated-scope
 
 ## Visual fidelity
 
@@ -153,7 +153,7 @@ Agent 정책은 XS/S read-only scout 0명, M 최대 1명, L/XL 최대 2명이며
 
 ## Risk / rollback
 
-- retry 경로 외 동작은 변경하지 않음
+- 지정한 레거시 범위 외 동작은 변경하지 않음
 - revert 가능한 단일 커밋
 ```
 

@@ -496,6 +496,12 @@ describe("v2 documentation", () => {
       expect(guides.legacy).not.toMatch(
         /API gaps? when OpenAPI is supplied|OpenAPI 제공 시 API gap|OpenAPI를 제공한 경우에만|required only when OpenAPI was supplied/,
       );
+      expect(guides.legacy, `${locale}:legacy examples must remain scope-neutral`).not.toMatch(
+        /결제\s*재시도|payment[-_\s]?retry|legacy_checkout_retry/i,
+      );
+      expect(guides.legacy).toContain(
+        locale === "ko" ? "지정한 레거시 범위" : "the selected legacy scope",
+      );
       expect(guides.figma).toContain("mock");
       expect(guides.figma).toContain("sha256");
       expect(guides.figma).toContain("98%");
@@ -510,6 +516,23 @@ describe("v2 documentation", () => {
       for (const caseName of ["brief", "legacy", "figma"]) {
         expect(guides[caseName]).not.toContain("featureVideo: required");
       }
+    }
+  });
+
+  it("keeps reusable legacy examples domain-neutral", () => {
+    const reusableLegacyExamples = [
+      "website/docs/usage/legacy.mdx",
+      "website/i18n/en/docusaurus-plugin-content-docs/current/usage/legacy.mdx",
+      "website/src/components/guide/VisualProof.tsx",
+      "scripts/build-guide-visual-assets.ts",
+      "website/static/img/guide/visual-proof/metrics.json",
+    ];
+
+    for (const file of reusableLegacyExamples) {
+      const contents = readFileSync(path.join(root, file), "utf8");
+      expect(contents, `${file}: reusable examples must not imply a business feature`).not.toMatch(
+        /결제\s*재시도|payment[-_\s/]?retry|checkout[-_\s/]?retry|payment-declined|legacy_checkout_retry/i,
+      );
     }
   });
 

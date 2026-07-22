@@ -7,7 +7,7 @@ type Locale = "ko" | "en";
 
 const proof = {
   ko: [
-    { file: "baseline.png", title: "1. Baseline", alt: "결제 재시도 화면의 비교 기준 PNG" },
+    { file: "baseline.png", title: "1. Baseline", alt: "선택한 레거시 화면의 비교 기준 PNG" },
     { file: "actual.png", title: "2. Actual", alt: "대상 구현에서 같은 조건으로 캡처한 PNG" },
     { file: "diff.png", title: "3. Diff", alt: "RGBA 거리가 있는 픽셀만 표시한 diff PNG" },
     {
@@ -20,7 +20,7 @@ const proof = {
     {
       file: "baseline.png",
       title: "1. Baseline",
-      alt: "Baseline PNG for the checkout retry state",
+      alt: "Baseline PNG for the selected legacy screen",
     },
     {
       file: "actual.png",

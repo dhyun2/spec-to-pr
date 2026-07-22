@@ -294,6 +294,10 @@ describe("plugin layout", () => {
     expect(main).toContain("`auto | ui | non-ui | docs`");
     expect(main).toContain("The four delivery cases are UI contracts");
     expect(main).toContain("Figma defaults to `publication: draft`");
+    expect(main).toContain(
+      "Treat `legacyProjectRoot` and `workflow_status.legacyInventory` as the complete source boundary",
+    );
+    expect(main).toContain("report an in-bound scope mismatch");
     for (const contract of [
       "sourceProvenance",
       "visualTargets",
@@ -336,6 +340,10 @@ describe("plugin layout", () => {
     expect(intake).toContain("automatically discovered project guidance");
     expect(intake).toContain("applicable installed skills");
     expect(intake).toContain("SpecToPR defaults");
+    expect(intake).toContain(
+      "Treat `legacyProjectRoot` and `workflow_status.legacyInventory` as the complete source boundary",
+    );
+    expect(intake).toContain("report an in-bound scope mismatch");
     expect(intake).toContain("Exclude project guidance from scope classification");
     expect(intake).toContain("Missing optional skills do not block");
     expect(intake).toContain("`auto | ui | non-ui | docs`");

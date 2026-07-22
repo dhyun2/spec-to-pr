@@ -13,7 +13,7 @@ function sha256(content: Buffer) {
   return `sha256:${createHash("sha256").update(content).digest("hex")}`;
 }
 
-function checkoutFixture(variant: "baseline" | "actual") {
+function migrationFixture(variant: "baseline" | "actual") {
   const actionColor = variant === "baseline" ? "#0f766e" : "#b45309";
 
   return `<!doctype html>
@@ -62,20 +62,20 @@ function checkoutFixture(variant: "baseline" | "actual") {
   </style>
 </head>
 <body>
-  <main aria-label="결제 재시도 상태">
+  <main aria-label="레거시 화면 비교 상태">
     <header>
-      <div><p class="eyebrow">Checkout recovery</p><h1>결제를 다시 시도해 주세요</h1></div>
-      <span class="order">ORDER #STP-2407</span>
+      <div><p class="eyebrow">Legacy migration</p><h1>선택한 화면을 이관했습니다</h1></div>
+      <span class="order">SCOPE #STP-2407</span>
     </header>
-    <section class="notice"><strong>승인이 완료되지 않았습니다</strong><p>카드 정보는 안전하게 유지됩니다. 결제 수단을 확인한 뒤 다시 시도해 주세요.</p></section>
+    <section class="notice"><strong>시각 검증 준비가 완료되었습니다</strong><p>두 화면을 같은 route, state, viewport에서 캡처해 차이를 측정합니다.</p></section>
     <div class="content">
-      <section class="methods" aria-label="결제 수단">
-        <div class="method"><strong>개인 카드</strong><span>Visa ···· 4242</span></div>
-        <div class="method"><strong>회사 카드</strong><span>Mastercard ···· 2026</span></div>
+      <section class="methods" aria-label="비교 조건">
+        <div class="method"><strong>Route</strong><span>/legacy/example</span></div>
+        <div class="method"><strong>State</strong><span>fixture-ready</span></div>
       </section>
-      <aside><dl><dt>상품 금액</dt><dd>₩48,000</dd><dt>배송비</dt><dd>₩0</dd><dt class="total">결제 금액</dt><dd class="total">₩48,000</dd></dl></aside>
+      <aside><dl><dt>Viewport</dt><dd>960×560</dd><dt>Scale</dt><dd>1×</dd><dt class="total">Review gate</dt><dd class="total">≥ 98%</dd></dl></aside>
     </div>
-    <footer><p>문제가 계속되면 다른 결제 수단을 선택할 수 있습니다.</p><button type="button">다시 시도</button></footer>
+    <footer><p>지정한 범위 밖의 기능은 변경하지 않습니다.</p><button type="button">결과 비교</button></footer>
   </main>
 </body>
 </html>`;
@@ -85,9 +85,9 @@ async function captureFixtures() {
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage({ viewport, deviceScaleFactor: 1 });
-    await page.setContent(checkoutFixture("baseline"), { waitUntil: "load" });
+    await page.setContent(migrationFixture("baseline"), { waitUntil: "load" });
     const baseline = await page.screenshot({ type: "png", animations: "disabled" });
-    await page.setContent(checkoutFixture("actual"), { waitUntil: "load" });
+    await page.setContent(migrationFixture("actual"), { waitUntil: "load" });
     const actual = await page.screenshot({ type: "png", animations: "disabled" });
     return { baseline, actual };
   } finally {
@@ -115,11 +115,11 @@ async function main() {
     status: comparison.status,
     attempt: 1,
     target: {
-      route: "/checkout/retry",
-      state: "payment-declined",
+      route: "/legacy/example",
+      state: "fixture-ready",
       viewport,
       deviceScaleFactor: 1,
-      fixture: "guide-checkout-retry-v1",
+      fixture: "guide-legacy-migration-v1",
     },
     metrics: comparison.metrics,
     maskReasons: comparison.maskReasons,
