@@ -113,6 +113,7 @@ describe("plugin layout", () => {
       "@modelcontextprotocol/sdk",
       "pdfjs-dist",
       "pngjs",
+      "typescript",
       "zod",
     ]);
     expect(packageJson.devDependencies).toHaveProperty("yaml");

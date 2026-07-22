@@ -5319,6 +5319,7 @@ function deriveLegacyApiOperations(
       path: operation.path,
       sourceLocator: operation.sourceLocator,
       ...(operation.operationId === undefined ? {} : { operationId: operation.operationId }),
+      ...(operation.serverOrigins === undefined ? {} : { serverOrigins: operation.serverOrigins }),
     })),
     runtimeRequests: inventory.apiCandidates.flatMap((candidate) =>
       candidate.method !== "UNKNOWN" &&

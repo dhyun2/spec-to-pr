@@ -47,6 +47,7 @@ describe("legacy source graph", () => {
         name: "VUE_APP_API_GW_V2_URL",
         runtime: "process.env",
         sanitizedOrigin: "https://fairway.example/v2/",
+        sanitizedOrigins: [{ sourceName: ".env.qa", origin: "https://fairway.example/v2/" }],
       }),
     ]);
     expect(JSON.stringify(graph)).not.toContain("must-not-appear");

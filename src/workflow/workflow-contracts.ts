@@ -131,6 +131,7 @@ export const OpenApiOperationContractSchema = z
     path: z.string().trim().startsWith("/").max(1_000),
     operationId: z.string().trim().min(1).max(500).optional(),
     sourceLocator: z.string().trim().min(1).max(2_000),
+    serverOrigins: z.array(z.string().url().max(2_000)).max(20).optional(),
   })
   .strict()
   .superRefine((operation, context) => {

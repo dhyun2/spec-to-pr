@@ -42,9 +42,7 @@ export function discoverLegacyApiCandidates(graph: LegacySourceGraph): LegacyApi
     const visit = (node: ts.Node): void => {
       if (ts.isCallExpression(node)) {
         const terminal = terminalCall(node, bindings, graph);
-        if (terminal !== undefined && terminal.pathTemplate !== undefined) {
-          mergeCandidate(candidates, file, bindings, terminal);
-        }
+        if (terminal !== undefined) mergeCandidate(candidates, file, bindings, terminal);
       }
       ts.forEachChild(node, visit);
     };
@@ -233,6 +231,9 @@ function endpointFromExpression(
           ...(reference?.sanitizedOrigin === undefined
             ? {}
             : { sanitizedOrigin: reference.sanitizedOrigin }),
+          ...(reference?.sanitizedOrigins === undefined
+            ? {}
+            : { sanitizedOrigins: reference.sanitizedOrigins }),
         };
       } else {
         rawPath += "{dynamic}";
@@ -459,11 +460,19 @@ function mergeCandidate(
   bindings: FileBindings,
   terminal: TerminalCall,
 ): void {
-  const endpointKey = stableEndpointKey(terminal);
   const location = bindings.sourceFile.getLineAndCharacterOfPosition(
     terminal.node.getStart(bindings.sourceFile),
   );
   const locator = `${file.sourcePath}:${location.line + 1}:${location.character + 1}`;
+  const endpointKey =
+    terminal.pathTemplate === undefined
+      ? `endpoint_${createHash("sha256")
+          .update("dynamic")
+          .update("\0")
+          .update(locator)
+          .digest("hex")
+          .slice(0, 24)}`
+      : stableEndpointKey(terminal);
   const wrapperChain = enclosingWrappers(terminal.node, bindings.sourceFile);
   const callSite: LegacyApiCallSite = {
     callSiteKey: `call_${createHash("sha256").update(locator).digest("hex").slice(0, 24)}`,
@@ -488,7 +497,7 @@ function mergeCandidate(
   candidates.set(endpointKey, {
     candidateKey: `candidate_${endpointKey.slice("endpoint_".length)}`,
     endpointKey,
-    operationKey: `${terminal.method} ${terminal.pathTemplate}`,
+    operationKey: `${terminal.method} ${terminal.pathTemplate ?? "path:unknown"}`,
     method: terminal.method,
     pathTemplate: terminal.pathTemplate,
     ...(terminal.originRef === undefined ? {} : { originRef: terminal.originRef }),

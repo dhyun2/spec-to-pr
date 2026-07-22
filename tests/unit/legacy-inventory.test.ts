@@ -117,7 +117,7 @@ describe("legacy inventory v3", () => {
         "PATCH /v1/OrderItems",
         "UNKNOWN /v2/NeedsMethod",
         "DELETE /v3/AccountID",
-        "UNKNOWN dynamic:fetch:dynamicCheckoutUrl",
+        "GET path:unknown",
         "GET operation:getCheckout",
         "GET operation:getOrders",
       ]),

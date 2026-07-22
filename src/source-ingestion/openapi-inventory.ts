@@ -6,6 +6,7 @@ export type OpenApiInventoryOperation = {
   path: string;
   operationId?: string;
   sourceLocator: string;
+  serverOrigins?: string[];
 };
 
 export function inventoryOpenApiOperations(
@@ -36,11 +37,17 @@ export function inventoryOpenApiOperations(
           rawOperation["operationId"].trim() !== ""
             ? rawOperation["operationId"]
             : undefined;
+        const serverOrigins = safeServerOrigins(
+          isObject(rawOperation) ? rawOperation["servers"] : undefined,
+          pathItem["servers"],
+          root["servers"],
+        );
         operations.push({
           operationKey,
           method,
           path: operationPath,
           ...(operationId === undefined ? {} : { operationId }),
+          ...(serverOrigins.length === 0 ? {} : { serverOrigins }),
           sourceLocator: file.path,
         });
         seen.add(operationKey);
@@ -54,6 +61,29 @@ export function inventoryOpenApiOperations(
     throw new Error("OpenAPI sources must declare at least one operation");
   }
   return operations;
+}
+
+function safeServerOrigins(...candidates: unknown[]): string[] {
+  const selected = candidates.find((candidate) => Array.isArray(candidate));
+  if (!Array.isArray(selected)) return [];
+  const origins = new Set<string>();
+  for (const server of selected) {
+    if (!isObject(server) || typeof server["url"] !== "string" || server["url"].includes("{")) {
+      continue;
+    }
+    try {
+      const parsed = new URL(server["url"]);
+      if (!/^https?:$/u.test(parsed.protocol)) continue;
+      parsed.username = "";
+      parsed.password = "";
+      parsed.search = "";
+      parsed.hash = "";
+      origins.add(parsed.toString());
+    } catch {
+      continue;
+    }
+  }
+  return [...origins].sort();
 }
 
 function resolvePathItem(

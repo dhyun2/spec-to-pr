@@ -64,6 +64,45 @@ components:
     ]);
   });
 
+  it("retains safe operation, path, or document server origins for scoped legacy matching", () => {
+    const operations = inventoryOpenApiOperations([
+      {
+        path: "openapi.yaml",
+        text: `
+openapi: 3.1.0
+servers:
+  - url: https://api.example/v1/
+paths:
+  /pets:
+    get: {}
+  /orders:
+    servers:
+      - url: https://api.example/v2/
+    post: {}
+  /private:
+    get:
+      servers:
+        - url: https://private.example/api/
+`,
+      },
+    ]);
+
+    expect(operations).toEqual([
+      expect.objectContaining({
+        operationKey: "GET /pets",
+        serverOrigins: ["https://api.example/v1/"],
+      }),
+      expect.objectContaining({
+        operationKey: "POST /orders",
+        serverOrigins: ["https://api.example/v2/"],
+      }),
+      expect.objectContaining({
+        operationKey: "GET /private",
+        serverOrigins: ["https://private.example/api/"],
+      }),
+    ]);
+  });
+
   it.each([
     ["external", "https://api.example.com/path-item.yaml"],
     ["broken", "#/components/pathItems/Missing"],

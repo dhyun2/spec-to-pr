@@ -74,6 +74,7 @@ export type LegacyEnvironmentReference = {
   name: string;
   sourcePaths: string[];
   sanitizedOrigin?: string;
+  sanitizedOrigins?: Array<{ sourceName: string; origin: string }>;
 };
 
 export type LegacySourceGraph = {
@@ -434,15 +435,24 @@ async function enrichEnvironmentReferences(
     }
   }
   envFiles.sort();
-  const contents = await Promise.all(envFiles.map((envFile) => readFile(envFile, "utf8")));
+  const contents = await Promise.all(
+    envFiles.map(async (envFile) => ({
+      sourceName: path.basename(envFile),
+      text: await readFile(envFile, "utf8"),
+    })),
+  );
   return references
     .map((reference) => {
       const origins = new Set<string>();
+      const sanitizedOrigins: Array<{ sourceName: string; origin: string }> = [];
       if (isSafeUrlEnvironmentName(reference.name)) {
         for (const content of contents) {
-          const value = environmentValue(content, reference.name);
+          const value = environmentValue(content.text, reference.name);
           const origin = value === undefined ? undefined : sanitizedHttpOrigin(value);
-          if (origin !== undefined) origins.add(origin);
+          if (origin !== undefined) {
+            origins.add(origin);
+            sanitizedOrigins.push({ sourceName: content.sourceName, origin });
+          }
         }
       }
       const sanitizedOrigin = origins.size === 1 ? [...origins][0] : undefined;
@@ -451,6 +461,7 @@ async function enrichEnvironmentReferences(
         name: reference.name,
         sourcePaths: reference.sourcePaths,
         ...(sanitizedOrigin === undefined ? {} : { sanitizedOrigin }),
+        ...(sanitizedOrigins.length === 0 ? {} : { sanitizedOrigins }),
       };
     })
     .sort((left, right) =>

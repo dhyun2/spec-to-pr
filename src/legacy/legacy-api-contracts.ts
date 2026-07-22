@@ -23,11 +23,20 @@ export const LegacyOriginRefSchema = z.discriminatedUnion("kind", [
       runtime: z.enum(["process.env", "import.meta.env"]),
       name: z.string().regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/),
       sanitizedOrigin: z.string().url().max(2_000).optional(),
+      sanitizedOrigins: z
+        .array(
+          z
+            .object({
+              sourceName: z.string().trim().min(1).max(200),
+              origin: z.string().url().max(2_000),
+            })
+            .strict(),
+        )
+        .max(100)
+        .optional(),
     })
     .strict(),
-  z
-    .object({ kind: z.literal("literal"), sanitizedOrigin: z.string().url().max(2_000) })
-    .strict(),
+  z.object({ kind: z.literal("literal"), sanitizedOrigin: z.string().url().max(2_000) }).strict(),
   z
     .object({
       kind: z.literal("openapi-server"),
@@ -43,7 +52,10 @@ export const LegacyOriginRefSchema = z.discriminatedUnion("kind", [
 export const LegacyApiCallSiteSchema = z
   .object({
     callSiteKey: z.string().trim().min(1).max(500),
-    ownerFeatureKey: z.string().regex(/^legacy_[a-f0-9]{24}$/).optional(),
+    ownerFeatureKey: z
+      .string()
+      .regex(/^legacy_[a-f0-9]{24}$/)
+      .optional(),
     ownerSourcePath: z.string().trim().min(1).max(1_000),
     terminalSourcePath: z.string().trim().min(1).max(1_000),
     line: z.number().int().positive(),

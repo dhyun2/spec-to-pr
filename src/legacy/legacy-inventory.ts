@@ -153,7 +153,6 @@ export async function buildLegacyInventory(
       if (
         entry.category === "api" &&
         entry.apiAdapter !== "source-generated-client" &&
-        entry.apiAdapter !== "source-fetch-dynamic" &&
         entry.apiAdapter !== "source-request-config"
       ) {
         continue;

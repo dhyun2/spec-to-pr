@@ -95,7 +95,23 @@ function resolveCandidate(
   );
   if (openApiMatches.length === 1) return openApiMatches[0];
 
-  if (candidate.pathTemplate === undefined) return undefined;
+  if (candidate.pathTemplate === undefined) {
+    const runtimeMatches = uniqueMatches(
+      runtime
+        .filter(
+          (request) =>
+            (candidate.method === "UNKNOWN" || candidate.method === request.method) &&
+            runtimeOriginMatches(candidate, request.origin),
+        )
+        .map((request) => ({
+          method: request.method,
+          path: request.path,
+          sourceLocator: "legacy-runtime-network",
+          resolution: "runtime" as const,
+        })),
+    );
+    return runtimeMatches.length === 1 ? runtimeMatches[0] : undefined;
+  }
   const runtimeMatches = uniqueMatches(
     runtime
       .filter(
@@ -137,10 +153,10 @@ function originMatches(
   serverOrigins: string[] | undefined,
 ): boolean {
   if (serverOrigins === undefined || serverOrigins.length === 0) return true;
-  const candidateOrigin = sanitizedCandidateOrigin(candidate);
-  if (candidateOrigin === undefined) return true;
-  return serverOrigins.some(
-    (origin) => normalizedOrigin(origin) === normalizedOrigin(candidateOrigin),
+  const candidateOrigins = sanitizedCandidateOrigins(candidate);
+  if (candidateOrigins.length === 0) return true;
+  return serverOrigins.some((origin) =>
+    candidateOrigins.some((candidateOrigin) => normalizedOriginsOverlap(origin, candidateOrigin)),
   );
 }
 
@@ -148,18 +164,34 @@ function runtimeOriginMatches(
   candidate: LegacyApiCandidate,
   runtimeOrigin: string | undefined,
 ): boolean {
-  const candidateOrigin = sanitizedCandidateOrigin(candidate);
+  const candidateOrigins = sanitizedCandidateOrigins(candidate);
   return (
-    candidateOrigin === undefined ||
+    candidateOrigins.length === 0 ||
     runtimeOrigin === undefined ||
-    normalizedOrigin(candidateOrigin) === normalizedOrigin(runtimeOrigin)
+    candidateOrigins.some((candidateOrigin) =>
+      normalizedOriginsOverlap(candidateOrigin, runtimeOrigin),
+    )
   );
 }
 
-function sanitizedCandidateOrigin(candidate: LegacyApiCandidate): string | undefined {
+function sanitizedCandidateOrigins(candidate: LegacyApiCandidate): string[] {
   const origin = candidate.originRef;
-  if (origin === undefined || origin.kind === "openapi-server") return undefined;
-  return origin.sanitizedOrigin;
+  if (origin === undefined || origin.kind === "openapi-server") return [];
+  if (origin.kind !== "environment") return [origin.sanitizedOrigin];
+  return [
+    ...(origin.sanitizedOrigin === undefined ? [] : [origin.sanitizedOrigin]),
+    ...(origin.sanitizedOrigins ?? []).map((item) => item.origin),
+  ];
+}
+
+function normalizedOriginsOverlap(left: string, right: string): boolean {
+  const normalizedLeft = normalizedOrigin(left);
+  const normalizedRight = normalizedOrigin(right);
+  return (
+    normalizedLeft === normalizedRight ||
+    normalizedLeft.startsWith(`${normalizedRight}/`) ||
+    normalizedRight.startsWith(`${normalizedLeft}/`)
+  );
 }
 
 function normalizedOrigin(value: string): string {

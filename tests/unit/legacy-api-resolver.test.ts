@@ -101,6 +101,34 @@ describe("legacy API evidence resolver", () => {
       resolution: "openapi",
     });
   });
+
+  it("resolves a path-dynamic call only when scoped runtime evidence has one unique operation", () => {
+    const dynamic = candidate({
+      method: "GET",
+      pathTemplate: undefined,
+      operationKey: "GET path:unknown",
+      originRef: undefined,
+    });
+    const result = resolveLegacyApiCandidates({
+      candidates: [dynamic],
+      openApiOperations: [],
+      runtimeRequests: [{ method: "GET", path: "/resolved", origin: "https://api.example" }],
+    });
+
+    expect(result.operations).toEqual([
+      expect.objectContaining({ operationKey: "GET /resolved", resolution: "runtime" }),
+    ]);
+    expect(
+      resolveLegacyApiCandidates({
+        candidates: [dynamic],
+        openApiOperations: [],
+        runtimeRequests: [
+          { method: "GET", path: "/first" },
+          { method: "GET", path: "/second" },
+        ],
+      }).unresolved,
+    ).toEqual([dynamic]);
+  });
 });
 
 function candidate(

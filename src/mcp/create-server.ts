@@ -76,6 +76,8 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
           hostFigmaIntake: true,
           deterministicVisualComparison: true,
           legacyProjectInventory: true,
+          semanticLegacyApiDiscovery: true,
+          sameRunLegacyNetworkEvidence: true,
           operationAwareApiCoverage: true,
           performanceEvidence: true,
           canonicalPrReportV2: true,
