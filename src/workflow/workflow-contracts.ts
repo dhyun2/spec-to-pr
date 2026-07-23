@@ -8,6 +8,11 @@ import { WorkloadEstimateSchema, WorkloadSignalsSchema } from "./workload-policy
 import { VisualCaptureSchema, VisualTargetManifestSchema } from "../visual/visual-comparator.js";
 import { WorkspaceBindingSchema } from "../workspace/workspace-binding.js";
 import { DraftEvidenceBundleSchema } from "./draft-evidence-bundle.js";
+import {
+  CapturedFigmaComponentSchema,
+  FigmaDesignMappingSchema,
+  assertCompleteDesignMapping,
+} from "../figma/figma-capture-contract.js";
 
 export const WorkflowScopeSchema = z
   .object({
@@ -1086,25 +1091,121 @@ const MockDataEvidenceSchema = z
           .regex(/\.json$/i, "Mock fixtures must be JSON"),
       )
       .min(1)
-      .max(100),
+      .max(100)
+      .optional(),
+    fixtures: z
+      .array(
+        z
+          .object({
+            id: z
+              .string()
+              .trim()
+              .min(1)
+              .max(300)
+              .regex(/^[a-z0-9][a-z0-9._:-]*$/i),
+            path: z
+              .string()
+              .trim()
+              .min(1)
+              .max(1_000)
+              .regex(/\.json$/i, "Mock fixtures must be JSON"),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(100)
+      .optional(),
   })
   .strict()
   .superRefine((evidence, context) => {
-    const unique = new Set(evidence.fixturePaths);
-    if (unique.size !== evidence.fixturePaths.length) {
+    if (evidence.fixturePaths === undefined && evidence.fixtures === undefined) {
       context.addIssue({
         code: "custom",
-        path: ["fixturePaths"],
+        path: ["fixtures"],
+        message: "Mock evidence requires fixtures",
+      });
+      return;
+    }
+    if (evidence.fixturePaths !== undefined && evidence.fixtures !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["fixtures"],
+        message: "Use named fixtures or compatibility fixturePaths, not both",
+      });
+      return;
+    }
+    const fixturePaths =
+      evidence.fixtures?.map((fixture) => fixture.path) ?? evidence.fixturePaths ?? [];
+    const unique = new Set(fixturePaths);
+    if (unique.size !== fixturePaths.length) {
+      context.addIssue({
+        code: "custom",
+        path: [evidence.fixtures === undefined ? "fixturePaths" : "fixtures"],
         message: "Mock fixture paths must be unique",
       });
     }
     if (unique.has(evidence.manifestPath)) {
       context.addIssue({
         code: "custom",
-        path: ["fixturePaths"],
+        path: [evidence.fixtures === undefined ? "fixturePaths" : "fixtures"],
         message: "Mock manifest cannot also be a fixture",
       });
     }
+    if (evidence.fixtures !== undefined) {
+      const fixtureIds = new Set(evidence.fixtures.map((fixture) => fixture.id));
+      if (fixtureIds.size !== evidence.fixtures.length) {
+        context.addIssue({
+          code: "custom",
+          path: ["fixtures"],
+          message: "Mock fixture IDs must be unique",
+        });
+      }
+    }
+  });
+
+const DesignSystemUsageSchema = z
+  .object({
+    figmaComponent: z.string().trim().min(1).max(500),
+    sourceFile: WorkflowSourcePathSchema,
+    resolutionKind: z.enum(["component", "asset", "exception"]),
+    importedExport: z.string().trim().min(1).max(500).optional(),
+    assetPath: WorkflowSourcePathSchema.optional(),
+  })
+  .strict()
+  .superRefine((usage, context) => {
+    if (usage.resolutionKind === "component" && usage.importedExport === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["importedExport"],
+        message: "Component usage requires the imported export",
+      });
+    }
+    if (usage.resolutionKind === "asset" && usage.assetPath === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["assetPath"],
+        message: "Asset usage requires the canonical asset path",
+      });
+    }
+  });
+
+const DesignSystemEvidenceSchema = z
+  .object({
+    usages: z.array(DesignSystemUsageSchema).max(1_000),
+  })
+  .strict()
+  .superRefine((evidence, context) => {
+    const componentNames = new Set<string>();
+    evidence.usages.forEach((usage, index) => {
+      if (componentNames.has(usage.figmaComponent)) {
+        context.addIssue({
+          code: "custom",
+          path: ["usages", index, "figmaComponent"],
+          message: `Duplicate design-system usage ${usage.figmaComponent}`,
+        });
+      }
+      componentNames.add(usage.figmaComponent);
+    });
   });
 
 export const ImplementationSubmissionSchema = z
@@ -1122,6 +1223,7 @@ export const ImplementationSubmissionSchema = z
     legacyCoverage: z.array(LegacyCoverageSchema).max(500).default([]),
     performanceEvidence: PerformanceEvidenceSchema.optional(),
     mockDataEvidence: MockDataEvidenceSchema.optional(),
+    designSystemEvidence: DesignSystemEvidenceSchema.optional(),
     blocker: WorkflowBlockerSchema.optional(),
   })
   .strict()
@@ -1254,7 +1356,9 @@ export const ImplementationSubmissionSchema = z
     if (submission.mockDataEvidence !== undefined) {
       for (const evidencePath of [
         submission.mockDataEvidence.manifestPath,
-        ...submission.mockDataEvidence.fixturePaths,
+        ...(submission.mockDataEvidence.fixtures?.map((fixture) => fixture.path) ??
+          submission.mockDataEvidence.fixturePaths ??
+          []),
       ]) {
         if (!submission.artifactPaths.includes(evidencePath)) {
           context.addIssue({
@@ -1264,6 +1368,17 @@ export const ImplementationSubmissionSchema = z
           });
         }
       }
+    }
+    if (submission.designSystemEvidence !== undefined) {
+      submission.designSystemEvidence.usages.forEach((usage, index) => {
+        if (!submission.changedFiles.includes(usage.sourceFile)) {
+          context.addIssue({
+            code: "custom",
+            path: ["designSystemEvidence", "usages", index, "sourceFile"],
+            message: "Design-system usage source files must be included in changedFiles",
+          });
+        }
+      });
     }
     if (
       submission.performanceEvidence !== undefined &&
@@ -1283,7 +1398,10 @@ export const FigmaBundleSubmissionSchema = z
     provider: z.literal("host-connected-figma"),
     capturedAt: z.string().datetime({ offset: true }),
     fileUrl: FigmaFileUrlSchema,
+    fileUrls: z.array(FigmaFileUrlSchema).min(1).max(20).optional(),
     nodeIds: z.array(z.string().trim().min(1)).min(1),
+    capturedComponents: z.array(CapturedFigmaComponentSchema).max(1_000),
+    designMapping: FigmaDesignMappingSchema,
     manifestPath: z
       .string()
       .trim()
@@ -1293,6 +1411,26 @@ export const FigmaBundleSubmissionSchema = z
   })
   .strict()
   .superRefine((submission, context) => {
+    const fileUrls = submission.fileUrls ?? [submission.fileUrl];
+    if (fileUrls[0] !== submission.fileUrl || new Set(fileUrls).size !== fileUrls.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["fileUrls"],
+        message: "Figma fileUrls must be unique and begin with fileUrl",
+      });
+    }
+    try {
+      assertCompleteDesignMapping({
+        capturedComponents: submission.capturedComponents,
+        mapping: submission.designMapping,
+      });
+    } catch (error: unknown) {
+      context.addIssue({
+        code: "custom",
+        path: ["designMapping"],
+        message: error instanceof Error ? error.message : "Figma design mapping is incomplete",
+      });
+    }
     if (!submission.artifactPaths.includes(submission.manifestPath)) {
       context.addIssue({
         code: "custom",

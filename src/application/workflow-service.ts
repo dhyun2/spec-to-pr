@@ -96,7 +96,13 @@ import {
 } from "../visual/visual-comparator.js";
 import { decodeBoundedPng } from "../visual/png-decoder.js";
 import { normalizeVisualPng } from "../visual/visual-normalizer.js";
-import { assertFigmaCaptureGeometry } from "../figma/figma-capture-contract.js";
+import {
+  CapturedFigmaComponentSchema,
+  FigmaDesignMappingSchema,
+  assertCompleteDesignMapping,
+  assertFigmaCaptureGeometry,
+  type FigmaDesignMapping,
+} from "../figma/figma-capture-contract.js";
 import {
   WorkspaceStartInputSchema,
   assertChangedFilesWithinWorkspace,
@@ -149,7 +155,10 @@ const FigmaManifestSchema = z
     provider: z.literal("host-connected-figma"),
     capturedAt: z.string().datetime({ offset: true }),
     fileUrl: FigmaFileUrlSchema,
+    fileUrls: z.array(FigmaFileUrlSchema).min(1).max(MAX_COMPOSABLE_SOURCE_PATHS),
     nodeIds: z.array(z.string().trim().min(1)).min(1),
+    capturedComponents: z.array(CapturedFigmaComponentSchema).max(1_000),
+    designMapping: FigmaDesignMappingSchema,
     visualPaths: z
       .array(
         z
@@ -1834,6 +1843,9 @@ export class WorkflowService {
           ? {
               summary: persistedSummary,
               status: "passed",
+              figmaFileUrls: submission.fileUrls ?? [submission.fileUrl],
+              capturedComponents: submission.capturedComponents,
+              designMapping: submission.designMapping,
               visualTargets: submission.visualTargets,
             }
           : { summary: persistedSummary }),
@@ -1866,6 +1878,9 @@ export class WorkflowService {
               ...(submission.mockDataEvidence === undefined
                 ? {}
                 : { mockDataEvidence: submission.mockDataEvidence }),
+              ...(submission.designSystemEvidence === undefined
+                ? {}
+                : { designSystemEvidence: submission.designSystemEvidence }),
               ...(submission.performanceEvidence === undefined
                 ? {}
                 : { performanceEvidence: submission.performanceEvidence }),
@@ -2082,10 +2097,15 @@ export class WorkflowService {
       preparedEvidencePaths.push({ evidencePath, resolvedPath, projectRelativePath });
     }
 
-    const mockFixtureDigests = new Map<string, string>();
+    if (submission.kind === "figma-bundle") {
+      await assertFigmaDesignAssets(root, submission.designMapping);
+    }
+
+    const mockFixtureDigests = new Map<string, { id: string; digest: string; named: boolean }>();
     if (submission.kind === "implementation" && submission.mockDataEvidence !== undefined) {
       const physicalFixtures = new Set<string>();
-      for (const fixturePath of submission.mockDataEvidence.fixturePaths) {
+      for (const fixture of normalizedMockFixtures(submission.mockDataEvidence)) {
+        const fixturePath = fixture.path;
         const prepared = preparedEvidencePaths.find((item) => item.evidencePath === fixturePath);
         if (prepared === undefined) {
           throw new Error(`Mock fixture must be included in artifactPaths: ${fixturePath}`);
@@ -2096,10 +2116,11 @@ export class WorkflowService {
         physicalFixtures.add(prepared.resolvedPath);
         const content = await readFile(prepared.resolvedPath);
         assertMockFixture(content, fixturePath);
-        mockFixtureDigests.set(
-          fixturePath,
-          `sha256:${createHash("sha256").update(content).digest("hex")}`,
-        );
+        mockFixtureDigests.set(fixturePath, {
+          id: fixture.id,
+          digest: `sha256:${createHash("sha256").update(content).digest("hex")}`,
+          named: fixture.named,
+        });
       }
     }
 
@@ -2179,7 +2200,10 @@ export class WorkflowService {
         assertDeterministicMockManifest(
           content,
           evidencePath,
-          [...mockFixtureDigests].map(([fixturePath, digest]) => ({ fixturePath, digest })),
+          [...mockFixtureDigests].map(([fixturePath, fixture]) => ({
+            fixturePath,
+            ...fixture,
+          })),
         );
       }
       if (submission.kind === "figma-bundle") {
@@ -2208,6 +2232,7 @@ export class WorkflowService {
 
       const mediaType = mediaTypeForPath(resolvedPath);
       const openSpecChangeName = openSpecChangeForContractArtifact(submission, projectRelativePath);
+      const mockFixture = mockFixtureDigests.get(evidencePath);
       const blob = await this.dependencies.artifactStore.writeBlob({
         content,
         mediaType,
@@ -2245,6 +2270,13 @@ export class WorkflowService {
                 }),
             ...(featureEvidenceRole === undefined ? {} : { featureEvidenceRole }),
             ...(apiEvidenceRole === undefined ? {} : { apiEvidenceRole }),
+            ...(mockFixture === undefined
+              ? {}
+              : {
+                  mockFixtureId: mockFixture.id,
+                  mockFixtureDigest: mockFixture.digest,
+                  mockFixtureNamed: mockFixture.named,
+                }),
             ...(openSpecChangeName === undefined ? {} : { changeName: openSpecChangeName }),
             ...(submission.kind !== "figma-bundle"
               ? {}
@@ -4674,10 +4706,27 @@ function assertSubmissionPrerequisites(
   }
   if (
     submission.kind === "figma-bundle" &&
-    profile.figmaUrl !== undefined &&
-    submission.fileUrl !== profile.figmaUrl
+    (profile.figmaUrls.length === 0 ||
+      JSON.stringify(submission.fileUrls ?? [submission.fileUrl]) !==
+        JSON.stringify(profile.figmaUrls))
   ) {
-    throw new Error("Figma bundle URL must match the delivery profile");
+    throw new Error("Figma bundle URLs must exactly match the delivery profile");
+  }
+  if (submission.kind === "figma-bundle") {
+    const capturedNodeIds = new Set(
+      submission.visualTargets.flatMap((target) =>
+        target.figmaCapture === undefined ? [] : [target.figmaCapture.nodeId],
+      ),
+    );
+    const missingUrlStates = (submission.fileUrls ?? [submission.fileUrl]).filter((fileUrl) => {
+      const nodeId = figmaNodeIdFromUrl(fileUrl);
+      return nodeId !== undefined && !capturedNodeIds.has(nodeId);
+    });
+    if (missingUrlStates.length > 0) {
+      throw new Error(
+        `Figma bundle must bind every supplied URL state to a visual target: ${missingUrlStates.join(", ")}`,
+      );
+    }
   }
   if (
     submission.kind === "figma-bundle" &&
@@ -4705,6 +4754,13 @@ function assertSubmissionPrerequisites(
     submission.mockDataEvidence === undefined
   ) {
     throw new Error("Figma delivery requires deterministic mock manifest and fixture evidence");
+  }
+  if (
+    submission.kind === "implementation" &&
+    submission.status === "passed" &&
+    profile.requirements.figmaBundle
+  ) {
+    assertFigmaImplementationBindings(run, submission);
   }
   if (
     submission.kind === "implementation" &&
@@ -4991,6 +5047,71 @@ function visualTargetsFromRun(run: RunManifest): VisualTargetManifest[] {
   return [];
 }
 
+function figmaDesignMappingFromRun(run: RunManifest): FigmaDesignMapping | undefined {
+  for (const artifact of [...run.artifacts].reverse()) {
+    if (artifact.metadata["workflowSubmissionKind"] !== "figma-bundle") continue;
+    const parsed = FigmaDesignMappingSchema.safeParse(artifact.metadata["designMapping"]);
+    if (parsed.success) return parsed.data;
+  }
+  return undefined;
+}
+
+function figmaNodeIdFromUrl(fileUrl: string): string | undefined {
+  const nodeId = new URL(fileUrl).searchParams.get("node-id")?.trim();
+  return nodeId === undefined || nodeId === "" ? undefined : nodeId.replaceAll("-", ":");
+}
+
+function assertFigmaImplementationBindings(
+  run: RunManifest,
+  submission: Extract<WorkflowSubmission, { kind: "implementation" }>,
+): void {
+  const namedFixtures = submission.mockDataEvidence?.fixtures;
+  if (namedFixtures === undefined) {
+    throw new Error("MOCK_FIXTURE_ID_MISMATCH: strict Figma targets require named fixtures");
+  }
+  const targetFixtureIds = new Set(visualTargetsFromRun(run).map((target) => target.fixture));
+  const suppliedFixtureIds = new Set(namedFixtures.map((fixture) => fixture.id));
+  const missingFixtures = [...targetFixtureIds].filter((id) => !suppliedFixtureIds.has(id));
+  const unusedFixtures = [...suppliedFixtureIds].filter((id) => !targetFixtureIds.has(id));
+  if (targetFixtureIds.size === 0 || missingFixtures.length > 0 || unusedFixtures.length > 0) {
+    throw new Error(
+      `MOCK_FIXTURE_ID_MISMATCH: missing fixture IDs: ${missingFixtures.join(", ") || "none"}; unused fixture IDs: ${unusedFixtures.join(", ") || "none"}`,
+    );
+  }
+
+  const mapping = figmaDesignMappingFromRun(run);
+  if (mapping === undefined) {
+    throw new Error("FIGMA_DESIGN_SYSTEM_EVIDENCE_INVALID: Figma design mapping is missing");
+  }
+  const requiredMappings = new Map(
+    mapping.components
+      .filter((component) => component.resolution.kind !== "exception")
+      .map((component) => [component.figmaComponent, component]),
+  );
+  const usages = submission.designSystemEvidence?.usages ?? [];
+  const usagesByComponent = new Map(usages.map((usage) => [usage.figmaComponent, usage]));
+  const missingUsages = [...requiredMappings].filter(
+    ([figmaComponent]) => !usagesByComponent.has(figmaComponent),
+  );
+  const unknownUsages = [...usagesByComponent].filter(
+    ([figmaComponent]) =>
+      !mapping.components.some((component) => component.figmaComponent === figmaComponent),
+  );
+  const mismatchedUsages = [...requiredMappings].filter(([figmaComponent, component]) => {
+    const usage = usagesByComponent.get(figmaComponent);
+    if (usage === undefined || usage.resolutionKind !== component.resolution.kind) return true;
+    if (component.resolution.kind === "component") {
+      return usage.importedExport !== component.resolution.exportName;
+    }
+    return component.resolution.kind !== "asset" || usage.assetPath !== component.resolution.path;
+  });
+  if (missingUsages.length > 0 || unknownUsages.length > 0 || mismatchedUsages.length > 0) {
+    throw new Error(
+      `FIGMA_DESIGN_SYSTEM_EVIDENCE_INVALID: missing: ${missingUsages.map(([name]) => name).join(", ") || "none"}; unknown: ${unknownUsages.map(([name]) => name).join(", ") || "none"}; mismatched: ${mismatchedUsages.map(([name]) => name).join(", ") || "none"}`,
+    );
+  }
+}
+
 function visualComparisonAttemptCount(run: RunManifest, reviewPacketId: string): number {
   const reservations = visualAttemptReservations(run, reviewPacketId);
   if (reservations.length > 0) return reservations.length;
@@ -5172,7 +5293,12 @@ function assertPassingJsonResult(content: Buffer, evidencePath: string): void {
 function assertDeterministicMockManifest(
   content: Buffer,
   evidencePath: string,
-  expectedFixtures: Array<{ fixturePath: string; digest: string }>,
+  expectedFixtures: Array<{
+    fixturePath: string;
+    id: string;
+    digest: string;
+    named: boolean;
+  }>,
 ): void {
   let parsed: unknown;
   try {
@@ -5187,6 +5313,13 @@ function assertDeterministicMockManifest(
         .array(
           z
             .object({
+              id: z
+                .string()
+                .trim()
+                .min(1)
+                .max(300)
+                .regex(/^[a-z0-9][a-z0-9._:-]*$/i)
+                .optional(),
               path: z.string().trim().min(1),
               sha256: z.string().regex(/^sha256:[a-f0-9]{64}$/),
             })
@@ -5196,20 +5329,44 @@ function assertDeterministicMockManifest(
     })
     .strict()
     .safeParse(parsed);
-  const expected = new Map(expectedFixtures.map((item) => [item.fixturePath, item.digest]));
-  const received = result.success
-    ? new Map(result.data.fixtures.map((fixture) => [fixture.path, fixture.sha256]))
-    : new Map<string, string>();
   if (
     !result.success ||
-    received.size !== result.data.fixtures.length ||
-    received.size !== expected.size ||
-    [...expected].some(([fixturePath, digest]) => received.get(fixturePath) !== digest)
+    result.data.fixtures.length !== expectedFixtures.length ||
+    new Set(result.data.fixtures.map((fixture) => fixture.path)).size !==
+      result.data.fixtures.length ||
+    new Set(result.data.fixtures.map((fixture) => fixture.id ?? fixture.path)).size !==
+      result.data.fixtures.length ||
+    expectedFixtures.some((expected) => {
+      const received = result.data.fixtures.find(
+        (fixture) => fixture.path === expected.fixturePath,
+      );
+      return (
+        received === undefined ||
+        received.sha256 !== expected.digest ||
+        (expected.named
+          ? received.id !== expected.id
+          : received.id !== undefined && received.id !== expected.id)
+      );
+    })
   ) {
     throw new Error(
-      `Mock data manifest must bind deterministic=true to the exact fixture paths and SHA-256 digests: ${evidencePath}`,
+      `Mock data manifest must bind deterministic=true to the exact fixture IDs, paths, and SHA-256 digests: ${evidencePath}`,
     );
   }
+}
+
+function normalizedMockFixtures(evidence: {
+  fixturePaths?: string[] | undefined;
+  fixtures?: Array<{ id: string; path: string }> | undefined;
+}): Array<{ id: string; path: string; named: boolean }> {
+  if (evidence.fixtures !== undefined) {
+    return evidence.fixtures.map((fixture) => ({ ...fixture, named: true }));
+  }
+  return (evidence.fixturePaths ?? []).map((fixturePath) => ({
+    id: fixturePath,
+    path: fixturePath,
+    named: false,
+  }));
 }
 
 function assertMockFixture(content: Buffer, evidencePath: string): void {
@@ -5312,6 +5469,34 @@ function assertPassingFeatureResult(
   }
 }
 
+async function assertFigmaDesignAssets(
+  projectRoot: string,
+  mapping: FigmaDesignMapping,
+): Promise<void> {
+  for (const component of mapping.components) {
+    if (component.resolution.kind !== "asset") continue;
+    const requestedPath = path.resolve(projectRoot, component.resolution.path);
+    assertWithinProjectRoot(projectRoot, requestedPath, component.resolution.path);
+    let resolvedPath: string;
+    try {
+      resolvedPath = await realpath(requestedPath);
+    } catch {
+      throw new Error(
+        `FIGMA_DESIGN_MAPPING_INCOMPLETE: canonical asset does not exist: ${component.resolution.path}`,
+      );
+    }
+    assertWithinProjectRoot(projectRoot, resolvedPath, component.resolution.path);
+    const digest = `sha256:${createHash("sha256")
+      .update(await readFile(resolvedPath))
+      .digest("hex")}`;
+    if (digest !== component.resolution.digest) {
+      throw new Error(
+        `FIGMA_DESIGN_MAPPING_INCOMPLETE: canonical asset digest does not match: ${component.resolution.path}`,
+      );
+    }
+  }
+}
+
 function assertFigmaManifest(
   content: Buffer,
   evidencePath: string,
@@ -5324,6 +5509,7 @@ function assertFigmaManifest(
     throw new Error(`Figma manifest must be valid JSON: ${evidencePath}`);
   }
   const parsed = FigmaManifestSchema.safeParse(raw);
+  const submittedFileUrls = submission.fileUrls ?? [submission.fileUrl];
   const expectedVisualPaths = submission.artifactPaths.filter(
     (artifactPath) => artifactPath !== submission.manifestPath,
   );
@@ -5332,12 +5518,20 @@ function assertFigmaManifest(
     parsed.data.provider !== submission.provider ||
     parsed.data.capturedAt !== submission.capturedAt ||
     parsed.data.fileUrl !== submission.fileUrl ||
+    JSON.stringify(parsed.data.fileUrls) !== JSON.stringify(submittedFileUrls) ||
     JSON.stringify(parsed.data.nodeIds) !== JSON.stringify(submission.nodeIds) ||
+    JSON.stringify(parsed.data.capturedComponents) !==
+      JSON.stringify(submission.capturedComponents) ||
+    JSON.stringify(parsed.data.designMapping) !== JSON.stringify(submission.designMapping) ||
     JSON.stringify(parsed.data.visualPaths) !== JSON.stringify(expectedVisualPaths) ||
     JSON.stringify(parsed.data.visualTargets) !== JSON.stringify(submission.visualTargets)
   ) {
     throw new Error(`Figma manifest provenance does not match its submission: ${evidencePath}`);
   }
+  assertCompleteDesignMapping({
+    capturedComponents: parsed.data.capturedComponents,
+    mapping: parsed.data.designMapping,
+  });
 }
 
 async function assertPng(content: Buffer, evidencePath: string): Promise<void> {

@@ -122,6 +122,7 @@ describe("WorkflowService", () => {
         deterministic: true,
         fixtures: [
           {
+            id: "mock:checkout",
             path: "mocks/checkout.json",
             sha256: `sha256:${createHash("sha256").update(mockFixture).digest("hex")}`,
           },
@@ -311,6 +312,24 @@ describe("WorkflowService", () => {
       api: false,
       hasVisualBaseline: true,
     });
+    await expect(
+      service.submit({
+        runId: status.runId,
+        submission: {
+          kind: "figma-bundle",
+          provider: "host-connected-figma",
+          capturedAt: "2026-07-13T00:00:00.000Z",
+          fileUrl: FIGMA_URL,
+          fileUrls: [FIGMA_URL, FIGMA_URL_SECOND_STATE],
+          nodeIds: ["1:2"],
+          capturedComponents: figmaCapturedComponents(),
+          designMapping: figmaDesignMapping(),
+          manifestPath: "figma/design-context.json",
+          visualTargets: figmaVisualTargets(),
+          artifactPaths: ["figma/design-context.json", "visual/diff.png"],
+        },
+      }),
+    ).rejects.toThrow(/every supplied URL state.*node-id=3-4/);
   });
 
   it("requires a passed report before ready publication planning", async () => {
@@ -2693,7 +2712,10 @@ describe("WorkflowService", () => {
         provider: "host-connected-figma",
         capturedAt: "2026-07-13T00:00:00.000Z",
         fileUrl: FIGMA_URL,
+        fileUrls: [FIGMA_URL],
         nodeIds: ["1:2"],
+        capturedComponents: figmaCapturedComponents(),
+        designMapping: figmaDesignMapping(),
         manifestPath: "figma/design-context.json",
         visualTargets: figmaVisualTargets(),
         artifactPaths: ["figma/design-context.json", "visual/diff.png"],
@@ -2776,7 +2798,10 @@ describe("WorkflowService", () => {
         provider: "host-connected-figma",
         capturedAt: "2026-07-13T00:00:00.000Z",
         fileUrl: FIGMA_URL,
+        fileUrls: [FIGMA_URL],
         nodeIds: ["1:2"],
+        capturedComponents: figmaCapturedComponents(),
+        designMapping: figmaDesignMapping(),
         manifestPath: "figma/design-context.json",
         visualTargets: figmaVisualTargets(),
         artifactPaths: ["figma/design-context.json", "visual/diff.png"],
@@ -4379,7 +4404,10 @@ describe("WorkflowService", () => {
         provider: "host-connected-figma",
         capturedAt: "2026-07-13T00:00:00.000Z",
         fileUrl: figmaUrl,
+        fileUrls: [figmaUrl],
         nodeIds: ["1:2"],
+        capturedComponents: figmaCapturedComponents(),
+        designMapping: figmaDesignMapping(),
         manifestPath: "figma/design-context.json",
         visualTargets: figmaVisualTargets(),
         artifactPaths: ["figma/design-context.json", "visual/diff.png"],
@@ -4399,7 +4427,10 @@ describe("WorkflowService", () => {
           provider: "host-connected-figma",
           capturedAt: "2026-07-13T00:00:00.000Z",
           fileUrl: figmaUrl,
+          fileUrls: [figmaUrl],
           nodeIds: ["1:2"],
+          capturedComponents: figmaCapturedComponents(),
+          designMapping: figmaDesignMapping(),
           manifestPath: "figma/design-context.json",
           visualTargets: figmaVisualTargets(),
           artifactPaths: ["figma/design-context.json", "visual/diff.png"],
@@ -4418,6 +4449,170 @@ describe("WorkflowService", () => {
       },
     });
     expect(accepted.nextActions[0]?.kind).toBe("implement");
+  });
+
+  it("binds captured Figma components and named fixtures to implementation evidence", async () => {
+    const capturedComponents = [{ name: "Logo/Normal/nxplus_park", nodeId: "1:2" }];
+    const logoBytes = Buffer.from("canonical nxplus park webp fixture", "utf8");
+    await mkdir(path.join(directory, "assets"), { recursive: true });
+    await writeFile(path.join(directory, "assets/nxplus_park.webp"), logoBytes);
+    await execFileAsync("git", ["add", "assets/nxplus_park.webp"], { cwd: directory });
+    await execFileAsync("git", ["commit", "-qm", "add canonical logo asset"], { cwd: directory });
+    const designMapping = {
+      designSystem: {
+        packageName: "@frontend/ui",
+        packageVersion: "1.2.3",
+        guidanceSkill: "design-system",
+      },
+      components: [
+        {
+          figmaComponent: "Logo/Normal/nxplus_park",
+          nodeId: "1:2",
+          resolution: {
+            kind: "asset" as const,
+            path: "assets/nxplus_park.webp",
+            digest: `sha256:${createHash("sha256").update(logoBytes).digest("hex")}`,
+          },
+        },
+      ],
+      fonts: [],
+      tokens: [],
+    };
+    await writeFile(
+      path.join(directory, "figma/design-context.json"),
+      JSON.stringify({
+        provider: "host-connected-figma",
+        capturedAt: "2026-07-13T00:00:00.000Z",
+        fileUrl: FIGMA_URL,
+        fileUrls: [FIGMA_URL],
+        nodeIds: ["1:2"],
+        capturedComponents,
+        designMapping,
+        visualPaths: ["visual/diff.png"],
+        visualTargets: figmaVisualTargets(),
+      }),
+      "utf8",
+    );
+    await execFileAsync("git", ["add", "figma/design-context.json"], { cwd: directory });
+    await execFileAsync("git", ["commit", "-qm", "bind Figma design mapping"], {
+      cwd: directory,
+    });
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: `Implement ${FIGMA_URL} with the internal design system`,
+      scope: "ui",
+      mode: "figma",
+      changeKind: "design",
+      figmaUrl: FIGMA_URL,
+    });
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "figma-bundle",
+          provider: "host-connected-figma",
+          capturedAt: "2026-07-13T00:00:00.000Z",
+          fileUrl: FIGMA_URL,
+          fileUrls: [FIGMA_URL],
+          nodeIds: ["1:2"],
+          capturedComponents,
+          designMapping: {
+            ...designMapping,
+            components: [
+              {
+                ...designMapping.components[0]!,
+                resolution: {
+                  ...designMapping.components[0]!.resolution,
+                  digest: `sha256:${"0".repeat(64)}`,
+                },
+              },
+            ],
+          },
+          manifestPath: "figma/design-context.json",
+          visualTargets: figmaVisualTargets(),
+          artifactPaths: ["figma/design-context.json", "visual/diff.png"],
+        },
+      }),
+    ).rejects.toThrow(/FIGMA_DESIGN_MAPPING_INCOMPLETE.*asset digest/);
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "figma-bundle",
+        provider: "host-connected-figma",
+        capturedAt: "2026-07-13T00:00:00.000Z",
+        fileUrl: FIGMA_URL,
+        fileUrls: [FIGMA_URL],
+        nodeIds: ["1:2"],
+        capturedComponents,
+        designMapping,
+        manifestPath: "figma/design-context.json",
+        visualTargets: figmaVisualTargets(),
+        artifactPaths: ["figma/design-context.json", "visual/diff.png"],
+      },
+    });
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "contracts",
+        status: "passed",
+        summary: "Bound the internal logo component and deterministic state.",
+        artifactPaths: ["contracts/requirements.json"],
+        requirementManifest: requirements("figma-screen"),
+      },
+    });
+    await changeSource(directory, "src/checkout.tsx", "export const checkout = 'mapped';\n");
+    const implementation = {
+      kind: "implementation",
+      status: "passed",
+      summary: "Implemented the mapped Figma component.",
+      apiReady: false,
+      uiChanged: true,
+      changedFiles: ["src/checkout.tsx"],
+      artifactPaths: ["test-results/unit.json", "mocks/manifest.json", "mocks/checkout.json"],
+      mockDataEvidence: {
+        manifestPath: "mocks/manifest.json",
+        fixtures: [{ id: "mock:checkout", path: "mocks/checkout.json" }],
+      },
+    } as const;
+
+    await expect(
+      service.submit({ runId: started.runId, submission: implementation }),
+    ).rejects.toThrow(/FIGMA_DESIGN_SYSTEM_EVIDENCE_INVALID.*Logo\/Normal\/nxplus_park/);
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: {
+          ...implementation,
+          designSystemEvidence: {
+            usages: [
+              {
+                figmaComponent: "Logo/Normal/nxplus_park",
+                sourceFile: "src/checkout.tsx",
+                resolutionKind: "asset",
+                assetPath: "assets/wrong.webp",
+              },
+            ],
+          },
+        },
+      }),
+    ).rejects.toThrow(/FIGMA_DESIGN_SYSTEM_EVIDENCE_INVALID.*mismatched/);
+    const accepted = await service.submit({
+      runId: started.runId,
+      submission: {
+        ...implementation,
+        designSystemEvidence: {
+          usages: [
+            {
+              figmaComponent: "Logo/Normal/nxplus_park",
+              sourceFile: "src/checkout.tsx",
+              resolutionKind: "asset",
+              assetPath: "assets/nxplus_park.webp",
+            },
+          ],
+        },
+      },
+    });
+    expect(accepted.nextActions.map((action) => action.kind)).toContain("compare-visuals");
   });
 
   it("requires a targeted feature E2E and exactly one video only in feature mode", async () => {
@@ -4461,7 +4656,10 @@ describe("WorkflowService", () => {
         provider: "host-connected-figma",
         capturedAt: "2026-07-13T00:00:00.000Z",
         fileUrl: FIGMA_URL,
+        fileUrls: [FIGMA_URL],
         nodeIds: ["1:2"],
+        capturedComponents: figmaCapturedComponents(),
+        designMapping: figmaDesignMapping(),
         manifestPath: "figma/design-context.json",
         visualTargets: figmaVisualTargets(),
         artifactPaths: ["figma/design-context.json", "visual/diff.png"],
@@ -4537,6 +4735,8 @@ describe("WorkflowService", () => {
         "test-results/checkout.mp4",
         "test-results/api-coverage.json",
         "test-results/performance.json",
+        "mocks/manifest.json",
+        "mocks/checkout.json",
       ],
       implementationContextId: FEATURE_CONTEXT_ID,
       featureEvidence: {
@@ -4574,6 +4774,10 @@ describe("WorkflowService", () => {
           status: "unavailable",
           reason: "No existing CrUX or authorized RUM source.",
         },
+      },
+      mockDataEvidence: {
+        manifestPath: "mocks/manifest.json",
+        fixtures: [{ id: "mock:checkout", path: "mocks/checkout.json" }],
       },
     } as const;
 
@@ -4834,7 +5038,10 @@ describe("WorkflowService", () => {
       provider: "host-connected-figma",
       capturedAt: "2026-07-13T00:00:00.000Z",
       fileUrl: FIGMA_URL,
+      fileUrls: [FIGMA_URL],
       nodeIds: ["1:2"],
+      capturedComponents: figmaCapturedComponents(),
+      designMapping: figmaDesignMapping(),
       manifestPath: "figma/design-context.json",
       visualTargets: figmaVisualTargets(),
       artifactPaths: ["figma/design-context.json", "visual/diff.png"],
@@ -4857,6 +5064,7 @@ describe("WorkflowService", () => {
   });
 
   it("rejects a scaled Figma thumbnail declared as the browser viewport", async () => {
+    const figmaUrl = "https://www.figma.com/design/abc/file?node-id=2558-4382";
     const target = {
       targetId: "shop-list",
       name: "Shop list",
@@ -4884,8 +5092,11 @@ describe("WorkflowService", () => {
       JSON.stringify({
         provider: "host-connected-figma",
         capturedAt: "2026-07-13T00:00:00.000Z",
-        fileUrl: FIGMA_URL,
+        fileUrl: figmaUrl,
+        fileUrls: [figmaUrl],
         nodeIds: ["2558:4382"],
+        capturedComponents: figmaCapturedComponents(),
+        designMapping: figmaDesignMapping(),
         visualPaths: [target.baselinePath],
         visualTargets: [target],
       }),
@@ -4893,11 +5104,11 @@ describe("WorkflowService", () => {
     );
     const started = await service.start({
       projectRoot: directory,
-      requestText: `Implement ${FIGMA_URL}`,
+      requestText: `Implement ${figmaUrl}`,
       scope: "ui",
       mode: "figma",
       changeKind: "design",
-      figmaUrl: FIGMA_URL,
+      figmaUrl,
     });
 
     await expect(
@@ -4907,8 +5118,11 @@ describe("WorkflowService", () => {
           kind: "figma-bundle",
           provider: "host-connected-figma",
           capturedAt: "2026-07-13T00:00:00.000Z",
-          fileUrl: FIGMA_URL,
+          fileUrl: figmaUrl,
+          fileUrls: [figmaUrl],
           nodeIds: ["2558:4382"],
+          capturedComponents: figmaCapturedComponents(),
+          designMapping: figmaDesignMapping(),
           manifestPath: "figma/design-context.json",
           visualTargets: [target],
           artifactPaths: ["figma/design-context.json", target.baselinePath],
@@ -4933,7 +5147,10 @@ describe("WorkflowService", () => {
         provider: "host-connected-figma",
         capturedAt: "2026-07-13T00:00:00.000Z",
         fileUrl: FIGMA_URL,
+        fileUrls: [FIGMA_URL],
         nodeIds: ["1:2"],
+        capturedComponents: figmaCapturedComponents(),
+        designMapping: figmaDesignMapping(),
         manifestPath: "figma/design-context.json",
         visualTargets: figmaVisualTargets(),
         artifactPaths: ["figma/design-context.json", "visual/diff.png"],
@@ -4970,7 +5187,10 @@ describe("WorkflowService", () => {
         provider: "host-connected-figma",
         capturedAt: "2026-07-13T00:00:00.000Z",
         fileUrl: FIGMA_URL,
+        fileUrls: [FIGMA_URL],
         nodeIds: ["1:2"],
+        capturedComponents: figmaCapturedComponents(),
+        designMapping: figmaDesignMapping(),
         manifestPath: "figma/design-context.json",
         visualTargets: figmaVisualTargets(),
         artifactPaths: ["figma/design-context.json", "visual/diff.png"],
@@ -5011,9 +5231,21 @@ describe("WorkflowService", () => {
       artifactPaths: ["test-results/unit.json", "mocks/manifest.json", "mocks/checkout.json"],
       mockDataEvidence: {
         manifestPath: "mocks/manifest.json",
-        fixturePaths: ["mocks/checkout.json"],
+        fixtures: [{ id: "mock:checkout", path: "mocks/checkout.json" }],
       },
     } as const;
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: {
+          ...implementationSubmission,
+          mockDataEvidence: {
+            manifestPath: "mocks/manifest.json",
+            fixtures: [{ id: "mock:unrelated", path: "mocks/checkout.json" }],
+          },
+        },
+      }),
+    ).rejects.toThrow(/MOCK_FIXTURE_ID_MISMATCH.*mock:checkout.*mock:unrelated/);
     for (const invalidFixture of ["not json", "null", "1", '"scalar"']) {
       await writeFile(path.join(directory, "mocks/checkout.json"), invalidFixture, "utf8");
       await expect(
@@ -5028,6 +5260,7 @@ describe("WorkflowService", () => {
         deterministic: true,
         fixtures: [
           {
+            id: "mock:checkout",
             path: "mocks/checkout.json",
             sha256: `sha256:${"0".repeat(64)}`,
           },
@@ -5044,6 +5277,24 @@ describe("WorkflowService", () => {
         deterministic: true,
         fixtures: [
           {
+            id: "mock:unrelated",
+            path: "mocks/checkout.json",
+            sha256: `sha256:${createHash("sha256").update(validFixture).digest("hex")}`,
+          },
+        ],
+      }),
+      "utf8",
+    );
+    await expect(
+      service.submit({ runId: started.runId, submission: implementationSubmission }),
+    ).rejects.toThrow(/fixture IDs, paths, and SHA-256 digests/i);
+    await writeFile(
+      path.join(directory, "mocks/manifest.json"),
+      JSON.stringify({
+        deterministic: true,
+        fixtures: [
+          {
+            id: "mock:checkout",
             path: "mocks/checkout.json",
             sha256: `sha256:${createHash("sha256").update(validFixture).digest("hex")}`,
           },
@@ -6234,9 +6485,29 @@ function figmaManifest() {
     provider: "host-connected-figma" as const,
     capturedAt: "2026-07-13T00:00:00.000Z",
     fileUrl: FIGMA_URL,
+    fileUrls: [FIGMA_URL],
     nodeIds: ["1:2"],
+    capturedComponents: figmaCapturedComponents(),
+    designMapping: figmaDesignMapping(),
     visualPaths: ["visual/diff.png"],
     visualTargets: figmaVisualTargets(),
+  };
+}
+
+function figmaCapturedComponents() {
+  return [];
+}
+
+function figmaDesignMapping() {
+  return {
+    designSystem: {
+      packageName: "@frontend/ui",
+      packageVersion: "1.2.3",
+      guidanceSkill: "design-system",
+    },
+    components: [],
+    fonts: [],
+    tokens: [],
   };
 }
 

@@ -957,7 +957,19 @@ describe("workflow v2 contracts", () => {
       provider: "host-connected-figma",
       capturedAt: "2026-07-13T00:00:00.000Z",
       fileUrl: "https://www.figma.com/design/abc/file?node-id=1-2",
+      fileUrls: ["https://www.figma.com/design/abc/file?node-id=1-2"],
       nodeIds: ["1:2"],
+      capturedComponents: [],
+      designMapping: {
+        designSystem: {
+          packageName: "@frontend/ui",
+          packageVersion: "1.2.3",
+          guidanceSkill: "design-system",
+        },
+        components: [],
+        fonts: [],
+        tokens: [],
+      },
       manifestPath: "figma/design-context.json",
       visualTargets: [
         {
@@ -1103,5 +1115,47 @@ describe("workflow v2 contracts", () => {
         }).success,
       ).toBe(false);
     }
+  });
+
+  it("accepts unique named fixtures and rejects duplicate fixture IDs", () => {
+    const base = {
+      kind: "implementation",
+      status: "passed",
+      summary: "Implemented deterministic Figma states.",
+      apiReady: false,
+      uiChanged: true,
+      changedFiles: ["src/view.tsx"],
+      artifactPaths: [
+        "test-results/unit.json",
+        "mocks/manifest.json",
+        "mocks/available.json",
+        "mocks/selected.json",
+      ],
+    };
+
+    expect(
+      WorkflowSubmissionSchema.safeParse({
+        ...base,
+        mockDataEvidence: {
+          manifestPath: "mocks/manifest.json",
+          fixtures: [
+            { id: "shop:available", path: "mocks/available.json" },
+            { id: "shop:selected", path: "mocks/selected.json" },
+          ],
+        },
+      }).success,
+    ).toBe(true);
+    expect(
+      WorkflowSubmissionSchema.safeParse({
+        ...base,
+        mockDataEvidence: {
+          manifestPath: "mocks/manifest.json",
+          fixtures: [
+            { id: "shop:available", path: "mocks/available.json" },
+            { id: "shop:available", path: "mocks/selected.json" },
+          ],
+        },
+      }).success,
+    ).toBe(false);
   });
 });
