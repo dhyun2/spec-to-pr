@@ -320,6 +320,34 @@ describe("PublisherService", () => {
     expect(loadedRun.agentResults.some((result) => result.kind === "publishing")).toBe(true);
   });
 
+  it("uses trusted Korean report metadata for visual evidence even when historical Markdown is English", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    await addVisualEvidence(run.id);
+    const report = await generatePrReport({
+      runId: run.id,
+      body: "# Summary\n\n## Decision\n\nReady for draft review.\n",
+      metadata: {
+        reportKind: "pr-body-markdown",
+        reportIntent: "ready",
+        decision: "ready",
+        locale: "ko",
+      },
+    });
+
+    await publisherService.publish({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      pushBranch: false,
+      confirm: true,
+    });
+
+    expect(githubPublisher.createdPayloads[0]?.body).toContain("## 시각 증거 미리보기");
+    expect(githubPublisher.createdPayloads[0]?.body).not.toContain("## Visual Evidence Preview");
+  });
+
   it("pushes the source branch through the selected remote", async () => {
     const run = await runService.createRun({ projectRoot });
     await markRunReadyForPublish(run.id);
@@ -1468,7 +1496,11 @@ async function markRunReadyForPublish(runId: string): Promise<void> {
   );
 }
 
-async function generatePrReport(input: { runId: string; metadata?: Record<string, unknown> }) {
+async function generatePrReport(input: {
+  runId: string;
+  metadata?: Record<string, unknown>;
+  body?: string;
+}) {
   const run = await store.get(input.runId);
   const timestamp = "2026-06-23T00:00:01.000Z";
   const decision = run.agentResults.some(
@@ -1476,7 +1508,7 @@ async function generatePrReport(input: { runId: string; metadata?: Record<string
   )
     ? "ready"
     : "blocked";
-  const markdown = [
+  const generatedMarkdown = [
     "# 요약",
     "",
     decision === "ready" ? "검증된 변경입니다." : "검증이 완료되지 않았습니다.",
@@ -1486,6 +1518,7 @@ async function generatePrReport(input: { runId: string; metadata?: Record<string
     decision,
     "",
   ].join("\n");
+  const markdown = input.body ?? generatedMarkdown;
   const blob = await artifactStore.writeBlob({
     content: Buffer.from(markdown),
     mediaType: "text/markdown",

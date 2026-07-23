@@ -360,7 +360,14 @@ describe("workflow report renderer", () => {
     expect(readyMarkdown).toContain("**레거시 이관 결과**");
     expect(readyMarkdown).not.toContain("SpecToPR legacy delivery");
     expect(readyMarkdown).not.toContain("Completed the legacy Shop migration.");
-    expect(readyMarkdown).toContain("REQ-SHOP-ROUTING: 라우팅 및 진입점");
+    expect(readyMarkdown).toContain("| 요구사항 | 리뷰 |");
+    expect(readyMarkdown).not.toContain("| 요구사항 | 구현 파일 | 리뷰 |");
+    expect(readyMarkdown).toContain("| Shop MPA entry and route parity | 승인 |");
+    expect(readyMarkdown).not.toContain("legacy_shop_main");
+    expect(readyMarkdown).toContain("| 상태 | 요구사항 | 이관 내용 |");
+    expect(readyMarkdown).toContain(
+      "| 이관 | REQ-SHOP-ROUTING | Shop 메인 화면을 이관했습니다. |",
+    );
     expect(readyMarkdown).toContain("| 화면 | 경로 · 상태 | 뷰포트 | 일치율 | 기준 | 결과 |");
     expect(readyMarkdown).toContain(
       "| 매장 메인 | /shop/&#35;/main/1 · 초기 화면 | 390×844 @1x | 99.12% | 98.00% | 통과 |",

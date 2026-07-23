@@ -184,7 +184,7 @@ export function renderPrReportV2Markdown(report: PrReportV2): string {
   );
   const legacyRows = report.legacy.coverage.map(
     (coverage) =>
-      `| ${markdownTableCell(coverage.featureKey)} | ${koreanOperationStatus(coverage.status)} | ${markdownTableCell(coverage.requirementIds.join(", "))} | ${markdownTableCell(coverage.targetFiles.join(", ") || "—")} |`,
+      `| ${koreanOperationStatus(coverage.status)} | ${markdownTableCell(coverage.requirementIds.join(", "))} | ${markdownTableCell(coverage.rationale)} |`,
   );
   const performanceRows = renderPerformanceRows(report.performance.evidence);
   const issueRows = [
@@ -264,13 +264,13 @@ export function renderPrReportV2Markdown(report: PrReportV2): string {
     "",
     "## 요구사항",
     "",
-    "| 요구사항 | 구현 파일 | 리뷰 |",
-    "| --- | ---: | --- |",
+    "| 요구사항 | 리뷰 |",
+    "| --- | --- |",
     ...(report.requirements.length === 0
-      ? ["| 없음 | 0개 | — |"]
+      ? ["| 없음 | — |"]
       : report.requirements.map(
           (requirement) =>
-            `| ${markdownTableCell(`${requirement.id}: ${koreanRequirementTitle(requirement.id, requirement.title)}`)} | ${requirement.implementationFiles.length}개 | ${markdownTableCell(koreanReviewVerdicts(requirement.reviewVerdicts))} |`,
+            `| ${markdownTableCell(requirement.title)} | ${markdownTableCell(koreanReviewVerdicts(requirement.reviewVerdicts))} |`,
         )),
     "",
     ...(showApi
@@ -320,8 +320,8 @@ export function renderPrReportV2Markdown(report: PrReportV2): string {
           ...(report.legacy.coverage.length === 0
             ? ["- 기록된 레거시 항목이 없습니다."]
             : [
-                "| 기능 키 | 상태 | 요구사항 | 대상 파일 |",
-                "| --- | --- | --- | --- |",
+                "| 상태 | 요구사항 | 이관 내용 |",
+                "| --- | --- | --- |",
                 ...legacyRows,
               ]),
           "",
@@ -455,21 +455,6 @@ function koreanReportTitle(mode: PrReportV2["mode"]): string {
     figma: "Figma 구현 결과",
   };
   return titles[mode];
-}
-
-function koreanRequirementTitle(id: string, fallback: string): string {
-  const labels: Record<string, string> = {
-    "REQ-SHOP-ROUTING": "라우팅 및 진입점",
-    "REQ-SHOP-DETAIL": "매장 상세 화면과 동작",
-    "REQ-SHOP-NOTICES": "공지 목록",
-    "REQ-SHOP-TOURNAMENTS": "대회 상태와 페이지 이동",
-    "REQ-SHOP-RANKING": "회원 랭킹과 개인 순위",
-    "REQ-SHOP-INTEGRATIONS": "대상 프로젝트 외부 연동",
-    "REQ-SHOP-API": "타입 기반 API와 환경 설정",
-    "REQ-SHOP-VISUAL": "레거시 화면 일치",
-    "REQ-SHOP-QUALITY": "접근성·보안·테스트·성능",
-  };
-  return labels[id] ?? (/[가-힣]/.test(fallback) ? fallback : "요구사항");
 }
 
 function koreanReviewVerdicts(verdicts: readonly string[]): string {

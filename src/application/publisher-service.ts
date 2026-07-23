@@ -29,6 +29,7 @@ import type {
   ReviewRequestPublisher,
 } from "../publisher/index.js";
 import {
+  ReportLocaleSchema,
   ReportDecisionSchema,
   WorkflowReportMetadataSchema,
   WorkflowReportIntentSchema,
@@ -791,6 +792,7 @@ export class PublisherService {
         body,
         report: visualPreview.report,
         assets: visualAssets,
+        ...(visualPreview.locale === undefined ? {} : { locale: visualPreview.locale }),
       });
     }
     if (videoAsset !== undefined) {
@@ -849,8 +851,10 @@ export class PublisherService {
   ): Promise<{
     report?: VisualReport;
     assets: ReviewRequestAsset[];
+    locale?: "ko" | "en";
   }> {
     const prReportArtifact = requireArtifact(run.artifacts, payload.reportArtifactId);
+    const locale = ReportLocaleSchema.safeParse(prReportArtifact.metadata["locale"]);
     const reviewPacketId = prReportArtifact.metadata["reviewPacketId"];
     const reportArtifact = latestVisualReportArtifact(run.artifacts, reviewPacketId);
 
@@ -912,6 +916,7 @@ export class PublisherService {
     return {
       report,
       assets,
+      ...(locale.success ? { locale: locale.data } : {}),
     };
   }
 
@@ -1244,8 +1249,9 @@ function injectVisualEvidencePreview(input: {
   body: string;
   report: VisualReport;
   assets: PublishedReviewAsset[];
+  locale?: "ko" | "en";
 }): string {
-  const locale = isKoreanReportBody(input.body) ? "ko" : "en";
+  const locale = input.locale ?? (isKoreanReportBody(input.body) ? "ko" : "en");
   const preview = renderVisualEvidencePreview(input.report, input.assets, locale);
 
   if (preview === undefined) {
