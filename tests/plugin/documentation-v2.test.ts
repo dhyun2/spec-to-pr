@@ -275,7 +275,7 @@ describe("v2 documentation", () => {
         locale === "ko" ? /(?:비교 총 3회|모두 (?:3|세) ?(?:회|번))/ : /three total comparisons/,
       );
       expect(contents, `${locale}:immutable packet`).toMatch(
-        locale === "ko" ? /변경 불가 검토 묶음/ : /immutable packet/,
+        locale === "ko" ? /변경할 수 없는 (?:동일한|하나의) 검토 묶음/ : /immutable packet/,
       );
       expect(contents, `${locale}:one writer`).toMatch(
         locale === "ko" ? /한 명의 구현 담당자|구현 담당자 1명/ : /one implementation writer/,
@@ -784,7 +784,7 @@ describe("v2 documentation", () => {
     expect(readmeKo).toContain("현재 릴리스");
     expect(readme).not.toContain("Unreleased");
     expect(readmeKo).not.toContain("Unreleased");
-    expect(config).toContain("Documentation · v${version}");
+    expect(config).toContain("SpecToPR 문서 · v${version}");
     expect(config).not.toContain("Development docs");
     expect(intro).toContain("스킬 8개");
     expect(adr).toContain("eight public marketplace skills");

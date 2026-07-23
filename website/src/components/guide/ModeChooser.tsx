@@ -8,7 +8,7 @@ const modes = {
   ko: [
     {
       id: "brief",
-      title: "기획서에서 전체 개발",
+      title: "기획서 기반 전체 구현",
       input: "기획서 + Figma + OpenAPI",
       result: "API·UI, Figma 화면 비교, API 차이, Web Vitals",
       href: "/usage/brief",
@@ -85,7 +85,7 @@ export default function ModeChooser({ locale }: { locale: Locale }) {
             <strong>{locale === "ko" ? "입력" : "Input"}</strong> {mode.input}
           </span>
           <span className={styles.modeMeta}>
-            <strong>{locale === "ko" ? "증거" : "Evidence"}</strong> {mode.result}
+            <strong>{locale === "ko" ? "검증 결과" : "Evidence"}</strong> {mode.result}
           </span>
           <span className={styles.modeLink}>{locale === "ko" ? "가이드 열기" : "Open guide"}</span>
         </Link>

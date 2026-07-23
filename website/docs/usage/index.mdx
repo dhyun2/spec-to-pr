@@ -34,12 +34,12 @@ import NextStep from "@site/src/components/guide/NextStep";
 
 ## 모든 사용법이 공유하는 약속
 
-한 명의 구현 담당자가 작업하고 `functional-reviewer`와, UI 작업일 때만 참여하는 `design-reviewer`가 같은 변경 불가 검토 묶음을 독립적으로 확인합니다. 화면 비교는 검토 일치율 `98%` 이상, 제외 영역 `20%` 이하를 요구하며 최대 세 번까지 수행합니다. [시각 검증](/concepts/visual-verification)에서 계산 방법을 자세히 볼 수 있습니다.
+한 명의 구현 담당자가 코드를 작성합니다. 모든 변경은 `functional-reviewer`가 독립적으로 확인하고, UI 작업은 `design-reviewer`가 한 번 더 확인합니다. 두 검토자는 변경할 수 없는 동일한 검토 묶음을 사용합니다. 화면 비교는 검토 일치율 `98%` 이상, 제외 영역 `20%` 이하를 요구하며 최대 세 번까지 수행합니다. [시각 검증](/concepts/visual-verification)에서 계산 방법을 자세히 볼 수 있습니다.
 
 <NextStep
   eyebrow="추천 시작점"
   title="처음이라면 기획서 사용법을 그대로 복사하세요"
-  description="필수 입력, 최소·완전 프롬프트, 예상 브랜치와 15개 섹션 PR까지 한 페이지에서 볼 수 있습니다."
+  description="필수 입력, 간단한 프롬프트와 전체 프롬프트, 예상 브랜치와 15개 섹션 PR까지 한 페이지에서 볼 수 있습니다."
   href="/usage/brief"
   label="기획서 케이스 열기"
   secondary={{ label: "파이프라인 이해하기", href: "/concepts/pipeline" }}

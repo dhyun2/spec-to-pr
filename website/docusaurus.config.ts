@@ -8,7 +8,7 @@ const { version } = require("../package.json") as { version: string };
 
 const config: Config = {
   title: "SpecToPR",
-  tagline: "기획서 · 레거시 마이그레이션 · 사용자 기능 · Figma를 검증된 구현과 draft PR로",
+  tagline: "기획서·레거시·사용자 기능·Figma를 검증된 구현과 초안 PR로 연결합니다",
   favicon: "img/favicon.ico",
 
   future: { v4: true },
@@ -90,10 +90,10 @@ const config: Config = {
           ],
         },
         {
-          title: "v2 레퍼런스",
+          title: "v2 알아보기",
           items: [
-            { label: "7 tools · 8 stages", to: "/concepts/pipeline" },
-            { label: "8 skills · 2 reviewers", to: "/reference/skills" },
+            { label: "도구 7개 · 단계 8개", to: "/concepts/pipeline" },
+            { label: "스킬 8개 · 독립 검토자 2명", to: "/reference/skills" },
             { label: "비교 · 채택 정책", to: "/concepts/comparison" },
             { label: "설정 · CLI", to: "/reference/config" },
           ],
@@ -103,7 +103,7 @@ const config: Config = {
           items: [{ label: "GitHub", href: "https://github.com/dhyun2/spec-to-pr" }],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} SpecToPR · Documentation · v${version}`,
+      copyright: `Copyright © ${new Date().getFullYear()} SpecToPR 문서 · v${version}`,
     },
     prism: {
       theme: prismThemes.github,

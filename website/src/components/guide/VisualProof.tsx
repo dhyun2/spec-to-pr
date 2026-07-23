@@ -101,7 +101,7 @@ export default function VisualProof({ locale }: { locale: Locale }) {
       </div>
       <p className={styles.proofCaption}>
         {locale === "ko"
-          ? "Playwright가 같은 고정 데이터로 기준 화면과 결과 화면을 캡처했습니다. 실제 compareVisualPngs 구현은 pngjs로 RGBA를 읽어 일치율, 차이 화면, 겹침 화면을 만듭니다. 수정과 재비교는 총 3회 안에서 진행하며, 디자인 검토자는 출처와 현재 검토 묶음의 연결을 확인합니다."
+          ? "같은 고정 데이터로 Playwright가 기준 화면과 결과 화면을 캡처합니다. compareVisualPngs는 pngjs로 RGBA 값을 읽어 일치율과 차이·겹침 화면을 만듭니다. 수정 후 비교는 최대 세 번까지 진행하며, 디자인 검토자가 각 화면의 출처와 현재 검토 묶음의 연결을 확인합니다."
           : "Playwright captured baseline and actual from the same fixture; production compareVisualPngs decoded RGBA with pngjs and produced metrics, diff, and overlay. Repairs stay within three total comparisons, and the design reviewer verifies provenance and current-packet binding."}{" "}
         <a href={`${assetRoot}metrics.json`}>
           {locale === "ko"

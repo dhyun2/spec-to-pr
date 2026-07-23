@@ -12,7 +12,7 @@ import NextStep from "@site/src/components/guide/NextStep";
 <GuideHero
   eyebrow="한 명이 구현하고 두 명이 독립적으로 검토합니다"
   title="에이전트는 무엇을 검증하나요?"
-  summary="구현 권한과 판정 권한을 분리합니다. 한 명의 구현 담당자가 변경하고, 두 검토자는 같은 변경 불가 검토 묶음을 읽기만 합니다."
+  summary="구현 권한과 판정 권한을 분리합니다. 한 명의 구현 담당자가 변경하고, 두 검토자는 변경할 수 없는 동일한 검토 묶음을 읽기만 합니다."
   primary={{ label: "시각 검증 보기", href: "/concepts/visual-verification" }}
   secondary={{ label: "전체 실행 보기", href: "/concepts/pipeline" }}
 />
@@ -23,7 +23,7 @@ import NextStep from "@site/src/components/guide/NextStep";
 
 ## 순서는 권한 경계입니다
 
-1. 진행 담당자가 승인된 계약, 현재 코드 차이, 실행 결과, 검증 자료 경로, `workflow_status` 상태 사본을 하나의 변경 불가 검토 묶음으로 고정합니다.
+1. 진행 담당자가 승인된 계약, 현재 코드 차이, 실행 결과, 검증 자료 경로, `workflow_status` 상태 사본을 변경할 수 없는 하나의 검토 묶음으로 고정합니다.
 2. 한 명의 구현 담당자가 API 준비 자료와 UI를 같은 `implementationContextId`로 제출합니다. API와 UI를 여러 담당자가 나눠 동시에 편집하지 않습니다.
 3. `functional-reviewer`는 수용 조건, API 검증 현황, 테스트, 구조·보안 검사, 레거시 이관 현황을 읽기 전용으로 판정합니다.
 4. UI 작업에서는 `design-reviewer`가 기준 화면의 출처, 실제 캡처, 화면 비교 보고서, 상호작용, 반응형 상태, 디자인 시스템, 접근성을 읽기 전용으로 판정합니다.

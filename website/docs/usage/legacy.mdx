@@ -102,7 +102,7 @@ publication: draft
 
 작업량이 XS/S이면 별도 조사 담당자를 두지 않고, M이면 최대 1명, L/XL이면 최대 2명의 읽기 전용 조사 담당자를 둘 수 있습니다. 큰 레거시 조사도 서로 독립적이고 편집이 필요 없는 범위로만 나눕니다. 구현 파일은 한 명만 편집하며 중첩 위임과 동시 편집은 허용하지 않습니다. 검토자 동시 실행은 구현이 끝난 뒤 UI 범위의 L/XL 작업에서만 사용합니다.
 
-- `stageSkillRoute`: 공개 작업은 `intake-contracts` → `implement` → `review-functional` 순서로 진행합니다. UI가 바뀌면 `review-design`, draft 발행이면 `publish`가 이어집니다. 이 경로는 `deliveryProfile.recommendedSkills`와 별개입니다.
+- `stageSkillRoute`: 공개 작업은 `intake-contracts` → `implement` → `review-functional` 순서로 진행합니다. UI가 바뀌면 `review-design`, 초안 발행이면 `publish`가 이어집니다. 이 경로는 `deliveryProfile.recommendedSkills`와 별개입니다.
 - `recommendedSkills`: `figmaUrl`이 있으면 `figma`와 `design-system`, `openApiPaths`나 `openApiUrls`가 있으면 `api-generator`를 후보로 둡니다. React/Next 패키지가 확인되면 `react-best-practices`, `next-best-practices`를 선택 후보로 추가합니다.
 - 레거시 UI라는 이유만으로 `playwright`를 추천하지 않습니다. `mode: feature`이고 UI 연결이 있을 때만 후보에 추가합니다.
 - `appliedSkills`: 추천 스킬과 `skillHints` 중 실제로 설치되어 있고 현재 작업에 맞는 선택 스킬만 기록합니다. 선택 스킬이 없다는 이유로 기준 화면 비교나 필수 회귀 검증을 생략하지 않습니다.
@@ -117,9 +117,9 @@ publication: draft
 
 입력이나 환경을 고친 뒤에는 새 실행을 만들지 않고 **같은 실행**의 최신 상태에서 이어갑니다. 진단용 초안이 있었다면 소스·대상 브랜치가 같은 **기존 초안 PR**의 `[Blocked]` 제목과 본문을 정상 `intent: ready` 내용으로 바꾸고 차단 라벨을 제거합니다.
 
-## 증거와 검증 <span id="evidence-legacy"></span>
+## 검증 자료와 통과 기준 <span id="evidence-legacy"></span>
 
-| 증거       | 경로 예시                         | 통과 기준                                                     |
+| 검증 자료  | 경로 예시                         | 통과 기준                                                     |
 | ---------- | --------------------------------- | ------------------------------------------------------------- |
 | 기능 목록  | `contracts/legacy-inventory.json` | 안정적인 기능 키와 소스 경로가 기록됨                         |
 | 이관 범위  | `contracts/legacy-coverage.json`  | 모든 범위 키에 이관·제외·차이·차단 상태가 기록됨              |

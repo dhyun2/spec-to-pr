@@ -31,7 +31,7 @@ secondary={{ label: "내 케이스 고르기", href: "/usage/" }}
 
 ## 한 변경이 PR이 되기까지
 
-아래 단계를 눌러 무엇을 받고 무엇을 남기는지 확인해 보세요. API와 UI는 한 명의 구현 담당자가 같은 `implementationContextId`에서 함께 구현합니다. 구현이 끝나면 읽기 전용 `functional-reviewer`와, UI 작업일 때만 참여하는 `design-reviewer`가 같은 변경 불가 검토 묶음을 독립적으로 확인합니다.
+아래 단계를 눌러 무엇을 받고 무엇을 남기는지 확인해 보세요. API와 UI는 한 명의 구현 담당자가 같은 `implementationContextId`에서 함께 구현합니다. 구현이 끝나면 읽기 전용 `functional-reviewer`와, UI 작업일 때만 참여하는 `design-reviewer`가 변경할 수 없는 동일한 검토 묶음을 독립적으로 확인합니다.
 
 <RunPipeline locale="ko" />
 
