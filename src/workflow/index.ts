@@ -1,4 +1,5 @@
 export * from "./workflow-contracts.js";
+export * from "./draft-evidence-bundle.js";
 export * from "./gate-policy.js";
 export * from "./delivery-policy.js";
 export * from "./delivery-mode-policy.js";

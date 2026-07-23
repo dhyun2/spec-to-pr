@@ -5,6 +5,7 @@ import { ArtifactIdSchema, RunIdSchema } from "../runtime/ids.js";
 import { GitObjectIdSchema, Sha256DigestSchema } from "../runtime/scalars.js";
 import { WorkloadEstimateSchema, WorkloadSignalsSchema } from "./workload-policy.js";
 import { VisualCaptureSchema, VisualTargetManifestSchema } from "../visual/visual-comparator.js";
+import { DraftEvidenceBundleSchema } from "./draft-evidence-bundle.js";
 
 export const WorkflowScopeSchema = z
   .object({
@@ -260,6 +261,7 @@ export const DeliveryProfileSchema = z
     changeKind: ChangeKindSchema,
     publication: PublicationIntentSchema,
     legacyProjectRoot: z.string().trim().min(1).max(1_000).optional(),
+    draftEvidenceBundle: DraftEvidenceBundleSchema.optional(),
     legacyNetworkEvidencePath: WorkflowSourcePathSchema.optional(),
     briefPath: WorkflowSourcePathSchema.optional(),
     figmaUrl: FigmaFileUrlSchema.optional(),

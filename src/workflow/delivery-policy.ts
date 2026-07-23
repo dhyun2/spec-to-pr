@@ -9,6 +9,7 @@ import {
 } from "./workflow-contracts.js";
 import type { WorkloadSize } from "./workload-policy.js";
 import { parallelReviewersForWorkload, resolveDeliveryPolicy } from "./delivery-mode-policy.js";
+import { createDraftEvidenceBundle } from "./draft-evidence-bundle.js";
 
 export function buildDelegationPolicy(size: WorkloadSize): DelegationPolicy {
   const maxReadOnlyScouts = size === "XS" || size === "S" ? 0 : size === "M" ? 1 : 2;
@@ -98,6 +99,14 @@ export function buildDeliveryProfile(input: {
     ...(input.legacyProjectRoot === undefined
       ? {}
       : { legacyProjectRoot: input.legacyProjectRoot }),
+    ...(input.mode === "legacy" && input.legacyProjectRoot !== undefined
+      ? {
+          draftEvidenceBundle: createDraftEvidenceBundle({
+            mode: "legacy",
+            legacyProjectRoot: input.legacyProjectRoot,
+          }),
+        }
+      : {}),
     ...(input.legacyNetworkEvidencePath === undefined
       ? {}
       : { legacyNetworkEvidencePath: input.legacyNetworkEvidencePath }),

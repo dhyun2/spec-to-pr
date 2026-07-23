@@ -2871,6 +2871,13 @@ describe("WorkflowService", () => {
           legacyProjectRoot: await import("node:fs/promises").then(({ realpath }) =>
             realpath(legacyRoot),
           ),
+          draftEvidenceBundle: {
+            featureSlug: expect.stringMatching(/^spec-to-pr-legacy-/),
+            rootPath: expect.stringMatching(/^\.spec-to-pr\/spec-to-pr-legacy-/),
+            manifestPath: expect.stringMatching(
+              /^\.spec-to-pr\/spec-to-pr-legacy-.*\/manifest\.json$/,
+            ),
+          },
           publication: "draft",
           requirements: {
             legacyBaseline: true,
