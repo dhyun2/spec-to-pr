@@ -1,0 +1,11 @@
+{
+  "id": "fixture:shop-unavailable",
+  "title": "내 주변 충전소",
+  "status": "현재 이용 불가",
+  "distance": "도보 4분",
+  "address": "서울특별시 강남구 테헤란로 152",
+  "chargers": [
+    { "label": "급속", "available": 0, "total": 4 },
+    { "label": "완속", "available": 0, "total": 6 }
+  ]
+}

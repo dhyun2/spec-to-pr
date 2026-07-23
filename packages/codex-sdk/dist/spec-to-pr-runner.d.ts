@@ -13,6 +13,7 @@ export type SpecToPrCodexRunInput = {
     docsPath?: string;
     docsPaths?: string[];
     figmaUrl?: string;
+    figmaUrls?: string[];
     openApiPath?: string;
     openApiPaths?: string[];
     openApiUrl?: string;

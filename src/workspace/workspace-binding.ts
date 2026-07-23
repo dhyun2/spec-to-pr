@@ -21,8 +21,7 @@ const RepoRelativePathSchema = z
   .trim()
   .min(1)
   .max(1_000)
-  .transform(normalizeRepoPath)
-  .refine((value) => isRepoRelativePath(value), {
+  .refine((value) => value === normalizeRepoPath(value) && isRepoRelativePath(value), {
     message: "Workspace paths must stay within the repository",
   });
 
@@ -226,35 +225,19 @@ export async function assertWorkspaceFresh(
     "--untracked-files=all",
   ]);
   if (status !== "") {
-    throw workspaceError(
-      "WORKSPACE_ROOT_MISMATCH",
-      "publication requires a clean bound worktree",
-    );
+    throw workspaceError("WORKSPACE_ROOT_MISMATCH", "publication requires a clean bound worktree");
   }
 
   const [currentBranch, headSha, sourceSha, targetSha, remoteUrl] = await Promise.all([
-    workspaceGit(runGit, binding.repositoryRoot, [
-      "symbolic-ref",
-      "--quiet",
-      "--short",
-      "HEAD",
-    ]),
+    workspaceGit(runGit, binding.repositoryRoot, ["symbolic-ref", "--quiet", "--short", "HEAD"]),
     workspaceGit(runGit, binding.repositoryRoot, ["rev-parse", "--verify", "HEAD"]),
-    workspaceGit(runGit, binding.repositoryRoot, [
-      "rev-parse",
-      "--verify",
-      binding.sourceBranch,
-    ]),
+    workspaceGit(runGit, binding.repositoryRoot, ["rev-parse", "--verify", binding.sourceBranch]),
     workspaceGit(runGit, binding.repositoryRoot, [
       "rev-parse",
       "--verify",
       `${binding.targetBranch}^{commit}`,
     ]),
-    workspaceGit(runGit, binding.repositoryRoot, [
-      "remote",
-      "get-url",
-      binding.remoteName,
-    ]),
+    workspaceGit(runGit, binding.repositoryRoot, ["remote", "get-url", binding.remoteName]),
   ]);
   if (currentBranch !== binding.sourceBranch) {
     throw workspaceError(

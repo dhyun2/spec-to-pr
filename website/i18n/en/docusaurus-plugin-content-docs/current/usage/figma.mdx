@@ -21,14 +21,14 @@ Use this case when Figma is the primary source and real APIs are out of scope. I
 
 ## Required inputs <span id="required-inputs-figma"></span>
 
-| Input         | Requirement                                                  |
-| ------------- | ------------------------------------------------------------ |
-| Repository    | Target Git repository with its design system and screen code |
-| `mode`        | `figma`                                                      |
-| `scope`       | `ui` is required                                             |
-| `figmaUrl`    | Accessible file URL, preferably with a concrete `node-id`    |
-| `publication` | Defaults to `draft`; use `none` to stop after reviews        |
-| Request       | Name screens, states, and responsive boundaries to implement |
+| Input         | Requirement                                                   |
+| ------------- | ------------------------------------------------------------- |
+| Repository    | Target Git repository with its design system and screen code  |
+| `mode`        | `figma`                                                       |
+| `scope`       | `ui` is required                                              |
+| `figmaUrls`   | Accessible URLs and concrete `node-id` values for every state |
+| `publication` | Defaults to `draft`; use `none` to stop after reviews         |
+| Request       | Name screens, states, and responsive boundaries to implement  |
 
 ## Optional inputs <span id="optional-inputs-figma"></span>
 
@@ -42,7 +42,7 @@ Use this case when Figma is the primary source and real APIs are out of scope. I
 /spec-to-pr /absolute/path/to/app
 mode: figma
 scope: ui
-figmaUrl: https://www.figma.com/design/FILE/checkout?node-id=12-345
+figmaUrls: [https://www.figma.com/design/FILE/shop?node-id=12-345, https://www.figma.com/design/FILE/shop?node-id=12-678]
 publication: draft
 Implement the Figma design with deterministic mock data, compare it at the 98% threshold, and publish a draft PR.
 ```
@@ -53,7 +53,7 @@ Implement the Figma design with deterministic mock data, compare it at the 98% t
 /spec-to-pr /absolute/path/to/app
 mode: figma
 scope: ui
-figmaUrl: https://www.figma.com/design/FILE/checkout?node-id=12-345
+figmaUrls: [https://www.figma.com/design/FILE/shop?node-id=12-345, https://www.figma.com/design/FILE/shop?node-id=12-678]
 docsPaths: [docs/checkout-states.md]
 guidancePaths: [docs/design-system.md, docs/etc/folder-structure.md]
 skillHints: [design-system, react-best-practices, accessibility-auditor]
@@ -65,12 +65,12 @@ Create real Figma `visualTargets`, deterministic mock states, exact/review ratio
 
 ## What SpecToPR does <span id="process-figma"></span>
 
-1. **Intake:** Confirm URL, node, screen/state scope, publication intent, and workload estimate.
-2. **Figma contracts:** Through the connected host, read node IDs, variables, component context, screenshots, and assets into a project-local strict manifest.
-3. **Design-system mapping:** Match the design to existing components and tokens before creating custom markup.
-4. **Implementation:** Submit a strict mock JSON manifest shaped as `{deterministic:true, fixtures:[{path, sha256}]}` plus separate fixtures. Each `sha256:` digest binds the fixture contents before responsive layout and loading/error/empty/success states are implemented.
-5. **Compare / reviews:** Every actual capture repeats the target route/state/viewport/device scale/fixture and records provider, ISO capture time, PNG path, and `sha256:` digest. Runtime rejects target drift or digest mismatch before `compare-visuals` computes exact/review ratios, masks, diff, and overlay at a minimum 98%, with at most 20% justified masking and three total comparison attempts (the initial comparison plus at most two repairs); reviewers independently judge interaction and accessibility.
-6. **Report / publish:** Create packet-bound 15-section `pr-report-v2.1` and publish the draft.
+1. **Pre-start binding:** Prepare a clean `codex/*` branch from the requested target, resolve repository root, target paths, base SHA, remote, and every Figma URL, then call `workflow_start` exactly once.
+2. **Figma contracts:** Read every URL's node, logical frame geometry, export bitmap size/scale, variables, component context, screenshots, fonts, and assets. A host thumbnail never becomes the browser viewport.
+3. **Design-system mapping:** Map each captured component exactly once to a verifiable installed design-system export, digest-bound canonical asset, or explicit exception before custom markup.
+4. **Implementation:** Submit `{deterministic:true, fixtures:[{id,path,sha256}]}` plus separate JSON fixtures. Every state is bound to a named fixture ID and digest.
+5. **Compare / repair:** Wait for the fixture, `document.fonts.ready`, and assets, then emit a receipt binding packet/head, logical geometry/DPR, capture provider, browser environment, fixture, fonts/assets, and PNG digest. Runtime owns sRGB normalization and the 98% verdict. A valid failure returns `implementation-repair`; modify and commit code, create a fresh packet, and recapture. Acquisition errors consume no attempt; there are three total comparison attempts (the initial comparison plus at most two repairs).
+6. **Review / report / publish:** Complete both independent reviews and packet-bound 15-section `pr-report-v2.1`, then publish only while the start-bound source/target/remote remain unchanged.
 
 Every report section is `complete`, `not-run`, `blocked`, or `not-applicable`; stale paths outside the current review packet are omitted. GitHub images, diffs, and overlays use immutable paths on one managed `spec-to-pr/evidence` branch and URLs pinned to the upload commit SHA, not a branch per Run.
 
@@ -106,21 +106,22 @@ After fixing access, node, or evidence, resume the **same Run** at its latest st
 
 ## Evidence and validation <span id="evidence-figma"></span>
 
-| Evidence               | Illustrative path                                                    | Passing condition                                                                           |
-| ---------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| Bundle                 | `evidence/figma/figma-bundle.json`                                   | `provider: host-connected-figma`, ISO `capturedAt`, matching `fileUrl`, non-empty `nodeIds` |
-| Manifest/visuals       | `evidence/figma/manifest.json`, `evidence/figma/checkout-mobile.png` | Project-local strict manifest and actual PNG `visualPaths`                                  |
-| Visual comparison      | `evidence/visual/figma-report.json`                                  | exact/review ratio ≥ 98%, baseline/target/diff/overlay                                      |
-| Mock fixtures          | `evidence/fixtures/checkout.json`                                    | deterministic loading/error/empty/success data                                              |
-| Responsive/interaction | `evidence/design/responsive.json`, `interaction.json`                | Named viewports and state transitions are verified                                          |
-| Accessibility          | `evidence/design/accessibility.json`                                 | Semantic, keyboard, focus, and contrast checks pass                                         |
-| Design review          | `evidence/reviews/design.json`                                       | Independent approved verdict over frozen diff/evidence                                      |
+| Evidence               | Illustrative path                                                    | Passing condition                                                                        |
+| ---------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Bundle                 | `evidence/figma/figma-bundle.json`                                   | All `fileUrls`, nodes, native geometry, design mappings, font/asset provenance are bound |
+| Manifest/visuals       | `evidence/figma/manifest.json`, `evidence/figma/checkout-mobile.png` | Actual PNG paths distinguish logical frames from export bitmaps                          |
+| Visual comparison      | `evidence/visual/figma-report.json`                                  | exact/review ratio ≥ 98%, baseline/target/diff/overlay                                   |
+| Mock fixtures          | `evidence/fixtures/checkout.json`                                    | named path/digest is carried into the capture receipt                                    |
+| Capture receipt        | `evidence/visual/<packet>/checkout.json`                             | current packet/head, environment, geometry, fixture, font/asset, and PNG digests match   |
+| Responsive/interaction | `evidence/design/responsive.json`, `interaction.json`                | Named viewports and state transitions are verified                                       |
+| Accessibility          | `evidence/design/accessibility.json`                                 | Semantic, keyboard, focus, and contrast checks pass                                      |
+| Design review          | `evidence/reviews/design.json`                                       | Independent approved verdict over frozen diff/evidence                                   |
 
 Figma mode does not automatically require feature-targeted E2E and video. If complete feature delivery and video are the goal, choose `mode: feature` and compose `figmaUrl` as a source.
 
 ## Expected branch and commits <span id="branch-and-commits-figma"></span>
 
-- Illustrative branch: `codex/figma-checkout`
+- Illustrative branch: `codex/figma-checkout`, created from the requested target
 - Illustrative commit: `feat: implement checkout from Figma`
 - Draft publication still requires a committed source branch and clean tree.
 
@@ -153,13 +154,13 @@ Figma mode does not automatically require feature-targeted E2E and video. If com
 
 ## When the Run stops <span id="blockers-figma"></span>
 
-| Blocker                                         | User action to resume                                               |
-| ----------------------------------------------- | ------------------------------------------------------------------- |
-| Invalid or inaccessible URL/node                | Supply an accessible URL and exact node ID                          |
-| Connected-host evidence cannot be read          | Restore Figma connection, login, or permission                      |
-| Required state or viewport is absent            | Supply authoritative behavior or approved supplemental requirements |
-| Existing design system conflicts with Figma     | Decide whether to reuse, extend, or allow an exception              |
-| Draft requested from a dirty/uncommitted branch | Commit only intended files and satisfy clean preflight              |
+| Blocker                                       | User action to resume                                                 |
+| --------------------------------------------- | --------------------------------------------------------------------- |
+| Invalid or inaccessible URL/node              | Supply an accessible URL and exact node ID                            |
+| Connected-host evidence cannot be read        | Restore Figma connection, login, or permission                        |
+| Required state or viewport is absent          | Supply authoritative behavior or approved supplemental requirements   |
+| Existing design system conflicts with Figma   | Decide whether to reuse, extend, or allow an exception                |
+| Source, target, or remote changed after start | Restore the pinned workspace binding and create a fresh review packet |
 
 ## What this case does not do <span id="exclusions-figma"></span>
 

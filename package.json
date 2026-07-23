@@ -16,6 +16,7 @@
     "test": "vitest run",
     "guide:assets": "tsx scripts/build-guide-visual-assets.ts",
     "guide:check": "node tests/browser/four-case-guide.mjs",
+    "case4:check": "node tests/browser/case4-figma-delivery.mjs",
     "policy:sync": "node scripts/sync-delivery-mode-policy.mjs",
     "policy:check": "node scripts/sync-delivery-mode-policy.mjs --check",
     "schemas:build": "tsx scripts/export-runtime-schemas.ts",

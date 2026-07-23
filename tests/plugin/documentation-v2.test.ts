@@ -624,6 +624,7 @@ describe("v2 documentation", () => {
       "036-use-delivery-profiles-not-mode-specific-pipelines.md",
       "037-use-boundary-budgeting-and-numeric-calibration.md",
       "038-harden-evidence-trust-and-unify-delivery-policy.md",
+      "039-bind-figma-delivery-to-workspace-and-native-captures.md",
     ]);
     expect(relativeFiles(path.join(root, "website", "docs"))).toEqual([
       "concepts/comparison.mdx",

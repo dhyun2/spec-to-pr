@@ -24,8 +24,8 @@ if (args.brief !== undefined) {
 if (args.docs.length > 0) {
     input.docsPaths = args.docs;
 }
-if (args.figma !== undefined) {
-    input.figmaUrl = args.figma;
+if (args.figma.length > 0) {
+    input.figmaUrls = args.figma;
 }
 if (args.openapi.length > 0) {
     input.openApiPaths = args.openapi;
@@ -80,6 +80,7 @@ console.log(JSON.stringify({
 function parseArgs(argv) {
     const parsed = {
         docs: [],
+        figma: [],
         openapi: [],
         openapiUrls: [],
         guidance: [],
@@ -135,7 +136,7 @@ function parseArgs(argv) {
                 parsed.docs.push(value);
                 break;
             case "--figma":
-                parsed.figma = value;
+                parsed.figma.push(value);
                 break;
             case "--openapi":
                 parsed.openapi.push(value);

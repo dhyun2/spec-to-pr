@@ -22,6 +22,130 @@
       "type": "string",
       "pattern": "^[a-f0-9]{7,64}$"
     },
+    "workspaceBinding": {
+      "type": "object",
+      "properties": {
+        "repositoryRoot": {
+          "type": "string",
+          "minLength": 1
+        },
+        "targetPaths": {
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        },
+        "supportingPaths": {
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        },
+        "sourceBranch": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "targetBranch": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "baseSha": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{7,64}$"
+        },
+        "initialHeadSha": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{7,64}$"
+        },
+        "remoteName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "remoteUrl": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "remoteProvider": {
+          "type": "string",
+          "enum": [
+            "github",
+            "gitlab"
+          ]
+        },
+        "remoteHost": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "publicationTarget": {
+          "type": "object",
+          "properties": {
+            "host": {
+              "type": "string",
+              "enum": [
+                "github",
+                "gitlab"
+              ]
+            },
+            "webBaseUrl": {
+              "type": "string",
+              "format": "uri"
+            },
+            "apiBaseUrl": {
+              "type": "string",
+              "format": "uri"
+            },
+            "owner": {
+              "type": "string",
+              "minLength": 1
+            },
+            "repo": {
+              "type": "string",
+              "minLength": 1
+            },
+            "projectPath": {
+              "type": "string",
+              "minLength": 1
+            },
+            "projectId": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "host",
+            "webBaseUrl",
+            "apiBaseUrl"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "repositoryRoot",
+        "targetPaths",
+        "supportingPaths",
+        "sourceBranch",
+        "targetBranch",
+        "baseSha",
+        "initialHeadSha",
+        "remoteName",
+        "remoteUrl",
+        "remoteProvider",
+        "remoteHost",
+        "publicationTarget"
+      ],
+      "additionalProperties": false
+    },
     "status": {
       "type": "string",
       "enum": [

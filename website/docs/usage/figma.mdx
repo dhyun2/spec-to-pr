@@ -21,14 +21,14 @@ Figma를 기준으로 실제 API 없이 고정된 모의 데이터로 화면을 
 
 ## 반드시 제공할 것 <span id="required-inputs-figma"></span>
 
-| 입력          | 요구사항                                         |
-| ------------- | ------------------------------------------------ |
-| 저장소        | 디자인 시스템과 화면을 구현할 대상 Git 저장소    |
-| `mode`        | `figma`                                          |
-| `scope`       | `ui` 필수                                        |
-| `figmaUrl`    | 접근 가능한 파일 URL과 가능하면 구체적 `node-id` |
-| `publication` | 기본값은 `draft`; 구현·검토까지만이면 `none`     |
-| 요청          | 구현할 화면·상태·반응형 범위를 지정              |
+| 입력          | 요구사항                                            |
+| ------------- | --------------------------------------------------- |
+| 저장소        | 디자인 시스템과 화면을 구현할 대상 Git 저장소       |
+| `mode`        | `figma`                                             |
+| `scope`       | `ui` 필수                                           |
+| `figmaUrls`   | 모든 화면·상태의 접근 가능한 URL과 구체적 `node-id` |
+| `publication` | 기본값은 `draft`; 구현·검토까지만이면 `none`        |
+| 요청          | 구현할 화면·상태·반응형 범위를 지정                 |
 
 ## 선택 입력 <span id="optional-inputs-figma"></span>
 
@@ -42,7 +42,7 @@ Figma를 기준으로 실제 API 없이 고정된 모의 데이터로 화면을 
 /spec-to-pr /absolute/path/to/app
 mode: figma
 scope: ui
-figmaUrl: https://www.figma.com/design/FILE/checkout?node-id=12-345
+figmaUrls: [https://www.figma.com/design/FILE/shop?node-id=12-345, https://www.figma.com/design/FILE/shop?node-id=12-678]
 publication: draft
 Figma를 고정된 모의 데이터로 구현하고 결과 화면과 98% 기준으로 비교한 뒤 초안 PR로 발행해줘.
 ```
@@ -53,7 +53,7 @@ Figma를 고정된 모의 데이터로 구현하고 결과 화면과 98% 기준�
 /spec-to-pr /absolute/path/to/app
 mode: figma
 scope: ui
-figmaUrl: https://www.figma.com/design/FILE/checkout?node-id=12-345
+figmaUrls: [https://www.figma.com/design/FILE/shop?node-id=12-345, https://www.figma.com/design/FILE/shop?node-id=12-678]
 docsPaths: [docs/checkout-states.md]
 guidancePaths: [docs/design-system.md, docs/etc/folder-structure.md]
 skillHints: [design-system, react-best-practices, accessibility-auditor]
@@ -66,12 +66,12 @@ publication: draft
 
 ## SpecToPR이 진행하는 과정 <span id="process-figma"></span>
 
-1. **접수:** URL, 노드, 화면·상태 범위, 발행 의도, 예상 작업량을 확인합니다.
-2. **Figma 계약 확정:** 연결된 호스트에서 노드 ID, 변수, 컴포넌트 맥락, 화면, 자산을 읽고 프로젝트 안에 엄격한 매니페스트를 만듭니다.
-3. **디자인 시스템 연결:** 새 마크업을 만들기 전에 기존 컴포넌트·토큰과 각 상태를 대응시킵니다.
-4. **구현:** `{deterministic:true, fixtures:[{path, sha256}]}` 형태의 엄격한 모의 데이터 JSON 매니페스트와 별도 테스트 데이터를 제출합니다. 각 `sha256:` 해시로 내용을 고정하고 반응형 레이아웃, 상호작용, 로딩·오류·빈 화면·성공 상태를 구현합니다.
-5. **화면 비교 및 검토:** 각 결과 화면에는 기준과 같은 경로·상태·화면 크기·기기 배율·테스트 데이터, 자료 제공자, ISO 형식의 촬영 시각, PNG 경로, `sha256:` 해시를 기록합니다. `compare-visuals`는 비교 조건이나 해시가 달라지면 거부한 뒤 정확 일치율·검토 일치율·마스킹 영역·차이 이미지·겹침 이미지를 계산합니다. 기준은 일치율 98% 이상, 근거가 있는 마스킹 영역 20% 이하이며, 최초 비교 1회와 보정 후 최대 2회를 합쳐 모두 3번까지 비교할 수 있습니다. 검토자는 접근성과 상호작용을 별도로 판정합니다.
-6. **보고서 및 발행:** `pr-report-v2.1` 15개 섹션을 만들고 초안 PR을 발행합니다.
+1. **시작 전 고정:** 지정한 target 브랜치에서 깨끗한 `codex/*` 브랜치를 준비하고, 저장소 루트·대상 경로·base SHA·remote·모든 Figma URL을 확인한 뒤 `workflow_start`를 정확히 한 번 호출합니다.
+2. **Figma 계약 확정:** 연결된 호스트에서 모든 URL의 노드 ID, 논리 프레임 크기, export bitmap 크기/배율, 변수, 컴포넌트, 화면, 글꼴과 자산을 읽습니다. 썸네일 크기를 브라우저 viewport로 사용하지 않습니다.
+3. **디자인 시스템 연결:** 새 마크업 전에 각 Figma 컴포넌트를 설치된 사내 컴포넌트 export, 해시로 고정한 canonical asset, 또는 명시적 예외에 정확히 한 번 대응시킵니다. `Logo/Normal/nxplus_park` 같은 이름을 CSS로 추측하지 않습니다.
+4. **구현:** `{deterministic:true, fixtures:[{id,path,sha256}]}` 형태의 엄격한 모의 데이터 매니페스트와 별도 JSON fixture를 제출합니다. 모든 화면 상태가 이름 있는 fixture ID와 해시에 연결되어야 합니다.
+5. **화면 비교 및 보정:** 브라우저는 fixture·`document.fonts.ready`·자산 로드를 기다리고 현재 패킷/HEAD, 논리 크기, DPR, 자료 제공자와 실행 환경, 글꼴·자산·fixture 해시, PNG 해시를 담은 receipt를 만듭니다. 런타임이 sRGB 정규화와 98% 비교를 소유합니다. 유효한 비교가 실패하면 `implementation-repair`에 따라 코드를 수정·커밋하고 새 패킷으로 다시 캡처합니다. 잘못된 receipt나 geometry는 시도 횟수를 소비하지 않고, 유효 비교는 최초 비교 1회와 보정 후 최대 2회, 합쳐 모두 3회입니다.
+6. **검토·보고서·발행:** 두 독립 검토와 `pr-report-v2.1` 15개 섹션을 만든 뒤, 시작 시 고정한 source/target/remote가 그대로일 때만 초안 PR을 발행합니다.
 
 각 보고서 섹션은 `complete`, `not-run`, `blocked`, `not-applicable` 중 하나입니다. 현재 검토 묶음에 속하지 않는 이전 검증 자료는 PR에서 제외합니다. 초안 PR에는 Figma 기준·결과·차이 이미지와 일치율을 제공합니다. GitHub용 이미지는 실행마다 새 브랜치를 만들지 않고 관리 브랜치 `spec-to-pr/evidence`의 변경되지 않는 경로에 올린 뒤 업로드 커밋 SHA로 고정합니다.
 
@@ -112,21 +112,22 @@ publication: draft
 
 ## 검증 자료와 통과 기준 <span id="evidence-figma"></span>
 
-| 검증 자료       | 예상 예시                                                            | 통과 기준                                                                                        |
-| --------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| Figma 자료 묶음 | `evidence/figma/figma-bundle.json`                                   | `provider: host-connected-figma`, ISO `capturedAt`, 일치하는 `fileUrl`, 비어 있지 않은 `nodeIds` |
-| 화면 목록       | `evidence/figma/manifest.json`, `evidence/figma/checkout-mobile.png` | 프로젝트 안의 엄격한 목록과 실제 PNG `visualPaths`                                               |
-| 화면 비교       | `evidence/visual/figma-report.json`                                  | 검토 일치율 98% 이상, 기준·결과·차이·겹침 이미지                                                 |
-| 모의 데이터     | `evidence/fixtures/checkout.json`                                    | 고정된 로딩·오류·빈 화면·성공 데이터                                                             |
-| 반응형·상호작용 | `evidence/design/responsive.json`, `interaction.json`                | 지정한 화면 크기와 상태 전이를 검증함                                                            |
-| 접근성          | `evidence/design/accessibility.json`                                 | 의미 구조·키보드·초점·명암비 검사가 성공                                                         |
-| 디자인 검토     | `evidence/reviews/design.json`                                       | 고정된 차이 이미지와 검증 자료에 대한 독립 판정이 승인됨                                         |
+| 검증 자료       | 예상 예시                                                            | 통과 기준                                                                       |
+| --------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Figma 자료 묶음 | `evidence/figma/figma-bundle.json`                                   | 모든 `fileUrls`, 노드, native geometry, design mapping, 글꼴·자산 출처가 연결됨 |
+| 화면 목록       | `evidence/figma/manifest.json`, `evidence/figma/checkout-mobile.png` | 논리 프레임과 export bitmap을 구분한 실제 PNG `visualPaths`                     |
+| 화면 비교       | `evidence/visual/figma-report.json`                                  | 검토 일치율 98% 이상, 기준·결과·차이·겹침 이미지                                |
+| 모의 데이터     | `evidence/fixtures/checkout.json`                                    | 이름·경로·해시가 receipt까지 이어지는 고정 상태                                 |
+| 캡처 receipt    | `evidence/visual/<packet>/checkout.json`                             | 현재 패킷/HEAD, 환경, geometry, fixture, 글꼴·자산, PNG 해시가 일치             |
+| 반응형·상호작용 | `evidence/design/responsive.json`, `interaction.json`                | 지정한 화면 크기와 상태 전이를 검증함                                           |
+| 접근성          | `evidence/design/accessibility.json`                                 | 의미 구조·키보드·초점·명암비 검사가 성공                                        |
+| 디자인 검토     | `evidence/reviews/design.json`                                       | 고정된 차이 이미지와 검증 자료에 대한 독립 판정이 승인됨                        |
 
 Figma 방식은 기능 개발용 E2E와 영상을 자동으로 요구하지 않습니다. 기능 전체와 영상까지 필요하면 `mode: feature`를 선택하고 `figmaUrl`을 입력 자료로 함께 제공합니다.
 
 ## 예상 브랜치와 커밋 <span id="branch-and-commits-figma"></span>
 
-- 예상 브랜치: `codex/figma-checkout`
+- 예상 브랜치: 지정한 target에서 만든 `codex/figma-checkout`
 - 커밋 예상 예시: `feat: implement checkout from Figma`
 - 초안 발행 전에는 다른 사용법과 마찬가지로 커밋한 소스 브랜치와 깨끗한 작업 트리가 필요합니다.
 
@@ -159,13 +160,13 @@ Figma 방식은 기능 개발용 E2E와 영상을 자동으로 요구하지 않�
 
 ## 실행이 멈추는 경우 <span id="blockers-figma"></span>
 
-| 중단 원인                                | 사용자가 할 일                                    |
-| ---------------------------------------- | ------------------------------------------------- |
-| URL·노드가 잘못되었거나 권한이 없음      | 접근 가능한 URL과 정확한 `node-id` 제공           |
-| 연결된 호스트에서 자료를 읽을 수 없음    | Figma 연결·로그인·권한을 복구하고 재개            |
-| 필요한 상태·화면 크기가 Figma에 없음     | 기준으로 삼을 동작 또는 승인된 보완 요구사항 제공 |
-| 기존 디자인 시스템과 Figma가 충돌        | 재사용·확장·예외 중 원하는 방향을 결정            |
-| 초안 요청인데 브랜치가 불결하거나 미커밋 | 의도한 파일만 커밋해 깨끗한 사전 상태를 충족      |
+| 중단 원인                             | 사용자가 할 일                                          |
+| ------------------------------------- | ------------------------------------------------------- |
+| URL·노드가 잘못되었거나 권한이 없음   | 접근 가능한 URL과 정확한 `node-id` 제공                 |
+| 연결된 호스트에서 자료를 읽을 수 없음 | Figma 연결·로그인·권한을 복구하고 재개                  |
+| 필요한 상태·화면 크기가 Figma에 없음  | 기준으로 삼을 동작 또는 승인된 보완 요구사항 제공       |
+| 기존 디자인 시스템과 Figma가 충돌     | 재사용·확장·예외 중 원하는 방향을 결정                  |
+| source/target/remote가 시작 뒤 변경됨 | 고정된 workspace binding으로 복원하고 새 검토 패킷 생성 |
 
 ## 이 사용법이 하지 않는 것 <span id="exclusions-figma"></span>
 
