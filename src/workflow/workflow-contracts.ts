@@ -1488,12 +1488,13 @@ export const VisualComparisonSubmissionSchema = z
     kind: z.literal("visual-comparison"),
     reviewPacketId: ReviewPacketIdSchema,
     captures: z.array(VisualCaptureSchema).min(1).max(50),
-    artifactPaths: z.array(z.string().trim().min(1)).min(1).max(50),
+    artifactPaths: z.array(z.string().trim().min(1)).min(1).max(100),
   })
   .strict()
   .superRefine((submission, context) => {
     const targetIds = new Set<string>();
     const actualPaths = new Set<string>();
+    const expectedArtifactPaths = new Set<string>();
     submission.captures.forEach((capture, index) => {
       if (targetIds.has(capture.targetId)) {
         context.addIssue({
@@ -1524,15 +1525,33 @@ export const VisualComparisonSubmissionSchema = z
       }
       targetIds.add(capture.targetId);
       actualPaths.add(capture.actualPath);
+      expectedArtifactPaths.add(capture.actualPath);
+      if (capture.receiptPath !== undefined) {
+        const receiptFileName = capture.receiptPath.slice(expectedDirectory.length);
+        if (
+          !capture.receiptPath.startsWith(expectedDirectory) ||
+          receiptFileName.includes("/") ||
+          !/^[a-z0-9][a-z0-9._:-]*\.json$/i.test(receiptFileName) ||
+          expectedArtifactPaths.has(capture.receiptPath)
+        ) {
+          context.addIssue({
+            code: "custom",
+            path: ["captures", index, "receiptPath"],
+            message: `Visual receipt must use a distinct file in ${expectedDirectory}`,
+          });
+        }
+        expectedArtifactPaths.add(capture.receiptPath);
+      }
     });
     if (
-      submission.artifactPaths.length !== actualPaths.size ||
-      submission.artifactPaths.some((artifactPath) => !actualPaths.has(artifactPath))
+      submission.artifactPaths.length !== expectedArtifactPaths.size ||
+      submission.artifactPaths.some((artifactPath) => !expectedArtifactPaths.has(artifactPath))
     ) {
       context.addIssue({
         code: "custom",
         path: ["artifactPaths"],
-        message: "Visual comparison artifactPaths must exactly match submitted actual PNGs",
+        message:
+          "Visual comparison artifactPaths must exactly match submitted actual PNGs and receipts",
       });
     }
   });

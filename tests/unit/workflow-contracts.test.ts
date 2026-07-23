@@ -1048,6 +1048,27 @@ describe("workflow v2 contracts", () => {
     };
 
     expect(WorkflowSubmissionSchema.safeParse(submission).success).toBe(true);
+    const receiptPath = `visual/actual/${reviewPacketId}/checkout.json`;
+    expect(
+      WorkflowSubmissionSchema.safeParse({
+        ...submission,
+        captures: [
+          {
+            ...submission.captures[0],
+            receiptPath,
+            receiptDigest: `sha256:${"2".repeat(64)}`,
+          },
+        ],
+        artifactPaths: [...submission.artifactPaths, receiptPath],
+      }).success,
+    ).toBe(true);
+    expect(
+      WorkflowSubmissionSchema.safeParse({
+        ...submission,
+        captures: [{ ...submission.captures[0], receiptPath }],
+        artifactPaths: [...submission.artifactPaths, receiptPath],
+      }).success,
+    ).toBe(false);
     expect(
       WorkflowSubmissionSchema.safeParse({
         ...submission,

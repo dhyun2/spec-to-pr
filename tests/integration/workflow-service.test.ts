@@ -4838,6 +4838,61 @@ describe("WorkflowService", () => {
     await mkdir(path.dirname(path.join(directory, featureActualPath)), { recursive: true });
     const featureActualBytes = PNG.sync.write(new PNG({ width: 1, height: 1 }));
     await writeFile(path.join(directory, featureActualPath), featureActualBytes);
+    const featureRun = await store.get(started.runId);
+    const featureImplementationArtifact = [...featureRun.artifacts]
+      .reverse()
+      .find(
+        (artifact) =>
+          artifact.kind === "agent-result-report" &&
+          artifact.metadata["workflowSubmissionKind"] === "implementation",
+      );
+    const featurePacket = featureImplementationArtifact?.metadata["reviewPacket"] as
+      { headSha?: unknown } | undefined;
+    if (typeof featurePacket?.headSha !== "string") {
+      throw new Error("Missing feature implementation packet head");
+    }
+    const featureActualDigest =
+      `sha256:${createHash("sha256").update(featureActualBytes).digest("hex")}` as const;
+    const featureReceiptPath =
+      `visual/actual/${visualAction.reviewPacketId}/checkout.json` as const;
+    const featureReceiptBytes = Buffer.from(
+      JSON.stringify({
+        reviewPacketId: visualAction.reviewPacketId,
+        headSha: featurePacket.headSha,
+        targetId: "checkout-default",
+        route: "/checkout",
+        state: "default",
+        captureKind: "viewport",
+        logicalSize: { width: 1, height: 1 },
+        deviceScaleFactor: 1,
+        playwrightVersion: "1.54.1",
+        browserName: "chromium",
+        browserVersion: "138.0.7204.168",
+        locale: "ko-KR",
+        colorScheme: "light",
+        timezone: "Asia/Seoul",
+        userAgent: "Mozilla/5.0 Chromium",
+        fonts: [],
+        fixture: {
+          id: "mock:checkout",
+          digest: `sha256:${createHash("sha256")
+            .update(Buffer.from(JSON.stringify({ state: "checkout" }), "utf8"))
+            .digest("hex")}`,
+        },
+        assets: [],
+        assetsComplete: true,
+        actual: {
+          path: featureActualPath,
+          digest: featureActualDigest,
+          bitmapSize: { width: 1, height: 1 },
+        },
+        runnerVersion: "capture-runner-v1",
+        normalizerVersion: "visual-normalizer-v1",
+        capturedAt: "2026-07-20T00:00:00.000Z",
+      }),
+      "utf8",
+    );
+    await writeFile(path.join(directory, featureReceiptPath), featureReceiptBytes);
     const featureCapture = {
       targetId: "checkout-default",
       route: "/checkout",
@@ -4848,7 +4903,10 @@ describe("WorkflowService", () => {
       provider: "playwright",
       capturedAt: "2026-07-20T00:00:00.000Z",
       actualPath: featureActualPath,
-      actualDigest: `sha256:${createHash("sha256").update(featureActualBytes).digest("hex")}`,
+      actualDigest: featureActualDigest,
+      receiptPath: featureReceiptPath,
+      receiptDigest:
+        `sha256:${createHash("sha256").update(featureReceiptBytes).digest("hex")}` as const,
     };
     await expect(
       service.submit({
@@ -4857,7 +4915,7 @@ describe("WorkflowService", () => {
           kind: "visual-comparison",
           reviewPacketId: visualAction.reviewPacketId,
           captures: [{ ...featureCapture, route: "/wrong" }],
-          artifactPaths: [featureActualPath],
+          artifactPaths: [featureActualPath, featureReceiptPath],
         },
       }),
     ).rejects.toThrow(/capture manifest.*target/i);
@@ -4868,7 +4926,7 @@ describe("WorkflowService", () => {
           kind: "visual-comparison",
           reviewPacketId: visualAction.reviewPacketId,
           captures: [{ ...featureCapture, actualDigest: `sha256:${"0".repeat(64)}` }],
-          artifactPaths: [featureActualPath],
+          artifactPaths: [featureActualPath, featureReceiptPath],
         },
       }),
     ).rejects.toThrow(/VISUAL_CAPTURE_DIGEST_MISMATCH/);
@@ -4878,7 +4936,7 @@ describe("WorkflowService", () => {
         kind: "visual-comparison",
         reviewPacketId: visualAction.reviewPacketId,
         captures: [featureCapture],
-        artifactPaths: [featureActualPath],
+        artifactPaths: [featureActualPath, featureReceiptPath],
       },
     });
     expect(visuallyCompared.nextActions.map((action) => action.kind).sort()).toEqual([
@@ -4892,7 +4950,7 @@ describe("WorkflowService", () => {
           kind: "visual-comparison",
           reviewPacketId: visualAction.reviewPacketId,
           captures: [featureCapture],
-          artifactPaths: [featureActualPath],
+          artifactPaths: [featureActualPath, featureReceiptPath],
         },
       }),
     ).rejects.toThrow(/already has a passing visual comparison/);
@@ -5312,15 +5370,75 @@ describe("WorkflowService", () => {
     if (compareAction === undefined || !("reviewPacketId" in compareAction)) {
       throw new Error("Missing visual comparison action");
     }
+    const implementationRun = await store.get(started.runId);
+    const implementationArtifact = [...implementationRun.artifacts]
+      .reverse()
+      .find(
+        (artifact) =>
+          artifact.kind === "agent-result-report" &&
+          artifact.metadata["workflowSubmissionKind"] === "implementation",
+      );
+    const implementationPacket = implementationArtifact?.metadata["reviewPacket"] as
+      { headSha?: unknown } | undefined;
+    if (typeof implementationPacket?.headSha !== "string") {
+      throw new Error("Missing implementation packet head");
+    }
 
     const actualDirectory = path.join(directory, "visual", "actual", compareAction.reviewPacketId);
     await mkdir(actualDirectory, { recursive: true });
-    const visualSubmission = async (name: string, rgba: [number, number, number, number]) => {
+    const visualSubmission = async (
+      name: string,
+      rgba: [number, number, number, number],
+      withReceipt = true,
+      fixtureDigestOverride?: string,
+    ) => {
       const image = new PNG({ width: 1, height: 1 });
       image.data.set(rgba);
       const actualPath = `visual/actual/${compareAction.reviewPacketId}/${name}.png`;
       const bytes = PNG.sync.write(image);
       await writeFile(path.join(directory, actualPath), bytes);
+      const actualDigest = `sha256:${createHash("sha256").update(bytes).digest("hex")}` as const;
+      const receiptPath = `visual/actual/${compareAction.reviewPacketId}/${name}.json`;
+      const receiptBytes = Buffer.from(
+        JSON.stringify({
+          reviewPacketId: compareAction.reviewPacketId,
+          headSha: implementationPacket.headSha,
+          targetId: "checkout-default",
+          route: "/checkout",
+          state: "default",
+          captureKind: "viewport",
+          logicalSize: { width: 1, height: 1 },
+          deviceScaleFactor: 1,
+          playwrightVersion: "1.54.1",
+          browserName: "chromium",
+          browserVersion: "138.0.7204.168",
+          locale: "ko-KR",
+          colorScheme: "light",
+          timezone: "Asia/Seoul",
+          userAgent: "Mozilla/5.0 Chromium",
+          fonts: [],
+          fixture: {
+            id: "mock:checkout",
+            digest:
+              fixtureDigestOverride ??
+              `sha256:${createHash("sha256").update(validFixture).digest("hex")}`,
+          },
+          assets: [],
+          assetsComplete: true,
+          actual: {
+            path: actualPath,
+            digest: actualDigest,
+            bitmapSize: { width: 1, height: 1 },
+          },
+          runnerVersion: "capture-runner-v1",
+          normalizerVersion: "visual-normalizer-v1",
+          capturedAt: "2026-07-20T00:00:00.000Z",
+        }),
+        "utf8",
+      );
+      if (withReceipt) {
+        await writeFile(path.join(directory, receiptPath), receiptBytes);
+      }
       return {
         kind: "visual-comparison" as const,
         reviewPacketId: compareAction.reviewPacketId,
@@ -5335,12 +5453,45 @@ describe("WorkflowService", () => {
             provider: "playwright",
             capturedAt: "2026-07-20T00:00:00.000Z",
             actualPath,
-            actualDigest: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
+            actualDigest,
+            ...(withReceipt
+              ? {
+                  receiptPath,
+                  receiptDigest:
+                    `sha256:${createHash("sha256").update(receiptBytes).digest("hex")}` as const,
+                }
+              : {}),
           },
         ],
-        artifactPaths: [actualPath],
+        artifactPaths: withReceipt ? [actualPath, receiptPath] : [actualPath],
       };
     };
+
+    const receiptless = await visualSubmission("missing-receipt", [255, 255, 255, 255], false);
+    await expect(service.submit({ runId: started.runId, submission: receiptless })).rejects.toThrow(
+      /VISUAL_CAPTURE_PROVENANCE_INVALID/,
+    );
+    const beforeValidCapture = await store.get(started.runId);
+    expect(
+      beforeValidCapture.artifacts.filter(
+        (artifact) => artifact.metadata["adapter"] === "visual-attempt-reservation-v2",
+      ),
+    ).toHaveLength(0);
+    const wrongFixtureReceipt = await visualSubmission(
+      "wrong-fixture",
+      [255, 255, 255, 255],
+      true,
+      `sha256:${"9".repeat(64)}`,
+    );
+    await expect(
+      service.submit({ runId: started.runId, submission: wrongFixtureReceipt }),
+    ).rejects.toThrow(/MOCK_FIXTURE_NOT_CONSUMED/);
+    const afterWrongFixture = await store.get(started.runId);
+    expect(
+      afterWrongFixture.artifacts.filter(
+        (artifact) => artifact.metadata["adapter"] === "visual-attempt-reservation-v2",
+      ),
+    ).toHaveLength(0);
 
     const submissions = await Promise.all([
       visualSubmission("attempt-1", [255, 255, 255, 255]),

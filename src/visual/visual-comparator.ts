@@ -74,8 +74,23 @@ export const VisualCaptureSchema = z
       .trim()
       .regex(/\.png$/i),
     actualDigest: Sha256DigestSchema,
+    receiptPath: z
+      .string()
+      .trim()
+      .regex(/\.json$/i)
+      .optional(),
+    receiptDigest: Sha256DigestSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((capture, context) => {
+    if ((capture.receiptPath === undefined) !== (capture.receiptDigest === undefined)) {
+      context.addIssue({
+        code: "custom",
+        path: ["receiptPath"],
+        message: "Visual receipt path and digest must be supplied together",
+      });
+    }
+  });
 
 export const VisualComparisonMetricsV2Schema = z
   .object({
