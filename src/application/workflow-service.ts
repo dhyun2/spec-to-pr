@@ -124,6 +124,10 @@ const ComposableSourceUrlsSchema = z
   .array(WorkflowSourceUrlSchema)
   .max(MAX_COMPOSABLE_SOURCE_PATHS)
   .default([]);
+const ComposableFigmaUrlsSchema = z
+  .array(FigmaFileUrlSchema)
+  .max(MAX_COMPOSABLE_SOURCE_PATHS)
+  .default([]);
 type StandardWorkflowSubmission = Exclude<WorkflowSubmission, { kind: "legacy-network-evidence" }>;
 const NormalizedDeliveryProfilePathsSchema = z
   .object({
@@ -178,6 +182,7 @@ export const WorkflowStartInputSchema = z
     legacyNetworkEvidencePath: WorkflowSourcePathSchema.optional(),
     briefPath: WorkflowSourcePathSchema.optional(),
     figmaUrl: FigmaFileUrlSchema.optional(),
+    figmaUrls: ComposableFigmaUrlsSchema,
     docsPath: WorkflowSourcePathSchema.optional(),
     docsPaths: ComposableSourcePathsSchema,
     openApiPath: WorkflowSourcePathSchema.optional(),
@@ -189,6 +194,10 @@ export const WorkflowStartInputSchema = z
   })
   .strict()
   .superRefine((input, context) => {
+    const figmaUrls = uniqueInputUrls([
+      ...(input.figmaUrl === undefined ? [] : [input.figmaUrl]),
+      ...input.figmaUrls,
+    ]);
     if (input.mode === "brief" || input.mode === "feature") {
       if (input.briefPath === undefined) {
         context.addIssue({
@@ -197,11 +206,11 @@ export const WorkflowStartInputSchema = z
           message: input.mode + " mode requires briefPath",
         });
       }
-      if (input.figmaUrl === undefined) {
+      if (figmaUrls.length === 0) {
         context.addIssue({
           code: "custom",
-          path: ["figmaUrl"],
-          message: input.mode + " mode requires figmaUrl",
+          path: ["figmaUrls"],
+          message: input.mode + " mode requires figmaUrl or figmaUrls",
         });
       }
       if (
@@ -247,11 +256,11 @@ export const WorkflowStartInputSchema = z
         message: "legacyNetworkEvidencePath requires legacyProjectRoot",
       });
     }
-    if (input.mode === "figma" && input.figmaUrl === undefined) {
+    if (input.mode === "figma" && figmaUrls.length === 0) {
       context.addIssue({
         code: "custom",
-        path: ["figmaUrl"],
-        message: "figma mode requires figmaUrl",
+        path: ["figmaUrls"],
+        message: "figma mode requires figmaUrl or figmaUrls",
       });
     }
     if (
@@ -259,7 +268,7 @@ export const WorkflowStartInputSchema = z
         input.mode === "legacy" ||
         input.mode === "feature" ||
         input.mode === "figma" ||
-        input.figmaUrl !== undefined ||
+        figmaUrls.length > 0 ||
         input.legacyProjectRoot !== undefined) &&
       input.scope !== "auto" &&
       input.scope !== "ui"
@@ -548,7 +557,12 @@ export class WorkflowService {
         ? legacyApiResult.operations
         : mergeDeliveryApiOperations(sourceOpenApiOperations, legacyApiResult.operations);
 
-    const figmaUrl = input.figmaUrl ?? parsed.parsed.figmaUrls[0];
+    const figmaUrls = uniqueInputUrls([
+      ...(input.figmaUrl === undefined ? [] : [input.figmaUrl]),
+      ...input.figmaUrls,
+      ...parsed.parsed.figmaUrls,
+    ]);
+    const figmaUrl = figmaUrls[0];
     const forcedUi =
       effectiveMode === "brief" ||
       effectiveMode === "legacy" ||
@@ -565,17 +579,19 @@ export class WorkflowService {
     const classifiedScope = classifyWorkflowScope({
       requestText: classificationText,
       explicitScope,
-      figmaUrls: figmaUrl === undefined ? parsed.parsed.figmaUrls : [figmaUrl],
+      figmaUrls,
     });
     const scope = WorkflowScopeSchema.parse({
       ...classifiedScope,
       ui: forcedUi || classifiedScope.ui,
       api:
-        classifiedScope.api ||
-        sources.openApi.length > 0 ||
-        effectiveMode === "brief" ||
-        effectiveMode === "legacy" ||
-        effectiveMode === "feature",
+        effectiveMode === "figma"
+          ? false
+          : classifiedScope.api ||
+            sources.openApi.length > 0 ||
+            effectiveMode === "brief" ||
+            effectiveMode === "legacy" ||
+            effectiveMode === "feature",
       specification: classifiedScope.specification || sources.openApi.length > 0,
       hasVisualBaseline:
         classifiedScope.hasVisualBaseline || figmaUrl !== undefined || effectiveMode === "legacy",
@@ -607,6 +623,7 @@ export class WorkflowService {
         ? {}
         : { briefPath: normalizedProfilePaths.briefPath }),
       ...(figmaUrl === undefined ? {} : { figmaUrl }),
+      figmaUrls,
       docsPaths: normalizedProfilePaths.docsPaths,
       openApiPaths: normalizedProfilePaths.openApiPaths,
       openApiUrls: normalizedProfilePaths.openApiUrls,
@@ -625,7 +642,7 @@ export class WorkflowService {
         requirements: countIntakeRequirements(classificationText),
         apiOperations: sources.openApi.length > 0 ? openApiOperations.length : scope.api ? 1 : 0,
         uiSurfaces: scope.ui ? 1 : 0,
-        figmaNodes: figmaUrl === undefined ? 0 : 1,
+        figmaNodes: figmaUrls.length,
         testTargets: scope.code ? 1 : 0,
         workspacePackages: await countDeclaredWorkspacePackages(projectRoot),
         uncertainty: scope.code ? 3 : 1,
@@ -5365,7 +5382,7 @@ function resolveWorkflowDeliveryMode(
   if (input.mode !== "auto") return input.mode;
   if (input.legacyProjectRoot !== undefined) return "legacy";
   if (input.briefPath !== undefined) return "brief";
-  if (input.figmaUrl !== undefined) return "figma";
+  if (input.figmaUrl !== undefined || input.figmaUrls.length > 0) return "figma";
   return "auto";
 }
 

@@ -34,6 +34,7 @@ import { createArtifactId } from "../../src/runtime/id-factory.js";
 import { createDraftEvidenceBundle } from "../../src/workflow/draft-evidence-bundle.js";
 
 const FIGMA_URL = "https://www.figma.com/design/abc/file?node-id=1-2";
+const FIGMA_URL_SECOND_STATE = "https://www.figma.com/design/abc/file?node-id=3-4";
 const FEATURE_CONTEXT_ID = `ctx_${"x".repeat(124)}`;
 const execFileAsync = promisify(execFile);
 
@@ -290,6 +291,26 @@ describe("WorkflowService", () => {
       }),
     ).rejects.toThrow(/WORKSPACE_TARGET_REF_MISMATCH/);
     await expect(store.list()).resolves.toHaveLength(0);
+  });
+
+  it("pins every supplied Figma state without enabling API scope from mock wording", async () => {
+    const status = await service.start({
+      projectRoot: directory,
+      requestText:
+        "Use the local MCP and deterministic mock API data to implement both Figma states",
+      scope: "ui",
+      mode: "figma",
+      publication: "none",
+      figmaUrls: [FIGMA_URL, FIGMA_URL_SECOND_STATE, FIGMA_URL],
+    });
+
+    expect(status.deliveryProfile.figmaUrls).toEqual([FIGMA_URL, FIGMA_URL_SECOND_STATE]);
+    expect(status.deliveryProfile.figmaUrl).toBe(FIGMA_URL);
+    expect(status.scope).toMatchObject({
+      ui: true,
+      api: false,
+      hasVisualBaseline: true,
+    });
   });
 
   it("requires a passed report before ready publication planning", async () => {

@@ -95,6 +95,24 @@ describe("Codex SDK workflow policy", () => {
     );
   });
 
+  it("pins multiple Figma state URLs in the single workflow_start prompt", () => {
+    const figmaUrls = [
+      "https://figma.com/design/example?node-id=1-2",
+      "https://figma.com/design/example?node-id=3-4",
+    ];
+    const prompt = buildSpecToPrPrompt({
+      workingDirectory: "/tmp/project",
+      deliveryMode: "figma",
+      prompt: "Implement both store states.",
+      figmaUrls,
+    });
+
+    expect(prompt).toContain(`figmaUrls: ${JSON.stringify(figmaUrls)}`);
+    expect(prompt).toContain(`- Figma: ${JSON.stringify(figmaUrls[0])}`);
+    expect(prompt).toContain(`- Figma: ${JSON.stringify(figmaUrls[1])}`);
+    expect(prompt).toContain("Call workflow_start exactly once");
+  });
+
   it("keeps API and UI work in one context and requires mocks before UI completion", () => {
     const prompt = buildSpecToPrPrompt({
       workingDirectory: "/tmp/project",
@@ -582,6 +600,10 @@ describe("Codex SDK workflow policy", () => {
       "docs/business-rules.md",
       "--docs",
       "docs/error-cases.md",
+      "--figma",
+      "https://figma.com/design/example?node-id=1-2",
+      "--figma",
+      "https://figma.com/design/example?node-id=3-4",
       "--openapi",
       "docs/openapi.yaml",
       "--openapi",
@@ -611,6 +633,10 @@ describe("Codex SDK workflow policy", () => {
         deliveryMode: "feature",
         briefPath: "docs/checkout.md",
         docsPaths: ["docs/business-rules.md", "docs/error-cases.md"],
+        figmaUrls: [
+          "https://figma.com/design/example?node-id=1-2",
+          "https://figma.com/design/example?node-id=3-4",
+        ],
         openApiPaths: ["docs/openapi.yaml", "docs/admin-openapi.yaml"],
         openApiUrls: ["https://api.example.com/openapi.yaml"],
         guidancePaths: ["AGENTS.md", "docs/architecture/ARCHITECTURE.md"],

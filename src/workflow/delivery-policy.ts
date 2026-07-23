@@ -31,6 +31,7 @@ export function buildDeliveryProfile(input: {
   legacyNetworkEvidencePath?: string;
   briefPath?: string;
   figmaUrl?: string;
+  figmaUrls?: string[];
   docsPaths?: string[];
   openApiPaths?: string[];
   openApiUrls?: string[];
@@ -41,12 +42,18 @@ export function buildDeliveryProfile(input: {
   recommendedSkills?: string[];
   sourceProvenance?: DeliveryProfile["sourceProvenance"];
 }): DeliveryProfile {
+  const figmaUrls = [
+    ...new Set([
+      ...(input.figmaUrl === undefined ? [] : [input.figmaUrl]),
+      ...(input.figmaUrls ?? []),
+    ]),
+  ];
   const fullDelivery = input.mode === "brief" || input.mode === "feature";
   if (fullDelivery && input.briefPath === undefined) {
     throw new Error(input.mode + " mode requires briefPath");
   }
-  if (fullDelivery && input.figmaUrl === undefined) {
-    throw new Error(input.mode + " mode requires figmaUrl");
+  if (fullDelivery && figmaUrls.length === 0) {
+    throw new Error(input.mode + " mode requires figmaUrl or figmaUrls");
   }
   if (fullDelivery && (input.openApiPaths?.length ?? 0) + (input.openApiUrls?.length ?? 0) === 0) {
     throw new Error(input.mode + " mode requires at least one OpenAPI source");
@@ -54,15 +61,15 @@ export function buildDeliveryProfile(input: {
   if (input.mode === "legacy" && input.legacyProjectRoot === undefined) {
     throw new Error("legacy mode requires legacyProjectRoot");
   }
-  if (input.mode === "figma" && input.figmaUrl === undefined) {
-    throw new Error("figma mode requires figmaUrl");
+  if (input.mode === "figma" && figmaUrls.length === 0) {
+    throw new Error("figma mode requires figmaUrl or figmaUrls");
   }
   if (
     (input.mode === "brief" ||
       input.mode === "legacy" ||
       input.mode === "feature" ||
       input.mode === "figma" ||
-      input.figmaUrl !== undefined) &&
+      figmaUrls.length > 0) &&
     !input.scope.ui
   ) {
     throw new Error(input.mode + " mode requires UI scope");
@@ -113,7 +120,8 @@ export function buildDeliveryProfile(input: {
       ? {}
       : { legacyNetworkEvidencePath: input.legacyNetworkEvidencePath }),
     ...(input.briefPath === undefined ? {} : { briefPath: input.briefPath }),
-    ...(input.figmaUrl === undefined ? {} : { figmaUrl: input.figmaUrl }),
+    ...(figmaUrls[0] === undefined ? {} : { figmaUrl: figmaUrls[0] }),
+    figmaUrls,
     docsPaths: input.docsPaths ?? [],
     openApiPaths: input.openApiPaths ?? [],
     openApiUrls: input.openApiUrls ?? [],

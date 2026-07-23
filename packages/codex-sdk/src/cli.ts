@@ -10,7 +10,7 @@ type ParsedArgs = {
   legacyNetwork?: string;
   brief?: string;
   docs: string[];
-  figma?: string;
+  figma: string[];
   openapi: string[];
   openapiUrls: string[];
   guidance: string[];
@@ -52,8 +52,8 @@ if (args.brief !== undefined) {
 if (args.docs.length > 0) {
   input.docsPaths = args.docs;
 }
-if (args.figma !== undefined) {
-  input.figmaUrl = args.figma;
+if (args.figma.length > 0) {
+  input.figmaUrls = args.figma;
 }
 if (args.openapi.length > 0) {
   input.openApiPaths = args.openapi;
@@ -116,6 +116,7 @@ console.log(
 function parseArgs(argv: string[]): ParsedArgs {
   const parsed: ParsedArgs = {
     docs: [],
+    figma: [],
     openapi: [],
     openapiUrls: [],
     guidance: [],
@@ -177,7 +178,7 @@ function parseArgs(argv: string[]): ParsedArgs {
         parsed.docs.push(value);
         break;
       case "--figma":
-        parsed.figma = value;
+        parsed.figma.push(value);
         break;
       case "--openapi":
         parsed.openapi.push(value);

@@ -267,6 +267,7 @@ export const DeliveryProfileSchema = z
     legacyNetworkEvidencePath: WorkflowSourcePathSchema.optional(),
     briefPath: WorkflowSourcePathSchema.optional(),
     figmaUrl: FigmaFileUrlSchema.optional(),
+    figmaUrls: z.array(FigmaFileUrlSchema).max(20).default([]),
     docsPaths: NormalizedSourcePathsSchema.default([]),
     openApiPaths: NormalizedSourcePathsSchema.default([]),
     openApiUrls: NormalizedSourceUrlsSchema.default([]),
@@ -306,6 +307,24 @@ export const DeliveryProfileSchema = z
   })
   .strict()
   .superRefine((profile, context) => {
+    if (new Set(profile.figmaUrls).size !== profile.figmaUrls.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["figmaUrls"],
+        message: "Figma URLs must be unique",
+      });
+    }
+    if (
+      profile.figmaUrl !== undefined &&
+      profile.figmaUrls.length > 0 &&
+      profile.figmaUrls[0] !== profile.figmaUrl
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["figmaUrl"],
+        message: "Compatibility figmaUrl must match the first figmaUrls entry",
+      });
+    }
     const classifiedSources = new Map<string, "docsPaths" | "openApiPaths">();
     for (const field of ["docsPaths", "openApiPaths"] as const) {
       profile[field].forEach((sourcePath, index) => {

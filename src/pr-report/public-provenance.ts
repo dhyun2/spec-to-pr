@@ -21,8 +21,14 @@ export function publicSourceRows(
     digest: source.digest,
     capturedAt: source.capturedAt,
   }));
-  if (profile.figmaUrl !== undefined) {
-    rows.push({ kind: "figma", locator: publicLocator(profile.figmaUrl) });
+  const figmaUrls =
+    profile.figmaUrls.length > 0
+      ? profile.figmaUrls
+      : profile.figmaUrl === undefined
+        ? []
+        : [profile.figmaUrl];
+  for (const figmaUrl of figmaUrls) {
+    rows.push({ kind: "figma", locator: publicLocator(figmaUrl) });
   }
   if (profile.legacyProjectRoot !== undefined) {
     rows.push({
