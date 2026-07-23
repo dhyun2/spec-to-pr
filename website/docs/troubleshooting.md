@@ -163,6 +163,12 @@ History read/write는 best-effort입니다. 권한 문제가 있어도 이미 �
 
 Publisher는 draft만 다룹니다. Merge, approve, ready 전환 실패를 publisher 문제로 취급하지 마세요. 그런 action은 애초에 수행하지 않습니다.
 
+### GitLab 이미지 upload가 실패한다
+
+`fallbackMode: gitlab-raw-evidence`가 보이면 project upload 대신 exact review commit의 raw PNG가 PR의 legacy/current 비교에 연결된 것입니다. 이는 401/403/408/429, 5xx, 또는 일시적 network 오류에서만 가능하며, baseline/current PNG가 tracked regular file이고 clean worktree의 SHA-256이 captured digest와 같은 경우에만 허용됩니다.
+
+diff/overlay, 영상, 누락·수정된 PNG, digest 불일치는 대체 대상이 아닙니다. 이 경우 token/파일을 바꾸거나 깨끗한 commit을 만든 뒤 같은 Run에서 publish를 다시 시도하세요. cookie/HAR/secret을 artifact나 PR에 붙여 해결하지 마세요.
+
 ### Diagnostic draft도 만들어지지 않는다
 
 `workflow_publish intent: blocked-diagnostic`은 blocker를 우회하는 명령이 아닙니다. 다음 preflight가 이미 충족되어야 합니다.

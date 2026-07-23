@@ -66,7 +66,9 @@ skillHints: []
 
 Legacy intake preserves the selected feature boundary while following only its direct imports and configuration edges. Concrete source HTTP calls are authoritative; constructors and local facades are not API operations. Environment origins and transport callsites remain in `legacyInventory`. A genuinely dynamic unresolved call returns `collect-legacy-network-evidence`, so a bounded HAR can resume the same Run instead of forcing another start.
 
-The status surface includes `requiredValidations`, `resumeContext`, and `blockerDetails`. Reports use `pr-report-v2`; visual targets are submitted through `visualTargets` and `compare-visuals`, with runtime-computed similarity requiring at least 98%. Blocked draft runs may publish a local blocked report using `intent: blocked-diagnostic`; a `status: blocked` diagnostic can be updated on the same draft PR. Common local blockers include `PUBLISH_NO_DELTA` and `BROWSER_NOT_RUN`.
+Legacy draft review material is gathered by feature under `.spec-to-pr/<feature>/`: `contracts`, `evidence`, side-by-side legacy/current `visual`, reviewer-facing `report`, and an integrity `manifest.json`. The same change records its proposal, delta spec, and tasks in `openspec/changes/`. A Run ID stays inside the manifest, so a reviewer never needs to interpret internal feature keys.
+
+The status surface includes `requiredValidations`, `resumeContext`, and `blockerDetails`. Reports use `pr-report-v2.1`; visual targets are submitted through `visualTargets` and `compare-visuals`, with runtime-computed similarity requiring at least 98%. If a GitLab project upload fails transiently, only verified baseline/current PNGs may fall back to raw URLs at the exact review commit. Digest mismatch, a changed worktree, and synthetic diff/overlay/video never fall back. Blocked draft runs may publish a local blocked report using `intent: blocked-diagnostic`; a `status: blocked` diagnostic can be updated on the same draft PR. Common local blockers include `PUBLISH_NO_DELTA` and `BROWSER_NOT_RUN`.
 
 ## Documentation
 

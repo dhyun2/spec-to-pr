@@ -66,7 +66,9 @@ skillHints: []
 
 레거시 intake는 선택한 기능 경계를 유지하면서 직접 import/configuration edge만 따라갑니다. 실제 HTTP terminal call은 API 근거로 사용하지만 생성자와 로컬 facade는 operation으로 중복 등록하지 않습니다. 환경 origin과 transport callsite는 `legacyInventory`에 보존됩니다. 정말 동적인 호출만 `collect-legacy-network-evidence` 액션을 내보내며, 제한된 HAR을 같은 Run에 제출해 새 시작 없이 재개할 수 있습니다.
 
-상태에는 `requiredValidations`, `resumeContext`, `blockerDetails`가 포함됩니다. 보고서는 `pr-report-v2`, 화면 비교는 `visualTargets`와 `compare-visuals`를 사용하고 런타임 계산 일치율 98% 이상을 요구합니다. 중단된 draft Run은 `intent: blocked-diagnostic`으로 local blocked report를 만들고 같은 draft PR을 갱신할 수 있습니다. 대표적인 로컬 blocker는 `PUBLISH_NO_DELTA`, `BROWSER_NOT_RUN`입니다.
+레거시 이관의 초안 검토 자료는 `.spec-to-pr/<feature>/` 아래에 기능별로 모입니다. `contracts`, `evidence`, legacy/현재 화면을 나란히 보여주는 `visual`, reviewer용 `report`, 무결성을 확인하는 `manifest.json`을 제공하며, 요구사항 변화는 같은 change의 `openspec/changes/`에도 제안·delta spec·작업 목록으로 남습니다. Run ID는 manifest 안에서만 추적하므로 리뷰어가 내부 키를 알 필요가 없습니다.
+
+상태에는 `requiredValidations`, `resumeContext`, `blockerDetails`가 포함됩니다. 보고서는 `pr-report-v2.1`, 화면 비교는 `visualTargets`와 `compare-visuals`를 사용하고 런타임 계산 일치율 98% 이상을 요구합니다. GitLab에서 project upload가 일시적으로 실패하면 검증된 baseline/current PNG만 exact review commit의 raw URL로 안전하게 대체할 수 있습니다. digest 불일치·작업 트리 변경·synthetic diff/overlay/video는 대체하지 않고 발행을 멈춥니다. 중단된 draft Run은 `intent: blocked-diagnostic`으로 local blocked report를 만들고 같은 draft PR을 갱신할 수 있습니다. 대표적인 로컬 blocker는 `PUBLISH_NO_DELTA`, `BROWSER_NOT_RUN`입니다.
 
 ## 가이드
 

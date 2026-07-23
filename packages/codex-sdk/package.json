@@ -1,6 +1,6 @@
 {
   "name": "@spec-to-pr/codex-sdk-runner",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "type": "module",
   "description": "Codex SDK runner for automating spec-to-pr workflows.",

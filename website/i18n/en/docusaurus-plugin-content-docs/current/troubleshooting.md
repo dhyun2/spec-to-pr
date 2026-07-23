@@ -56,6 +56,12 @@ At the first completed boundary at or above 80%, the SDK checkpoints and resumes
 
 Normal publication uses `workflow_publish intent: ready` and creates/updates a draft only. Verify publication is requested, the tree is clean, source is not target, authentication and remote are supported, intended changes are committed, source is at least one commit ahead, and required assets are synced.
 
+### A GitLab image upload fails
+
+When `fallbackMode: gitlab-raw-evidence` appears, the PR's legacy/current comparison uses raw PNG URLs at the exact review commit instead of a project upload. This is available only for 401/403/408/429, 5xx, or transient network errors, and only when each baseline/current PNG is a tracked regular file whose SHA-256 in the clean worktree equals the captured digest.
+
+Diffs/overlays, video, missing or modified PNGs, and digest mismatches are not fallback candidates. Repair the token/file state or make a clean commit, then retry publication in the same Run. Never attach cookies, HARs, or secrets to the artifact or PR to work around the error.
+
 `workflow_publish intent: blocked-diagnostic` does not bypass these preconditions. A valid preflight may publish blocker evidence, but the draft remains `status: blocked` and is not a passed report/publish verdict. Missing delta is `PUBLISH_NO_DELTA`; never create an empty commit or issue fallback. A publish action cannot repair its own branch/auth/commit precondition, so return a **local blocked report** and exact unblock action instead of looping.
 
 ### `diagnostic-publication-uncertain` is returned

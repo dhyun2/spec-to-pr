@@ -127,6 +127,30 @@ Correct the input/environment and resume the **same Run** at its latest status. 
 
 Filenames are an **Illustrative expectation**. UI or Figma sources add design evidence, but legacy mode does not automatically require a feature video.
 
+### Where draft review material lives
+
+Each legacy migration creates a feature-scoped draft bundle at `.spec-to-pr/<feature>/`. `<feature>` is a readable feature slug, not an inventory stable key, so a reviewer never has to interpret opaque identifiers.
+
+```text
+.spec-to-pr/<feature>/
+├── manifest.json        # digest, current packet, and Run trace
+├── contracts/           # acceptance conditions and migration coverage
+├── evidence/            # API, validation, and performance proof
+├── visual/              # legacy/current PNGs and comparison output
+└── report/              # reviewer JSON/Markdown used by the draft PR
+
+openspec/changes/<change-name>/
+├── proposal.md
+├── specs/<capability>/spec.md
+└── tasks.md
+```
+
+Only `manifest.json` carries the Run ID and digests. The PR body prioritizes requirement titles, state, outcome files, and a **side-by-side legacy/current view**; opaque feature keys and repeated every-file lists are hidden by default. Raw HARs, cookies, tokens, and complete logs are never copied into the bundle or PR.
+
+### GitLab image fallback publication
+
+If a GitLab project upload fails because of authentication, a transient network error, or a 5xx response, the draft may use raw URLs at the exact review commit only for verified legacy/current PNGs. Before fallback, the runtime confirms that every file is a tracked regular file, the commit SHA matches the clean worktree, and the captured digest equals the current file. Generated diffs/overlays, video, missing or changed files, and digest mismatches never fall back; the report retains the exact failure instead.
+
 ## Expected branch and commits <span id="branch-and-commits-legacy"></span>
 
 - Illustrative branch: `codex/legacy-scope-migration`

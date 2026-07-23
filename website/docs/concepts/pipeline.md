@@ -142,6 +142,10 @@ Playwright Test/CLI web-first assertion과 structured result가 browser acceptan
 
 GitHub 증거는 실행마다 branch를 만들지 않고 단일 관리 branch `spec-to-pr/evidence`의 immutable run/packet/target/artifact 경로에 저장합니다. PR 링크는 upload commit SHA에 고정되어 동일 경로를 재사용해도 과거 증거가 바뀌지 않습니다.
 
+레거시 이관의 초안 검토 자료는 `.spec-to-pr/<feature>/` bundle과 같은 change의 `openspec/changes/<change-name>/`에 고정합니다. bundle은 `manifest.json`, `contracts/`, `evidence/`, `visual/`, `report/`만 보존합니다. manifest 안에만 Run ID/digest를 두고, PR은 요구사항 상태와 legacy/current 나란히 화면을 보여 줍니다. raw HAR·cookie·token·전체 로그, opaque feature key, 반복적인 전체 구현 파일 목록은 reviewer surface에서 제외합니다.
+
+GitLab project upload가 401/403/408/429, 5xx 또는 일시적 network 오류로 실패하면, exact review commit에 tracked regular file로 존재하고 clean worktree와 captured SHA-256이 일치하는 legacy/current PNG만 raw URL로 대체할 수 있습니다. synthetic diff/overlay, 영상, missing/changed/digest-mismatched file은 이 경로를 쓰지 않으며 원래 publish 실패를 보존합니다.
+
 `workflow_publish intent: blocked-diagnostic`은 clean tree, non-target source, supported authenticated remote, committed delta, target보다 한 commit ahead 조건이 이미 맞을 때만 diagnostic draft를 만들 수 있습니다. Diagnostic publication은 계속 `status: blocked`이며 report/publish passed verdict가 아닙니다. 조건이 없거나 `PUBLISH_NO_DELTA`이면 empty commit 또는 issue fallback 없이 **local blocked report**를 반환합니다. 같은 action이 자기 precondition blocker를 다시 publish하며 loop하지 않습니다.
 
 동시 실행을 막는 durable claim이 만료되거나 heartbeat를 잃어 외부 mutation 성공 여부를 확정할 수 없으면 `reason: diagnostic-publication-uncertain`을 반환하고 자동 재발행하지 않습니다. `recoverUncertain: false`가 기본값입니다. 사용자가 GitHub/GitLab에서 같은 source/target의 matching draft를 직접 확인한 뒤 명시적으로 승인한 경우에만 기존 `workflow_publish`를 `recoverUncertain: true`로 다시 호출합니다. 이 선택적 복구는 새 tool/stage가 아니며 blocked stages를 passed로 바꾸지 않고, SDK도 자동 승인하지 않습니다.

@@ -127,6 +127,30 @@ Agent 정책은 XS/S read-only scout 0명, M 최대 1명, L/XL 최대 2명이며
 
 파일명은 **예상 예시**입니다. Figma 또는 UI source가 있다면 별도 design evidence가 추가되지만 기능 개발용 영상은 자동 요구하지 않습니다.
 
+### Draft 검토 자료의 위치
+
+레거시 이관은 프로젝트 루트의 `.spec-to-pr/<feature>/`에 기능별 draft bundle을 만듭니다. 이름의 `<feature>`는 inventory의 내부 stable key가 아니라 읽을 수 있는 기능 slug이며, 리뷰어가 opaque key를 해석할 필요가 없습니다.
+
+```text
+.spec-to-pr/<feature>/
+├── manifest.json        # digest, 현재 packet, Run 추적 정보
+├── contracts/           # 수용 조건과 migration coverage
+├── evidence/            # API·검증·성능 근거
+├── visual/              # legacy / current PNG와 비교 결과
+└── report/              # draft PR에 쓰이는 reviewer용 JSON/Markdown
+
+openspec/changes/<change-name>/
+├── proposal.md
+├── specs/<capability>/spec.md
+└── tasks.md
+```
+
+`manifest.json`만 Run ID와 digest를 추적합니다. PR 본문은 요구사항의 제목·상태·결과 파일과 **legacy/current 나란히 보기**를 우선하며, internal feature key나 모든 구현 파일의 반복 목록은 기본적으로 숨깁니다. raw HAR, cookie, token, 전체 로그도 bundle이나 PR에 복사하지 않습니다.
+
+### GitLab 이미지 대체 발행
+
+GitLab project upload가 인증·일시적 네트워크·5xx 오류로 실패하면, 검증된 legacy/current PNG만 exact review commit의 raw URL로 대체해 draft PR을 계속 만들 수 있습니다. 대체 전에 파일이 tracked regular file인지, commit SHA와 worktree가 일치하는지, captured digest가 현재 파일과 같은지를 모두 확인합니다. 생성된 diff/overlay, 영상, 누락·변경된 파일, digest 불일치 파일은 절대 대체하지 않고 정확한 실패 원인을 남깁니다.
+
 ## 예상 브랜치와 커밋 <span id="branch-and-commits-legacy"></span>
 
 - 브랜치 예상 예시: `codex/legacy-scope-migration`

@@ -7,6 +7,25 @@ use the plugin tag format, for example `spec-to-pr--v0.1.0`.
 
 ## Unreleased
 
+## 0.3.1 - 2026-07-23
+
+### Added
+
+- Added feature-scoped legacy draft bundles containing contracts, evidence, visual comparison, a reviewer report, and a digest-bound manifest; the corresponding OpenSpec proposal, delta spec, and task list are emitted under the same change name.
+- Added reviewer-focused legacy draft rendering that keeps requirement outcomes and side-by-side legacy/current screenshots visible while omitting opaque feature keys and repeated implementation-file lists.
+- Added a guarded GitLab raw-evidence fallback for transient project-upload failures. It accepts only digest-matched, tracked regular baseline/current PNGs at the exact clean review commit; generated visuals and stale or modified files remain blocked.
+
+### Changed
+
+- Clarified Korean and English legacy, pipeline, troubleshooting, and README guidance for immutable scope boundaries, environment-origin evidence, same-Run runtime network recovery, stable artifacts, OpenSpec, and GitLab fallback publication.
+
+### Verified
+
+- `pnpm check`
+- `pnpm plugin:validate`
+- `pnpm --dir website typecheck && pnpm --dir website build && pnpm guide:check`
+- `pnpm release:build 0.3.1 --full`
+
 ## 0.3.0 - 2026-07-21
 
 ### Added
