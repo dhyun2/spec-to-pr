@@ -159,7 +159,10 @@ describe("workspace binding", () => {
       targetBranch: "release-qa",
       remoteName: "origin",
     });
-    await writeFile(path.join(targetDrift.root, "src/pages/shop/App.ts"), "export const app = 2;\n");
+    await writeFile(
+      path.join(targetDrift.root, "src/pages/shop/App.ts"),
+      "export const app = 2;\n",
+    );
     await git(targetDrift.root, "add", ".");
     await git(targetDrift.root, "commit", "-m", "implementation");
     const targetHead = await git(targetDrift.root, "rev-parse", "HEAD");

@@ -344,7 +344,9 @@ export class PublisherService {
         })
       ).target as PublishTarget);
     if (input.host !== undefined && target.host !== input.host) {
-      throw new Error(`Requested host ${input.host} but ${input.remoteName} remote is ${target.host}`);
+      throw new Error(
+        `Requested host ${input.host} but ${input.remoteName} remote is ${target.host}`,
+      );
     }
     const reviewPacketId = reportArtifact.metadata["reviewPacketId"];
     const payload = ReviewRequestPayloadSchema.parse({
