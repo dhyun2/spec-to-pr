@@ -15,11 +15,13 @@ import { RunIdSchema, type RunId } from "../runtime/ids.js";
 import { GitObjectIdSchema } from "../runtime/scalars.js";
 import { SourceRefSchema } from "../runtime/source.js";
 import type { ListRunsFilter, RunStore } from "../store/run-store.js";
+import { WorkspaceBindingSchema } from "../workspace/workspace-binding.js";
 
 export const CreateRunInputSchema = z
   .object({
     projectRoot: z.string().trim().min(1),
     baseCommit: GitObjectIdSchema.optional(),
+    workspaceBinding: WorkspaceBindingSchema.optional(),
     sources: z.array(SourceRefSchema).default([]),
   })
   .strict();
@@ -66,6 +68,9 @@ export class RunService {
     const run = createInitialRun(
       {
         ...(input.baseCommit === undefined ? {} : { baseCommit: input.baseCommit }),
+        ...(input.workspaceBinding === undefined
+          ? {}
+          : { workspaceBinding: input.workspaceBinding }),
         sources: input.sources,
       },
       {

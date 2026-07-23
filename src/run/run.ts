@@ -21,6 +21,7 @@ import {
   IsoDateTimeSchema,
   RuntimeContractVersionSchema,
 } from "../runtime/scalars.js";
+import { WorkspaceBindingSchema } from "../workspace/workspace-binding.js";
 import { createInitialStageStates, RUN_STAGE_NAMES, StageStateSchema } from "./stages.js";
 
 export const RunStatusSchema = z.enum([
@@ -39,6 +40,7 @@ export const RunManifestSchema = z
     pluginVersion: z.string().trim().min(1),
     projectRoot: z.string().trim().min(1),
     baseCommit: GitObjectIdSchema.optional(),
+    workspaceBinding: WorkspaceBindingSchema.optional(),
     status: RunStatusSchema,
     revision: z.number().int().nonnegative(),
     createdAt: IsoDateTimeSchema,
@@ -265,6 +267,7 @@ export const RunSummarySchema = z
     pluginVersion: z.string().trim().min(1),
     projectRoot: z.string().trim().min(1),
     baseCommit: GitObjectIdSchema.optional(),
+    workspaceBinding: WorkspaceBindingSchema.optional(),
     status: RunStatusSchema,
     revision: z.number().int().nonnegative(),
     createdAt: IsoDateTimeSchema,
@@ -281,6 +284,7 @@ export const CreateInitialRunInputSchema = z
   .object({
     sources: z.array(SourceRefSchema).default([]),
     baseCommit: GitObjectIdSchema.optional(),
+    workspaceBinding: WorkspaceBindingSchema.optional(),
   })
   .strict();
 
@@ -306,6 +310,7 @@ export function createInitialRun(
     pluginVersion: options.pluginVersion,
     projectRoot: options.projectRoot,
     ...(input.baseCommit === undefined ? {} : { baseCommit: input.baseCommit }),
+    ...(input.workspaceBinding === undefined ? {} : { workspaceBinding: input.workspaceBinding }),
     status: "created",
     revision: 0,
     createdAt: options.now,
@@ -326,6 +331,7 @@ export function summarizeRun(run: RunManifest): RunSummary {
     pluginVersion: run.pluginVersion,
     projectRoot: run.projectRoot,
     ...(run.baseCommit === undefined ? {} : { baseCommit: run.baseCommit }),
+    ...(run.workspaceBinding === undefined ? {} : { workspaceBinding: run.workspaceBinding }),
     status: run.status,
     revision: run.revision,
     createdAt: run.createdAt,

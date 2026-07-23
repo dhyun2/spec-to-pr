@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { link, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -230,6 +230,66 @@ describe("WorkflowService", () => {
         }).success,
       ).toBe(false);
     }
+  });
+
+  it("persists and exposes a strict workspace binding from a nested target", async () => {
+    const workspace = await prepareStrictWorkspace(directory);
+
+    const status = await service.start({
+      projectRoot: path.join(directory, "src/pages/shop"),
+      requestText: "Implement the supplied Figma shop states with deterministic mock data",
+      scope: "ui",
+      mode: "figma",
+      publication: "draft",
+      figmaUrl: FIGMA_URL,
+      workspace: {
+        sourceBranch: "codex/shop",
+        targetBranch: "release-qa",
+        remoteName: "origin",
+      },
+    });
+
+    expect(status.workspaceBinding).toMatchObject({
+      repositoryRoot: await realpath(directory),
+      targetPaths: ["src/pages/shop"],
+      supportingPaths: [],
+      sourceBranch: "codex/shop",
+      targetBranch: "release-qa",
+      baseSha: workspace.releaseQaSha,
+      initialHeadSha: workspace.releaseQaSha,
+      remoteName: "origin",
+      remoteProvider: "gitlab",
+      remoteHost: "gitlab.com",
+    });
+    const run = await store.get(status.runId);
+    expect(run.projectRoot).toBe(await realpath(directory));
+    expect(run.baseCommit).toBe(workspace.releaseQaSha);
+  });
+
+  it("does not persist a Run when strict workspace validation fails", async () => {
+    await prepareStrictWorkspace(directory);
+    await writeFile(path.join(directory, "src/pages/shop/App.ts"), "export const shop = 2;\n");
+    await execFileAsync("git", ["add", "."], { cwd: directory });
+    await execFileAsync("git", ["commit", "-qm", "unexpected implementation"], {
+      cwd: directory,
+    });
+
+    await expect(
+      service.start({
+        projectRoot: path.join(directory, "src/pages/shop"),
+        requestText: "Implement the supplied Figma shop states",
+        scope: "ui",
+        mode: "figma",
+        publication: "draft",
+        figmaUrl: FIGMA_URL,
+        workspace: {
+          sourceBranch: "codex/shop",
+          targetBranch: "release-qa",
+          remoteName: "origin",
+        },
+      }),
+    ).rejects.toThrow(/WORKSPACE_TARGET_REF_MISMATCH/);
+    await expect(store.list()).resolves.toHaveLength(0);
   });
 
   it("requires a passed report before ready publication planning", async () => {
@@ -6122,6 +6182,22 @@ function projectRelativePathOfLength(length: number): string {
   const result = segments.join(path.sep);
   if (result.length !== length) throw new Error(`Could not build a ${length}-character path`);
   return result;
+}
+
+async function prepareStrictWorkspace(projectRoot: string): Promise<{ releaseQaSha: string }> {
+  await execFileAsync("git", ["switch", "-c", "release-qa"], { cwd: projectRoot });
+  await mkdir(path.join(projectRoot, "src/pages/shop"), { recursive: true });
+  await writeFile(path.join(projectRoot, "src/pages/shop/App.ts"), "export const shop = 1;\n");
+  await execFileAsync("git", ["add", "."], { cwd: projectRoot });
+  await execFileAsync("git", ["commit", "-qm", "release qa fixture"], { cwd: projectRoot });
+  const releaseQaSha = (
+    await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: projectRoot, encoding: "utf8" })
+  ).stdout.trim();
+  await execFileAsync("git", ["switch", "-c", "codex/shop"], { cwd: projectRoot });
+  await execFileAsync("git", ["remote", "add", "origin", "git@gitlab.com:example/mobydick.git"], {
+    cwd: projectRoot,
+  });
+  return { releaseQaSha };
 }
 
 async function changeSource(

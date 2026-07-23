@@ -95,6 +95,11 @@ import {
   type VisualTargetManifest,
 } from "../visual/visual-comparator.js";
 import { decodeBoundedPng } from "../visual/png-decoder.js";
+import {
+  WorkspaceStartInputSchema,
+  assertChangedFilesWithinWorkspace,
+  resolveWorkspaceBinding,
+} from "../workspace/workspace-binding.js";
 
 const WORKER_ID = "workflow-orchestrator" as const;
 const execFileAsync = promisify(execFile);
@@ -163,6 +168,7 @@ const FeatureResultSchema = z
 export const WorkflowStartInputSchema = z
   .object({
     projectRoot: z.string().trim().min(1),
+    workspace: WorkspaceStartInputSchema.optional(),
     requestText: z.string().trim().min(1).max(200_000),
     scope: z.enum(["auto", "ui", "non-ui", "docs"]).default("auto"),
     mode: DeliveryModeSchema.default("auto"),
@@ -450,16 +456,24 @@ export class WorkflowService {
 
   public async start(rawInput: unknown): Promise<WorkflowStatus> {
     const input = WorkflowStartInputSchema.parse(rawInput);
+    const workspaceBinding =
+      input.workspace === undefined
+        ? undefined
+        : await resolveWorkspaceBinding({
+            requestedPath: input.projectRoot,
+            ...input.workspace,
+          });
+    const projectRoot = workspaceBinding?.repositoryRoot ?? input.projectRoot;
     const effectiveMode = resolveWorkflowDeliveryMode(input);
     const canonicalLegacyProjectRoot = await canonicalLegacyDirectory({
-      projectRoot: input.projectRoot,
+      projectRoot,
       ...(input.legacyProjectRoot === undefined
         ? {}
         : { legacyProjectRoot: input.legacyProjectRoot }),
       required: effectiveMode === "legacy",
     });
     const sources = await prepareComposableSources(
-      input,
+      { ...input, projectRoot },
       this.dependencies.fetchOpenApiSource ?? fetchOpenApiDocument,
     );
     if (sources.legacyNetwork !== undefined) {
@@ -483,10 +497,11 @@ export class WorkflowService {
     });
     const sourceOpenApiOperations = inventoryOpenApiOperations(sources.openApi);
     const publication = input.publication ?? "draft";
-    const initialHead = await currentGitHead(input.projectRoot);
+    const initialHead = workspaceBinding?.baseSha ?? (await currentGitHead(projectRoot));
     const created = await this.dependencies.runService.createRun({
-      projectRoot: input.projectRoot,
+      projectRoot,
       ...(initialHead === null ? {} : { baseCommit: initialHead }),
+      ...(workspaceBinding === undefined ? {} : { workspaceBinding }),
       sources: [],
     });
     const started = await this.dependencies.stageService.start({
@@ -572,7 +587,7 @@ export class WorkflowService {
     });
     const gatePlan = buildGatePlan(scope);
     const recommendedSkills = await recommendedSkillsForIntake({
-      projectRoot: input.projectRoot,
+      projectRoot,
       ...(figmaUrl === undefined ? {} : { figmaUrl }),
       hasOpenApi: sources.openApi.length > 0,
       featureUi: scope.ui && (effectiveMode === "feature" || input.changeKind === "feature"),
@@ -612,7 +627,7 @@ export class WorkflowService {
         uiSurfaces: scope.ui ? 1 : 0,
         figmaNodes: figmaUrl === undefined ? 0 : 1,
         testTargets: scope.code ? 1 : 0,
-        workspacePackages: await countDeclaredWorkspacePackages(input.projectRoot),
+        workspacePackages: await countDeclaredWorkspacePackages(projectRoot),
         uncertainty: scope.code ? 3 : 1,
       },
     });
@@ -1127,6 +1142,7 @@ export class WorkflowService {
       ...(currentStage === undefined ? {} : { currentStage: currentStage.name }),
       scope,
       deliveryProfile,
+      ...(run.workspaceBinding === undefined ? {} : { workspaceBinding: run.workspaceBinding }),
       workload,
       delegationPolicy: buildDelegationPolicy(workload.size),
       requiredValidations,
@@ -6217,36 +6233,67 @@ type GitSnapshot = {
 };
 
 async function captureGitSnapshot(run: RunManifest): Promise<GitSnapshot> {
-  if (run.baseCommit === undefined) {
+  const baseCommit = run.workspaceBinding?.baseSha ?? run.baseCommit;
+  const projectRoot = run.workspaceBinding?.repositoryRoot ?? run.projectRoot;
+  if (baseCommit === undefined) {
     throw new Error("Implementation review packets require a Git base commit");
   }
-  const headSha = await currentGitHead(run.projectRoot);
+  const headSha = await currentGitHead(projectRoot);
   if (headSha === null)
     throw new Error("Implementation review packets require a readable Git HEAD");
   try {
-    const [{ stdout: diff }, { stdout: trackedNames }, { stdout: untrackedNames }] =
-      await Promise.all([
-        execFileAsync("git", ["diff", "--binary", run.baseCommit, "--"], {
-          cwd: run.projectRoot,
-          encoding: "buffer",
-          maxBuffer: 50 * 1024 * 1024,
+    const strictBinding = run.workspaceBinding;
+    if (strictBinding !== undefined) {
+      const [{ stdout: checkedOutBranch }, { stdout: trackedStatus }] = await Promise.all([
+        execFileAsync("git", ["symbolic-ref", "--quiet", "--short", "HEAD"], {
+          cwd: projectRoot,
+          encoding: "utf8",
+          maxBuffer: 1024 * 1024,
         }),
-        execFileAsync("git", ["diff", "--name-only", "-z", run.baseCommit, "--"], {
-          cwd: run.projectRoot,
-          encoding: "buffer",
-          maxBuffer: 5 * 1024 * 1024,
-        }),
-        execFileAsync("git", ["ls-files", "--others", "--exclude-standard", "-z"], {
-          cwd: run.projectRoot,
-          encoding: "buffer",
+        execFileAsync("git", ["status", "--porcelain=v1", "--untracked-files=no"], {
+          cwd: projectRoot,
+          encoding: "utf8",
           maxBuffer: 5 * 1024 * 1024,
         }),
       ]);
+      if (checkedOutBranch.trim() !== strictBinding.sourceBranch) {
+        throw new Error(
+          `WORKSPACE_BRANCH_MISMATCH: expected ${strictBinding.sourceBranch}, found ${checkedOutBranch.trim() || "detached HEAD"}`,
+        );
+      }
+      if (trackedStatus.trim() !== "") {
+        throw new Error(
+          "WORKSPACE_ROOT_MISMATCH: strict implementation snapshots require committed source changes",
+        );
+      }
+    }
+    const diffRange = strictBinding === undefined ? [baseCommit] : [baseCommit, headSha];
+    const [{ stdout: diff }, { stdout: trackedNames }, untrackedResult] = await Promise.all([
+      execFileAsync("git", ["diff", "--binary", ...diffRange, "--"], {
+        cwd: projectRoot,
+        encoding: "buffer",
+        maxBuffer: 50 * 1024 * 1024,
+      }),
+      execFileAsync("git", ["diff", "--name-only", "-z", ...diffRange, "--"], {
+        cwd: projectRoot,
+        encoding: "buffer",
+        maxBuffer: 5 * 1024 * 1024,
+      }),
+      strictBinding === undefined
+        ? execFileAsync("git", ["ls-files", "--others", "--exclude-standard", "-z"], {
+            cwd: projectRoot,
+            encoding: "buffer",
+            maxBuffer: 5 * 1024 * 1024,
+          })
+        : Promise.resolve({ stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }),
+    ]);
+    const untrackedNames = untrackedResult.stdout;
     const tracked = splitNullPaths(trackedNames);
     const untracked = splitNullPaths(untrackedNames);
     const changedFiles = [...new Set([...tracked, ...untracked])].sort();
+    assertChangedFilesWithinWorkspace(changedFiles, strictBinding);
     const digest = createHash("sha256").update(Buffer.isBuffer(diff) ? diff : Buffer.from(diff));
-    const root = await realpath(run.projectRoot);
+    const root = await realpath(projectRoot);
     for (const relativePath of untracked.sort()) {
       const requestedPath = path.resolve(root, relativePath);
       assertWithinProjectRoot(root, requestedPath, relativePath);

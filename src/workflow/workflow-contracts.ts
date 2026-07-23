@@ -6,6 +6,7 @@ import { GitObjectIdSchema, Sha256DigestSchema } from "../runtime/scalars.js";
 import { OpenSpecChangeNameSchema } from "../openspec/openspec-paths.js";
 import { WorkloadEstimateSchema, WorkloadSignalsSchema } from "./workload-policy.js";
 import { VisualCaptureSchema, VisualTargetManifestSchema } from "../visual/visual-comparator.js";
+import { WorkspaceBindingSchema } from "../workspace/workspace-binding.js";
 import { DraftEvidenceBundleSchema } from "./draft-evidence-bundle.js";
 
 export const WorkflowScopeSchema = z
@@ -1478,6 +1479,7 @@ export const WorkflowStatusSchema = z
     currentStage: z.string().trim().min(1).optional(),
     scope: WorkflowScopeSchema,
     deliveryProfile: DeliveryProfileSchema,
+    workspaceBinding: WorkspaceBindingSchema.optional(),
     workload: WorkloadEstimateSchema,
     delegationPolicy: DelegationPolicySchema,
     requiredValidations: z.array(z.string().trim().min(1)).superRefine((items, context) => {
