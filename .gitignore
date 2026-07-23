@@ -43,6 +43,7 @@ temp/
 
 # Agent working notes (keep plans and specs outside the repository)
 docs/superpowers/
+.worktrees/
 
 # Environment
 .env
