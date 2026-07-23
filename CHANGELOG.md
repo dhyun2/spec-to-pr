@@ -7,6 +7,38 @@ use the plugin tag format, for example `spec-to-pr--v0.1.0`.
 
 ## Unreleased
 
+## 0.3.3 - 2026-07-23
+
+### Added
+
+- Added canonical Git workspace binding for nested targets, target/source/base/remote freshness
+  checks, and self-hosted GitHub/GitLab publication preflight.
+- Added multi-URL Figma state contracts, native logical/export geometry, deterministic sRGB
+  normalization, packet-specific browser receipts, and named mock-fixture consumption evidence.
+- Added design-system component, token, font, and digest-bound asset mappings, including explicit
+  handling for canonical assets such as `nxplus_park.webp`.
+- Added implementation-repair lineage across fresh review packets with three measured visual
+  attempts and a production-style 360×1824 Playwright regression for available/unavailable states.
+
+### Changed
+
+- Figma-only delivery now normalizes API scope to false and requires every supplied Figma URL,
+  component mapping, fixture, capture environment, and asset to be attributable before review.
+- Visual acquisition failures no longer consume comparison attempts. Valid comparisons below the
+  98% review threshold reopen implementation and require a committed repair plus fresh packet.
+- Publisher preview and execute now use the exact workspace, branches, reviewed HEAD, target base,
+  and sanitized publication target pinned at workflow start.
+- Synchronized the SDK prompt, public skills, bilingual Figma guide, runtime schemas, and bundled
+  MCP server with the hardened Case 4 contract.
+
+### Verified
+
+- `pnpm check`
+- `pnpm plugin:validate`
+- `pnpm case4:check`
+- `pnpm --dir website typecheck && pnpm --dir website build && pnpm guide:check`
+- `pnpm release:build 0.3.3 --full`
+
 ## 0.3.2 - 2026-07-23
 
 ### Added
