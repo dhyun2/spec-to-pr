@@ -524,6 +524,42 @@ describe("workflow v2 contracts", () => {
     ).toBe(false);
   });
 
+  it("accepts a feature-scoped legacy Draft bundle only when every OpenSpec document is submitted", () => {
+    const submission = {
+      kind: "contracts",
+      status: "passed",
+      summary: "Shop migration contracts and review bundle generated.",
+      artifactPaths: [
+        ".spec-to-pr/shop/manifest.json",
+        "openspec/changes/migrate-shop-vue3/proposal.md",
+        "openspec/changes/migrate-shop-vue3/specs/shop-migration/spec.md",
+        "openspec/changes/migrate-shop-vue3/tasks.md",
+      ],
+      requirementManifest: [
+        {
+          id: "shop-routing",
+          title: "Shop routing",
+          acceptanceCriteria: ["The migrated Shop route remains reachable."],
+        },
+      ],
+      draftBundle: {
+        manifestPath: ".spec-to-pr/shop/manifest.json",
+        changeName: "migrate-shop-vue3",
+        proposalPath: "openspec/changes/migrate-shop-vue3/proposal.md",
+        specPaths: ["openspec/changes/migrate-shop-vue3/specs/shop-migration/spec.md"],
+        tasksPath: "openspec/changes/migrate-shop-vue3/tasks.md",
+      },
+    } as const;
+
+    expect(ContractsSubmissionSchema.safeParse(submission).success).toBe(true);
+    expect(
+      ContractsSubmissionSchema.safeParse({
+        ...submission,
+        artifactPaths: [submission.draftBundle.manifestPath],
+      }).success,
+    ).toBe(false);
+  });
+
   it("ties review packet identity to its run and actual diff digest", () => {
     const packet = {
       id: `packet_${"a".repeat(64)}`,

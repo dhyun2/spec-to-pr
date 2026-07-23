@@ -3,6 +3,7 @@ import { z } from "zod";
 import { RunStageNameSchema } from "../run/stages.js";
 import { ArtifactIdSchema, RunIdSchema } from "../runtime/ids.js";
 import { GitObjectIdSchema, Sha256DigestSchema } from "../runtime/scalars.js";
+import { OpenSpecChangeNameSchema } from "../openspec/openspec-paths.js";
 import { WorkloadEstimateSchema, WorkloadSignalsSchema } from "./workload-policy.js";
 import { VisualCaptureSchema, VisualTargetManifestSchema } from "../visual/visual-comparator.js";
 import { DraftEvidenceBundleSchema } from "./draft-evidence-bundle.js";
@@ -420,6 +421,56 @@ const LegacyBaselineSchema = z
   })
   .strict();
 
+const DraftBundleSubmissionSchema = z
+  .object({
+    manifestPath: z.string().trim().min(1).max(1_000),
+    changeName: OpenSpecChangeNameSchema,
+    proposalPath: z.string().trim().min(1).max(1_000),
+    specPaths: z.array(z.string().trim().min(1).max(1_000)).min(1).max(50),
+    tasksPath: z.string().trim().min(1).max(1_000),
+  })
+  .strict()
+  .superRefine((bundle, context) => {
+    const paths = [bundle.manifestPath, bundle.proposalPath, ...bundle.specPaths, bundle.tasksPath];
+    paths.forEach((artifactPath, index) => {
+      if (!isSafeDurableEvidencePath(artifactPath)) {
+        context.addIssue({
+          code: "custom",
+          path: [index],
+          message: "Draft bundle paths must be safe project-relative evidence paths",
+        });
+      }
+    });
+    if (!/^\.spec-to-pr\/[a-z0-9]+(?:-[a-z0-9]+)*\/manifest\.json$/.test(bundle.manifestPath)) {
+      context.addIssue({
+        code: "custom",
+        path: ["manifestPath"],
+        message: "Draft bundle manifest must be stored under .spec-to-pr/<feature>/manifest.json",
+      });
+    }
+    const openSpecPrefix = `openspec/changes/${bundle.changeName}/`;
+    [bundle.proposalPath, ...bundle.specPaths, bundle.tasksPath].forEach((artifactPath, index) => {
+      if (!artifactPath.startsWith(openSpecPrefix)) {
+        context.addIssue({
+          code: "custom",
+          path: [index + 1],
+          message: "Draft bundle OpenSpec artifacts must belong to the declared change",
+        });
+      }
+    });
+    if (new Set(bundle.specPaths).size !== bundle.specPaths.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["specPaths"],
+        message: "Draft bundle OpenSpec spec paths must be unique",
+      });
+    }
+  });
+
+function draftBundleArtifactPaths(bundle: z.infer<typeof DraftBundleSubmissionSchema>): string[] {
+  return [bundle.manifestPath, bundle.proposalPath, ...bundle.specPaths, bundle.tasksPath];
+}
+
 const LegacyCoverageSchema = z
   .object({
     featureKey: z.string().regex(/^legacy_[a-f0-9]{24}$/),
@@ -613,6 +664,7 @@ export const ContractsSubmissionSchema = z
       .default([]),
     legacyCoverage: z.array(LegacyCoverageSchema).max(500).default([]),
     visualTargets: VisualTargetsSchema.default([]),
+    draftBundle: DraftBundleSubmissionSchema.optional(),
     workloadSignals: WorkloadSignalsSchema.optional(),
     guidanceTrace: GuidanceTraceSchema.default({
       explicit: [],
@@ -710,6 +762,17 @@ export const ContractsSubmissionSchema = z
         });
       }
     });
+    if (submission.draftBundle !== undefined) {
+      draftBundleArtifactPaths(submission.draftBundle).forEach((artifactPath, index) => {
+        if (!submission.artifactPaths.includes(artifactPath)) {
+          context.addIssue({
+            code: "custom",
+            path: ["draftBundle", index],
+            message: "Every Draft bundle artifact must be included in artifactPaths",
+          });
+        }
+      });
+    }
     const scopedKeys = new Set(submission.legacyScopeKeys);
     if (scopedKeys.size !== submission.legacyScopeKeys.length) {
       context.addIssue({

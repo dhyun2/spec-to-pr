@@ -2133,6 +2133,10 @@ export class WorkflowService {
       }
 
       const mediaType = mediaTypeForPath(resolvedPath);
+      const openSpecChangeName = openSpecChangeForContractArtifact(
+        submission,
+        projectRelativePath,
+      );
       const blob = await this.dependencies.artifactStore.writeBlob({
         content,
         mediaType,
@@ -2143,7 +2147,9 @@ export class WorkflowService {
         ArtifactRefSchema.parse({
           id: createArtifactId(),
           kind:
-            (submission.kind === "figma-bundle" && /\.png$/i.test(evidencePath)) ||
+            openSpecChangeName !== undefined
+              ? "openspec"
+              : (submission.kind === "figma-bundle" && /\.png$/i.test(evidencePath)) ||
             submission.kind === "visual-comparison"
               ? "screenshot"
               : "other",
@@ -2168,6 +2174,7 @@ export class WorkflowService {
                 }),
             ...(featureEvidenceRole === undefined ? {} : { featureEvidenceRole }),
             ...(apiEvidenceRole === undefined ? {} : { apiEvidenceRole }),
+            ...(openSpecChangeName === undefined ? {} : { changeName: openSpecChangeName }),
             ...(submission.kind !== "figma-bundle"
               ? {}
               : { figmaProvider: submission.provider, figmaCapturedAt: submission.capturedAt }),
@@ -3579,6 +3586,19 @@ export class WorkflowService {
       reason,
     });
   }
+}
+
+function openSpecChangeForContractArtifact(
+  submission: StandardWorkflowSubmission,
+  projectRelativePath: string,
+): string | undefined {
+  if (submission.kind !== "contracts" || submission.draftBundle === undefined) {
+    return undefined;
+  }
+  const bundle = submission.draftBundle;
+  return [bundle.proposalPath, ...bundle.specPaths, bundle.tasksPath].includes(projectRelativePath)
+    ? bundle.changeName
+    : undefined;
 }
 
 type PublisherResult = Awaited<ReturnType<PublisherService["publish"]>>["result"];

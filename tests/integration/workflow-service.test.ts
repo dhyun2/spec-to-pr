@@ -60,6 +60,10 @@ describe("WorkflowService", () => {
       "visual/legacy.png",
       "contracts/requirements.json",
       "contracts/legacy-baseline.md",
+      ".spec-to-pr/shop/manifest.json",
+      "openspec/changes/migrate-shop-vue3/proposal.md",
+      "openspec/changes/migrate-shop-vue3/specs/shop-migration/spec.md",
+      "openspec/changes/migrate-shop-vue3/tasks.md",
       "docs/openapi.yaml",
       "figma/design-context.json",
       "mocks/manifest.json",
@@ -3784,6 +3788,10 @@ describe("WorkflowService", () => {
           "contracts/legacy-baseline.md",
           "visual/legacy.png",
           "test-results/unit.json",
+          ".spec-to-pr/shop/manifest.json",
+          "openspec/changes/migrate-shop-vue3/proposal.md",
+          "openspec/changes/migrate-shop-vue3/specs/shop-migration/spec.md",
+          "openspec/changes/migrate-shop-vue3/tasks.md",
         ],
         baselinePaths: ["contracts/legacy-baseline.md", "visual/legacy.png"],
         requirementManifest: requirements("legacy-fix"),
@@ -3823,10 +3831,24 @@ describe("WorkflowService", () => {
             },
           ],
         },
+        draftBundle: {
+          manifestPath: ".spec-to-pr/shop/manifest.json",
+          changeName: "migrate-shop-vue3",
+          proposalPath: "openspec/changes/migrate-shop-vue3/proposal.md",
+          specPaths: ["openspec/changes/migrate-shop-vue3/specs/shop-migration/spec.md"],
+          tasksPath: "openspec/changes/migrate-shop-vue3/tasks.md",
+        },
       },
     });
 
     expect(accepted.nextActions[0]?.kind).toBe("implement");
+    const contractRun = await store.get(started.runId);
+    expect(
+      contractRun.artifacts.some(
+        (artifact) =>
+          artifact.kind === "openspec" && artifact.metadata["changeName"] === "migrate-shop-vue3",
+      ),
+    ).toBe(true);
     await writeFile(legacySourcePath, 'export const parserRoute = { path: "/changed" };\n');
     await expect(
       service.submit({
