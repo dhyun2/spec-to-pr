@@ -11,6 +11,7 @@ import {
   failStage,
   heartbeatStage,
   reopenImplementationForReviewChanges,
+  reopenImplementationForVisualRepair,
   startStage,
 } from "../../src/state/stage-machine.js";
 
@@ -274,5 +275,41 @@ describe("stage machine", () => {
         artifactIds: [],
       });
     }
+  });
+
+  it("reopens implementation with a retryable visual repair code", () => {
+    const run = baseRun();
+    const prepared = {
+      ...run,
+      stages: run.stages.map((stage) =>
+        stage.name === "implementation"
+          ? {
+              ...stage,
+              status: "passed" as const,
+              completedAt: "2026-06-23T00:00:10.000Z",
+              attempt: 1,
+              artifactIds: [],
+            }
+          : stage,
+      ),
+    };
+
+    const reopened = reopenImplementationForVisualRepair(
+      prepared,
+      "Visual comparison failed.",
+      () => "2026-06-23T00:00:20.000Z",
+    );
+
+    expect(reopened.stages.find((stage) => stage.name === "implementation")).toMatchObject({
+      status: "failed",
+      error: { code: "VISUAL_IMPLEMENTATION_REPAIR_REQUIRED", retryable: true },
+    });
+    expect(
+      startStage(
+        reopened,
+        { stageName: "implementation", workerId: "worker-2" },
+        () => "2026-06-23T00:00:30.000Z",
+      ).stage,
+    ).toMatchObject({ status: "running", attempt: 2 });
   });
 });

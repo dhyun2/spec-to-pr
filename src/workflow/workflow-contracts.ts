@@ -416,6 +416,7 @@ export const ImplementationReviewPacketSchema = z
     evidenceDigest: Sha256DigestSchema,
     diffDigest: Sha256DigestSchema,
     changedFiles: z.array(z.string().trim().min(1)).max(10_000),
+    visualLineageId: ReviewPacketIdSchema.optional(),
   })
   .strict();
 
@@ -1594,6 +1595,26 @@ export const WorkflowActionSchema = z.discriminatedUnion("kind", [
       runId: RunIdSchema,
       reviewPacketId: ReviewPacketIdSchema,
       attempt: z.number().int().min(1).max(3),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("implementation-repair"),
+      runId: RunIdSchema,
+      reviewPacketId: ReviewPacketIdSchema,
+      lineageId: ReviewPacketIdSchema,
+      nextAttempt: z.union([z.literal(2), z.literal(3)]),
+      failedTargets: z
+        .array(
+          z
+            .object({
+              targetId: VisualTargetManifestSchema.shape.targetId,
+              reviewMatchRatio: z.number().min(0).max(1),
+            })
+            .strict(),
+        )
+        .min(1)
+        .max(50),
     })
     .strict(),
   z

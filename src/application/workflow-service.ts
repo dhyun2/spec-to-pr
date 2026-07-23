@@ -82,7 +82,10 @@ import {
   type WorkflowSubmission,
   DraftEvidenceManifestSchema,
 } from "../workflow/index.js";
-import { reopenImplementationForReviewChanges } from "../state/stage-machine.js";
+import {
+  reopenImplementationForReviewChanges,
+  reopenImplementationForVisualRepair,
+} from "../state/stage-machine.js";
 import type { IntakeRequestService } from "./intake-request-service.js";
 import type { OpenSpecArchiveService } from "./openspec-archive-service.js";
 import type { PublisherService } from "./publisher-service.js";
@@ -109,6 +112,7 @@ import {
   assertChangedFilesWithinWorkspace,
   resolveWorkspaceBinding,
 } from "../workspace/workspace-binding.js";
+import { createVisualLineage } from "../workflow/visual-repair-lineage.js";
 
 const WORKER_ID = "workflow-orchestrator" as const;
 const execFileAsync = promisify(execFile);
@@ -2552,6 +2556,7 @@ export class WorkflowService {
     const reservation = await this.reserveVisualAttempt(run.id, packet, submissionIdentity);
     if (reservation.duplicate) return;
     const attempt = reservation.attempt;
+    const lineageId = visualLineageId(packet);
     const attemptEvidenceArtifacts = boundEvidenceArtifacts.map((artifact) =>
       ArtifactRefSchema.parse({
         ...artifact,
@@ -2739,6 +2744,7 @@ export class WorkflowService {
             version: 2,
             runId: run.id,
             reviewPacketId: packet.id,
+            visualLineageId: lineageId,
             headSha: packet.headSha,
             diffDigest: packet.diffDigest,
             attempt,
@@ -2772,6 +2778,7 @@ export class WorkflowService {
           reportKind: "visual-report-v2-json",
           workflowSubmissionKind: "visual-comparison",
           reviewPacketId: packet.id,
+          visualLineageId: lineageId,
           headSha: packet.headSha,
           diffDigest: packet.diffDigest,
           visualComparisonAttempt: attempt,
@@ -2798,6 +2805,15 @@ export class WorkflowService {
         [...attemptEvidenceArtifacts, ...generatedArtifacts, reportArtifact, completionArtifact],
         timestamp,
       );
+      await this.recordVisualRepairOutcome({
+        runId: run.id,
+        packet,
+        lineageId,
+        attempt,
+        visualStatus,
+        results,
+        timestamp,
+      });
     } catch (error: unknown) {
       const timestamp = this.now();
       const failureArtifact = await this.visualAttemptStatusArtifact({
@@ -2818,6 +2834,126 @@ export class WorkflowService {
     }
   }
 
+  private async recordVisualRepairOutcome(input: {
+    runId: string;
+    packet: ImplementationReviewPacket;
+    lineageId: string;
+    attempt: 1 | 2 | 3;
+    visualStatus: "passed" | "failed";
+    results: Array<Record<string, unknown>>;
+    timestamp: string;
+  }): Promise<void> {
+    const failedTargets = input.results.flatMap((result) => {
+      if (result["status"] !== "failed" || typeof result["targetId"] !== "string") return [];
+      const metrics =
+        typeof result["metrics"] === "object" && result["metrics"] !== null
+          ? (result["metrics"] as Record<string, unknown>)
+          : {};
+      return typeof metrics["reviewMatchRatio"] === "number"
+        ? [
+            {
+              targetId: result["targetId"],
+              reviewMatchRatio: metrics["reviewMatchRatio"],
+              diffArtifactId:
+                typeof result["diffArtifactId"] === "string" ? result["diffArtifactId"] : undefined,
+              overlayArtifactId:
+                typeof result["overlayArtifactId"] === "string"
+                  ? result["overlayArtifactId"]
+                  : undefined,
+            },
+          ]
+        : [];
+    });
+    const repairRequired =
+      input.visualStatus === "failed" && input.attempt < MAX_VISUAL_REPAIR_ATTEMPTS;
+    const content = Buffer.from(
+      `${JSON.stringify({
+        visualLineageId: input.lineageId,
+        sourcePacketId: input.packet.id,
+        attempt: input.attempt,
+        status:
+          input.visualStatus === "passed"
+            ? "closed"
+            : repairRequired
+              ? "repair-required"
+              : "exhausted",
+        repairRequired,
+        failedTargets,
+      })}\n`,
+      "utf8",
+    );
+    const blob = await this.dependencies.artifactStore.writeBlob({
+      content,
+      mediaType: "application/json",
+      storedAt: input.timestamp,
+      label: `visual-lineage-attempt-${String(input.attempt)}.json`,
+    });
+    const artifact = ArtifactRefSchema.parse({
+      id: createArtifactId(),
+      kind: "other",
+      uri: blob.uri,
+      mediaType: "application/json",
+      digest: blob.digest,
+      producedBy: "orchestrator",
+      evidenceIds: [],
+      createdAt: input.timestamp,
+      metadata: {
+        adapter: "visual-repair-lineage-v1",
+        visualLineageId: input.lineageId,
+        visualLineageAttempt: input.attempt,
+        sourcePacketId: input.packet.id,
+        repairRequired,
+        visualStatus: input.visualStatus,
+        failedTargets: failedTargets.map(({ targetId, reviewMatchRatio }) => ({
+          targetId,
+          reviewMatchRatio,
+        })),
+        diffArtifactIds: failedTargets.flatMap((target) =>
+          target.diffArtifactId === undefined ? [] : [target.diffArtifactId],
+        ),
+        overlayArtifactIds: failedTargets.flatMap((target) =>
+          target.overlayArtifactId === undefined ? [] : [target.overlayArtifactId],
+        ),
+      },
+    });
+
+    for (let retry = 0; retry < 12; retry += 1) {
+      const current = await this.dependencies.runStore.get(input.runId);
+      if (
+        current.artifacts.some(
+          (candidate) =>
+            candidate.metadata["adapter"] === "visual-repair-lineage-v1" &&
+            candidate.metadata["sourcePacketId"] === input.packet.id &&
+            candidate.metadata["visualLineageAttempt"] === input.attempt,
+        )
+      ) {
+        return;
+      }
+      const withArtifact = {
+        ...current,
+        artifacts: [...current.artifacts, artifact],
+      };
+      const next = repairRequired
+        ? reopenImplementationForVisualRepair(
+            withArtifact,
+            `Visual comparison attempt ${String(input.attempt)} failed; repair the implementation before recapturing.`,
+            this.now,
+          )
+        : {
+            ...withArtifact,
+            revision: current.revision + 1,
+            updatedAt: input.timestamp,
+          };
+      try {
+        await this.dependencies.runStore.save(next, current.revision);
+        return;
+      } catch (error: unknown) {
+        if (!(error instanceof RevisionConflictError)) throw error;
+      }
+    }
+    throw new Error("VISUAL_REPAIR_REFRESH_REQUIRED: refresh workflow_status and retry");
+  }
+
   private async reserveVisualAttempt(
     runId: string,
     packet: ImplementationReviewPacket,
@@ -2834,14 +2970,14 @@ export class WorkflowService {
       if (currentVisualReport(current, packet.id)?.metadata["visualStatus"] === "passed") {
         throw new Error("The current review packet already has a passing visual comparison");
       }
-      const reservations = visualAttemptReservations(current, packet.id);
+      const reservations = visualAttemptReservations(current, visualLineageId(packet));
       const duplicate = reservations.find(
         (candidate) => candidate.submissionIdentity === submissionIdentity,
       );
       if (duplicate !== undefined) return { attempt: duplicate.attempt, duplicate: true };
       if (reservations.length >= MAX_VISUAL_REPAIR_ATTEMPTS) {
         throw new Error(
-          `VISUAL_ATTEMPT_LIMIT_REACHED: the current review packet already used ${MAX_VISUAL_REPAIR_ATTEMPTS} attempts`,
+          `VISUAL_ATTEMPT_LIMIT_REACHED: the active visual lineage already used ${MAX_VISUAL_REPAIR_ATTEMPTS} attempts`,
         );
       }
       const attempt = (reservations.length + 1) as 1 | 2 | 3;
@@ -2883,6 +3019,7 @@ export class WorkflowService {
     const content = Buffer.from(
       `${JSON.stringify({
         reviewPacketId: input.packet.id,
+        visualLineageId: visualLineageId(input.packet),
         submissionIdentity: input.submissionIdentity,
         attempt: input.attempt,
         status: input.status,
@@ -2907,6 +3044,7 @@ export class WorkflowService {
       metadata: {
         adapter: "visual-attempt-reservation-v2",
         reviewPacketId: input.packet.id,
+        visualLineageId: visualLineageId(input.packet),
         headSha: input.packet.headSha,
         diffDigest: input.packet.diffDigest,
         submissionIdentity: input.submissionIdentity,
@@ -4640,6 +4778,19 @@ function actionsForRun(run: RunManifest, scope: WorkflowScope, profile: Delivery
     return [WorkflowActionSchema.parse({ kind: "prepare-contracts", runId: run.id })];
   }
   if (stage(run, "contracts").status === "passed" && isActionable(stage(run, "implementation"))) {
+    const visualRepair = activeVisualRepairAction(run);
+    if (visualRepair !== undefined) {
+      return [
+        WorkflowActionSchema.parse({
+          kind: "implementation-repair",
+          runId: run.id,
+          reviewPacketId: visualRepair.sourcePacketId,
+          lineageId: visualRepair.lineageId,
+          nextAttempt: visualRepair.nextAttempt,
+          failedTargets: visualRepair.failedTargets,
+        }),
+      ];
+    }
     return [
       WorkflowActionSchema.parse({
         kind: "implement",
@@ -4662,15 +4813,15 @@ function actionsForRun(run: RunManifest, scope: WorkflowScope, profile: Delivery
   if (
     profile.requirements.visualComparison &&
     currentVisual?.metadata["visualStatus"] !== "passed" &&
-    !hasInProgressVisualAttempt(run, packet.id) &&
-    visualComparisonAttemptCount(run, packet.id) < MAX_VISUAL_REPAIR_ATTEMPTS
+    !hasInProgressVisualAttempt(run, packet) &&
+    visualComparisonAttemptCount(run, packet) < MAX_VISUAL_REPAIR_ATTEMPTS
   ) {
     actions.push(
       WorkflowActionSchema.parse({
         kind: "compare-visuals",
         runId: run.id,
         reviewPacketId: packet.id,
-        attempt: visualComparisonAttemptCount(run, packet.id) + 1,
+        attempt: visualComparisonAttemptCount(run, packet) + 1,
       }),
     );
   }
@@ -4689,7 +4840,7 @@ function actionsForRun(run: RunManifest, scope: WorkflowScope, profile: Delivery
     (parallelReviewers || stage(run, "functional-review").status === "passed") &&
     (!profile.requirements.visualComparison ||
       currentVisual?.metadata["visualStatus"] === "passed" ||
-      visualComparisonAttemptCount(run, packet.id) >= MAX_VISUAL_REPAIR_ATTEMPTS)
+      visualComparisonAttemptCount(run, packet) >= MAX_VISUAL_REPAIR_ATTEMPTS)
   ) {
     actions.push(
       WorkflowActionSchema.parse({
@@ -5294,12 +5445,72 @@ function assertFigmaImplementationBindings(
   }
 }
 
-function visualComparisonAttemptCount(run: RunManifest, reviewPacketId: string): number {
-  const reservations = visualAttemptReservations(run, reviewPacketId);
+function visualLineageId(packet: ImplementationReviewPacket): string {
+  return packet.visualLineageId ?? packet.id;
+}
+
+function activeVisualRepairAction(run: RunManifest):
+  | {
+      sourcePacketId: string;
+      lineageId: string;
+      nextAttempt: 2 | 3;
+      failedTargets: Array<{ targetId: string; reviewMatchRatio: number }>;
+    }
+  | undefined {
+  if (stage(run, "implementation").error?.code !== "VISUAL_IMPLEMENTATION_REPAIR_REQUIRED") {
+    return undefined;
+  }
+  for (const artifact of [...run.artifacts].reverse()) {
+    if (
+      artifact.metadata["adapter"] !== "visual-repair-lineage-v1" ||
+      artifact.metadata["repairRequired"] !== true
+    ) {
+      continue;
+    }
+    const sourcePacketId = artifact.metadata["sourcePacketId"];
+    const lineageId = artifact.metadata["visualLineageId"];
+    const attempt = artifact.metadata["visualLineageAttempt"];
+    const failedTargets = z
+      .array(
+        z
+          .object({
+            targetId: VisualTargetManifestSchema.shape.targetId,
+            reviewMatchRatio: z.number().min(0).max(1),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(50)
+      .safeParse(artifact.metadata["failedTargets"]);
+    if (
+      typeof sourcePacketId === "string" &&
+      typeof lineageId === "string" &&
+      (attempt === 1 || attempt === 2) &&
+      failedTargets.success
+    ) {
+      return {
+        sourcePacketId,
+        lineageId,
+        nextAttempt: (attempt + 1) as 2 | 3,
+        failedTargets: failedTargets.data,
+      };
+    }
+  }
+  return undefined;
+}
+
+function visualComparisonAttemptCount(
+  run: RunManifest,
+  packet: ImplementationReviewPacket,
+): number {
+  const reservations = visualAttemptReservations(run, visualLineageId(packet));
   if (reservations.length > 0) return reservations.length;
   return run.artifacts.filter(
     (artifact) =>
-      artifact.kind === "visual-report" && artifact.metadata["reviewPacketId"] === reviewPacketId,
+      artifact.kind === "visual-report" &&
+      (artifact.metadata["visualLineageId"] === visualLineageId(packet) ||
+        (artifact.metadata["visualLineageId"] === undefined &&
+          artifact.metadata["reviewPacketId"] === packet.id)),
   ).length;
 }
 
@@ -5326,13 +5537,13 @@ type VisualAttemptReservationState = {
 
 function visualAttemptReservations(
   run: RunManifest,
-  reviewPacketId: string,
+  lineageId: string,
 ): VisualAttemptReservationState[] {
   const byIdentity = new Map<string, VisualAttemptReservationState>();
   for (const artifact of run.artifacts) {
     if (
       artifact.metadata["adapter"] !== "visual-attempt-reservation-v2" ||
-      artifact.metadata["reviewPacketId"] !== reviewPacketId
+      (artifact.metadata["visualLineageId"] ?? artifact.metadata["reviewPacketId"]) !== lineageId
     ) {
       continue;
     }
@@ -5351,8 +5562,8 @@ function visualAttemptReservations(
   return [...byIdentity.values()].sort((left, right) => left.attempt - right.attempt);
 }
 
-function hasInProgressVisualAttempt(run: RunManifest, reviewPacketId: string): boolean {
-  return visualAttemptReservations(run, reviewPacketId).some(
+function hasInProgressVisualAttempt(run: RunManifest, packet: ImplementationReviewPacket): boolean {
+  return visualAttemptReservations(run, visualLineageId(packet)).some(
     (reservation) => reservation.status === "in-progress",
   );
 }
@@ -5372,7 +5583,8 @@ function visualSubmissionIdentity(
 function assertCurrentVisualComparisonPassed(run: RunManifest, reviewPacketId: string): void {
   const report = currentVisualReport(run, reviewPacketId);
   if (report?.metadata["visualStatus"] === "passed") return;
-  const attempts = visualComparisonAttemptCount(run, reviewPacketId);
+  const packet = reviewPacketFromRun(run);
+  const attempts = packet?.id === reviewPacketId ? visualComparisonAttemptCount(run, packet) : 0;
   if (attempts >= MAX_VISUAL_REPAIR_ATTEMPTS) {
     throw new Error(
       `VISUAL_ATTEMPT_LIMIT_REACHED: design approval is blocked after ${MAX_VISUAL_REPAIR_ATTEMPTS} failed comparisons`,
@@ -6708,7 +6920,42 @@ function createImplementationReviewPacket(
     changedFiles: snapshot.changedFiles,
   };
   const id = createHash("sha256").update(JSON.stringify(identity)).digest("hex");
-  return ImplementationReviewPacketSchema.parse({ id: `packet_${id}`, ...identity });
+  const packetId = `packet_${id}`;
+  const lineage = createVisualLineage(
+    previous === undefined ? undefined : activeVisualRepairCheckpoint(run, previous),
+    { id: packetId },
+  );
+  return ImplementationReviewPacketSchema.parse({
+    id: packetId,
+    ...identity,
+    visualLineageId: lineage.lineageId,
+  });
+}
+
+function activeVisualRepairCheckpoint(
+  run: RunManifest,
+  previousPacket: ImplementationReviewPacket,
+) {
+  for (const artifact of [...run.artifacts].reverse()) {
+    if (
+      artifact.metadata["adapter"] !== "visual-repair-lineage-v1" ||
+      artifact.metadata["repairRequired"] !== true ||
+      artifact.metadata["sourcePacketId"] !== previousPacket.id
+    ) {
+      continue;
+    }
+    const lineageId = artifact.metadata["visualLineageId"];
+    const attempts = artifact.metadata["visualLineageAttempt"];
+    if (typeof lineageId === "string" && (attempts === 1 || attempts === 2 || attempts === 3)) {
+      return {
+        lineageId,
+        attempts,
+        repairRequired: true as const,
+        sourcePacketId: previousPacket.id,
+      };
+    }
+  }
+  return undefined;
 }
 
 type GitSnapshot = {

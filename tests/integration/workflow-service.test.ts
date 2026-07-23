@@ -5224,7 +5224,7 @@ describe("WorkflowService", () => {
     ).toHaveLength(1);
   });
 
-  it("computes visual evidence in the runtime, binds it to the packet, and caps repairs at three", async () => {
+  it("repairs implementation across visual packets and caps valid comparisons at three", async () => {
     const baseline = new PNG({ width: 1, height: 1 });
     baseline.data.set([0, 0, 0, 255]);
     await writeFile(path.join(directory, "visual/diff.png"), PNG.sync.write(baseline));
@@ -5387,6 +5387,8 @@ describe("WorkflowService", () => {
     const actualDirectory = path.join(directory, "visual", "actual", compareAction.reviewPacketId);
     await mkdir(actualDirectory, { recursive: true });
     const visualSubmission = async (
+      action: { reviewPacketId: string },
+      packetHeadSha: string,
       name: string,
       rgba: [number, number, number, number],
       withReceipt = true,
@@ -5394,15 +5396,16 @@ describe("WorkflowService", () => {
     ) => {
       const image = new PNG({ width: 1, height: 1 });
       image.data.set(rgba);
-      const actualPath = `visual/actual/${compareAction.reviewPacketId}/${name}.png`;
+      const actualPath = `visual/actual/${action.reviewPacketId}/${name}.png`;
       const bytes = PNG.sync.write(image);
+      await mkdir(path.dirname(path.join(directory, actualPath)), { recursive: true });
       await writeFile(path.join(directory, actualPath), bytes);
       const actualDigest = `sha256:${createHash("sha256").update(bytes).digest("hex")}` as const;
-      const receiptPath = `visual/actual/${compareAction.reviewPacketId}/${name}.json`;
+      const receiptPath = `visual/actual/${action.reviewPacketId}/${name}.json`;
       const receiptBytes = Buffer.from(
         JSON.stringify({
-          reviewPacketId: compareAction.reviewPacketId,
-          headSha: implementationPacket.headSha,
+          reviewPacketId: action.reviewPacketId,
+          headSha: packetHeadSha,
           targetId: "checkout-default",
           route: "/checkout",
           state: "default",
@@ -5441,7 +5444,7 @@ describe("WorkflowService", () => {
       }
       return {
         kind: "visual-comparison" as const,
-        reviewPacketId: compareAction.reviewPacketId,
+        reviewPacketId: action.reviewPacketId,
         captures: [
           {
             targetId: "checkout-default",
@@ -5467,7 +5470,13 @@ describe("WorkflowService", () => {
       };
     };
 
-    const receiptless = await visualSubmission("missing-receipt", [255, 255, 255, 255], false);
+    const receiptless = await visualSubmission(
+      compareAction,
+      implementationPacket.headSha,
+      "missing-receipt",
+      [255, 255, 255, 255],
+      false,
+    );
     await expect(service.submit({ runId: started.runId, submission: receiptless })).rejects.toThrow(
       /VISUAL_CAPTURE_PROVENANCE_INVALID/,
     );
@@ -5478,6 +5487,8 @@ describe("WorkflowService", () => {
       ),
     ).toHaveLength(0);
     const wrongFixtureReceipt = await visualSubmission(
+      compareAction,
+      implementationPacket.headSha,
       "wrong-fixture",
       [255, 255, 255, 255],
       true,
@@ -5493,26 +5504,108 @@ describe("WorkflowService", () => {
       ),
     ).toHaveLength(0);
 
-    const submissions = await Promise.all([
-      visualSubmission("attempt-1", [255, 255, 255, 255]),
-      visualSubmission("attempt-2", [192, 192, 192, 255]),
-      visualSubmission("attempt-3", [128, 128, 128, 255]),
-      visualSubmission("attempt-4", [64, 64, 64, 255]),
-    ]);
-    const outcomes = await Promise.allSettled(
-      submissions.map((submission) => service.submit({ runId: started.runId, submission })),
+    const packetHeadFor = async (reviewPacketId: string) => {
+      const current = await store.get(started.runId);
+      const packetArtifact = [...current.artifacts].reverse().find((artifact) => {
+        const candidate = artifact.metadata["reviewPacket"] as { id?: unknown } | undefined;
+        return candidate?.id === reviewPacketId;
+      });
+      const candidate = packetArtifact?.metadata["reviewPacket"] as
+        { headSha?: unknown } | undefined;
+      if (typeof candidate?.headSha !== "string") {
+        throw new Error(`Missing packet head for ${reviewPacketId}`);
+      }
+      return candidate.headSha;
+    };
+
+    const firstAttempt = await visualSubmission(
+      compareAction,
+      implementationPacket.headSha,
+      "attempt-1",
+      [255, 255, 255, 255],
     );
-    expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(3);
-    const rejected = outcomes.find((outcome) => outcome.status === "rejected");
-    expect(String(rejected?.status === "rejected" ? rejected.reason : "")).toMatch(
-      /VISUAL_ATTEMPT_LIMIT_REACHED/,
+    const afterFirstFailure = await service.submit({
+      runId: started.runId,
+      submission: firstAttempt,
+    });
+    const firstRepair = afterFirstFailure.nextActions.find(
+      (action) => action.kind === "implementation-repair",
     );
-    const acceptedIndex = outcomes.findIndex((outcome) => outcome.status === "fulfilled");
-    if (acceptedIndex < 0) throw new Error("Expected an accepted visual submission");
-    await Promise.all([
-      service.submit({ runId: started.runId, submission: submissions[acceptedIndex]! }),
-      service.submit({ runId: started.runId, submission: submissions[acceptedIndex]! }),
-    ]);
+    expect(firstRepair).toMatchObject({
+      reviewPacketId: compareAction.reviewPacketId,
+      nextAttempt: 2,
+      failedTargets: [
+        expect.objectContaining({ targetId: "checkout-default", reviewMatchRatio: 0 }),
+      ],
+    });
+    expect(afterFirstFailure.nextActions.map((action) => action.kind)).not.toContain(
+      "compare-visuals",
+    );
+
+    await changeSource(directory, "src/checkout.tsx", "export const checkout = 'repair-1';\n");
+    const repairedOnce = await service.submit({
+      runId: started.runId,
+      submission: implementationSubmission,
+    });
+    const compareSecond = repairedOnce.nextActions.find(
+      (action) => action.kind === "compare-visuals",
+    );
+    if (compareSecond === undefined || !("reviewPacketId" in compareSecond)) {
+      throw new Error("Missing second visual comparison action");
+    }
+    expect(compareSecond.attempt).toBe(2);
+    const secondAttempt = await visualSubmission(
+      compareSecond,
+      await packetHeadFor(compareSecond.reviewPacketId),
+      "attempt-2",
+      [192, 192, 192, 255],
+    );
+    const afterSecondFailure = await service.submit({
+      runId: started.runId,
+      submission: secondAttempt,
+    });
+    expect(
+      afterSecondFailure.nextActions.find((action) => action.kind === "implementation-repair"),
+    ).toMatchObject({ nextAttempt: 3, lineageId: firstRepair?.lineageId });
+
+    await changeSource(directory, "src/checkout.tsx", "export const checkout = 'repair-2';\n");
+    const repairedTwice = await service.submit({
+      runId: started.runId,
+      submission: implementationSubmission,
+    });
+    const compareThird = repairedTwice.nextActions.find(
+      (action) => action.kind === "compare-visuals",
+    );
+    if (compareThird === undefined || !("reviewPacketId" in compareThird)) {
+      throw new Error("Missing third visual comparison action");
+    }
+    expect(compareThird.attempt).toBe(3);
+    const thirdPacketHead = await packetHeadFor(compareThird.reviewPacketId);
+    const thirdAttempt = await visualSubmission(
+      compareThird,
+      thirdPacketHead,
+      "attempt-3",
+      [128, 128, 128, 255],
+    );
+    const afterThirdFailure = await service.submit({
+      runId: started.runId,
+      submission: thirdAttempt,
+    });
+    expect(afterThirdFailure.nextActions.map((action) => action.kind)).not.toContain(
+      "implementation-repair",
+    );
+    expect(afterThirdFailure.nextActions.map((action) => action.kind)).not.toContain(
+      "compare-visuals",
+    );
+    const fourthAttempt = await visualSubmission(
+      compareThird,
+      thirdPacketHead,
+      "attempt-4",
+      [64, 64, 64, 255],
+    );
+    await expect(
+      service.submit({ runId: started.runId, submission: fourthAttempt }),
+    ).rejects.toThrow(/VISUAL_ATTEMPT_LIMIT_REACHED/);
 
     const run = await store.get(started.runId);
     const reports = run.artifacts.filter((artifact) => artifact.kind === "visual-report");
@@ -5527,7 +5620,7 @@ describe("WorkflowService", () => {
     expect(
       reports.every(
         (artifact) =>
-          artifact.metadata["reviewPacketId"] === compareAction.reviewPacketId &&
+          artifact.metadata["visualLineageId"] === firstRepair?.lineageId &&
           artifact.metadata["visualStatus"] === "failed",
       ),
     ).toBe(true);
@@ -5541,7 +5634,8 @@ describe("WorkflowService", () => {
     expect(lastReport).toMatchObject({
       attempt: 3,
       status: "failed",
-      reviewPacketId: compareAction.reviewPacketId,
+      reviewPacketId: compareThird.reviewPacketId,
+      visualLineageId: firstRepair?.lineageId,
       results: [
         expect.objectContaining({
           targetId: "checkout-default",
@@ -5555,7 +5649,7 @@ describe("WorkflowService", () => {
         runId: started.runId,
         submission: {
           kind: "design-review",
-          reviewPacketId: compareAction.reviewPacketId,
+          reviewPacketId: compareThird.reviewPacketId,
           verdict: "approved",
           summary: "Caller claims the design passed.",
           requirements: [{ id: "figma-screen", verdict: "accepted" }],

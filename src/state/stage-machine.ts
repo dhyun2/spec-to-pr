@@ -114,6 +114,7 @@ export function startStage(
   const retryStage =
     stage.status === "failed" &&
     (stage.error?.code === "REVIEW_CHANGES_REQUESTED" ||
+      stage.error?.code === "VISUAL_IMPLEMENTATION_REPAIR_REQUIRED" ||
       (stage.name === "publish" &&
         stage.error?.code === "PUBLISH_FAILED" &&
         stage.error.retryable)) &&
@@ -135,6 +136,23 @@ export function startStage(
 export function reopenImplementationForReviewChanges(
   run: RunManifest,
   reason: string,
+  now: Clock,
+): RunManifest {
+  return reopenImplementation(run, reason, "REVIEW_CHANGES_REQUESTED", now);
+}
+
+export function reopenImplementationForVisualRepair(
+  run: RunManifest,
+  reason: string,
+  now: Clock,
+): RunManifest {
+  return reopenImplementation(run, reason, "VISUAL_IMPLEMENTATION_REPAIR_REQUIRED", now);
+}
+
+function reopenImplementation(
+  run: RunManifest,
+  reason: string,
+  errorCode: "REVIEW_CHANGES_REQUESTED" | "VISUAL_IMPLEMENTATION_REPAIR_REQUIRED",
   now: Clock,
 ): RunManifest {
   const implementation = findStage(run, "implementation");
@@ -165,7 +183,7 @@ export function reopenImplementationForReviewChanges(
           lease: undefined,
           completedAt: nowIso,
           error: {
-            code: "REVIEW_CHANGES_REQUESTED",
+            code: errorCode,
             message: reason,
             retryable: true,
           },
