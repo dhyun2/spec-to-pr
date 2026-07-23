@@ -15,6 +15,226 @@ afterEach(async () => {
 });
 
 describe("semantic legacy API discovery", () => {
+  it("does not infer HTTP transports from ordinary receiver names", async () => {
+    const graph = await fixture({
+      "src/modules/shop/profile.ts": `
+        const profileService = { get(id) { return { id }; } };
+        const client = { post(value) { return value; } };
+        const http = { request(value) { return value; } };
+        function inspect(serviceClient) { return serviceClient.get(profileId); }
+        profileService.get(profileId);
+        client.post("/not-an-api");
+        http.request({ method: "GET", url: "/still-not-an-api" });
+        inspect({ get(id) { return id; } });
+      `,
+    });
+
+    expect(discoverLegacyApiCandidates(graph)).toEqual([]);
+  });
+
+  it("resolves environment URL aliases embedded in endpoint templates", async () => {
+    const graph = await fixture({
+      "src/modules/shop/orders.ts": `
+        import axios from "axios";
+        const apiBase = process.env.API_URL;
+        export const loadOrder = (id) => axios.get(\`${"${apiBase}"}/orders/${"${id}"}\`);
+      `,
+      ".env.qa": "API_URL=https://api.example.test/v2/\n",
+    });
+
+    expect(discoverLegacyApiCandidates(graph)).toEqual([
+      expect.objectContaining({
+        method: "GET",
+        pathTemplate: "/orders/{id}",
+        originRef: expect.objectContaining({
+          kind: "environment",
+          runtime: "process.env",
+          name: "API_URL",
+        }),
+      }),
+    ]);
+  });
+
+  it("retains configured base origins on created transport receivers", async () => {
+    const graph = await fixture({
+      "src/modules/shop/clients.ts": `
+        import axios from "axios";
+        import { httpService } from "@/api/httpService";
+        const axiosClient = axios.create({ baseURL: process.env.API_URL });
+        const customClient = new httpService({ baseURL: import.meta.env.VITE_BACKEND_URL });
+        axiosClient.get("/shop");
+        customClient.post("/checkout");
+      `,
+      "src/api/httpService.ts": `
+        export class httpService {
+          constructor(options) { this.options = options; }
+          post(path) { return path; }
+        }
+      `,
+      ".env.qa": [
+        "API_URL=https://api.example.test/v2/",
+        "VITE_BACKEND_URL=https://backend.example.test/",
+      ].join("\n"),
+    });
+
+    const candidates = discoverLegacyApiCandidates(graph);
+
+    expect(candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          operationKey: "GET /shop",
+          originRef: expect.objectContaining({ kind: "environment", name: "API_URL" }),
+        }),
+        expect.objectContaining({
+          operationKey: "POST /checkout",
+          originRef: expect.objectContaining({
+            kind: "environment",
+            name: "VITE_BACKEND_URL",
+          }),
+        }),
+      ]),
+    );
+  });
+
+  it("preserves literal baseURL path prefixes for axios and custom clients", async () => {
+    const graph = await fixture({
+      "src/modules/shop/clients.ts": `
+        import axios from "axios";
+        import { httpService } from "@/api/httpService";
+        const axiosClient = axios.create({ baseURL: "https://api.example/v2" });
+        const customClient = new httpService({ baseURL: "https://custom.example/gateway/v3/" });
+        axiosClient.get("/shop");
+        customClient.post("checkout");
+      `,
+      "src/api/httpService.ts": `
+        export class httpService {
+          constructor(options) { this.options = options; }
+          post(path) { return path; }
+        }
+      `,
+    });
+
+    expect(discoverLegacyApiCandidates(graph)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          operationKey: "GET /v2/shop",
+          originRef: { kind: "literal", sanitizedOrigin: "https://api.example" },
+        }),
+        expect.objectContaining({
+          operationKey: "POST /gateway/v3/checkout",
+          originRef: { kind: "literal", sanitizedOrigin: "https://custom.example" },
+        }),
+      ]),
+    );
+  });
+
+  it("preserves a path suffix on an environment-derived baseURL", async () => {
+    const graph = await fixture({
+      "src/modules/shop/client.ts": [
+        'import axios from "axios";',
+        "const gatewayBase = `${process.env.API_HOST}/v2`;",
+        "const client = axios.create({ baseURL: gatewayBase });",
+        'client.get("/shop");',
+      ].join("\n"),
+      ".env.qa": "API_HOST=https://api.example\n",
+    });
+
+    expect(discoverLegacyApiCandidates(graph)).toEqual([
+      expect.objectContaining({
+        operationKey: "GET /v2/shop",
+        originRef: expect.objectContaining({
+          kind: "environment",
+          runtime: "process.env",
+          name: "API_HOST",
+        }),
+      }),
+    ]);
+  });
+
+  it("traces only the imported outside-root facade symbol to its terminal HTTP call", async () => {
+    const graph = await fixture({
+      "src/modules/shop/profile.ts": `
+        import { loadProfile } from "@/api";
+        export const showProfile = (id) => loadProfile(id);
+      `,
+      "src/api/index.ts": `
+        export * from "./auditApi";
+        export * from "./profileApi";
+      `,
+      "src/api/profileApi.ts": `
+        import axios from "axios";
+        export const loadProfile = (id) => axios.get(\`/profiles/${"${id}"}\`);
+        export const removeProfile = (id) => axios.delete(\`/profiles/${"${id}"}\`);
+      `,
+      "src/api/auditApi.ts": `
+        export const loadAuditLog = () => fetch("/audit-log");
+      `,
+    });
+
+    const candidates = discoverLegacyApiCandidates(graph);
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({ method: "GET", pathTemplate: "/profiles/{id}" });
+    expect(candidates[0]?.callSites).toEqual([
+      expect.objectContaining({
+        ownerSourcePath: "profile.ts",
+        terminalSourcePath: "@app/src/api/profileApi.ts",
+        wrapperChain: ["@app/src/api/profileApi.ts#loadProfile"],
+      }),
+    ]);
+  });
+
+  it("ignores non-production test, mock, story, and fixture API calls", async () => {
+    const graph = await fixture({
+      "src/modules/shop/index.ts": `
+        import { loadReferencedFixture } from "./fixtures/referenced";
+        import { loadSingularFixture } from "./fixture/referenced";
+        export const loadShop = () => fetch("/production");
+        export const loadReference = () => loadReferencedFixture();
+        export const loadSingularReference = () => loadSingularFixture();
+      `,
+      "src/modules/shop/fixtures/referenced.ts":
+        'export const loadReferencedFixture = () => fetch("/referenced-fixture");',
+      "src/modules/shop/fixture/referenced.ts":
+        'export const loadSingularFixture = () => fetch("/referenced-singular-fixture");',
+      "src/modules/shop/fixtures/unreferenced.ts": 'fetch("/unreferenced-fixture");',
+      "src/modules/shop/fixture/unreferenced.ts": 'fetch("/singular-fixture");',
+      "src/modules/shop/__tests__/shop.ts": 'fetch("/test-directory");',
+      "src/modules/shop/__mocks__/shop.ts": 'fetch("/mock-directory");',
+      "src/modules/shop/shop.spec.ts": 'fetch("/spec-file");',
+      "src/modules/shop/shop.test.ts": 'fetch("/test-file");',
+      "src/modules/shop/Shop.stories.tsx": 'fetch("/story-file");',
+      "src/modules/shop/stories/ShopStory.tsx": 'fetch("/story-directory");',
+      "src/modules/shop/test/shop.ts": 'fetch("/singular-test-directory");',
+      "src/modules/shop/spec/shop.ts": 'fetch("/singular-spec-directory");',
+      "src/modules/shop/mock/shop.ts": 'fetch("/singular-mock-directory");',
+      "src/modules/shop/story/ShopStory.tsx": 'fetch("/singular-story-directory");',
+      "src/modules/shop/storybook/ShopStory.tsx": 'fetch("/storybook-directory");',
+      "src/modules/shop/contest/normal.ts": 'fetch("/contest-production");',
+      "src/modules/shop/history/normal.ts": 'fetch("/history-production");',
+      "src/modules/shop/mockingbird/normal.ts": 'fetch("/mockingbird-production");',
+      "src/modules/shop/fixture-tools/normal.ts": 'fetch("/fixture-tools-production");',
+      "src/modules/shop/storybook-tools/normal.ts": 'fetch("/storybook-tools-production");',
+    });
+
+    expect(
+      discoverLegacyApiCandidates(graph)
+        .map((candidate) => candidate.operationKey)
+        .sort(),
+    ).toEqual(
+      [
+        "GET /contest-production",
+        "GET /fixture-tools-production",
+        "GET /history-production",
+        "GET /mockingbird-production",
+        "GET /production",
+        "GET /referenced-fixture",
+        "GET /referenced-singular-fixture",
+        "GET /storybook-tools-production",
+      ].sort(),
+    );
+  });
+
   it("ignores comments, strings, constructors, local wrappers, and unrelated SDK calls", async () => {
     const graph = await fixture({
       "src/modules/shop/api.js": `

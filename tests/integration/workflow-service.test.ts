@@ -31,6 +31,7 @@ import type {
 } from "../../src/publisher/index.js";
 import { ArtifactRefSchema } from "../../src/runtime/artifact.js";
 import { createArtifactId } from "../../src/runtime/id-factory.js";
+import { createDraftEvidenceBundle } from "../../src/workflow/draft-evidence-bundle.js";
 
 const FIGMA_URL = "https://www.figma.com/design/abc/file?node-id=1-2";
 const FEATURE_CONTEXT_ID = `ctx_${"x".repeat(124)}`;
@@ -2942,6 +2943,88 @@ describe("WorkflowService", () => {
     }
   });
 
+  it("preserves every legacy gateway origin when equal method paths share one API contract", async () => {
+    const legacyRoot = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-legacy-gateways-"));
+    try {
+      await mkdir(path.join(legacyRoot, "src"));
+      await writeFile(path.join(legacyRoot, "package.json"), '{"name":"legacy-gateways"}\n');
+      await writeFile(
+        path.join(legacyRoot, ".env"),
+        [
+          "API_GATEWAY_V1=https://v1.example/api/",
+          "API_GATEWAY_V2=https://v2.example/api/",
+          "",
+        ].join("\n"),
+      );
+      await writeFile(
+        path.join(legacyRoot, ".env.qa"),
+        [
+          "API_GATEWAY_V1=https://v1.example/api/",
+          "API_GATEWAY_V2=https://v2.example/api/",
+          "",
+        ].join("\n"),
+      );
+      await writeFile(
+        path.join(legacyRoot, "src", "ranking.ts"),
+        [
+          'import axios from "axios";',
+          "const v1 = axios.create({ baseURL: process.env.API_GATEWAY_V1 });",
+          "const v2 = axios.create({ baseURL: process.env.API_GATEWAY_V2 });",
+          'export const loadLegacyRanking = () => v1.get("/shop/ranking");',
+          'export const loadCurrentRanking = () => v2.get("/shop/ranking");',
+          "",
+        ].join("\n"),
+      );
+      await writeFile(
+        path.join(directory, "docs", "ranking.openapi.yaml"),
+        [
+          "openapi: 3.1.0",
+          "servers:",
+          "  - url: https://contract.example/api/",
+          "paths:",
+          "  /shop/ranking:",
+          "    get:",
+          "      operationId: getShopRanking",
+          "      responses: {}",
+          "  /admin:",
+          "    delete:",
+          "      operationId: deleteAdmin",
+          "      responses: {}",
+          "",
+        ].join("\n"),
+      );
+
+      const started = await service.start({
+        projectRoot: directory,
+        legacyProjectRoot: legacyRoot,
+        requestText: "Migrate the selected legacy scope",
+        mode: "legacy",
+        changeKind: "migration",
+        openApiPaths: ["docs/ranking.openapi.yaml"],
+      });
+
+      expect(started.deliveryProfile.openApiOperations).toEqual([
+        expect.objectContaining({
+          operationKey: "GET /shop/ranking",
+          operationId: "getShopRanking",
+          serverOrigins: [
+            "https://contract.example/api/",
+            "https://v1.example/api/",
+            "https://v2.example/api/",
+          ],
+        }),
+      ]);
+      expect(started.legacyInventory?.apiCandidates).toHaveLength(2);
+      expect(
+        started.legacyInventory?.apiCandidates.map((candidate) => candidate.originRef),
+      ).toEqual(
+        expect.arrayContaining(["process.env:API_GATEWAY_V1", "process.env:API_GATEWAY_V2"]),
+      );
+    } finally {
+      await rm(legacyRoot, { recursive: true, force: true });
+    }
+  });
+
   it("advances Shop-style legacy API intake from source evidence without OpenAPI or HAR", async () => {
     const legacyRoot = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-legacy-shop-api-"));
     const environmentName = "VUE_APP_API_GW_V2_URL";
@@ -3200,6 +3283,8 @@ describe("WorkflowService", () => {
           }),
         ],
       });
+      expect(started.blockerDetails[0]!.exactUnblockAction).toMatch(/same Run/i);
+      expect(started.blockerDetails[0]!.exactUnblockAction).not.toMatch(/restart intake/i);
       expect(started.legacyInventory?.entries).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ normalizedKey: "UNKNOWN //api.example/API/Checkout" }),
@@ -3236,6 +3321,65 @@ describe("WorkflowService", () => {
       ]);
       expect(JSON.stringify(await store.get(started.runId))).not.toContain("do-not-persist");
       expect(JSON.stringify(await store.get(started.runId))).not.toContain("password@");
+    } finally {
+      await rm(legacyRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("does not reuse resolved legacy operations as OpenAPI evidence on same-Run HAR resume", async () => {
+    const legacyRoot = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-legacy-api-resume-"));
+    try {
+      await mkdir(path.join(legacyRoot, "src"));
+      await writeFile(
+        path.join(legacyRoot, "src", "shared.ts"),
+        [
+          'import axios from "axios";',
+          'export const known = () => axios.get("/shared");',
+          'export const dynamic = () => axios.request({ url: "/shared" });',
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const started = await service.start({
+        projectRoot: directory,
+        legacyProjectRoot: legacyRoot,
+        requestText: "Migrate the legacy API screen",
+        mode: "legacy",
+        changeKind: "migration",
+      });
+      expect(started.currentStage).toBe("intake");
+      expect(started.deliveryProfile.openApiOperations).toEqual([
+        expect.objectContaining({ operationKey: "GET /shared" }),
+      ]);
+
+      await mkdir(path.join(directory, "evidence"), { recursive: true });
+      await writeFile(
+        path.join(directory, "evidence", "unrelated.har"),
+        JSON.stringify([{ method: "POST", url: "https://legacy.example/other" }]),
+        "utf8",
+      );
+      const resumed = await service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "legacy-network-evidence",
+          evidencePath: "evidence/unrelated.har",
+        },
+      });
+
+      expect(resumed.runId).toBe(started.runId);
+      expect(resumed.currentStage).toBe("intake");
+      expect(resumed.nextActions).toEqual([
+        {
+          kind: "collect-legacy-network-evidence",
+          runId: started.runId,
+          maxBytes: 1024 * 1024,
+          maxRequests: 1_000,
+        },
+      ]);
+      expect(resumed.blockerDetails).toEqual(
+        expect.arrayContaining([expect.objectContaining({ code: "LEGACY_API_METHOD_UNKNOWN" })]),
+      );
     } finally {
       await rm(legacyRoot, { recursive: true, force: true });
     }
@@ -3741,6 +3885,126 @@ describe("WorkflowService", () => {
     await expect(store.list()).resolves.toHaveLength(0);
   });
 
+  it("resumes a v0.3.1 local-only legacy Run without requiring stale draft artifacts", async () => {
+    const legacyRoot = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-legacy-local-"));
+    try {
+      await mkdir(path.join(legacyRoot, "src"), { recursive: true });
+      await writeFile(
+        path.join(legacyRoot, "src", "shop.ts"),
+        'export const shopRoute = { path: "/shop" };\n',
+        "utf8",
+      );
+      const started = await service.start({
+        projectRoot: directory,
+        legacyProjectRoot: legacyRoot,
+        requestText: "Migrate the local Shop screen without publication",
+        mode: "legacy",
+        changeKind: "migration",
+        publication: "none",
+      });
+      const legacyFeatureKey = started.legacyInventory?.entries[0]?.featureKey;
+      if (legacyFeatureKey === undefined) throw new Error("Missing runtime legacy inventory");
+
+      const run = await store.get(started.runId);
+      const staleDraftEvidenceBundle = createDraftEvidenceBundle({
+        mode: "legacy",
+        legacyProjectRoot: legacyRoot,
+      });
+      await store.save(
+        {
+          ...run,
+          revision: run.revision + 1,
+          updatedAt: new Date(Date.parse(run.updatedAt) + 1_000).toISOString(),
+          stages: run.stages.map((item) => {
+            if (item.name !== "intake" || item.checkpoint === undefined) return item;
+            const deliveryProfile = item.checkpoint.data["deliveryProfile"];
+            if (
+              typeof deliveryProfile !== "object" ||
+              deliveryProfile === null ||
+              Array.isArray(deliveryProfile)
+            ) {
+              throw new Error("Missing persisted delivery profile");
+            }
+            return {
+              ...item,
+              checkpoint: {
+                ...item.checkpoint,
+                data: {
+                  ...item.checkpoint.data,
+                  deliveryProfile: {
+                    ...deliveryProfile,
+                    draftEvidenceBundle: staleDraftEvidenceBundle,
+                  },
+                },
+              },
+            };
+          }),
+        },
+        run.revision,
+      );
+
+      const resumed = await service.status({ runId: started.runId });
+      expect(resumed.deliveryProfile.publication).toBe("none");
+      expect(resumed.deliveryProfile.draftEvidenceBundle).toBeUndefined();
+
+      const accepted = await service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "contracts",
+          status: "passed",
+          summary: "Captured the local-only Shop migration contract.",
+          artifactPaths: [
+            "contracts/requirements.json",
+            "contracts/legacy-baseline.md",
+            "visual/legacy.png",
+          ],
+          baselinePaths: ["contracts/legacy-baseline.md", "visual/legacy.png"],
+          requirementManifest: requirements("legacy-local-shop"),
+          legacyScopeKeys: [legacyFeatureKey],
+          legacyCoverage: [
+            {
+              featureKey: legacyFeatureKey,
+              requirementIds: ["legacy-local-shop"],
+              status: "planned",
+              targetFiles: [],
+              executableEvidencePaths: [],
+              rationale: "The persisted local-only Run keeps its selected Shop feature.",
+            },
+          ],
+          visualTargets: [
+            {
+              targetId: "legacy-local-shop",
+              name: "Legacy local Shop",
+              state: "default",
+              route: "/shop",
+              baselineKind: "legacy-screenshot",
+              baselinePath: "visual/legacy.png",
+              viewport: { width: 1, height: 1 },
+              deviceScaleFactor: 1,
+              fixture: "legacy:local-shop",
+              masks: [],
+            },
+          ],
+          legacyBaseline: {
+            scope: "local Shop route",
+            evidencePaths: ["contracts/legacy-baseline.md"],
+            checks: [
+              {
+                command: "pnpm test -- shop",
+                resultPath: "contracts/legacy-baseline.md",
+                status: "passed",
+              },
+            ],
+          },
+        },
+      });
+
+      expect(accepted.nextActions.map((action) => action.kind)).toContain("implement");
+    } finally {
+      await rm(legacyRoot, { recursive: true, force: true });
+    }
+  });
+
   it("blocks legacy contracts without a focused baseline", async () => {
     const legacyRoot = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-legacy-contract-"));
     await mkdir(path.join(legacyRoot, "src"), { recursive: true });
@@ -3760,6 +4024,7 @@ describe("WorkflowService", () => {
       changeKind: "migration",
       publication: "draft",
     });
+    expect(started.revision).toBeGreaterThan(0);
     const legacyFeatureKey = started.legacyInventory?.entries[0]?.featureKey;
     if (legacyFeatureKey === undefined) throw new Error("Missing runtime legacy inventory");
 
@@ -3777,68 +4042,139 @@ describe("WorkflowService", () => {
       }),
     ).rejects.toThrow(/baseline/i);
 
+    const draftEvidenceBundle = started.deliveryProfile.draftEvidenceBundle;
+    if (draftEvidenceBundle === undefined) throw new Error("Missing draft evidence bundle profile");
+    await mkdir(path.dirname(path.join(directory, draftEvidenceBundle.manifestPath)), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(directory, draftEvidenceBundle.manifestPath),
+      JSON.stringify({ placeholder: true }),
+      "utf8",
+    );
+    const contractSubmission = {
+      kind: "contracts",
+      status: "passed",
+      summary: "Captured current behavior and the requested delta.",
+      artifactPaths: [
+        "contracts/requirements.json",
+        "contracts/legacy-baseline.md",
+        "visual/legacy.png",
+        "test-results/unit.json",
+        draftEvidenceBundle.manifestPath,
+        "openspec/changes/migrate-shop-vue3/proposal.md",
+        "openspec/changes/migrate-shop-vue3/specs/shop-migration/spec.md",
+        "openspec/changes/migrate-shop-vue3/tasks.md",
+      ],
+      baselinePaths: ["contracts/legacy-baseline.md", "visual/legacy.png"],
+      requirementManifest: requirements("legacy-fix"),
+      legacyScopeKeys: [legacyFeatureKey],
+      legacyCoverage: [
+        {
+          featureKey: legacyFeatureKey,
+          requirementIds: ["legacy-fix"],
+          status: "planned",
+          targetFiles: [],
+          executableEvidencePaths: [],
+          rationale: "The parser route is explicitly planned for migration.",
+        },
+      ],
+      visualTargets: [
+        {
+          targetId: "legacy-parser",
+          name: "Legacy parser",
+          state: "default",
+          route: "/parser",
+          baselineKind: "legacy-screenshot",
+          baselinePath: "visual/legacy.png",
+          viewport: { width: 1, height: 1 },
+          deviceScaleFactor: 1,
+          fixture: "legacy:parser-default",
+          masks: [],
+        },
+      ],
+      legacyBaseline: {
+        scope: "parser behavior changed by this fix",
+        evidencePaths: ["contracts/legacy-baseline.md"],
+        checks: [
+          {
+            command: "pnpm test -- parser",
+            resultPath: "contracts/legacy-baseline.md",
+            status: "passed",
+          },
+        ],
+      },
+      draftBundle: {
+        manifestPath: draftEvidenceBundle.manifestPath,
+        changeName: "migrate-shop-vue3",
+        proposalPath: "openspec/changes/migrate-shop-vue3/proposal.md",
+        specPaths: ["openspec/changes/migrate-shop-vue3/specs/shop-migration/spec.md"],
+        tasksPath: "openspec/changes/migrate-shop-vue3/tasks.md",
+      },
+    } as const;
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: { ...contractSubmission, draftBundle: undefined },
+      }),
+    ).rejects.toThrow(/Draft bundle/i);
+    const wrongManifestPath = ".spec-to-pr/other/manifest.json";
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: {
+          ...contractSubmission,
+          artifactPaths: contractSubmission.artifactPaths.map((artifactPath) =>
+            artifactPath === draftEvidenceBundle.manifestPath ? wrongManifestPath : artifactPath,
+          ),
+          draftBundle: { ...contractSubmission.draftBundle, manifestPath: wrongManifestPath },
+        },
+      }),
+    ).rejects.toThrow(/manifest.*delivery profile/i);
+
+    await expect(
+      service.submit({ runId: started.runId, submission: contractSubmission }),
+    ).rejects.toThrow(/manifest.*schema/i);
+    const openSpecArtifact = (artifactPath: string) => ({
+      path: artifactPath,
+      digest: `sha256:${createHash("sha256").update(`${artifactPath}\n`).digest("hex")}`,
+    });
+    const draftManifest = {
+      schemaVersion: "draft-evidence-manifest-v1",
+      runId: started.runId,
+      runRevision: started.revision,
+      phase: "pre-implementation",
+      legacyRootDigest: started.legacyInventory?.rootDigest,
+      requirementIds: ["legacy-fix"],
+      openSpec: {
+        changeName: contractSubmission.draftBundle.changeName,
+        proposal: openSpecArtifact(contractSubmission.draftBundle.proposalPath),
+        specs: contractSubmission.draftBundle.specPaths.map(openSpecArtifact),
+        tasks: openSpecArtifact(contractSubmission.draftBundle.tasksPath),
+      },
+    } as const;
+    await writeFile(
+      path.join(directory, draftEvidenceBundle.manifestPath),
+      JSON.stringify(draftManifest),
+      "utf8",
+    );
+    await writeFile(
+      path.join(directory, contractSubmission.draftBundle.proposalPath),
+      "stale proposal\n",
+      "utf8",
+    );
+    await expect(
+      service.submit({ runId: started.runId, submission: contractSubmission }),
+    ).rejects.toThrow(/OpenSpec digest does not match/i);
+    await writeFile(
+      path.join(directory, contractSubmission.draftBundle.proposalPath),
+      `${contractSubmission.draftBundle.proposalPath}\n`,
+      "utf8",
+    );
+
     const accepted = await service.submit({
       runId: started.runId,
-      submission: {
-        kind: "contracts",
-        status: "passed",
-        summary: "Captured current behavior and the requested delta.",
-        artifactPaths: [
-          "contracts/requirements.json",
-          "contracts/legacy-baseline.md",
-          "visual/legacy.png",
-          "test-results/unit.json",
-          ".spec-to-pr/shop/manifest.json",
-          "openspec/changes/migrate-shop-vue3/proposal.md",
-          "openspec/changes/migrate-shop-vue3/specs/shop-migration/spec.md",
-          "openspec/changes/migrate-shop-vue3/tasks.md",
-        ],
-        baselinePaths: ["contracts/legacy-baseline.md", "visual/legacy.png"],
-        requirementManifest: requirements("legacy-fix"),
-        legacyScopeKeys: [legacyFeatureKey],
-        legacyCoverage: [
-          {
-            featureKey: legacyFeatureKey,
-            requirementIds: ["legacy-fix"],
-            status: "planned",
-            targetFiles: [],
-            executableEvidencePaths: [],
-            rationale: "The parser route is explicitly planned for migration.",
-          },
-        ],
-        visualTargets: [
-          {
-            targetId: "legacy-parser",
-            name: "Legacy parser",
-            state: "default",
-            route: "/parser",
-            baselineKind: "legacy-screenshot",
-            baselinePath: "visual/legacy.png",
-            viewport: { width: 1, height: 1 },
-            deviceScaleFactor: 1,
-            fixture: "legacy:parser-default",
-            masks: [],
-          },
-        ],
-        legacyBaseline: {
-          scope: "parser behavior changed by this fix",
-          evidencePaths: ["contracts/legacy-baseline.md"],
-          checks: [
-            {
-              command: "pnpm test -- parser",
-              resultPath: "contracts/legacy-baseline.md",
-              status: "passed",
-            },
-          ],
-        },
-        draftBundle: {
-          manifestPath: ".spec-to-pr/shop/manifest.json",
-          changeName: "migrate-shop-vue3",
-          proposalPath: "openspec/changes/migrate-shop-vue3/proposal.md",
-          specPaths: ["openspec/changes/migrate-shop-vue3/specs/shop-migration/spec.md"],
-          tasksPath: "openspec/changes/migrate-shop-vue3/tasks.md",
-        },
-      },
+      submission: contractSubmission,
     });
 
     expect(accepted.nextActions[0]?.kind).toBe("implement");
@@ -3859,7 +4195,11 @@ describe("WorkflowService", () => {
           summary: "Attempted implementation against a changed legacy source.",
           apiReady: false,
           uiChanged: true,
-          changedFiles: ["src/parser.ts", "test-results/unit.json"],
+          changedFiles: [
+            draftEvidenceBundle.manifestPath,
+            "src/parser.ts",
+            "test-results/unit.json",
+          ],
           artifactPaths: ["test-results/unit.json"],
         },
       }),
@@ -3888,7 +4228,11 @@ describe("WorkflowService", () => {
           summary: "Migration claimed without current coverage.",
           apiReady: false,
           uiChanged: true,
-          changedFiles: ["src/parser.ts", "test-results/unit.json"],
+          changedFiles: [
+            draftEvidenceBundle.manifestPath,
+            "src/parser.ts",
+            "test-results/unit.json",
+          ],
           artifactPaths: ["test-results/unit.json", "test-results/performance.json"],
           performanceEvidence,
         },
@@ -3902,7 +4246,7 @@ describe("WorkflowService", () => {
         summary: "Parser migration implemented and verified.",
         apiReady: false,
         uiChanged: true,
-        changedFiles: ["src/parser.ts", "test-results/unit.json"],
+        changedFiles: [draftEvidenceBundle.manifestPath, "src/parser.ts", "test-results/unit.json"],
         artifactPaths: ["test-results/unit.json", "test-results/performance.json"],
         legacyCoverage: [
           {
@@ -4340,7 +4684,7 @@ describe("WorkflowService", () => {
     await service.advance({ runId: started.runId, until: "report" });
     const report = await reportMarkdown(store, artifactStore, started.runId);
     expect(report).toContain("## 실행 메타데이터");
-    expect(report).toContain("<summary>Run, 입력 출처, 변경 파일, 증거 보기</summary>");
+    expect(report).toContain("<summary>실행 정보, 입력 출처, 변경 파일, 검증 자료 보기</summary>");
     expect(report).toContain("docs/architecture/ARCHITECTURE.md");
     expect(report).toContain("docs/rules&#92;n&#35;&#35; Injected heading");
     expect(report).not.toContain("\n## Injected heading");
@@ -4953,7 +5297,7 @@ describe("WorkflowService", () => {
     expect(report).not.toContain("checkout-states: 요구사항");
     expect(report).not.toContain("checkout-submit: 요구사항");
     expect(report).toContain("src/checkout.tsx");
-    expect(report).toMatch(/Diff digest \| sha256:[a-f0-9]{64} \|/);
+    expect(report).toMatch(/변경 해시 \| sha256:[a-f0-9]{64} \|/);
     expect(report).toContain("| 기능 리뷰 | 승인 | 1/1 통과 | 0건 |");
     expect(report).toContain("| 디자인·접근성 리뷰 | 승인 | 1/1 통과 | 0건 |");
     expect(report).not.toContain("## API");

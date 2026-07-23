@@ -5,9 +5,15 @@ import path from "node:path";
 import {
   type LegacyAstNode,
   isLegacyAstNode,
+  legacyAstNode as astNode,
+  legacyExportedSelection,
+  legacyIdentifierName as identifierName,
+  legacyLocalSelection,
   legacyMemberObject,
   legacyMemberProperty,
+  legacyProgramBody as programBody,
   legacyPropertyName,
+  legacyStringLiteralValue as stringLiteralValue,
   parseLegacySource,
   walkLegacyAst,
 } from "./legacy-parser.js";
@@ -54,12 +60,22 @@ export type LegacySourceGraphLimits = {
   maxElapsedMs: number;
 };
 
+export const LEGACY_SOURCE_DIGEST_ALGORITHM_V1 = "legacy-source-graph-v1" as const;
+export const LEGACY_SOURCE_DIGEST_ALGORITHM_V2 = "selected-exports-v2" as const;
+export type LegacySourceDigestAlgorithm =
+  typeof LEGACY_SOURCE_DIGEST_ALGORITHM_V1 | typeof LEGACY_SOURCE_DIGEST_ALGORITHM_V2;
+
+export type LegacySourceGraphOptions = {
+  digestAlgorithm?: LegacySourceDigestAlgorithm;
+};
+
 const DEFAULT_LIMITS: LegacySourceGraphLimits = {
   maxFiles: 1_000,
   maxBytes: 20 * 1024 * 1024,
   maxDepth: 32,
   maxElapsedMs: 5_000,
 };
+const MAX_ENVIRONMENT_EVIDENCE_FILES = 100;
 
 export type LegacyGraphFile = {
   absolutePath: string;
@@ -94,16 +110,33 @@ export type LegacySourceGraph = {
   edges: LegacyDependencyEdge[];
   aliases: Record<string, string>;
   environmentRefs: LegacyEnvironmentReference[];
+  digestAlgorithm: LegacySourceDigestAlgorithm;
   sourceDigest: `sha256:${string}`;
   truncated: boolean;
   truncation?: { limit: string; sourcePath: string };
 };
 
+type SourceReadBudget = {
+  limits: LegacySourceGraphLimits;
+  startedAt: number;
+  files: Map<string, { content: string }>;
+  scannedBytes: number;
+  truncation?: { limit: keyof LegacySourceGraphLimits; absolutePath: string };
+};
+
+type ExportInspection = {
+  readBudget: SourceReadBudget;
+  parsedFiles: Map<string, ReturnType<typeof parseLegacySource>>;
+  results: Map<string, boolean>;
+};
+
 export async function discoverLegacySourceGraph(
   featureRoot: string,
   limitOverrides: Partial<LegacySourceGraphLimits> = {},
+  options: LegacySourceGraphOptions = {},
 ): Promise<LegacySourceGraph> {
   const limits = { ...DEFAULT_LIMITS, ...limitOverrides };
+  const digestAlgorithm = options.digestAlgorithm ?? LEGACY_SOURCE_DIGEST_ALGORITHM_V2;
   const startedAt = Date.now();
   const canonicalFeatureRoot = await realpath(featureRoot);
   const applicationRoot = await findEnclosingApplicationRoot(canonicalFeatureRoot);
@@ -111,20 +144,47 @@ export async function discoverLegacySourceGraph(
   const ownedPaths = await collectOwnedSourceFiles(canonicalFeatureRoot, limits, startedAt);
   const files = new Map<string, LegacyGraphFile>();
   const edges: LegacyDependencyEdge[] = [];
+  const edgeKeys = new Set<string>();
   const environmentSources = new Map<
     string,
     { runtime: LegacyEnvironmentReference["runtime"]; sourcePaths: Set<string> }
   >();
-  let scannedBytes = 0;
+  const readBudget: SourceReadBudget = {
+    limits,
+    startedAt,
+    files: new Map(),
+    scannedBytes: 0,
+  };
+  const exportInspection: ExportInspection = {
+    readBudget,
+    parsedFiles: new Map(),
+    results: new Map(),
+  };
   let truncation: LegacySourceGraph["truncation"];
 
   const pending: Array<{
     absolutePath: string;
     ownership: LegacyGraphFile["ownership"];
+    requestedExports?: string[];
   }> = ownedPaths.map((absolutePath) => ({ absolutePath, ownership: "feature" }));
-  while (pending.length > 0) {
+  const fullyExpanded = new Set<string>();
+  const expandedExports = new Map<string, Set<string>>();
+  traversal: while (pending.length > 0) {
     const next = pending.shift()!;
-    if (files.has(next.absolutePath)) continue;
+    let requestedExports: string[] | undefined;
+    if (next.requestedExports === undefined) {
+      if (fullyExpanded.has(next.absolutePath)) continue;
+      fullyExpanded.add(next.absolutePath);
+    } else {
+      if (fullyExpanded.has(next.absolutePath)) continue;
+      const expanded = expandedExports.get(next.absolutePath) ?? new Set<string>();
+      requestedExports = [...new Set(next.requestedExports)].filter(
+        (selector) => !expanded.has(selector),
+      );
+      if (requestedExports.length === 0) continue;
+      requestedExports.forEach((selector) => expanded.add(selector));
+      expandedExports.set(next.absolutePath, expanded);
+    }
     if (Date.now() - startedAt >= limits.maxElapsedMs) {
       truncation = {
         limit: "maxElapsedMs",
@@ -132,66 +192,95 @@ export async function discoverLegacySourceGraph(
       };
       break;
     }
-    if (files.size >= limits.maxFiles) {
-      truncation = {
-        limit: "maxFiles",
-        sourcePath: publicGraphPath(next.absolutePath, canonicalFeatureRoot, applicationRoot),
+
+    let graphFile = files.get(next.absolutePath);
+    if (graphFile === undefined) {
+      const source = await readBudgetedSourceFile(next.absolutePath, readBudget);
+      if (readBudget.truncation !== undefined) {
+        truncation = publicTruncation(readBudget.truncation, canonicalFeatureRoot, applicationRoot);
+        break;
+      }
+      if (source === undefined) continue;
+      const content = source.content;
+      const sourcePath = publicGraphPath(next.absolutePath, canonicalFeatureRoot, applicationRoot);
+      graphFile = {
+        absolutePath: next.absolutePath,
+        sourcePath,
+        applicationRelativePath: path
+          .relative(applicationRoot, next.absolutePath)
+          .split(path.sep)
+          .join("/"),
+        content,
+        digest: `sha256:${createHash("sha256").update(content).digest("hex")}`,
+        ownership: next.ownership,
       };
-      break;
+      files.set(next.absolutePath, graphFile);
     }
-    const details = await lstat(next.absolutePath);
-    if (!details.isFile() || details.isSymbolicLink()) continue;
-    if (scannedBytes + details.size > limits.maxBytes) {
-      truncation = {
-        limit: "maxBytes",
-        sourcePath: publicGraphPath(next.absolutePath, canonicalFeatureRoot, applicationRoot),
-      };
-      break;
-    }
-    const content = await readFile(next.absolutePath, "utf8");
-    scannedBytes += Buffer.byteLength(content, "utf8");
-    const sourcePath = publicGraphPath(next.absolutePath, canonicalFeatureRoot, applicationRoot);
-    const graphFile: LegacyGraphFile = {
-      absolutePath: next.absolutePath,
-      sourcePath,
-      applicationRelativePath: path
-        .relative(applicationRoot, next.absolutePath)
-        .split(path.sep)
-        .join("/"),
-      content,
-      digest: `sha256:${createHash("sha256").update(content).digest("hex")}`,
-      ownership: next.ownership,
-    };
-    files.set(next.absolutePath, graphFile);
 
     if (!SCRIPT_EXTENSION.test(next.absolutePath)) continue;
-    for (const environment of discoverEnvironmentReferences(content, next.absolutePath)) {
+    for (const environment of discoverEnvironmentReferences(graphFile.content, next.absolutePath)) {
       const key = `${environment.runtime}:${environment.name}`;
       const existing = environmentSources.get(key) ?? {
         runtime: environment.runtime,
         sourcePaths: new Set<string>(),
       };
-      existing.sourcePaths.add(sourcePath);
+      existing.sourcePaths.add(graphFile.sourcePath);
       environmentSources.set(key, existing);
     }
-    for (const specifier of discoverModuleSpecifiers(content, next.absolutePath)) {
+    const references: LegacyModuleReference[] =
+      digestAlgorithm === LEGACY_SOURCE_DIGEST_ALGORITHM_V1
+        ? discoverModuleSpecifiers(graphFile.content, next.absolutePath).map((specifier) => ({
+            specifier,
+          }))
+        : discoverModuleReferences(graphFile.content, next.absolutePath, requestedExports);
+    for (const reference of references) {
       const resolved = await resolveGraphDependency({
         importer: next.absolutePath,
-        specifier,
+        specifier: reference.specifier,
         applicationRoot,
         aliases,
       });
-      if (resolved === undefined || files.has(resolved.absolutePath)) continue;
-      edges.push({
-        importer: sourcePath,
-        specifier,
-        resolvedPath: path
-          .relative(applicationRoot, resolved.absolutePath)
-          .split(path.sep)
-          .join("/"),
-        resolver: resolved.resolver,
+      if (resolved === undefined) continue;
+      if (
+        digestAlgorithm === LEGACY_SOURCE_DIGEST_ALGORITHM_V2 &&
+        reference.requiredExports !== undefined &&
+        !(await sourceDirectlyExports(
+          resolved.absolutePath,
+          reference.requiredExports,
+          exportInspection,
+        ))
+      ) {
+        if (readBudget.truncation !== undefined) {
+          truncation = publicTruncation(
+            readBudget.truncation,
+            canonicalFeatureRoot,
+            applicationRoot,
+          );
+          break traversal;
+        }
+        continue;
+      }
+      const resolvedPath = path
+        .relative(applicationRoot, resolved.absolutePath)
+        .split(path.sep)
+        .join("/");
+      const edgeKey = `${graphFile.sourcePath}\0${reference.specifier}\0${resolvedPath}`;
+      if (!edgeKeys.has(edgeKey)) {
+        edgeKeys.add(edgeKey);
+        edges.push({
+          importer: graphFile.sourcePath,
+          specifier: reference.specifier,
+          resolvedPath,
+          resolver: resolved.resolver,
+        });
+      }
+      pending.push({
+        absolutePath: resolved.absolutePath,
+        ownership: "supporting-dependency",
+        ...(reference.requestedExports === undefined
+          ? {}
+          : { requestedExports: reference.requestedExports }),
       });
-      pending.push({ absolutePath: resolved.absolutePath, ownership: "supporting-dependency" });
     }
   }
 
@@ -203,7 +292,11 @@ export async function discoverLegacySourceGraph(
       sourcePaths: [...value.sourcePaths].sort(),
     })),
     applicationRoot,
+    readBudget,
   );
+  if (truncation === undefined && readBudget.truncation !== undefined) {
+    truncation = publicTruncation(readBudget.truncation, canonicalFeatureRoot, applicationRoot);
+  }
   const allFiles = [...files.values()].sort((left, right) =>
     left.applicationRelativePath.localeCompare(right.applicationRelativePath),
   );
@@ -224,9 +317,63 @@ export async function discoverLegacySourceGraph(
     ),
     aliases,
     environmentRefs,
+    digestAlgorithm,
     sourceDigest: `sha256:${sourceHash.digest("hex")}`,
     truncated: truncation !== undefined,
     ...(truncation === undefined ? {} : { truncation }),
+  };
+}
+
+async function readBudgetedSourceFile(
+  absolutePath: string,
+  budget: SourceReadBudget,
+): Promise<{ content: string } | undefined> {
+  if (budget.truncation !== undefined) return undefined;
+  if (Date.now() - budget.startedAt >= budget.limits.maxElapsedMs) {
+    budget.truncation = { limit: "maxElapsedMs", absolutePath };
+    return undefined;
+  }
+  const cached = budget.files.get(absolutePath);
+  if (cached !== undefined) return cached;
+  let details;
+  try {
+    details = await lstat(absolutePath);
+  } catch {
+    return undefined;
+  }
+  if (!details.isFile() || details.isSymbolicLink()) return undefined;
+  if (budget.files.size >= budget.limits.maxFiles) {
+    budget.truncation = { limit: "maxFiles", absolutePath };
+    return undefined;
+  }
+  if (budget.scannedBytes + details.size > budget.limits.maxBytes) {
+    budget.truncation = { limit: "maxBytes", absolutePath };
+    return undefined;
+  }
+  const content = await readFile(absolutePath, "utf8");
+  const byteLength = Buffer.byteLength(content, "utf8");
+  if (budget.scannedBytes + byteLength > budget.limits.maxBytes) {
+    budget.truncation = { limit: "maxBytes", absolutePath };
+    return undefined;
+  }
+  if (Date.now() - budget.startedAt >= budget.limits.maxElapsedMs) {
+    budget.truncation = { limit: "maxElapsedMs", absolutePath };
+    return undefined;
+  }
+  const source = { content };
+  budget.files.set(absolutePath, source);
+  budget.scannedBytes += byteLength;
+  return source;
+}
+
+function publicTruncation(
+  truncation: NonNullable<SourceReadBudget["truncation"]>,
+  featureRoot: string,
+  applicationRoot: string,
+): NonNullable<LegacySourceGraph["truncation"]> {
+  return {
+    limit: truncation.limit,
+    sourcePath: publicGraphPath(truncation.absolutePath, featureRoot, applicationRoot),
   };
 }
 
@@ -335,6 +482,12 @@ async function collectOwnedSourceFiles(
   return result.sort();
 }
 
+type LegacyModuleReference = {
+  specifier: string;
+  requestedExports?: string[];
+  requiredExports?: string[];
+};
+
 function discoverModuleSpecifiers(content: string, filePath: string): string[] {
   const parsed = parseLegacySource(content, filePath);
   const specifiers = new Set<string>();
@@ -342,32 +495,206 @@ function discoverModuleSpecifiers(content: string, filePath: string): string[] {
     if (
       ["ImportDeclaration", "ExportNamedDeclaration", "ExportAllDeclaration"].includes(node.type)
     ) {
-      const source = node["source"];
-      if (
-        isLegacyAstNode(source) &&
-        source.type === "StringLiteral" &&
-        typeof source["value"] === "string"
-      ) {
-        specifiers.add(source["value"]);
-      }
-    } else if (isCallNode(node)) {
-      const callee = node["callee"];
-      const args = node["arguments"];
-      if (
-        isLegacyAstNode(callee) &&
-        callee.type === "Identifier" &&
-        callee["name"] === "require" &&
-        Array.isArray(args) &&
-        args.length === 1 &&
-        isLegacyAstNode(args[0]) &&
-        args[0].type === "StringLiteral" &&
-        typeof args[0]["value"] === "string"
-      ) {
-        specifiers.add(args[0]["value"]);
-      }
+      const source = stringLiteralValue(astNode(node["source"]));
+      if (source !== undefined) specifiers.add(source);
+      return;
+    }
+    if (!isCallNode(node)) return;
+    const callee = astNode(node["callee"]);
+    const args = node["arguments"];
+    if (
+      callee?.type === "Identifier" &&
+      callee["name"] === "require" &&
+      Array.isArray(args) &&
+      args.length === 1
+    ) {
+      const source = stringLiteralValue(astNode(args[0]));
+      if (source !== undefined) specifiers.add(source);
     }
   });
   return [...specifiers].sort();
+}
+
+function discoverModuleReferences(
+  content: string,
+  filePath: string,
+  requestedExports?: string[],
+): LegacyModuleReference[] {
+  const parsed = parseLegacySource(content, filePath);
+  const references = new Map<string, Set<string> | undefined>();
+  const conditionalExports = new Map<string, Set<string>>();
+  const unconditionalReferences = new Set<string>();
+  const addReference = (source: string, selectors?: string[], requiredExports?: string[]): void => {
+    addModuleReference(references, source, selectors);
+    if (requiredExports === undefined) {
+      unconditionalReferences.add(source);
+      conditionalExports.delete(source);
+      return;
+    }
+    if (unconditionalReferences.has(source)) return;
+    const existing = conditionalExports.get(source) ?? new Set<string>();
+    requiredExports.forEach((name) => existing.add(name));
+    conditionalExports.set(source, existing);
+  };
+  const relevantNodes = relevantExportNodes(parsed.root, requestedExports);
+
+  for (const statement of programBody(parsed.root)) {
+    if (statement.type === "ImportDeclaration") {
+      const source = stringLiteralValue(astNode(statement["source"]));
+      if (source === undefined) continue;
+      const specifiers = Array.isArray(statement["specifiers"])
+        ? statement["specifiers"].filter(isLegacyAstNode)
+        : [];
+      if (specifiers.length === 0) {
+        addReference(source);
+        continue;
+      }
+      for (const specifier of specifiers) {
+        const local = identifierName(specifier["local"]);
+        if (local === undefined) continue;
+        const imported =
+          specifier.type === "ImportDefaultSpecifier"
+            ? "default"
+            : specifier.type === "ImportNamespaceSpecifier"
+              ? "*"
+              : legacyPropertyName(astNode(specifier["imported"]));
+        if (imported === undefined) continue;
+        const selectors = importedBindingSelectors(relevantNodes, local, imported);
+        if (selectors.length > 0) addReference(source, selectors);
+      }
+      continue;
+    }
+    if (statement.type !== "ExportNamedDeclaration" && statement.type !== "ExportAllDeclaration") {
+      continue;
+    }
+    const source = stringLiteralValue(astNode(statement["source"]));
+    if (source === undefined) continue;
+    if (statement.type === "ExportAllDeclaration") {
+      addReference(source, requestedExports, requestedExports);
+      continue;
+    }
+    const specifiers = Array.isArray(statement["specifiers"])
+      ? statement["specifiers"].filter(isLegacyAstNode)
+      : [];
+    if (requestedExports === undefined || requestedExports.includes("*")) {
+      const selectors = specifiers.flatMap((specifier) => {
+        const local = legacyPropertyName(astNode(specifier["local"]));
+        return local === undefined ? [] : [local];
+      });
+      addReference(source, selectors.length === 0 ? undefined : selectors);
+      continue;
+    }
+    const forwarded: string[] = [];
+    for (const selector of requestedExports) {
+      const [base, ...members] = selector.split(".");
+      for (const specifier of specifiers) {
+        if (legacyPropertyName(astNode(specifier["exported"])) !== base) continue;
+        const local = legacyPropertyName(astNode(specifier["local"]));
+        if (local !== undefined) forwarded.push([local, ...members].join("."));
+      }
+    }
+    if (forwarded.length > 0) addReference(source, forwarded);
+  }
+
+  for (const relevant of relevantNodes) {
+    walkLegacyAst(relevant, (node) => {
+      if (!isCallNode(node)) return;
+      const callee = astNode(node["callee"]);
+      const args = node["arguments"];
+      if (
+        callee?.type === "Identifier" &&
+        callee["name"] === "require" &&
+        Array.isArray(args) &&
+        args.length === 1
+      ) {
+        const source = stringLiteralValue(astNode(args[0]));
+        if (source !== undefined) addReference(source);
+      }
+    });
+  }
+
+  return [...references.entries()]
+    .map(([specifier, selectors]) => ({
+      specifier,
+      ...(selectors === undefined ? {} : { requestedExports: [...selectors].sort() }),
+      ...(conditionalExports.has(specifier)
+        ? { requiredExports: [...conditionalExports.get(specifier)!].sort() }
+        : {}),
+    }))
+    .sort((left, right) => left.specifier.localeCompare(right.specifier));
+}
+
+function addModuleReference(
+  references: Map<string, Set<string> | undefined>,
+  source: string,
+  selectors?: string[],
+): void {
+  if (references.has(source) && references.get(source) === undefined) return;
+  if (selectors === undefined || selectors.includes("*")) {
+    references.set(source, undefined);
+    return;
+  }
+  const existing = references.get(source) ?? new Set<string>();
+  selectors.forEach((selector) => existing.add(selector));
+  references.set(source, existing);
+}
+
+function importedBindingSelectors(
+  relevantNodes: LegacyAstNode[],
+  local: string,
+  imported: string,
+): string[] {
+  const selectors = new Set<string>();
+  for (const relevant of relevantNodes) {
+    walkLegacyAst(relevant, (node, parent) => {
+      if (node.type !== "Identifier" || node["name"] !== local) return;
+      if (
+        parent !== undefined &&
+        ["ImportSpecifier", "ImportDefaultSpecifier", "ImportNamespaceSpecifier"].includes(
+          parent.type,
+        )
+      ) {
+        return;
+      }
+      if (
+        parent !== undefined &&
+        ["MemberExpression", "OptionalMemberExpression"].includes(parent.type) &&
+        astNode(parent["object"]) === node
+      ) {
+        const property = legacyMemberProperty(parent);
+        if (property !== undefined) {
+          selectors.add(imported === "*" ? property : `${imported}.${property}`);
+          return;
+        }
+      }
+      selectors.add(imported);
+    });
+  }
+  return [...selectors];
+}
+
+function relevantExportNodes(root: LegacyAstNode, requestedExports?: string[]): LegacyAstNode[] {
+  if (requestedExports === undefined || requestedExports.includes("*")) return [root];
+  const result: LegacyAstNode[] = [];
+  const seen = new Set<LegacyAstNode>();
+  const pending = requestedExports.flatMap((selector) => {
+    const selected = legacyExportedSelection(root, selector);
+    return selected === undefined ? [] : [selected];
+  });
+  while (pending.length > 0) {
+    const selected = pending.shift()!;
+    if (seen.has(selected)) continue;
+    seen.add(selected);
+    result.push(selected);
+    walkLegacyAst(selected, (node) => {
+      if (!isCallNode(node)) return;
+      const callee = astNode(node["callee"]);
+      const localName = callee === undefined ? undefined : identifierName(callee);
+      const local = localName === undefined ? undefined : legacyLocalSelection(root, localName);
+      if (local !== undefined && !seen.has(local)) pending.push(local);
+    });
+  }
+  return result;
 }
 
 function discoverEnvironmentReferences(
@@ -453,6 +780,106 @@ async function resolveSourceFile(candidate: string): Promise<string | undefined>
   return undefined;
 }
 
+async function sourceDirectlyExports(
+  absolutePath: string,
+  requestedExports: string[],
+  inspection: ExportInspection,
+  visited = new Set<string>(),
+  depth = 0,
+): Promise<boolean> {
+  if (!SCRIPT_EXTENSION.test(absolutePath)) return true;
+  if (visited.has(absolutePath)) return false;
+  if (Date.now() - inspection.readBudget.startedAt >= inspection.readBudget.limits.maxElapsedMs) {
+    inspection.readBudget.truncation = { limit: "maxElapsedMs", absolutePath };
+    return false;
+  }
+  if (depth > inspection.readBudget.limits.maxDepth) {
+    inspection.readBudget.truncation = { limit: "maxDepth", absolutePath };
+    return false;
+  }
+  const requestedNames = [
+    ...new Set(requestedExports.map((selector) => selector.split(".")[0]!)),
+  ].sort();
+  const resultKey = `${absolutePath}\0${requestedNames.join("\0")}`;
+  const cached = inspection.results.get(resultKey);
+  if (cached !== undefined) return cached;
+  visited.add(absolutePath);
+  const source = await readBudgetedSourceFile(absolutePath, inspection.readBudget);
+  if (source === undefined) return false;
+  let parsed = inspection.parsedFiles.get(absolutePath);
+  if (parsed === undefined) {
+    parsed = parseLegacySource(source.content, absolutePath);
+    inspection.parsedFiles.set(absolutePath, parsed);
+  }
+  if (Date.now() - inspection.readBudget.startedAt >= inspection.readBudget.limits.maxElapsedMs) {
+    inspection.readBudget.truncation = { limit: "maxElapsedMs", absolutePath };
+    return false;
+  }
+  const requestedNameSet = new Set(requestedNames);
+  const exportAllSources: string[] = [];
+  for (const statement of programBody(parsed.root)) {
+    if (statement.type === "ExportAllDeclaration") {
+      const source = stringLiteralValue(astNode(statement["source"]));
+      if (source !== undefined) exportAllSources.push(source);
+      continue;
+    }
+    if (statement.type === "ExportDefaultDeclaration" && requestedNameSet.has("default")) {
+      inspection.results.set(resultKey, true);
+      return true;
+    }
+    if (statement.type !== "ExportNamedDeclaration") continue;
+    const declaration = astNode(statement["declaration"]);
+    if (declaration !== undefined) {
+      const names =
+        declaration.type === "VariableDeclaration" && Array.isArray(declaration["declarations"])
+          ? declaration["declarations"].flatMap((item) => {
+              const name = isLegacyAstNode(item) ? identifierName(item["id"]) : undefined;
+              return name === undefined ? [] : [name];
+            })
+          : [identifierName(declaration["id"])].filter(
+              (name): name is string => name !== undefined,
+            );
+      if (names.some((name) => requestedNameSet.has(name))) {
+        inspection.results.set(resultKey, true);
+        return true;
+      }
+    }
+    if (!Array.isArray(statement["specifiers"])) continue;
+    if (
+      statement["specifiers"].some(
+        (specifier) =>
+          isLegacyAstNode(specifier) &&
+          requestedNameSet.has(legacyPropertyName(astNode(specifier["exported"])) ?? ""),
+      )
+    ) {
+      inspection.results.set(resultKey, true);
+      return true;
+    }
+  }
+  const namedRequests = requestedExports.filter((selector) => !selector.startsWith("default"));
+  if (namedRequests.length === 0) {
+    inspection.results.set(resultKey, false);
+    return false;
+  }
+  for (const source of exportAllSources) {
+    if (!source.startsWith(".")) {
+      inspection.results.set(resultKey, true);
+      return true;
+    }
+    const target = await resolveSourceFile(path.resolve(path.dirname(absolutePath), source));
+    if (
+      target !== undefined &&
+      (await sourceDirectlyExports(target, namedRequests, inspection, new Set(visited), depth + 1))
+    ) {
+      inspection.results.set(resultKey, true);
+      return true;
+    }
+    if (inspection.readBudget.truncation !== undefined) return false;
+  }
+  inspection.results.set(resultKey, false);
+  return false;
+}
+
 function dependencyKind(
   specifier: string,
   fallback: "relative-import" | "alias",
@@ -470,21 +897,53 @@ async function enrichEnvironmentReferences(
     sourcePaths: string[];
   }>,
   applicationRoot: string,
+  readBudget: SourceReadBudget,
 ): Promise<LegacyEnvironmentReference[]> {
+  if (references.length === 0 || readBudget.truncation !== undefined) {
+    return references
+      .map((reference) => ({
+        runtime: reference.runtime,
+        name: reference.name,
+        sourcePaths: reference.sourcePaths,
+      }))
+      .sort((left, right) =>
+        `${left.runtime}:${left.name}`.localeCompare(`${right.runtime}:${right.name}`),
+      );
+  }
   const envFiles: string[] = [];
+  let envFileCount = 0;
   const directory = await opendir(applicationRoot);
   for await (const entry of directory) {
+    if (Date.now() - readBudget.startedAt >= readBudget.limits.maxElapsedMs) {
+      readBudget.truncation = {
+        limit: "maxElapsedMs",
+        absolutePath: path.join(applicationRoot, entry.name),
+      };
+      break;
+    }
     if (entry.isFile() && /^\.env(?:\..+)?$/u.test(entry.name)) {
+      envFileCount += 1;
       envFiles.push(path.join(applicationRoot, entry.name));
+      envFiles.sort();
+      if (envFiles.length > MAX_ENVIRONMENT_EVIDENCE_FILES + 1) {
+        envFiles.pop();
+      }
     }
   }
-  envFiles.sort();
-  const contents = await Promise.all(
-    envFiles.map(async (envFile) => ({
-      sourceName: path.basename(envFile),
-      text: await readFile(envFile, "utf8"),
-    })),
-  );
+  const contents: Array<{ sourceName: string; text: string }> = [];
+  if (readBudget.truncation === undefined) {
+    for (const envFile of envFiles.slice(0, MAX_ENVIRONMENT_EVIDENCE_FILES)) {
+      const source = await readBudgetedSourceFile(envFile, readBudget);
+      if (source === undefined) break;
+      contents.push({ sourceName: path.basename(envFile), text: source.content });
+    }
+  }
+  if (readBudget.truncation === undefined && envFileCount > MAX_ENVIRONMENT_EVIDENCE_FILES) {
+    readBudget.truncation = {
+      limit: "maxFiles",
+      absolutePath: envFiles[MAX_ENVIRONMENT_EVIDENCE_FILES] ?? path.join(applicationRoot, ".env"),
+    };
+  }
   return references
     .map((reference) => {
       const origins = new Set<string>();

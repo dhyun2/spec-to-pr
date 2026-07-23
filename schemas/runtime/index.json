@@ -6,6 +6,7 @@
     "artifact-ref.schema.json",
     "check-result.schema.json",
     "decision.schema.json",
+    "draft-evidence-manifest.schema.json",
     "evidence-ref.schema.json",
     "gap.schema.json",
     "run-manifest.schema.json",

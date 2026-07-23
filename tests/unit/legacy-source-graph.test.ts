@@ -3,7 +3,11 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { discoverLegacySourceGraph } from "../../src/legacy/legacy-source-graph.js";
+import {
+  LEGACY_SOURCE_DIGEST_ALGORITHM_V1,
+  LEGACY_SOURCE_DIGEST_ALGORITHM_V2,
+  discoverLegacySourceGraph,
+} from "../../src/legacy/legacy-source-graph.js";
 
 const temporaryRoots: string[] = [];
 
@@ -14,6 +18,100 @@ afterEach(async () => {
 });
 
 describe("legacy source graph", () => {
+  it("follows only the requested symbol through a supporting barrel", async () => {
+    const project = await vueFixture({
+      "src/modules/shop/profile.ts":
+        'import { loadProfile } from "@/api"; export const profile = (id) => loadProfile(id);',
+      "src/api/index.ts": ['export * from "./profileApi";', 'export * from "./ordersApi";'].join(
+        "\n",
+      ),
+      "src/api/profileApi.ts":
+        'import axios from "axios"; export const loadProfile = (id) => axios.get(`/profiles/${id}`);',
+      "src/api/ordersApi.ts":
+        'import axios from "axios"; export const loadOrders = () => axios.get("/orders");',
+    });
+
+    const graph = await discoverLegacySourceGraph(path.join(project, "src/modules/shop"));
+
+    expect(graph.digestAlgorithm).toBe(LEGACY_SOURCE_DIGEST_ALGORITHM_V2);
+    expect(graph.supportingFiles.map((file) => file.applicationRelativePath)).toEqual([
+      "src/api/index.ts",
+      "src/api/profileApi.ts",
+    ]);
+    expect(JSON.stringify(graph)).not.toContain("ordersApi.ts");
+
+    await writeFile(
+      path.join(project, "src/api/ordersApi.ts"),
+      'export const loadOrders = () => fetch("/changed-but-unreferenced");\n',
+      "utf8",
+    );
+    const afterSiblingChange = await discoverLegacySourceGraph(
+      path.join(project, "src/modules/shop"),
+    );
+    expect(afterSiblingChange.sourceDigest).toBe(graph.sourceDigest);
+  });
+
+  it("can reproduce the 0.3.1 all-import source digest for persisted Runs", async () => {
+    const project = await vueFixture({
+      "src/modules/shop/profile.ts":
+        'import { loadProfile } from "@/api"; export const profile = (id) => loadProfile(id);',
+      "src/api/index.ts": ['export * from "./profileApi";', 'export * from "./ordersApi";'].join(
+        "\n",
+      ),
+      "src/api/profileApi.ts":
+        'import axios from "axios"; export const loadProfile = (id) => axios.get(`/profiles/${id}`);',
+      "src/api/ordersApi.ts":
+        'import axios from "axios"; export const loadOrders = () => axios.get("/orders");',
+    });
+
+    const selected = await discoverLegacySourceGraph(path.join(project, "src/modules/shop"));
+    const legacy = await discoverLegacySourceGraph(
+      path.join(project, "src/modules/shop"),
+      {},
+      { digestAlgorithm: LEGACY_SOURCE_DIGEST_ALGORITHM_V1 },
+    );
+
+    expect(legacy.digestAlgorithm).toBe(LEGACY_SOURCE_DIGEST_ALGORITHM_V1);
+    expect(legacy.supportingFiles.map((file) => file.applicationRelativePath)).toEqual([
+      "src/api/index.ts",
+      "src/api/ordersApi.ts",
+      "src/api/profileApi.ts",
+    ]);
+    expect(legacy.sourceDigest).not.toBe(selected.sourceDigest);
+  });
+
+  it("counts export inspection reads against the graph budget and reports truncation", async () => {
+    const featureSource =
+      'import { missingExport } from "@/api"; export const profile = missingExport;';
+    const exports = Object.fromEntries(
+      Array.from({ length: 5 }, (_, index) => [
+        `src/api/unrelated-${index}.ts`,
+        `export const unrelated${index} = ${index};`,
+      ]),
+    );
+    const project = await vueFixture({
+      "src/modules/shop/profile.ts": featureSource,
+      "src/api/index.ts": Array.from(
+        { length: 5 },
+        (_, index) => `export * from "./unrelated-${index}";`,
+      ).join("\n"),
+      ...exports,
+    });
+
+    const graph = await discoverLegacySourceGraph(path.join(project, "src/modules/shop"), {
+      maxFiles: 3,
+    });
+
+    expect(graph.truncated).toBe(true);
+    expect(graph.truncation?.limit).toBe("maxFiles");
+
+    const byteLimited = await discoverLegacySourceGraph(path.join(project, "src/modules/shop"), {
+      maxBytes: Buffer.byteLength(`${featureSource}\n`, "utf8") + 1,
+    });
+    expect(byteLimited.truncated).toBe(true);
+    expect(byteLimited.truncation?.limit).toBe("maxBytes");
+  });
+
   it("resolves an enclosing Vue alias without discovering sibling features", async () => {
     const project = await vueFixture({
       "src/modules/shop/api.js":
@@ -51,6 +149,38 @@ describe("legacy source graph", () => {
       }),
     ]);
     expect(JSON.stringify(graph)).not.toContain("must-not-appear");
+  });
+
+  it("bounds environment evidence with the shared source-read budget", async () => {
+    const featureSource = "export const url = `${process.env.VUE_APP_API_GW_V2_URL}shop`;";
+    const environmentFiles = Object.fromEntries(
+      Array.from({ length: 101 }, (_, index) => [
+        `.env.${String(index).padStart(3, "0")}`,
+        "VUE_APP_API_GW_V2_URL=https://fairway.example/v2/",
+      ]),
+    );
+    const project = await vueFixture({
+      "src/modules/shop/api.js": featureSource,
+      ...environmentFiles,
+    });
+
+    const graph = await discoverLegacySourceGraph(path.join(project, "src/modules/shop"));
+
+    expect(graph.truncated).toBe(true);
+    expect(graph.truncation).toEqual({
+      limit: "maxFiles",
+      sourcePath: "@app/.env.100",
+    });
+    expect(graph.environmentRefs[0]?.sanitizedOrigins).toHaveLength(100);
+
+    const byteLimited = await discoverLegacySourceGraph(path.join(project, "src/modules/shop"), {
+      maxBytes: Buffer.byteLength(`${featureSource}\n`, "utf8") + 1,
+    });
+    expect(byteLimited.truncated).toBe(true);
+    expect(byteLimited.truncation).toEqual({
+      limit: "maxBytes",
+      sourcePath: "@app/.env.000",
+    });
   });
 
   it("keeps ordinary app directories and falls back to the feature root without a package marker", async () => {

@@ -103,6 +103,49 @@ describe("plugin layout", () => {
     expect(gitignore.split(/\r?\n/)).toContain("docs/superpowers/");
   });
 
+  it("ships the strict draft evidence manifest contract and documents every allowed field", () => {
+    const index = JSON.parse(
+      readFileSync(path.join(root, "schemas", "runtime", "index.json"), "utf8"),
+    ) as { dialect: string; files: string[] };
+    const manifest = JSON.parse(
+      readFileSync(
+        path.join(root, "schemas", "runtime", "draft-evidence-manifest.schema.json"),
+        "utf8",
+      ),
+    ) as {
+      $schema: string;
+      additionalProperties: boolean;
+      required: string[];
+      properties: Record<string, unknown>;
+    };
+    const intakeSkill = readFileSync(
+      path.join(root, "skills", "intake-contracts", "SKILL.md"),
+      "utf8",
+    );
+
+    expect(index.dialect).toBe("https://json-schema.org/draft/2020-12/schema");
+    expect(index.files).toContain("draft-evidence-manifest.schema.json");
+    expect(manifest.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
+    expect(manifest.additionalProperties).toBe(false);
+    expect(manifest.required).toEqual([
+      "schemaVersion",
+      "runId",
+      "runRevision",
+      "phase",
+      "legacyRootDigest",
+      "requirementIds",
+      "openSpec",
+    ]);
+    expect(Object.keys(manifest.properties)).toEqual(manifest.required);
+    for (const field of manifest.required) {
+      expect(intakeSkill).toContain(`"${field}"`);
+    }
+    expect(intakeSkill).toContain('"digest": "sha256:<64 lowercase hex characters>"');
+    expect(intakeSkill).toContain("exact file bytes");
+    expect(intakeSkill).toContain("accepts no additional fields");
+    expect(intakeSkill).not.toMatch(/["`]\s*head(?:Sha)?\s*["`]/iu);
+  });
+
   it("keeps runtime dependencies limited to the production bundle", () => {
     const packageJson = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")) as {
       dependencies: Record<string, string>;

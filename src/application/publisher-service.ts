@@ -40,6 +40,7 @@ import {
   type ReportDecision,
   type WorkflowReportIntent,
 } from "../pr-report/pr-report-model.js";
+import { redactSecretShapes } from "../pr-report/markdown-safe.js";
 import { RunManifestSchema, RunSummarySchema, summarizeRun } from "../run/index.js";
 import { AgentResultSchema } from "../runtime/agent-result.js";
 import { ArtifactRefSchema } from "../runtime/artifact.js";
@@ -62,6 +63,37 @@ type VisualPreviewPolicy = {
   includeBrowser?: boolean;
   includeDiff?: boolean;
 };
+
+type VisualPreviewContext = {
+  name: string;
+  route: string;
+  state: string;
+  viewport: { width: number; height: number };
+  deviceScaleFactor: number;
+};
+
+type VisualPreviewResult = VisualReport["results"][number] & {
+  context?: VisualPreviewContext;
+};
+
+type VisualPreviewReport = Omit<VisualReport, "results"> & {
+  results: VisualPreviewResult[];
+};
+
+const VisualPreviewContextSchema = z
+  .object({
+    name: z.string().trim().min(1).max(200),
+    route: z.string().trim().min(1).max(2_000),
+    state: z.string().trim().min(1).max(200),
+    viewport: z
+      .object({
+        width: z.number().int().positive().max(10_000),
+        height: z.number().int().positive().max(10_000),
+      })
+      .strict(),
+    deviceScaleFactor: z.number().positive().max(8),
+  })
+  .strip();
 
 class PublishPreparationError extends Error {
   public constructor(
@@ -92,6 +124,10 @@ class PublishNoDeltaError extends Error {
 export type GitCommandRunner = (
   cwd: string,
   args: string[],
+  options?: {
+    encoding?: "utf8" | "latin1";
+    maxBuffer?: number;
+  },
 ) => Promise<{
   stdout: string;
   stderr: string;
@@ -576,7 +612,10 @@ export class PublisherService {
   }): Promise<PublishResult> {
     try {
       input.signal?.throwIfAborted();
-      const token = readPublisherToken(input.plan.target.host);
+      const token = readPublisherToken(
+        input.plan.target.host,
+        new URL(input.plan.target.webBaseUrl).hostname,
+      );
 
       if (input.pushBranch) {
         await this.git(input.run.projectRoot, [
@@ -664,7 +703,10 @@ export class PublisherService {
   }): Promise<PublishResult> {
     try {
       input.signal?.throwIfAborted();
-      const token = readPublisherToken(input.plan.target.host);
+      const token = readPublisherToken(
+        input.plan.target.host,
+        new URL(input.plan.target.webBaseUrl).hostname,
+      );
       const publisher = this.publishers[input.plan.target.host];
       const run = await this.runStore.get(input.plan.runId);
       const prepared = await this.preparePayloadForPublish({
@@ -851,7 +893,7 @@ export class PublisherService {
     target: PublishTarget;
     payload: ReviewRequestPayload;
     visualPreview: {
-      report?: VisualReport;
+      report?: VisualPreviewReport;
       assets: ReviewRequestAsset[];
       locale?: "ko" | "en";
     };
@@ -913,6 +955,22 @@ export class PublisherService {
       if (!gitTreeContainsRegularFile(tracked.stdout, evidence.projectRelativePath)) {
         return undefined;
       }
+
+      let committedContent: Buffer;
+      try {
+        const objectName = `${input.payload.headSha}:${evidence.projectRelativePath}`;
+        const result = await this.git(input.run.projectRoot, ["cat-file", "blob", objectName], {
+          encoding: "latin1",
+          maxBuffer: 50 * 1024 * 1024,
+        });
+        committedContent = Buffer.from(result.stdout, "latin1");
+      } catch {
+        return undefined;
+      }
+      const committedDigest = `sha256:${createHash("sha256")
+        .update(committedContent)
+        .digest("hex")}`;
+      if (committedDigest !== evidence.digest) return undefined;
 
       let content: Buffer;
       try {
@@ -980,7 +1038,7 @@ export class PublisherService {
     run: Awaited<ReturnType<RunStore["get"]>>,
     payload: ReviewRequestPayload,
   ): Promise<{
-    report?: VisualReport;
+    report?: VisualPreviewReport;
     assets: ReviewRequestAsset[];
     locale?: "ko" | "en";
   }> {
@@ -1266,13 +1324,25 @@ function includeVisualRole(
 async function defaultGitCommandRunner(
   cwd: string,
   args: string[],
+  options: {
+    encoding?: "utf8" | "latin1";
+    maxBuffer?: number;
+  } = {},
 ): Promise<{
   stdout: string;
   stderr: string;
 }> {
-  return execFileAsync("git", args, {
+  const encoding = options.encoding ?? "utf8";
+  const result = await execFileAsync("git", args, {
     cwd,
+    encoding,
+    ...(options.maxBuffer === undefined ? {} : { maxBuffer: options.maxBuffer }),
   });
+
+  return {
+    stdout: Buffer.isBuffer(result.stdout) ? result.stdout.toString(encoding) : result.stdout,
+    stderr: Buffer.isBuffer(result.stderr) ? result.stderr.toString(encoding) : result.stderr,
+  };
 }
 
 function resolvePrReportArtifact(
@@ -1411,7 +1481,7 @@ function latestVisualReportArtifact(
     .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))[0];
 }
 
-function normalizeVisualReport(rawReport: unknown): VisualReport {
+function normalizeVisualReport(rawReport: unknown): VisualPreviewReport {
   const legacy = VisualReportSchema.safeParse(rawReport);
   if (legacy.success) return legacy.data;
   if (typeof rawReport !== "object" || rawReport === null || Array.isArray(rawReport)) {
@@ -1420,11 +1490,14 @@ function normalizeVisualReport(rawReport: unknown): VisualReport {
   const report = rawReport as Record<string, unknown>;
   const rawResults = report["results"];
   if (!Array.isArray(rawResults)) throw new Error("Visual report is missing results");
+  const contexts: Array<VisualPreviewContext | undefined> = [];
   const results = rawResults.map((rawResult) => {
     if (typeof rawResult !== "object" || rawResult === null || Array.isArray(rawResult)) {
       throw new Error("Visual report contains an invalid result");
     }
     const result = rawResult as Record<string, unknown>;
+    const context = VisualPreviewContextSchema.safeParse(result);
+    contexts.push(context.success ? context.data : undefined);
     return {
       targetId: result["targetId"],
       status: result["status"],
@@ -1441,7 +1514,7 @@ function normalizeVisualReport(rawReport: unknown): VisualReport {
     typeof rawResults[0] === "object" && rawResults[0] !== null
       ? (rawResults[0] as Record<string, unknown>)["baselineKind"]
       : "figma";
-  return VisualReportSchema.parse({
+  const normalized = VisualReportSchema.parse({
     runId: report["runId"],
     changeName: "review-packet-visual-comparison",
     visualBaseline: baselineKind,
@@ -1450,14 +1523,21 @@ function normalizeVisualReport(rawReport: unknown): VisualReport {
     targetCount: results.length,
     passedCount: results.filter((result) => result.status === "passed").length,
     failedCount: results.filter((result) => result.status === "failed").length,
-    reviewNeededCount: 0,
+    reviewNeededCount: results.filter((result) => result.status === "review-needed").length,
     results,
   });
+  return {
+    ...normalized,
+    results: normalized.results.map((result, index) => ({
+      ...result,
+      ...(contexts[index] === undefined ? {} : { context: contexts[index] }),
+    })),
+  };
 }
 
 function injectVisualEvidencePreview(input: {
   body: string;
-  report: VisualReport;
+  report: VisualPreviewReport;
   assets: PublishedReviewAsset[];
   locale?: "ko" | "en";
 }): string {
@@ -1500,14 +1580,17 @@ function injectFeatureVideoEvidence(body: string, asset: PublishedReviewAsset): 
     start === -1 || end === -1 || end < start
       ? body.trimEnd()
       : `${body.slice(0, start).trimEnd()}\n\n${body.slice(end + FEATURE_VIDEO_END.length).trimStart()}`.trimEnd();
+  const korean = isKoreanReportBody(cleanBody);
 
   return [
     cleanBody,
     "",
     FEATURE_VIDEO_START,
-    "## Feature E2E Evidence",
+    korean ? "## 기능 E2E 영상" : "## Feature E2E Evidence",
     "",
-    `[Open the targeted feature recording](${asset.url})`,
+    korean
+      ? `[변경한 기능 녹화 보기](${asset.url})`
+      : `[Open the targeted feature recording](${asset.url})`,
     "",
     FEATURE_VIDEO_END,
   ].join("\n");
@@ -1525,7 +1608,7 @@ function removeVisualEvidencePreview(body: string): string {
 }
 
 function renderVisualEvidencePreview(
-  report: VisualReport,
+  report: VisualPreviewReport,
   assets: PublishedReviewAsset[],
   locale: "ko" | "en" = "en",
 ): string | undefined {
@@ -1540,54 +1623,111 @@ function renderVisualEvidencePreview(
     assetByTargetAndRole.set(`${asset.targetId}:${asset.role}`, asset);
   }
 
-  const rows = report.results.map((result) => {
+  const rows = report.results.map((result, index) => {
     const figma = assetByTargetAndRole.get(`${result.targetId}:figma`);
     const browser = assetByTargetAndRole.get(`${result.targetId}:browser`);
     const diff = assetByTargetAndRole.get(`${result.targetId}:diff`);
     const reviewMatch = `${(result.metrics.reviewMatchRatio * 100).toFixed(2)}%`;
     const exactMatch = `${(result.metrics.exactMatchRatio * 100).toFixed(2)}%`;
+    const target = visualTargetDisplay(result, index, locale);
+
+    const screenCell =
+      target.context === undefined
+        ? escapeMarkdownTableCell(target.name)
+        : `${escapeMarkdownTableCell(target.name)}<br>${escapeMarkdownTableCell(target.context)}`;
 
     return locale === "ko"
       ? [
-          escapeMarkdownTableCell(result.targetId),
-          imageCell(figma, labels.baseline),
-          imageCell(browser, labels.actual),
-          `${reviewMatch}<br>${result.status === "passed" ? "통과" : "실패"}`,
+          screenCell,
+          imageCell(figma, labels.baseline, target.name),
+          imageCell(browser, labels.actual, target.name),
+          imageCell(diff, "차이", target.name),
+          reviewMatch,
+          exactMatch,
+          koreanVisualStatus(result.status),
         ]
       : [
-          escapeMarkdownTableCell(result.targetId),
-          imageCell(figma, labels.baseline),
-          imageCell(browser, labels.actual),
-          imageCell(diff, "Diff"),
-          `${reviewMatch}<br>exact ${exactMatch}<br>${result.status}`,
+          screenCell,
+          imageCell(figma, labels.baseline, target.name),
+          imageCell(browser, labels.actual, target.name),
+          imageCell(diff, "Diff", target.name),
+          reviewMatch,
+          exactMatch,
+          result.status,
         ];
   });
 
   const hasNonEmbeddable = assets.some((asset) => asset.embeddable === false);
   const fallbackNote = hasNonEmbeddable
     ? locale === "ko"
-      ? "\n> 이 저장소는 인라인 이미지 미리보기가 제한되어(예: private 저장소) 이미지를 링크로 대체했습니다. 링크를 클릭하면 로그인된 상태에서 볼 수 있습니다."
+      ? "\n> 이 저장소는 인라인 이미지 미리보기가 제한되어(예: 비공개 저장소) 이미지를 링크로 대체했습니다. 로그인한 뒤 링크를 열어 확인하세요."
       : "\n> Inline image previews are restricted for this repository (e.g. a private repo), so images are shown as links. Open them while signed in to view."
     : "";
 
   return [
     VISUAL_PREVIEW_START,
-    locale === "ko" ? "## 시각 증거 미리보기" : "## Visual Evidence Preview",
+    locale === "ko"
+      ? report.visualBaseline === "legacy-screenshot"
+        ? "### 레거시와 이관 결과"
+        : "### Figma와 브라우저 결과"
+      : "## Visual Evidence Preview",
     "",
-    visualPreviewDescription(report, locale),
+    visualPreviewDescription(report, assets, locale),
     fallbackNote,
     "",
     locale === "ko"
-      ? `| 화면 | ${labels.baseline} | ${labels.actual} | 일치율 |`
-      : `| Target | ${labels.baseline} | ${labels.actual} | Diff | Score |`,
-    locale === "ko" ? "| --- | --- | --- | ---: |" : "| --- | --- | --- | --- | --- |",
+      ? `| 화면 | ${labels.baseline} | ${labels.actual} | 차이 | 검토 일치율 | 픽셀 일치율 | 결과 |`
+      : `| Screen | ${labels.baseline} | ${labels.actual} | Diff | Review match | Exact match | Status |`,
+    "| --- | --- | --- | --- | ---: | ---: | --- |",
     ...rows.map((row) => `| ${row.join(" | ")} |`),
     VISUAL_PREVIEW_END,
   ].join("\n");
 }
 
+function visualTargetDisplay(
+  result: VisualPreviewResult,
+  index: number,
+  locale: "ko" | "en",
+): { name: string; context?: string } {
+  if (result.context === undefined) {
+    return { name: locale === "ko" ? `화면 ${index + 1}` : `Screen ${index + 1}` };
+  }
+
+  const providedName = redactSecretShapes(result.context.name.trim());
+  const safeRoute = redactSecretShapes(result.context.route);
+  const safeState = redactSecretShapes(result.context.state);
+  const name =
+    providedName !== result.targetId && !looksLikeOpaqueVisualIdentifier(providedName)
+      ? providedName
+      : (visualNameFromRoute(safeRoute) ??
+        (locale === "ko" ? `화면 ${index + 1}` : `Screen ${index + 1}`));
+
+  return {
+    name,
+    context: `${safeRoute} · ${safeState} · ${result.context.viewport.width}×${result.context.viewport.height} @${result.context.deviceScaleFactor}x`,
+  };
+}
+
+function visualNameFromRoute(route: string): string | undefined {
+  const routeWithoutQuery = route.split("?", 1)[0] ?? route;
+  const segments = routeWithoutQuery
+    .split(/[/:#]+/)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment !== "" && !/^\d+$/.test(segment));
+  const segment = segments.at(-1);
+  if (segment === undefined || looksLikeOpaqueVisualIdentifier(segment)) return undefined;
+  return segment.replace(/[._-]+/g, " ");
+}
+
+function looksLikeOpaqueVisualIdentifier(value: string): boolean {
+  return (
+    /^(?:legacy_)?[a-f0-9]{16,}$/i.test(value) ||
+    /^(?:target|screen|view)?[_-]?[a-z0-9]{20,}$/i.test(value)
+  );
+}
+
 function visualPreviewLabels(
-  report: VisualReport,
+  report: VisualPreviewReport,
   locale: "ko" | "en" = "en",
 ): { baseline: string; actual: string } {
   if (locale === "ko") {
@@ -1600,23 +1740,38 @@ function visualPreviewLabels(
     : { baseline: "Figma", actual: "Browser" };
 }
 
-function visualPreviewDescription(report: VisualReport, locale: "ko" | "en"): string {
+function visualPreviewDescription(
+  report: VisualPreviewReport,
+  assets: PublishedReviewAsset[],
+  locale: "ko" | "en",
+): string {
+  const hasDiff = assets.some((asset) => asset.role === "diff");
   if (report.visualBaseline === "legacy-screenshot") {
     return locale === "ko"
-      ? "레거시 화면과 이관 결과를 같은 조건으로 비교했습니다."
-      : "Legacy screenshot baseline, target screenshot, and visual diff are uploaded for review.";
+      ? `레거시 화면과 이관 결과를 같은 조건으로 비교했습니다.${hasDiff ? " 픽셀 차이 이미지도 함께 제공합니다." : ""}`
+      : `The legacy baseline and migrated result were compared under the same conditions.${hasDiff ? " A pixel diff is also available." : ""}`;
   }
 
   return locale === "ko"
-    ? "Figma baseline, 브라우저 캡처, visual diff 이미지를 리뷰용으로 업로드했습니다."
-    : "Figma baseline, browser capture, and visual diff are uploaded for review.";
+    ? `Figma 기준 화면과 브라우저 캡처를 같은 조건으로 비교했습니다.${hasDiff ? " 픽셀 차이 이미지도 함께 제공합니다." : ""}`
+    : `The Figma baseline and browser capture were compared under the same conditions.${hasDiff ? " A pixel diff is also available." : ""}`;
+}
+
+function koreanVisualStatus(status: VisualPreviewResult["status"]): string {
+  if (status === "passed") return "통과";
+  if (status === "review-needed") return "검토 필요";
+  return "실패";
 }
 
 function isKoreanReportBody(body: string): boolean {
   return body.startsWith("# 요약") || body.includes("\n## 실행 메타데이터");
 }
 
-function imageCell(asset: PublishedReviewAsset | undefined, altPrefix: string): string {
+function imageCell(
+  asset: PublishedReviewAsset | undefined,
+  altPrefix: string,
+  targetName: string,
+): string {
   if (asset === undefined) {
     return "-";
   }
@@ -1624,10 +1779,10 @@ function imageCell(asset: PublishedReviewAsset | undefined, altPrefix: string): 
   // Non-embeddable assets (e.g. private GitHub raw URLs) render as a plain link
   // so the review body never shows a broken image.
   if (asset.embeddable === false) {
-    return `[${escapeMarkdownTableCell(`${altPrefix} ↗`)}](${asset.url})`;
+    return `[${escapeMarkdownTableCell(`${altPrefix} · ${targetName} ↗`)}](${asset.url})`;
   }
 
-  return `<img src="${escapeHtmlAttribute(asset.url)}" alt="${escapeHtmlAttribute(`${altPrefix} ${asset.targetId}`)}" width="260" />`;
+  return `<img src="${escapeHtmlAttribute(asset.url)}" alt="${escapeHtmlAttribute(`${altPrefix} · ${targetName}`)}" width="260" />`;
 }
 
 function extensionForMediaType(mediaType: string): string {
@@ -1644,7 +1799,12 @@ function safePathSegment(value: string): string {
 }
 
 function escapeMarkdownTableCell(value: string): string {
-  return value.replaceAll("|", "\\|").replace(/\r?\n/g, "<br>");
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("|", "\\|")
+    .replace(/\r?\n/g, "<br>");
 }
 
 function escapeHtmlAttribute(value: string): string {

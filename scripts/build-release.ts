@@ -4,8 +4,9 @@ import { ReleaseService } from "../src/application/release-service.js";
 
 const version = process.argv[2];
 const mode = process.argv[3] ?? "--dry-run";
+const unexpectedArgument = process.argv[4];
 
-if (version === undefined || !["--dry-run", "--full"].includes(mode)) {
+if (version === undefined || !["--dry-run", "--full"].includes(mode) || unexpectedArgument) {
   console.error("Usage: pnpm release:build <version> [--dry-run|--full]");
   process.exit(1);
 }

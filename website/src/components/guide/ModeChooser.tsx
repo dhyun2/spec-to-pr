@@ -10,28 +10,28 @@ const modes = {
       id: "brief",
       title: "기획서에서 전체 개발",
       input: "기획서 + Figma + OpenAPI",
-      result: "API/UI, Figma 비교, API gap, Web Vitals",
+      result: "API·UI, Figma 화면 비교, API 차이, Web Vitals",
       href: "/usage/brief",
     },
     {
       id: "legacy",
       title: "레거시를 더 나은 구조로 이관",
-      input: "대상 저장소 + 별도 legacy path",
-      result: "inventory/coverage와 running legacy 비교",
+      input: "대상 저장소 + 별도 레거시 경로",
+      result: "이관 목록·검증 현황, 실행 중인 레거시와 화면 비교",
       href: "/usage/legacy",
     },
     {
       id: "feature",
       title: "사용자 기능 하나를 끝까지",
       input: "기획서 + Figma + OpenAPI",
-      result: "full evidence + targeted E2E + 영상 1개",
+      result: "전체 검증 자료, 대상 기능 E2E, 영상 1개",
       href: "/usage/feature",
     },
     {
       id: "figma",
-      title: "Figma를 mock UI로 구현",
+      title: "Figma를 모의 데이터 UI로 구현",
       input: "Figma URL + 대상 저장소",
-      result: "mock 상태와 수치화된 Figma 비교",
+      result: "모의 데이터 상태, 수치화된 Figma 화면 비교",
       href: "/usage/figma",
     },
   ],
@@ -75,7 +75,7 @@ export default function ModeChooser({ locale }: { locale: Locale }) {
     <nav
       className={styles.modeGrid}
       data-testid="mode-chooser"
-      aria-label={locale === "ko" ? "SpecToPR 사용 케이스" : "SpecToPR delivery cases"}
+      aria-label={locale === "ko" ? "SpecToPR 사용 방식" : "SpecToPR delivery cases"}
     >
       {modes[locale].map((mode, index) => (
         <Link className={styles.modeCard} to={mode.href} key={mode.id}>

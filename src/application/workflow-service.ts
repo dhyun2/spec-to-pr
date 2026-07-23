@@ -25,7 +25,10 @@ import {
   validateLegacyRuntimeNetworkEvidence,
   type LegacyInventory,
 } from "../legacy/legacy-inventory.js";
-import { resolveLegacyApiCandidates } from "../legacy/legacy-api-resolver.js";
+import {
+  resolveLegacyApiCandidates,
+  type ResolvedLegacyApiOperation,
+} from "../legacy/legacy-api-resolver.js";
 import { renderPrReportV2Markdown } from "../pr-report/workflow-report-renderer.js";
 import { PublishIntentSchema, PublishResultSchema } from "../publisher/index.js";
 import { ArtifactRefSchema, type ArtifactRef } from "../runtime/artifact.js";
@@ -61,6 +64,7 @@ import {
   WorkflowStatusSchema,
   WorkflowSubmissionSchema,
   WorkloadEstimateSchema,
+  OpenApiOperationContractSchema,
   buildDelegationPolicy,
   buildGatePlan,
   buildDeliveryProfile,
@@ -76,6 +80,7 @@ import {
   type WorkloadSignals,
   type WorkflowStatus,
   type WorkflowSubmission,
+  DraftEvidenceManifestSchema,
 } from "../workflow/index.js";
 import { reopenImplementationForReviewChanges } from "../state/stage-machine.js";
 import type { IntakeRequestService } from "./intake-request-service.js";
@@ -523,10 +528,10 @@ export class WorkflowService {
       legacyInventoryResult === undefined
         ? { operations: [], unresolved: [] }
         : deriveLegacyApiOperations(legacyInventoryResult.inventory, sourceOpenApiOperations);
-    const openApiOperations = mergeDeliveryApiOperations(
-      sourceOpenApiOperations,
-      legacyApiResult.operations,
-    );
+    const openApiOperations =
+      effectiveMode === "legacy"
+        ? legacyApiResult.operations
+        : mergeDeliveryApiOperations(sourceOpenApiOperations, legacyApiResult.operations);
 
     const figmaUrl = input.figmaUrl ?? parsed.parsed.figmaUrls[0];
     const forcedUi =
@@ -664,7 +669,15 @@ export class WorkflowService {
         ],
         checkpoint: {
           name: "scope-classified",
-          data: { scope, gatePlan, deliveryProfile, workload },
+          data: {
+            scope,
+            gatePlan,
+            deliveryProfile,
+            workload,
+            ...(effectiveMode === "legacy"
+              ? { legacyOpenApiEvidence: sourceOpenApiOperations }
+              : {}),
+          },
         },
       });
       return this.status({ runId: created.id });
@@ -681,7 +694,13 @@ export class WorkflowService {
       ],
       checkpoint: {
         name: "scope-classified",
-        data: { scope, gatePlan, deliveryProfile, workload },
+        data: {
+          scope,
+          gatePlan,
+          deliveryProfile,
+          workload,
+          ...(effectiveMode === "legacy" ? { legacyOpenApiEvidence: sourceOpenApiOperations } : {}),
+        },
       },
     });
 
@@ -804,6 +823,7 @@ export class WorkflowService {
       await this.assertLegacyReferenceFresh(run);
     }
     assertSubmissionPrerequisites(run, submission);
+    await assertDraftBundleIntegrity(run, submission);
     if (
       (submission.kind === "functional-review" || submission.kind === "design-review") &&
       submission.verdict !== "changes-requested"
@@ -981,7 +1001,7 @@ export class WorkflowService {
     const recorded = await this.recordLegacyInventory(run.id, profile.legacyProjectRoot, source);
     const legacyApiResult = deriveLegacyApiOperations(
       recorded.inventory,
-      profile.openApiOperations,
+      legacyOpenApiEvidenceFromRun(run, profile),
     );
     if (legacyApiResult.unresolved.length > 0) {
       await this.dependencies.stageService.block({
@@ -997,7 +1017,14 @@ export class WorkflowService {
         },
         gapIds: intake.gapIds,
         artifactIds: [recorded.artifact.id],
-        checkpoint: intake.checkpoint,
+        ...(intake.checkpoint === undefined
+          ? {}
+          : {
+              checkpoint: {
+                name: intake.checkpoint.name,
+                data: intake.checkpoint.data,
+              },
+            }),
       });
       return this.status({ runId: run.id });
     }
@@ -1005,10 +1032,7 @@ export class WorkflowService {
     const updatedProfile = DeliveryProfileSchema.parse({
       ...profile,
       legacyNetworkEvidencePath: source.path,
-      openApiOperations: mergeDeliveryApiOperations(
-        profile.openApiOperations,
-        legacyApiResult.operations,
-      ),
+      openApiOperations: legacyApiResult.operations,
       sourceProvenance: [
         ...profile.sourceProvenance.filter((item) => item.kind !== "legacy-network"),
         {
@@ -1053,6 +1077,7 @@ export class WorkflowService {
           gatePlan: buildGatePlan(scope),
           deliveryProfile: updatedProfile,
           workload: workloadFromRun(run, scope, updatedProfile),
+          legacyOpenApiEvidence: legacyOpenApiEvidenceFromRun(run, profile),
         },
       },
     });
@@ -1097,6 +1122,7 @@ export class WorkflowService {
 
     return WorkflowStatusSchema.parse({
       runId: run.id,
+      revision: run.revision,
       status,
       ...(currentStage === undefined ? {} : { currentStage: currentStage.name }),
       scope,
@@ -4079,7 +4105,7 @@ function genericUnblockAction(
   code?: string,
 ): string {
   if (code === "LEGACY_API_METHOD_UNKNOWN") {
-    return "Add scoped runtime network evidence or OpenAPI that uniquely resolves every detected legacy API method/path, then restart intake.";
+    return "Capture scoped runtime network evidence for the unresolved calls and submit it to this same Run to resume intake.";
   }
   if (kind === "missing-input") return `Provide the missing input and resume ${stageName}.`;
   if (kind === "missing-tool") return `Enable the required tool and resume ${stageName}.`;
@@ -4117,6 +4143,11 @@ function deliveryProfileFromRun(run: RunManifest): DeliveryProfile {
 
   if (!parsed.success) {
     throw new Error(`Run ${run.id} uses an unsupported delivery profile`);
+  }
+
+  if (parsed.data.publication === "none" && parsed.data.draftEvidenceBundle !== undefined) {
+    const { draftEvidenceBundle: _staleDraftEvidenceBundle, ...localOnlyProfile } = parsed.data;
+    return DeliveryProfileSchema.parse(localOnlyProfile);
   }
 
   return parsed.data;
@@ -4426,6 +4457,24 @@ function assertSubmissionPrerequisites(
   if (
     submission.kind === "contracts" &&
     submission.status === "passed" &&
+    profile.publication === "draft" &&
+    profile.draftEvidenceBundle !== undefined &&
+    submission.draftBundle === undefined
+  ) {
+    throw new Error("Legacy draft publication requires a Draft bundle before contracts can pass");
+  }
+  if (
+    submission.kind === "contracts" &&
+    submission.status === "passed" &&
+    profile.publication === "draft" &&
+    profile.draftEvidenceBundle !== undefined &&
+    submission.draftBundle?.manifestPath !== profile.draftEvidenceBundle.manifestPath
+  ) {
+    throw new Error("Draft bundle manifest must match the delivery profile manifest path");
+  }
+  if (
+    submission.kind === "contracts" &&
+    submission.status === "passed" &&
     profile.requirements.legacyBaseline &&
     (submission.visualTargets.length === 0 ||
       submission.visualTargets.some((target) => target.baselineKind !== "legacy-screenshot"))
@@ -4655,6 +4704,88 @@ function assertSubmissionPrerequisites(
     submission.verdict === "approved"
   ) {
     assertRequiredGateResults(run, submission);
+  }
+}
+
+async function assertDraftBundleIntegrity(
+  run: RunManifest,
+  submission: StandardWorkflowSubmission,
+): Promise<void> {
+  const profile = deliveryProfileFromRun(run);
+  if (
+    profile.publication !== "draft" ||
+    profile.draftEvidenceBundle === undefined ||
+    submission.kind !== "contracts" ||
+    submission.status !== "passed" ||
+    submission.draftBundle === undefined
+  ) {
+    return;
+  }
+
+  const manifestFile = await readProjectTextFile(
+    run.projectRoot,
+    submission.draftBundle.manifestPath,
+    "Draft bundle manifest",
+  );
+  let rawManifest: unknown;
+  try {
+    rawManifest = JSON.parse(await readFile(manifestFile.resolvedPath, "utf8"));
+  } catch {
+    throw new Error("Draft bundle manifest schema is invalid");
+  }
+  const parsed = DraftEvidenceManifestSchema.safeParse(rawManifest);
+  if (!parsed.success) {
+    throw new Error("Draft bundle manifest schema is invalid");
+  }
+  const manifest = parsed.data;
+  const legacyRootDigest = legacyRootDigestFromRun(run);
+  const requirementIds = submission.requirementManifest.map((requirement) => requirement.id);
+  const submittedOpenSpec = [
+    submission.draftBundle.proposalPath,
+    ...submission.draftBundle.specPaths,
+    submission.draftBundle.tasksPath,
+  ];
+  const manifestOpenSpec = [
+    manifest.openSpec.proposal.path,
+    ...manifest.openSpec.specs.map((artifact) => artifact.path),
+    manifest.openSpec.tasks.path,
+  ];
+
+  if (manifest.runId !== run.id || manifest.runRevision !== run.revision) {
+    throw new Error("Draft bundle manifest must reference the current Run revision");
+  }
+  if (legacyRootDigest === undefined || manifest.legacyRootDigest !== legacyRootDigest) {
+    throw new Error("Draft bundle manifest legacy root digest is stale");
+  }
+  if (!sameStringMembers(manifest.requirementIds, requirementIds)) {
+    throw new Error("Draft bundle manifest requirements must match the submitted contracts");
+  }
+  if (
+    manifest.openSpec.changeName !== submission.draftBundle.changeName ||
+    !sameStringMembers(manifestOpenSpec, submittedOpenSpec)
+  ) {
+    throw new Error("Draft bundle manifest OpenSpec paths must match the submitted change");
+  }
+
+  for (const artifact of [
+    manifest.openSpec.proposal,
+    ...manifest.openSpec.specs,
+    manifest.openSpec.tasks,
+  ]) {
+    const source = await readProjectTextFile(
+      run.projectRoot,
+      artifact.path,
+      "Draft bundle OpenSpec",
+    );
+    if (source.path !== artifact.path) {
+      throw new Error(`Draft bundle OpenSpec path must resolve exactly: ${artifact.path}`);
+    }
+    const digest = `sha256:${createHash("sha256")
+      .update(await readFile(source.resolvedPath))
+      .digest("hex")}`;
+    if (digest !== artifact.digest) {
+      throw new Error(`Draft bundle OpenSpec digest does not match: ${artifact.path}`);
+    }
   }
 }
 
@@ -5417,14 +5548,7 @@ function deriveLegacyApiOperations(
         : [],
     ),
   });
-  const operations: DeliveryProfile["openApiOperations"] = semantic.operations.map(
-    ({ operationKey, method, path, sourceLocator }) => ({
-      operationKey,
-      method,
-      path,
-      sourceLocator,
-    }),
-  );
+  const operations = mergeResolvedLegacyApiOperations(semantic.operations);
   const unresolved: UnresolvedLegacyApiCandidate[] = semantic.unresolved.map((candidate) => ({
     normalizedKey: candidate.operationKey,
     sourcePath: candidate.callSites[0]!.ownerSourcePath,
@@ -5500,6 +5624,62 @@ function deriveLegacyApiOperations(
   return { operations, unresolved };
 }
 
+function mergeResolvedLegacyApiOperations(
+  resolved: ResolvedLegacyApiOperation[],
+): DeliveryProfile["openApiOperations"] {
+  const operations = new Map<string, DeliveryProfile["openApiOperations"][number]>();
+  for (const operation of resolved) {
+    const origins = boundedServerOrigins(
+      operation.serverOrigins ?? [],
+      legacyOperationServerOrigins(operation),
+    );
+    const existing = operations.get(operation.operationKey);
+    if (existing === undefined) {
+      operations.set(operation.operationKey, {
+        operationKey: operation.operationKey,
+        method: operation.method,
+        path: operation.path,
+        sourceLocator: operation.sourceLocator,
+        ...(operation.operationId === undefined ? {} : { operationId: operation.operationId }),
+        ...(origins.length === 0 ? {} : { serverOrigins: origins }),
+      });
+      continue;
+    }
+    const serverOrigins = boundedServerOrigins(existing.serverOrigins ?? [], origins);
+    operations.set(operation.operationKey, {
+      ...existing,
+      ...(serverOrigins.length === 0 ? {} : { serverOrigins }),
+    });
+  }
+  return [...operations.values()];
+}
+
+function legacyOpenApiEvidenceFromRun(
+  run: RunManifest,
+  profile: DeliveryProfile,
+): DeliveryProfile["openApiOperations"] {
+  const parsed = z
+    .array(OpenApiOperationContractSchema)
+    .max(1_000)
+    .safeParse(stage(run, "intake").checkpoint?.data["legacyOpenApiEvidence"]);
+  if (parsed.success) return parsed.data;
+  return profile.openApiOperations.filter(
+    (operation) =>
+      operation.sourceLocator !== "legacy-runtime-network" &&
+      !operation.sourceLocator.startsWith("external-legacy-project/"),
+  );
+}
+
+function legacyOperationServerOrigins(operation: ResolvedLegacyApiOperation): string[] {
+  const origin = operation.originRef;
+  if (origin === undefined || origin.kind === "openapi-server") return [];
+  if (origin.kind !== "environment") return [origin.sanitizedOrigin];
+  return [
+    ...(origin.sanitizedOrigin === undefined ? [] : [origin.sanitizedOrigin]),
+    ...(origin.sanitizedOrigins ?? []).map((item) => item.origin),
+  ];
+}
+
 function uniqueOperationMatches(
   operations: Array<{ method: string; path: string }>,
 ): Array<{ method: string; path: string }> {
@@ -5536,10 +5716,26 @@ function mergeDeliveryApiOperations(
 ): DeliveryProfile["openApiOperations"] {
   const merged = new Map(openApi.map((operation) => [operation.operationKey, operation]));
   for (const operation of legacy) {
-    if (!merged.has(operation.operationKey)) merged.set(operation.operationKey, operation);
+    const existing = merged.get(operation.operationKey);
+    if (existing === undefined) {
+      merged.set(operation.operationKey, operation);
+      continue;
+    }
+    const serverOrigins = boundedServerOrigins(
+      existing.serverOrigins ?? [],
+      operation.serverOrigins ?? [],
+    );
+    merged.set(operation.operationKey, {
+      ...existing,
+      ...(serverOrigins.length === 0 ? {} : { serverOrigins }),
+    });
   }
   if (merged.size > 1_000) throw new Error("Combined API operation inventory exceeds 1000");
   return [...merged.values()];
+}
+
+function boundedServerOrigins(...groups: readonly (readonly string[])[]): string[] {
+  return [...new Set(groups.flat())].sort().slice(0, 20);
 }
 
 function exclusionsForProfile(profile: DeliveryProfile): string[] {

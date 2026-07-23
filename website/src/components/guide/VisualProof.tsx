@@ -7,13 +7,13 @@ type Locale = "ko" | "en";
 
 const proof = {
   ko: [
-    { file: "baseline.png", title: "1. Baseline", alt: "선택한 레거시 화면의 비교 기준 PNG" },
-    { file: "actual.png", title: "2. Actual", alt: "대상 구현에서 같은 조건으로 캡처한 PNG" },
-    { file: "diff.png", title: "3. Diff", alt: "RGBA 거리가 있는 픽셀만 표시한 diff PNG" },
+    { file: "baseline.png", title: "1. 기준 화면", alt: "선택한 레거시 화면의 비교 기준" },
+    { file: "actual.png", title: "2. 결과 화면", alt: "대상 구현을 같은 조건으로 캡처한 화면" },
+    { file: "diff.png", title: "3. 차이", alt: "RGBA 색상 차이가 있는 픽셀을 표시한 화면" },
     {
       file: "overlay.png",
-      title: "4. Overlay",
-      alt: "baseline과 actual을 절반씩 합성한 overlay PNG",
+      title: "4. 겹침",
+      alt: "기준 화면과 결과 화면을 절반씩 합성한 화면",
     },
   ],
   en: [
@@ -39,19 +39,19 @@ export default function VisualProof({ locale }: { locale: Locale }) {
   const metricItems = [
     {
       value: asPercent(metrics.reviewMatchRatio),
-      label: locale === "ko" ? "실제 review match" : "observed review match",
+      label: locale === "ko" ? "검토 일치율" : "observed review match",
     },
     {
       value: asPercent(metrics.exactMatchRatio),
-      label: locale === "ko" ? "실제 exact match" : "observed exact match",
+      label: locale === "ko" ? "정확 일치율" : "observed exact match",
     },
     {
       value: metrics.meanDistance.toFixed(4),
-      label: locale === "ko" ? "평균 RGBA distance" : "mean RGBA distance",
+      label: locale === "ko" ? "평균 RGBA 색상 거리" : "mean RGBA distance",
     },
     {
       value: metrics.maxDistance.toFixed(4),
-      label: locale === "ko" ? "최대 RGBA distance" : "maximum RGBA distance",
+      label: locale === "ko" ? "최대 RGBA 색상 거리" : "maximum RGBA distance",
     },
     {
       value: metrics.pixelTolerance.toFixed(2),
@@ -59,11 +59,11 @@ export default function VisualProof({ locale }: { locale: Locale }) {
     },
     {
       value: asPercent(metrics.threshold),
-      label: locale === "ko" ? "최소 review threshold" : "minimum review threshold",
+      label: locale === "ko" ? "최소 통과 일치율" : "minimum review threshold",
     },
     {
       value: asPercent(metrics.maskedAreaRatio),
-      label: locale === "ko" ? "실제 mask 면적 · 최대 20%" : "observed mask area · 20% maximum",
+      label: locale === "ko" ? "제외 영역 · 최대 20%" : "observed mask area · 20% maximum",
     },
     {
       value: `${proofManifest.attempt} / 3`,
@@ -101,11 +101,11 @@ export default function VisualProof({ locale }: { locale: Locale }) {
       </div>
       <p className={styles.proofCaption}>
         {locale === "ko"
-          ? "Playwright가 baseline과 actual을 같은 fixture로 캡처하고, production compareVisualPngs가 pngjs로 RGBA를 읽어 metrics, diff, overlay를 만들었습니다. 비교 총 3회 안에서 수리하며 design reviewer는 provenance와 현재 packet 결합을 확인합니다."
+          ? "Playwright가 같은 고정 데이터로 기준 화면과 결과 화면을 캡처했습니다. 실제 compareVisualPngs 구현은 pngjs로 RGBA를 읽어 일치율, 차이 화면, 겹침 화면을 만듭니다. 수정과 재비교는 총 3회 안에서 진행하며, 디자인 검토자는 출처와 현재 검토 묶음의 연결을 확인합니다."
           : "Playwright captured baseline and actual from the same fixture; production compareVisualPngs decoded RGBA with pngjs and produced metrics, diff, and overlay. Repairs stay within three total comparisons, and the design reviewer verifies provenance and current-packet binding."}{" "}
         <a href={`${assetRoot}metrics.json`}>
           {locale === "ko"
-            ? "digest가 포함된 metrics.json 보기"
+            ? "해시가 포함된 metrics.json 보기"
             : "Inspect metrics.json with digests"}
         </a>
       </p>

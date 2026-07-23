@@ -160,8 +160,26 @@ export function renderPrReportV2Markdown(report: PrReportV2): string {
   const apiExcluded = report.api.operations.filter((operation) =>
     /out-of-scope|excluded/i.test(operation.status),
   ).length;
-  const apiBlocking = report.api.operations.filter((operation) => operation.blocking).length;
-  const apiVerified = report.api.operations.length - apiExcluded - apiBlocking;
+  const apiUnresolvedOperations = report.api.operations.filter((operation) =>
+    /^(gap|planned|blocked)$/i.test(operation.status),
+  );
+  const apiUnresolvedKeys = new Set(
+    apiUnresolvedOperations.map((operation) => operation.operationKey),
+  );
+  for (const gap of report.api.gaps) {
+    const matchingOperation = apiUnresolvedOperations.find((operation) =>
+      gapReferencesOperation(gap, operation.operationKey),
+    );
+    apiUnresolvedKeys.add(matchingOperation?.operationKey ?? `gap:${normalizeGap(gap)}`);
+  }
+  const apiGaps = apiUnresolvedKeys.size;
+  const apiVerified = report.api.operations.filter(
+    (operation) => operation.status === "exercised",
+  ).length;
+  const apiAdditionalGapCount = [...apiUnresolvedKeys].filter((key) =>
+    key.startsWith("gap:"),
+  ).length;
+  const apiTotal = report.api.operations.length + apiAdditionalGapCount;
   const legacyMigrated = report.legacy.coverage.filter(
     (coverage) => coverage.status === "migrated",
   ).length;
@@ -176,7 +194,7 @@ export function renderPrReportV2Markdown(report: PrReportV2): string {
   });
   const visualRows = report.visual.results.map(
     (result) =>
-      `| ${markdownTableCell(koreanVisualName(result.targetId, result.name))} | ${markdownTableCell(`${result.route} · ${koreanVisualState(result.targetId, result.state)}`)} | ${result.viewport.width}×${result.viewport.height} @${result.deviceScaleFactor}x | ${(result.metrics.reviewMatchRatio * 100).toFixed(2)}% | ${(result.metrics.threshold * 100).toFixed(2)}% | ${result.status === "passed" ? "통과" : "실패"} |`,
+      `| ${markdownTableCell(visualDisplayName(result))} | ${markdownTableCell(`${result.route} · ${visualStateName(result.state)}`)} | ${result.viewport.width}×${result.viewport.height} @${result.deviceScaleFactor}x | ${(result.metrics.reviewMatchRatio * 100).toFixed(2)}% | ${(result.metrics.exactMatchRatio * 100).toFixed(2)}% | ${(result.metrics.threshold * 100).toFixed(2)}% | ${koreanOperationStatus(result.status)} |`,
   );
   const apiRows = report.api.operations.map(
     (operation) =>
@@ -188,7 +206,7 @@ export function renderPrReportV2Markdown(report: PrReportV2): string {
   );
   const performanceRows = renderPerformanceRows(report.performance.evidence);
   const issueRows = [
-    ...report.gaps.map((gap) => `| 갭 | ${markdownTableCell(gap)} |`),
+    ...report.gaps.map((gap) => `| 미해결 | ${markdownTableCell(gap)} |`),
     ...report.blockers.map((blocker) => `| 차단 | ${markdownTableCell(blocker)} |`),
     ...report.unrunValidations.map((validation) => `| 미실행 | ${markdownTableCell(validation)} |`),
     ...(report.decision === "blocked"
@@ -225,13 +243,15 @@ export function renderPrReportV2Markdown(report: PrReportV2): string {
     ...(report.decision === "blocked"
       ? ["| 1 | 검증이 차단되어 구현·리뷰가 완료되지 않았습니다. |"]
       : report.mode === "legacy"
-        ? [`| 1 | 레거시 기능 ${legacyMigrated}개를 대상 프로젝트 구조로 이관했습니다. |`]
+        ? [`| 1 | 레거시 항목 ${legacyMigrated}개를 대상 프로젝트 구조로 이관했습니다. |`]
         : ["| 1 | 요청 범위의 구현을 완료했습니다. |"]),
     ...(showApi
-      ? [`| 2 | API ${apiVerified}개를 구현·검증하고 ${apiExcluded}개는 범위에서 제외했습니다. |`]
+      ? [
+          `| 2 | API ${apiVerified}개를 사용·검증했고, ${apiExcluded}개는 범위에서 제외했으며, ${apiGaps}개는 미해결로 남았습니다. |`,
+        ]
       : []),
     ...(showVisual
-      ? [`| 3 | 동일한 경로·상태·뷰포트에서 화면 ${visualPassed}개를 비교했습니다. |`]
+      ? [`| 3 | 동일한 경로·상태·화면 크기에서 화면 ${visualPassed}개를 비교했습니다. |`]
       : []),
     "",
     "## 검증 결과",
@@ -277,21 +297,21 @@ export function renderPrReportV2Markdown(report: PrReportV2): string {
       ? [
           "## API",
           "",
-          "| 전체 | 사용·검증 | 범위 제외 | 차단 | 갭 |",
-          "| ---: | ---: | ---: | ---: | ---: |",
-          `| ${report.api.operations.length} | ${Math.max(apiVerified, 0)} | ${apiExcluded} | ${apiBlocking} | ${report.api.gaps.length} |`,
+          "| 전체 | 사용·검증 | 범위 제외 | 미해결 |",
+          "| ---: | ---: | ---: | ---: |",
+          `| ${apiTotal} | ${apiVerified} | ${apiExcluded} | ${apiGaps} |`,
           "",
           "<details>",
           "<summary>API 상세</summary>",
           "",
           ...(report.api.inventoryDigest === undefined
             ? []
-            : [`- 인벤토리 digest: ${report.api.inventoryDigest}`]),
+            : [`- 인벤토리 해시: ${report.api.inventoryDigest}`]),
           ...(report.api.discoveryAdapters === undefined
             ? []
-            : [`- 탐지 adapter: ${report.api.discoveryAdapters.join(", ")}`]),
+            : [`- 탐지 방식: ${report.api.discoveryAdapters.join(", ")}`]),
           ...(report.api.operations.length === 0
-            ? ["- 탐지된 API operation이 없습니다."]
+            ? ["- 탐지된 API 항목이 없습니다."]
             : [
                 "",
                 "| API | 상태 | 호출 위치 | 실행 증거 |",
@@ -300,7 +320,7 @@ export function renderPrReportV2Markdown(report: PrReportV2): string {
               ]),
           ...(report.api.gaps.length === 0
             ? []
-            : ["", ...report.api.gaps.map((gap) => `- 갭: ${markdownBullet(gap)}`)]),
+            : ["", ...report.api.gaps.map((gap) => `- 미해결: ${markdownBullet(gap)}`)]),
           "",
           "</details>",
           "",
@@ -329,10 +349,10 @@ export function renderPrReportV2Markdown(report: PrReportV2): string {
       ? [
           "## 화면 일치율",
           "",
-          "| 화면 | 경로 · 상태 | 뷰포트 | 일치율 | 기준 | 결과 |",
-          "| --- | --- | --- | ---: | ---: | --- |",
+          "| 화면 | 경로 · 상태 | 화면 크기 | 검토 일치율 | 픽셀 일치율 | 기준 | 결과 |",
+          "| --- | --- | --- | ---: | ---: | ---: | --- |",
           ...(report.visual.results.length === 0
-            ? ["| 없음 | — | — | — | — | 미실행 |"]
+            ? ["| 없음 | — | — | — | — | — | 미실행 |"]
             : visualRows),
           "",
           VISUAL_PREVIEW_SLOT,
@@ -341,7 +361,7 @@ export function renderPrReportV2Markdown(report: PrReportV2): string {
       : []),
     "## 독립 리뷰",
     "",
-    "| 리뷰 | 결과 | 게이트 | 발견사항 |",
+    "| 리뷰 | 결과 | 통과 조건 | 발견사항 |",
     "| --- | --- | ---: | ---: |",
     ...(reviewRows.length === 0 ? ["| 미실행 | — | 0/0 | 0건 |"] : reviewRows),
     "",
@@ -384,20 +404,20 @@ export function renderPrReportV2Markdown(report: PrReportV2): string {
     "## 실행 메타데이터",
     "",
     "<details>",
-    "<summary>Run, 입력 출처, 변경 파일, 증거 보기</summary>",
+    "<summary>실행 정보, 입력 출처, 변경 파일, 검증 자료 보기</summary>",
     "",
     "| 항목 | 값 |",
     "| --- | --- |",
-    `| Run | ${markdownTableCell(report.runId)} |`,
+    `| 실행 ID | ${markdownTableCell(report.runId)} |`,
     `| 모드 | ${koreanMode(report.mode)} |`,
     `| 생성 시각 | ${markdownTableCell(report.generatedAt)} |`,
     ...(report.binding === undefined
-      ? ["| 리뷰 패킷 | 생성 전 차단 |"]
+      ? ["| 검토 묶음 | 생성 전 차단 |"]
       : [
-          `| 리뷰 패킷 | ${markdownTableCell(report.binding.reviewPacketId)} |`,
-          `| Base | ${markdownTableCell(report.binding.baseSha)} |`,
-          `| Head | ${markdownTableCell(report.binding.headSha)} |`,
-          `| Diff digest | ${markdownTableCell(report.binding.diffDigest)} |`,
+          `| 검토 묶음 | ${markdownTableCell(report.binding.reviewPacketId)} |`,
+          `| 기준 커밋 | ${markdownTableCell(report.binding.baseSha)} |`,
+          `| 변경 커밋 | ${markdownTableCell(report.binding.headSha)} |`,
+          `| 변경 해시 | ${markdownTableCell(report.binding.diffDigest)} |`,
         ]),
     "",
     "### 입력 출처",
@@ -405,7 +425,7 @@ export function renderPrReportV2Markdown(report: PrReportV2): string {
     ...(report.sources.length === 0
       ? ["- 없음"]
       : [
-          "| 종류 | 위치 | digest |",
+          "| 종류 | 위치 | 해시 |",
           "| --- | --- | --- |",
           ...report.sources.map(
             (source) =>
@@ -419,7 +439,7 @@ export function renderPrReportV2Markdown(report: PrReportV2): string {
       ? ["- 없음"]
       : report.changedFiles.map((file) => `- ${markdownBullet(file)}`)),
     "",
-    "### 증거 인덱스",
+    "### 검증 자료 목록",
     "",
     ...listOrNone(report.evidencePaths),
     "",
@@ -466,24 +486,61 @@ function koreanReviewVerdicts(verdicts: readonly string[]): string {
     .join(", ");
 }
 
-function koreanVisualName(targetId: string, fallback: string): string {
-  if (targetId.includes("tournament.current")) return "진행 대회";
-  if (targetId.includes("tournament.ended")) return "종료 대회";
-  if (targetId.includes("tournament.upcoming")) return "예정 대회";
-  if (targetId.includes("notice")) return "공지";
-  if (targetId.includes("ranking")) return "회원 랭킹";
-  if (targetId.includes("main")) return "매장 메인";
-  return /[가-힣]/.test(fallback) ? fallback : targetId;
+function visualDisplayName(input: {
+  targetId: string;
+  name: string;
+  route: string;
+  state: string;
+  viewport: { width: number; height: number };
+}): string {
+  const name = input.name.trim();
+  if (name !== "" && name !== input.targetId && !looksLikeOpaqueIdentifier(name)) {
+    return name;
+  }
+
+  const routeLabel = routeScreenName(input.route);
+  if (routeLabel !== undefined) return routeLabel;
+
+  const state = input.state.trim();
+  if (state !== "" && state !== input.targetId && !looksLikeOpaqueIdentifier(state)) {
+    return state;
+  }
+
+  return `${input.viewport.width}×${input.viewport.height} 화면`;
 }
 
-function koreanVisualState(targetId: string, fallback: string): string {
-  if (targetId.includes("tournament.current")) return "진행 중";
-  if (targetId.includes("tournament.ended")) return "종료";
-  if (targetId.includes("tournament.upcoming")) return "예정";
-  if (targetId.includes("notice")) return "첫 페이지 · 접힘";
-  if (targetId.includes("ranking")) return "첫 페이지";
-  if (targetId.includes("main")) return "초기 화면";
-  return /[가-힣]/.test(fallback) ? fallback : "검증 상태";
+function visualStateName(state: string): string {
+  const value = state.trim();
+  return value === "" || looksLikeOpaqueIdentifier(value) ? "기본 상태" : value;
+}
+
+function routeScreenName(route: string): string | undefined {
+  const path = route.split("?", 1)[0] ?? route;
+  const segments = path
+    .split(/[/:#]+/)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment !== "" && !/^\d+$/.test(segment));
+  const segment = segments.at(-1);
+  if (segment === undefined || looksLikeOpaqueIdentifier(segment)) return undefined;
+  return `${segment.replace(/[._-]+/g, " ")} 화면`;
+}
+
+function looksLikeOpaqueIdentifier(value: string): boolean {
+  return (
+    /^(?:legacy_)?[a-f0-9]{16,}$/i.test(value) ||
+    /^(?:target|screen|view)?[_-]?[a-z0-9]{20,}$/i.test(value)
+  );
+}
+
+function normalizeGap(gap: string): string {
+  return gap.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function gapReferencesOperation(gap: string, operationKey: string): boolean {
+  const normalized = gap.trim();
+  if (!normalized.startsWith(operationKey)) return false;
+  const suffix = normalized.slice(operationKey.length);
+  return suffix === "" || /^[:\s]/u.test(suffix);
 }
 
 function koreanSectionStatus(status: string): string {
@@ -501,6 +558,10 @@ function koreanVerdict(verdict: string): string {
     approved: "승인",
     accepted: "승인",
     passed: "통과",
+    blocked: "차단",
+    planned: "계획",
+    gap: "미해결",
+    "review-needed": "검토 필요",
     rejected: "거절",
     "changes-requested": "수정 요청",
   };
@@ -511,6 +572,17 @@ function koreanOperationStatus(status: string): string {
   const labels: Record<string, string> = {
     exercised: "사용·검증",
     migrated: "이관",
+    planned: "계획",
+    captured: "캡처 완료",
+    compared: "비교 완료",
+    passed: "통과",
+    failed: "실패",
+    complete: "완료",
+    "not-run": "미실행",
+    "not-applicable": "해당 없음",
+    "review-needed": "검토 필요",
+    gap: "미해결",
+    blocked: "차단",
     "intentionally-out-of-scope": "범위 제외",
     excluded: "범위 제외",
     resolved: "해결",

@@ -2,6 +2,7 @@ import type { RunResult } from "@openai/codex-sdk";
 import { type AggregatedUsage, type WorkloadSize } from "./workload-budget.js";
 export type BoundaryWorkflowStatus = {
     runId: string;
+    revision: number;
     status: "running" | "needs-external-action" | "blocked" | "publish-ready" | "completed";
     currentStage?: string;
     stages: unknown[];

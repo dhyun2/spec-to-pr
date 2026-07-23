@@ -21,6 +21,41 @@ describe("legacy API evidence resolver", () => {
     ]);
   });
 
+  it("canonicalizes a concrete source template to one matching OpenAPI contract", () => {
+    const result = resolveLegacyApiCandidates({
+      candidates: [candidate({ method: "GET", pathTemplate: "/shop/{rgnNo}" })],
+      openApiOperations: [
+        {
+          method: "GET",
+          path: "/shop/{id}",
+          operationId: "findShopInfo",
+          sourceLocator: "shop.yaml",
+          serverOrigins: ["https://api.example/v2/"],
+        },
+        {
+          method: "GET",
+          path: "/shop/ranking",
+          operationId: "findShopRanking",
+          sourceLocator: "shop.yaml",
+          serverOrigins: ["https://api.example/v2/"],
+        },
+      ],
+      runtimeRequests: [],
+    });
+
+    expect(result.unresolved).toEqual([]);
+    expect(result.operations).toEqual([
+      expect.objectContaining({
+        operationKey: "GET /shop/{id}",
+        path: "/shop/{id}",
+        operationId: "findShopInfo",
+        resolution: "openapi",
+        sourceLocator: "shop.yaml",
+        serverOrigins: ["https://api.example/v2/"],
+      }),
+    ]);
+  });
+
   it("resolves an unknown method only from one scoped OpenAPI or runtime match", () => {
     const fromOpenApi = resolveLegacyApiCandidates({
       candidates: [candidate({ method: "UNKNOWN", pathTemplate: "/checkout" })],
@@ -42,6 +77,24 @@ describe("legacy API evidence resolver", () => {
       runtimeRequests: [{ method: "PATCH", path: "/checkout", origin: "https://api.example/v2/" }],
     });
     expect(fromRuntime.operations[0]).toMatchObject({ method: "PATCH", resolution: "runtime" });
+  });
+
+  it("matches a source path template to one concrete runtime request in the same origin", () => {
+    const templated = candidate({ method: "UNKNOWN", pathTemplate: "/shop/{id}" });
+    const result = resolveLegacyApiCandidates({
+      candidates: [templated],
+      openApiOperations: [],
+      runtimeRequests: [{ method: "GET", path: "/shop/123", origin: "https://api.example/v2/" }],
+    });
+
+    expect(result.unresolved).toEqual([]);
+    expect(result.operations).toEqual([
+      expect.objectContaining({
+        operationKey: "GET /shop/{id}",
+        path: "/shop/{id}",
+        resolution: "runtime",
+      }),
+    ]);
   });
 
   it("does not use an operation from a conflicting origin or choose between ambiguous methods", () => {
@@ -128,6 +181,91 @@ describe("legacy API evidence resolver", () => {
         ],
       }).unresolved,
     ).toEqual([dynamic]);
+  });
+
+  it("keeps competing path-dynamic calls unresolved without an explicit runtime link", () => {
+    const first = {
+      ...candidate({
+        method: "GET",
+        pathTemplate: undefined,
+        operationKey: "GET path:unknown:first",
+        originRef: undefined,
+      }),
+      candidateKey: "candidate_first",
+      endpointKey: "endpoint_first",
+    };
+    const second = {
+      ...candidate({
+        method: "GET",
+        pathTemplate: undefined,
+        operationKey: "GET path:unknown:second",
+        originRef: undefined,
+      }),
+      candidateKey: "candidate_second",
+      endpointKey: "endpoint_second",
+    };
+
+    const result = resolveLegacyApiCandidates({
+      candidates: [first, second],
+      openApiOperations: [],
+      runtimeRequests: [
+        { method: "GET", path: "/resolved" },
+        { method: "GET", path: "/resolved" },
+      ],
+    });
+
+    expect(result.operations).toEqual([]);
+    expect(result.unresolved).toEqual([first, second]);
+  });
+
+  it("keeps equal method paths separate across gateways and preserves their endpoint identity", () => {
+    const firstOrigin = {
+      kind: "environment" as const,
+      runtime: "process.env" as const,
+      name: "API_GATEWAY_V1",
+      sanitizedOrigin: "https://v1.example/api/",
+    };
+    const secondOrigin = {
+      kind: "environment" as const,
+      runtime: "process.env" as const,
+      name: "API_GATEWAY_V2",
+      sanitizedOrigin: "https://v2.example/api/",
+    };
+    const first = {
+      ...candidate({ method: "GET", pathTemplate: "/shop/ranking", originRef: firstOrigin }),
+      candidateKey: "candidate_gateway_v1",
+      endpointKey: "endpoint_gateway_v1",
+    };
+    const second = {
+      ...candidate({ method: "GET", pathTemplate: "/shop/ranking", originRef: secondOrigin }),
+      candidateKey: "candidate_gateway_v2",
+      endpointKey: "endpoint_gateway_v2",
+    };
+
+    const result = resolveLegacyApiCandidates({
+      candidates: [first, second],
+      openApiOperations: [],
+      runtimeRequests: [],
+    });
+
+    expect(result.unresolved).toEqual([]);
+    expect(result.operations).toHaveLength(2);
+    expect(result.operations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          operationKey: "GET /shop/ranking",
+          endpointKey: "endpoint_gateway_v1",
+          originRef: firstOrigin,
+          candidateKeys: ["candidate_gateway_v1"],
+        }),
+        expect.objectContaining({
+          operationKey: "GET /shop/ranking",
+          endpointKey: "endpoint_gateway_v2",
+          originRef: secondOrigin,
+          candidateKeys: ["candidate_gateway_v2"],
+        }),
+      ]),
+    );
   });
 });
 

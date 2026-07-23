@@ -7,6 +7,64 @@ use the plugin tag format, for example `spec-to-pr--v0.1.0`.
 
 ## Unreleased
 
+## 0.3.2 - 2026-07-23
+
+### Added
+
+- Added regression coverage for environment aliases, HTTP-client base URLs, imported local facades,
+  barrel re-exports, concrete runtime matches for path templates, competing dynamic calls, multiple
+  API gateways, and HAR static-resource filtering.
+- Added a digest-bound draft evidence manifest that ties the current Run revision, legacy root,
+  requirements, and exact OpenSpec files together before draft contracts can pass.
+
+### Changed
+
+- Legacy discovery now keeps `legacyProjectRoot` as the immutable feature boundary while following
+  only directly referenced dependencies and safe URL configuration needed to understand that scope.
+  Environment-variable names and sanitized `.env*` origins remain available for target migration.
+- In legacy mode, the bounded source inventory is authoritative: supplied OpenAPI enriches only
+  matching legacy calls and no longer expands the migration with unrelated operations.
+- Draft review bundles are required only for `publication: draft`; local-only legacy runs no longer
+  inherit a publication-specific contract gate.
+- Reworked Korean guidance into natural reviewer-facing language, clarified that a legacy root plus
+  a one-line whole-scope request is sufficient, synchronized the English reference pages, and
+  regenerated the public visual example with capture provider, timestamp, and Korean display text.
+
+### Fixed
+
+- Stopped HTTP-client constructors, ordinary local receivers, and local API wrappers from becoming
+  duplicate or pathless API operations. Imported facades now resolve only through the invoked symbol
+  instead of expanding unrelated sibling exports.
+- Canonicalized uniquely matching OpenAPI path templates without confusing concrete paths with
+  parameters, preserved `baseURL` path prefixes, and excluded unreferenced test, mock, story, and
+  fixture calls from the production API and feature inventory.
+- Prevented same-Run HAR recovery from treating previously resolved legacy calls as OpenAPI evidence;
+  original OpenAPI input is retained separately for safe enrichment during recovery.
+- Versioned legacy source digests while retaining unchanged v2 and v0.3.1 Run compatibility, and
+  bound barrel export inspection and `.env*` origin evidence to the graph's shared file, byte,
+  depth, and time budgets. Environment evidence is capped deterministically before schema limits.
+- Kept same-path gateway origins in the authoritative API contract, matched concrete runtime paths to
+  source templates, and prevented multiple pathless candidates from claiming one runtime request.
+- Filtered documents, scripts, styles, images, fonts, media, analytics, and other static HAR entries
+  while preserving explicit request arrays and all evidence size and shape validation.
+- Made unresolved legacy API evidence resume the same Run, corrected verified/gap API report counts,
+  prevented prefix-collision undercounts, and avoided negative or inflated report summaries.
+- Made reviewer previews identify each screen without exposing internal target keys, publish every
+  available baseline/current/diff image with review and exact-match scores, and retain screen names
+  in non-embeddable image links for accessible multi-screen review.
+- Hardened GitLab raw-image fallback against worktree substitution by verifying the exact reviewed
+  commit blob, and forwarded self-hosted GitLab hostnames to `glab` token lookup.
+- Full release packaging now runs plugin validation itself and binds the successful result to the
+  exact release commit; callers can no longer mark validation as passed with a command-line flag.
+  Dirty-tolerant local dry runs are recorded as `skipped` instead of making an attestation.
+
+### Verified
+
+- `pnpm check`
+- `pnpm plugin:validate`
+- `pnpm --dir website typecheck && pnpm --dir website build && pnpm guide:check`
+- `pnpm release:build 0.3.2 --full`
+
 ## 0.3.1 - 2026-07-23
 
 ### Added

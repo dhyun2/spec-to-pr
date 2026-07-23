@@ -615,6 +615,7 @@ describe("Codex SDK workload budget", () => {
     });
 
     expect(extractWorkflowStatus(turnResult(1_000, status).items)).toMatchObject({
+      revision: 7,
       deliveryProfile: { publication: "draft" },
       delegationPolicy: {
         singleWriter: true,
@@ -1147,6 +1148,7 @@ function workflowStatus(
   const hardLimitTokens = options.hardLimitTokens ?? 180_000;
   return {
     runId: options.runId ?? "run_12345678",
+    revision: 7,
     status,
     ...(status === "completed" ? {} : { currentStage: "contracts" }),
     stages: [{ name: "intake", status: "passed" }],

@@ -1473,6 +1473,7 @@ export const DiagnosticPublicationSchema = z
 export const WorkflowStatusSchema = z
   .object({
     runId: RunIdSchema,
+    revision: z.number().int().nonnegative(),
     status: z.enum(["running", "needs-external-action", "blocked", "publish-ready", "completed"]),
     currentStage: z.string().trim().min(1).optional(),
     scope: WorkflowScopeSchema,

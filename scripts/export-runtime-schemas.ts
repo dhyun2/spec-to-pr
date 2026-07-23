@@ -1,5 +1,6 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { RunManifestSchema, RunSummarySchema } from "../src/run/index.js";
+import { DraftEvidenceManifestSchema } from "../src/workflow/index.js";
 
 import { z } from "zod";
 
@@ -21,6 +22,7 @@ const schemas = {
   "artifact-ref.schema.json": ArtifactRefSchema,
   "check-result.schema.json": CheckResultSchema,
   "decision.schema.json": DecisionSchema,
+  "draft-evidence-manifest.schema.json": DraftEvidenceManifestSchema,
   "evidence-ref.schema.json": EvidenceRefSchema,
   "gap.schema.json": GapSchema,
   "source-ref.schema.json": SourceRefSchema,

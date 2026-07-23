@@ -21,16 +21,16 @@ describe("publisher token provider", () => {
     restoreEnv("GITLAB_PRIVATE_TOKEN", originalGitlabPrivateToken);
   });
 
-  it("reads the configured GitLab token through the supported glab config command", () => {
+  it("passes a self-hosted GitLab hostname to the supported glab config command", () => {
     execFileSync.mockReturnValue("glpat-test-token\n");
 
-    expect(readPublisherToken("gitlab")).toEqual({
+    expect(readPublisherToken("gitlab", "gitlab.internal.example")).toEqual({
       token: "glpat-test-token",
-      source: "glab config get token --host",
+      source: "glab config get token --host gitlab.internal.example",
     });
     expect(execFileSync).toHaveBeenCalledWith(
       "glab",
-      ["config", "get", "token", "--host"],
+      ["config", "get", "token", "--host", "gitlab.internal.example"],
       expect.objectContaining({ encoding: "utf8" }),
     );
   });

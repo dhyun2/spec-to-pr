@@ -1,5 +1,7 @@
 {
   "schemaVersion": "guide-visual-proof-v1",
+  "provider": "playwright-chromium",
+  "capturedAt": "2026-07-23T04:11:22.904Z",
   "status": "passed",
   "attempt": 1,
   "target": {
@@ -29,19 +31,19 @@
   "files": {
     "baseline": {
       "path": "baseline.png",
-      "digest": "sha256:bf2c8c61ff53b4821838674156623edc26c55aeb572ea0feaee6757bfbc6715e"
+      "digest": "sha256:7e61012ccecff9c3ac5ab34a9a855f5619bf253d6b72e4748251e70e14a8de79"
     },
     "actual": {
       "path": "actual.png",
-      "digest": "sha256:fd0068b46205174ab0374801fcd2ea638a17facf511c0a011c5c9100f40cff74"
+      "digest": "sha256:b446052a2d7872c3aed642d78982ffcc86091c4574928a3aac542ebb1e6f45a5"
     },
     "diff": {
       "path": "diff.png",
-      "digest": "sha256:368ba627634dabb68ad6c2dcac67d72427887f4468e8f3cba7053bb080b399b5"
+      "digest": "sha256:6dde934779cd66e1f34a16ad797a9da9b33c281d599d673dd6948cf0b6723cb2"
     },
     "overlay": {
       "path": "overlay.png",
-      "digest": "sha256:772d8846a28038a630b98a4500e11d71799377631142397f66ed0cfe8314eacd"
+      "digest": "sha256:e486ad5214c4846d49c9d13fb272b3379cfbc0134b10ba69013310154f1233bd"
     }
   }
 }

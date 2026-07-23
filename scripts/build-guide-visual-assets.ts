@@ -64,16 +64,16 @@ function migrationFixture(variant: "baseline" | "actual") {
 <body>
   <main aria-label="레거시 화면 비교 상태">
     <header>
-      <div><p class="eyebrow">Legacy migration</p><h1>선택한 화면을 이관했습니다</h1></div>
-      <span class="order">SCOPE #STP-2407</span>
+      <div><p class="eyebrow">레거시 이관</p><h1>선택한 화면을 이관했습니다</h1></div>
+      <span class="order">작업 #STP-2407</span>
     </header>
-    <section class="notice"><strong>시각 검증 준비가 완료되었습니다</strong><p>두 화면을 같은 route, state, viewport에서 캡처해 차이를 측정합니다.</p></section>
+    <section class="notice"><strong>화면 비교 준비가 끝났습니다</strong><p>두 화면을 같은 경로·상태·화면 크기로 캡처해 차이를 측정합니다.</p></section>
     <div class="content">
       <section class="methods" aria-label="비교 조건">
-        <div class="method"><strong>Route</strong><span>/legacy/example</span></div>
-        <div class="method"><strong>State</strong><span>fixture-ready</span></div>
+        <div class="method"><strong>경로</strong><span>/legacy/example</span></div>
+        <div class="method"><strong>화면 상태</strong><span>비교 준비 완료</span></div>
       </section>
-      <aside><dl><dt>Viewport</dt><dd>960×560</dd><dt>Scale</dt><dd>1×</dd><dt class="total">Review gate</dt><dd class="total">≥ 98%</dd></dl></aside>
+      <aside><dl><dt>화면 크기</dt><dd>960×560</dd><dt>배율</dt><dd>1×</dd><dt class="total">승인 기준</dt><dd class="total">≥ 98%</dd></dl></aside>
     </div>
     <footer><p>지정한 범위 밖의 기능은 변경하지 않습니다.</p><button type="button">결과 비교</button></footer>
   </main>
@@ -112,6 +112,8 @@ async function main() {
   };
   const manifest = {
     schemaVersion: "guide-visual-proof-v1",
+    provider: "playwright-chromium",
+    capturedAt: new Date().toISOString(),
     status: comparison.status,
     attempt: 1,
     target: {

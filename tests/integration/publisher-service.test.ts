@@ -276,14 +276,14 @@ describe("PublisherService", () => {
     });
     expect(published.agentResultId).toMatch(/^ar_/);
     expect(githubPublisher.receivedSignals).toContain(controller.signal);
-    expect(githubPublisher.createdPayloads[0]?.body).toContain("## 시각 증거 미리보기");
+    expect(githubPublisher.createdPayloads[0]?.body).toContain("### Figma와 브라우저 결과");
     expect(githubPublisher.createdPayloads[0]?.body).toContain(
       "https://github.example/assets/figma.png",
     );
     expect(githubPublisher.createdPayloads[0]?.body).toContain(
       "https://github.example/assets/browser.png",
     );
-    expect(githubPublisher.createdPayloads[0]?.body).not.toContain(
+    expect(githubPublisher.createdPayloads[0]?.body).toContain(
       "https://github.example/assets/diff.png",
     );
     expect(githubPublisher.createdPayloads[0]?.body).not.toContain(
@@ -345,7 +345,7 @@ describe("PublisherService", () => {
       confirm: true,
     });
 
-    expect(githubPublisher.createdPayloads[0]?.body).toContain("## 시각 증거 미리보기");
+    expect(githubPublisher.createdPayloads[0]?.body).toContain("### Figma와 브라우저 결과");
     expect(githubPublisher.createdPayloads[0]?.body).not.toContain("## Visual Evidence Preview");
   });
 
@@ -1153,9 +1153,13 @@ describe("PublisherService", () => {
     expect(githubPublisher.createdPayloads[0]?.body).not.toContain(
       "https://github.example/assets/diff.png",
     );
+    expect(githubPublisher.createdPayloads[0]?.body).not.toContain(
+      "픽셀 차이 이미지도 함께 제공합니다.",
+    );
+    expect(githubPublisher.createdPayloads[0]?.body).not.toContain("overlay");
   });
 
-  it("injects legacy-screenshot visual previews with legacy and target labels", async () => {
+  it("injects legacy-screenshot visual previews with all available comparison evidence", async () => {
     const run = await runService.createRun({
       projectRoot,
     });
@@ -1178,7 +1182,7 @@ describe("PublisherService", () => {
     });
 
     expect(githubPublisher.createdPayloads[0]?.body).toContain(
-      "| 화면 | 레거시 | 이관 결과 | 일치율 |",
+      "| 화면 | 레거시 | 이관 결과 | 차이 | 검토 일치율 | 픽셀 일치율 | 결과 |",
     );
     expect(githubPublisher.createdPayloads[0]?.body).toContain(
       "레거시 화면과 이관 결과를 같은 조건으로 비교했습니다.",
@@ -1186,7 +1190,52 @@ describe("PublisherService", () => {
     expect(githubPublisher.createdPayloads[0]?.body).not.toContain(
       "| 대상 | Figma | Browser | Diff",
     );
+    expect(githubPublisher.createdPayloads[0]?.body).toContain(
+      "https://github.example/assets/diff.png",
+    );
+    expect(githubPublisher.createdPayloads[0]?.body).toContain("95.00%");
     expect(githubPublisher.createdPayloads[0]?.body).toContain("98.00%");
+    expect(githubPublisher.createdPayloads[0]?.body).not.toContain("overlay");
+  });
+
+  it("uses route, state, and viewport context instead of exposing opaque target IDs", async () => {
+    const run = await runService.createRun({
+      projectRoot,
+    });
+    await markRunReadyForPublish(run.id);
+    await addVisualEvidence(run.id, {
+      visualBaseline: "legacy-screenshot",
+      context: {
+        targetId: "legacy_01e68a8c011c37b4b997f938",
+        name: "매장 상세",
+        route: "/shop/42?tab=notice&token=do-not-publish",
+        state: "공지 탭 <펼침>",
+        viewport: { width: 390, height: 844 },
+        deviceScaleFactor: 2,
+      },
+    });
+
+    const report = await prReportService.generatePrReport({
+      runId: run.id,
+    });
+
+    await publisherService.publish({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      pushBranch: false,
+      confirm: true,
+    });
+
+    const body = githubPublisher.createdPayloads[0]?.body ?? "";
+    expect(body).toContain("매장 상세");
+    expect(body).toContain(
+      "/shop/42?tab=notice&amp;token=[REDACTED] · 공지 탭 &lt;펼침&gt; · 390×844 @2x",
+    );
+    expect(body).not.toContain("do-not-publish");
+    expect(body).not.toContain("<펼침>");
+    expect(body).not.toContain("legacy_01e68a8c011c37b4b997f938");
   });
 
   it("records failed publish and no publisher AgentResult when API body sync fails", async () => {
@@ -1297,7 +1346,7 @@ describe("PublisherService", () => {
       });
       expect(published.result.fallbackReason).toContain("GitLab review-asset upload failed");
       expect(published.agentResultId).toMatch(/^ar_/);
-      expect(gitlabPublisher.createdPayloads[0]?.body).toContain("## 시각 증거 미리보기");
+      expect(gitlabPublisher.createdPayloads[0]?.body).toContain("### 레거시와 이관 결과");
       expect(gitlabPublisher.createdPayloads[0]?.body).toContain(
         `https://gitlab.com/acme/spec-to-pr/-/raw/${gitHead}/.spec-to-pr/shop/visual/legacy.png`,
       );
@@ -1309,6 +1358,77 @@ describe("PublisherService", () => {
       if (originalGitLabToken === undefined) delete process.env["GITLAB_TOKEN"];
       else process.env["GITLAB_TOKEN"] = originalGitLabToken;
     }
+  });
+
+  it("refuses the GitLab raw-evidence fallback when HEAD blob bytes do not match the captured digest", async () => {
+    const originalGitLabToken = process.env["GITLAB_TOKEN"];
+    process.env["GITLAB_TOKEN"] = "glpat_test_token";
+
+    try {
+      const run = await runService.createRun({ projectRoot });
+      await markRunReadyForPublish(run.id);
+      await addVisualEvidence(run.id, { visualBaseline: "legacy-screenshot" });
+      await bindVisualEvidenceToCommittedFiles(run.id);
+      const report = await prReportService.generatePrReport({ runId: run.id });
+      gitlabPublisher.assetUploadError = new GitLabAssetUploadError(
+        "GitLab upload review asset failed: 503 uploads unavailable",
+        503,
+      );
+
+      const published = await createGitLabRawFallbackService({
+        headBlobContents: {
+          ".spec-to-pr/shop/visual/current.png": "different-committed-browser-png",
+        },
+      }).publish({
+        runId: run.id,
+        reportArtifactId: report.markdownArtifactId,
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        remoteUrl: "https://gitlab.com/acme/spec-to-pr.git",
+        headSha: gitHead,
+        pushBranch: false,
+        confirm: true,
+      });
+
+      expect(published.result).toMatchObject({
+        status: "failed",
+        requestSynced: false,
+        visualPreviewExpected: true,
+        visualPreviewSynced: false,
+        fallbackMode: "none",
+      });
+      expect(gitCalls).toContainEqual([
+        "cat-file",
+        "blob",
+        `${gitHead}:.spec-to-pr/shop/visual/current.png`,
+      ]);
+      expect(gitlabPublisher.createdPayloads).toHaveLength(0);
+    } finally {
+      if (originalGitLabToken === undefined) delete process.env["GITLAB_TOKEN"];
+      else process.env["GITLAB_TOKEN"] = originalGitLabToken;
+    }
+  });
+
+  it("names non-embeddable visual links with their screen context", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    await addVisualEvidence(run.id, { visualBaseline: "legacy-screenshot" });
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    githubPublisher.visualAssetsEmbeddable = false;
+
+    await publisherService.publish({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      pushBranch: false,
+      confirm: true,
+    });
+
+    const body = githubPublisher.createdPayloads[0]?.body ?? "";
+    expect(body).toContain("[레거시 · 화면 1 ↗]");
+    expect(body).toContain("[이관 결과 · 화면 1 ↗]");
+    expect(body).toContain("[차이 · 화면 1 ↗]");
   });
 
   it("refuses the GitLab raw-evidence fallback when a committed screenshot no longer matches its captured digest", async () => {
@@ -1416,7 +1536,8 @@ describe("PublisherService", () => {
       featureVideoSynced: true,
     });
     expect(githubPublisher.uploadedAssets[0]).toEqual([{ role: "e2e-video" }]);
-    expect(githubPublisher.createdPayloads[0]?.body).toContain("Feature E2E Evidence");
+    expect(githubPublisher.createdPayloads[0]?.body).toContain("기능 E2E 영상");
+    expect(githubPublisher.createdPayloads[0]?.body).toContain("변경한 기능 녹화 보기");
     expect(githubPublisher.createdPayloads[0]?.body).toContain(
       "https://github.example/assets/e2e-video.webm",
     );
@@ -1697,7 +1818,17 @@ async function getPrReport(input: { runId: string; artifactId: string }) {
 
 async function addVisualEvidence(
   runId: string,
-  options: { visualBaseline?: "figma" | "legacy-screenshot" } = {},
+  options: {
+    visualBaseline?: "figma" | "legacy-screenshot";
+    context?: {
+      targetId: string;
+      name: string;
+      route: string;
+      state: string;
+      viewport: { width: number; height: number };
+      deviceScaleFactor: number;
+    };
+  } = {},
 ): Promise<void> {
   const run = await store.get(runId);
   const timestamp = "2026-06-23T00:00:00.750Z";
@@ -1757,37 +1888,65 @@ async function addVisualEvidence(
       timestamp,
     }),
   ];
-  const visualReport = {
-    runId,
-    changeName: "home",
-    ...(options.visualBaseline === undefined ? {} : { visualBaseline: options.visualBaseline }),
-    generatedAt: timestamp,
-    targetCount: 1,
-    passedCount: 1,
-    failedCount: 0,
-    reviewNeededCount: 0,
-    results: [
-      {
-        targetId: "home-desktop",
-        status: "passed",
-        figmaScreenshotArtifactId: "art_22222222222222222222222222222222",
-        browserScreenshotArtifactId: "art_33333333333333333333333333333333",
-        diffArtifactId: "art_44444444444444444444444444444444",
-        metrics: {
-          width: 100,
-          height: 100,
-          comparedPixelCount: 10_000,
-          maskedPixelCount: 0,
-          exactMatchRatio: 0.95,
-          reviewMatchRatio: 0.98,
-          meanDistance: 0.1,
-          maxDistance: 1,
-        },
-        gapIds: [],
-        notes: [],
-      },
-    ],
+  const commonMetrics = {
+    width: 100,
+    height: 100,
+    comparedPixelCount: 10_000,
+    maskedPixelCount: 0,
+    exactMatchRatio: 0.95,
+    reviewMatchRatio: 0.98,
+    meanDistance: 0.1,
+    maxDistance: 1,
   };
+  const visualReport =
+    options.context === undefined
+      ? {
+          runId,
+          changeName: "home",
+          ...(options.visualBaseline === undefined
+            ? {}
+            : { visualBaseline: options.visualBaseline }),
+          generatedAt: timestamp,
+          targetCount: 1,
+          passedCount: 1,
+          failedCount: 0,
+          reviewNeededCount: 0,
+          results: [
+            {
+              targetId: "home-desktop",
+              status: "passed",
+              figmaScreenshotArtifactId: "art_22222222222222222222222222222222",
+              browserScreenshotArtifactId: "art_33333333333333333333333333333333",
+              diffArtifactId: "art_44444444444444444444444444444444",
+              metrics: commonMetrics,
+              gapIds: [],
+              notes: [],
+            },
+          ],
+        }
+      : {
+          version: 2,
+          runId,
+          generatedAt: timestamp,
+          results: [
+            {
+              ...options.context,
+              baselineKind: options.visualBaseline ?? "figma",
+              fixture: "고정된 검토 데이터",
+              masks: [],
+              status: "passed",
+              metrics: {
+                ...commonMetrics,
+                maskedAreaRatio: 0,
+                pixelTolerance: 0.02,
+                threshold: 0.98,
+              },
+              baselineArtifactId: "art_22222222222222222222222222222222",
+              actualArtifactId: "art_33333333333333333333333333333333",
+              diffArtifactId: "art_44444444444444444444444444444444",
+            },
+          ],
+        };
   const visualReportArtifact = await writeArtifact({
     id: "art_55555555555555555555555555555555",
     kind: "visual-report",
@@ -1875,7 +2034,10 @@ async function bindVisualEvidenceToCommittedFiles(runId: string): Promise<void> 
 }
 
 function createGitLabRawFallbackService(
-  options: { treeMode?: "100644" | "120000" } = {},
+  options: {
+    treeMode?: "100644" | "120000";
+    headBlobContents?: Record<string, string>;
+  } = {},
 ): PublisherService {
   return new PublisherService(
     store,
@@ -1891,6 +2053,19 @@ function createGitLabRawFallbackService(
       if (args[0] === "ls-tree") {
         return {
           stdout: `${options.treeMode ?? "100644"} blob ${"b".repeat(40)}\t${args.at(-1)}\n`,
+          stderr: "",
+        };
+      }
+      if (args[0] === "cat-file") {
+        const objectName = args[2] ?? "";
+        const separator = objectName.indexOf(":");
+        const projectRelativePath = separator < 0 ? "" : objectName.slice(separator + 1);
+        const defaultContent = projectRelativePath.endsWith("legacy.png")
+          ? "figma-png"
+          : "browser-png";
+
+        return {
+          stdout: options.headBlobContents?.[projectRelativePath] ?? defaultContent,
           stderr: "",
         };
       }
@@ -2005,6 +2180,7 @@ class FakePublisher implements ReviewRequestPublisher {
   public failCreate = false;
   public failAssetUpload = false;
   public assetUploadError: Error | undefined;
+  public visualAssetsEmbeddable = true;
   public existingRequest: PublishedReviewRequest | undefined;
   public forceNonDraftResult = false;
 
@@ -2035,7 +2211,7 @@ class FakePublisher implements ReviewRequestPublisher {
       targetId: asset.targetId,
       label: asset.label,
       url: `https://github.example/assets/${asset.role}${asset.role === "e2e-video" ? ".webm" : ".png"}`,
-      embeddable: asset.role !== "e2e-video",
+      embeddable: asset.role !== "e2e-video" && this.visualAssetsEmbeddable,
     }));
   }
 

@@ -10,6 +10,7 @@ import { parallelReviewersForWorkload } from "./generated/delivery-mode-policy.j
 
 export type BoundaryWorkflowStatus = {
   runId: string;
+  revision: number;
   status: "running" | "needs-external-action" | "blocked" | "publish-ready" | "completed";
   currentStage?: string;
   stages: unknown[];
@@ -380,6 +381,7 @@ function compactStatus(
 ) {
   return {
     runId: status.runId,
+    revision: status.revision,
     status: status.status,
     ...(status.currentStage === undefined ? {} : { currentStage: status.currentStage }),
     stages: status.stages,
@@ -438,6 +440,7 @@ function parseWorkflowStatusCandidate(value: unknown): BoundaryWorkflowStatus | 
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
   const runId = record["runId"];
+  const revision = record["revision"];
   const status = record["status"];
   const allowedStatuses = new Set([
     "running",
@@ -446,7 +449,14 @@ function parseWorkflowStatusCandidate(value: unknown): BoundaryWorkflowStatus | 
     "publish-ready",
     "completed",
   ]);
-  if (typeof runId !== "string" || typeof status !== "string" || !allowedStatuses.has(status)) {
+  if (
+    typeof runId !== "string" ||
+    typeof revision !== "number" ||
+    !Number.isInteger(revision) ||
+    revision < 0 ||
+    typeof status !== "string" ||
+    !allowedStatuses.has(status)
+  ) {
     return null;
   }
   if (
@@ -477,6 +487,7 @@ function parseWorkflowStatusCandidate(value: unknown): BoundaryWorkflowStatus | 
 
   return {
     runId,
+    revision,
     status: status as BoundaryWorkflowStatus["status"],
     ...(currentStage === undefined ? {} : { currentStage }),
     stages: record["stages"],

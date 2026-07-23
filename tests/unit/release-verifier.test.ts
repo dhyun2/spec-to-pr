@@ -262,6 +262,7 @@ function requiredReleaseInventory(): string[] {
     "schemas/runtime/artifact-ref.schema.json",
     "schemas/runtime/check-result.schema.json",
     "schemas/runtime/decision.schema.json",
+    "schemas/runtime/draft-evidence-manifest.schema.json",
     "schemas/runtime/evidence-ref.schema.json",
     "schemas/runtime/gap.schema.json",
     "schemas/runtime/run-manifest.schema.json",

@@ -1,6 +1,6 @@
 ---
 sidebar_position: 1
-title: How a Run moves
+title: How a Run works
 hide_title: true
 ---
 
@@ -10,13 +10,13 @@ import NextStep from "@site/src/components/guide/NextStep";
 
 <GuideHero
 eyebrow="One Run · eight durable stages"
-title="How a Run moves"
-summary="Follow one change from the incoming request through state, evidence, authority boundaries, a draft PR, and explicit post-merge archive."
-primary={{ label: "See review ownership", href: "/concepts/reviews" }}
-secondary={{ label: "Choose my case", href: "/usage/" }}
+title="How a Run works"
+summary="Follow one change from intake through implementation, verification, a draft PR, and explicit post-merge archiving."
+primary={{ label: "See reviewer roles", href: "/concepts/reviews" }}
+secondary={{ label: "Choose a use case", href: "/usage/" }}
 />
 
-Four delivery modes share one Run and one pipeline. Delivery mode controls delivery and evidence; input sources compose independently. Project guidance is traceable but excluded from scope classification.
+All four delivery modes use one Run and the same pipeline. The selected mode determines the result and required evidence, while input sources can be combined as needed. Project guidance is tracked, but it does not expand the requested scope.
 
 ## Run map
 
@@ -40,19 +40,19 @@ Four delivery modes share one Run and one pipeline. Delivery mode controls deliv
 
 The sequential durable spine remains intact. Non-UI work marks design review not applicable. Publish is draft-only; archive is an explicit post-merge action.
 
-### Artifact-evidence path contract
+### Evidence path rules
 
-Every `artifactPaths` and artifact-evidence path must be a portable project-relative, `/`-separated safe name rooted at the project. Before ingestion, the runtime rejects absolute, traversal, control-character, backslash-containing non-portable paths and secret-shaped paths. Never place token/password/secret/credential **values** in a path. A descriptive name such as `token-validation.json` remains valid because it does not contain an actual secret value.
+Every entry in `artifactPaths` and every evidence path must be relative to the project root, portable across operating systems, and separated with `/`. Before accepting a file, the runtime rejects absolute paths, directory traversal, control characters, backslashes, and paths that look like secret values. Never put an actual token, password, secret, or credential **value** in a path. A descriptive filename such as `token-validation.json` is valid because it does not contain the value itself.
 
-## Workload and resume boundary
+## Workload estimates and resuming
 
-After intake, `workflow_status` reports `XS`–`XL`, an estimated token range/confidence/reasons, the 80% checkpoint, and authoritative `requiredValidations`. Contracts may refine the same estimate with numeric `workloadSignals`; this adds no tool or stage. The SDK checkpoints at the first completed boundary at or above 80%, starts a compact fresh thread from `resumeContext`, and returns `split-required` at the hard limit without shrinking validation. Missing usage blocks as `usage-unavailable`.
+After intake, `workflow_status` reports an `XS`–`XL` workload, estimated token range, confidence and reasons, the 80% checkpoint, and authoritative `requiredValidations`. Contracts can refine that estimate with numeric `workloadSignals`; this does not add another tool or stage. At the first completed boundary at or above 80%, the SDK saves a checkpoint and starts a compact new thread from `resumeContext`. At the hard limit it returns `split-required` without reducing validation. If usage cannot be measured, the next action is blocked as `usage-unavailable` rather than treating usage as zero.
 
 ## One implementation context
 
-One implementation writer owns API and UI. API-backed UI first submits physically distinct non-empty types, schemas, wrappers, mocks, a passing contract-test JSON, and operation-aware `operations` with one `implementationContextId`; final implementation repeats that ID and supplies exact `apiCoverage`.
+One implementation writer owns both API and UI work. Before final UI implementation, API-backed work submits distinct, non-empty types, schemas, wrappers, mocks, a passing contract-test JSON, and operation-aware `operations` under one `implementationContextId`. The final implementation uses the same ID and supplies exact `apiCoverage`.
 
-Intake pins timestamped local/remote `sourceProvenance` and the complete OpenAPI operation inventory. Figma and running-legacy baselines share `visualTargets`. Every actual capture repeats its target route/state/viewport/device scale/fixture and records provider, ISO capture time, PNG path, and `sha256:` digest. Runtime rejects target drift, digest mismatch, and caller scores before `compare-visuals` computes exact/review ratios, diff, and overlay at a minimum 98%, with at most 20% justified masking and three total comparison attempts (the initial comparison plus at most two repairs). Legacy contracts plan stable keys and final implementation replaces them with current-packet migrated/excluded coverage. Brief/feature API coverage must exactly match intake OpenAPI operations. Legacy derives API candidates through its explicit bounded source-adapter list: candidates require the same complete API evidence, zero candidates produce a `complete` API section bound to that list and the inventory digest, and ambiguous methods/paths resolve only from a unique scoped runtime/OpenAPI match. Otherwise intake returns a durable blocker with the Run ID. Report creates canonical 15-section `pr-report-v2.1` JSON and Markdown for ready and blocked results; historical v2.1 remains readable while new publication requires current adapter/digest evidence.
+Intake records timestamped local and remote `sourceProvenance` and the complete OpenAPI operation inventory. Figma and running-legacy baselines share `visualTargets`. Every actual capture repeats its target route/state/viewport/device scale/fixture and records the provider, ISO capture time, PNG path, and `sha256:` digest. Before `compare-visuals` runs, the runtime rejects changed comparison conditions, digest mismatches, and caller-provided scores. It then computes exact and review ratios, diff, and overlay, requiring at least 98% similarity, no more than 20% justified masking, and no more than three attempts: the initial comparison plus two repairs. Legacy contracts record stable keys as planned; final implementation replaces them with current-packet migrated or excluded coverage. Brief and feature API coverage must exactly match the OpenAPI operations recorded at intake. Legacy derives API candidates from an explicit, bounded list of source adapters. Existing candidates require complete API evidence; no candidates produce a `complete` API section tied to the adapter list and inventory digest. An ambiguous method or path is resolved only by one unique scoped runtime or OpenAPI match. Otherwise intake returns a durable blocker while preserving the Run ID. Reporting creates canonical 15-section `pr-report-v2.1` JSON and Markdown for both ready and blocked results. Historical v2.1 reports remain readable, while new publication requires current adapter and digest evidence.
 
 Instruction precedence is current user request → explicit `guidancePaths` → automatically discovered guidance → available/applicable installed skill → SpecToPR defaults. Missing optional skills do not block.
 
@@ -62,7 +62,7 @@ Ambiguous legacy APIs resolve only from project-local bounded HAR/request JSON (
 
 `delegationPolicy` derives from workload: zero read-only scout workers for XS/S, at most one for M, and at most two for L/XL. Scouts only do bounded independent read-heavy discovery; they do not edit, browse, call workflow MCP, nest, or create parallel writers. Only the fully read-only, workflow-MCP-free `functional-reviewer` and UI-only `design-reviewer` may run in parallel after implementation from immutable packets.
 
-## Mode evidence
+## Evidence by mode
 
 | Mode      | Additional evidence                                                             |
 | --------- | ------------------------------------------------------------------------------- |
@@ -73,9 +73,9 @@ Ambiguous legacy APIs resolve only from project-local bounded HAR/request JSON (
 
 Only feature inherits targeted E2E/video. Any supplied `figmaUrl` requires one real `figma-bundle` regardless of mode.
 
-## Browser evidence routing
+## Choosing browser evidence
 
-Playwright Test/CLI web-first assertions and structured results are the browser acceptance oracle. Browser MCP or a host browser is optional for interactive reproduction/inspection. Chrome DevTools MCP is conditional diagnosis for console, network, performance, memory, or live DOM. Screenshots, videos, traces, and agent observation do not replace assertions. Required proof not run blocks as `BROWSER_NOT_RUN` with an exact unblock action.
+Playwright Test/CLI web-first assertions and structured results decide whether browser requirements pass. Browser MCP or a host browser is optional for reproducing and inspecting interactions. Chrome DevTools MCP is used only when console, network, performance, memory, or live-DOM diagnosis is needed. Screenshots, videos, traces, and agent observations do not replace assertions. If required proof cannot run, the Run is blocked as `BROWSER_NOT_RUN` with an exact recovery action.
 
 ## Ready and blocked publication
 
@@ -85,15 +85,15 @@ Ready and blocked publication use the same 15-section `pr-report-v2.1`. Every se
 
 GitHub evidence uses one managed `spec-to-pr/evidence` branch with immutable run/packet/target/artifact paths instead of creating a branch per Run. PR URLs are pinned to the upload commit SHA, so later uploads cannot rewrite earlier evidence links.
 
-Legacy migration draft review material is pinned to a `.spec-to-pr/<feature>/` bundle and the same change's `openspec/changes/<change-name>/`. A bundle keeps only `manifest.json`, `contracts/`, `evidence/`, `visual/`, and `report/`. The manifest alone carries Run IDs/digests; the PR shows requirement state and side-by-side legacy/current screens. Raw HARs, cookies, tokens, complete logs, opaque feature keys, and repeated whole implementation-file lists stay out of the reviewer surface.
+Legacy draft review material is kept under `.spec-to-pr/<feature>/` and the same change's `openspec/changes/<change-name>/`. The feature directory contains only `manifest.json`, `contracts/`, `evidence/`, `visual/`, and `report/`. The manifest is the contract-integrity authority for the current Run/revision, legacy-root digest, requirements, and OpenSpec file digests. Collapsed PR metadata shows only the Run, commit, and input digests needed to reproduce the review; the visible body leads with requirement status and side-by-side legacy/current screens. Raw HARs, cookies, tokens, complete logs, opaque feature keys, and repetitive lists of every implementation file stay out of the review surface.
 
-When a GitLab project upload fails with 401/403/408/429, 5xx, or a transient network error, only legacy/current PNGs that are tracked regular files at the exact review commit and whose captured SHA-256 matches the clean worktree may use raw URLs as a fallback. Synthetic diffs/overlays, video, missing/changed/digest-mismatched files never use this path; the original publication failure remains.
+When a GitLab project upload fails with 401/403/408/429, 5xx, or a transient network error, only legacy/current PNGs that are tracked regular files whose exact reviewed-commit blobs and clean-worktree files both match the captured SHA-256 may use raw URLs as a fallback. Synthetic diffs/overlays, video, missing/changed/digest-mismatched files never use this path; the original publication failure remains.
 
 `workflow_publish intent: blocked-diagnostic` may create a diagnostic draft only when the tree is clean, source is non-target, the remote is supported/authenticated, a delta is committed, and source is at least one commit ahead. It remains `status: blocked`; it is evidence, not a passed report/publish verdict. Missing preconditions or `PUBLISH_NO_DELTA` return a **local blocked report** without an empty commit or issue fallback, and the same action does not loop on a precondition it cannot resolve.
 
 If a durable concurrency claim expires or loses its heartbeat and the external mutation cannot be proven, the result is `reason: diagnostic-publication-uncertain` and publication does not retry automatically. `recoverUncertain: false` is the default. Only after the user inspects GitHub/GitLab for an existing matching source/target draft and gives explicit approval may the existing `workflow_publish` action be called with `recoverUncertain: true`. This optional recovery adds no tool or stage, leaves blocked stages blocked, and is never auto-approved by the SDK.
 
-After recovery, continue the **same Run** from `resumeContext` without replaying passed stages. If a diagnostic draft exists, update the same source/target **same draft PR** from `[Blocked]` to its normal ready title/body and remove the blocked label. Humans retain ready/approve/merge authority.
+After recovery, continue the **same Run** from `resumeContext` without replaying stages that already passed. If a diagnostic draft exists, update the existing draft PR for the same source and target: replace its `[Blocked]` title and body with the normal ready content, then remove the blocked label. Ready, approval, and merge decisions remain with people.
 
 <NextStep
 eyebrow="Next concept"

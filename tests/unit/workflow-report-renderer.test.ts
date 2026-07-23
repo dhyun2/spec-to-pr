@@ -238,10 +238,23 @@ describe("workflow report renderer", () => {
     expect(markdown).toContain("## 검증 결과");
     expect(markdown).toContain("| API | 완료 |");
     expect(markdown).toContain("<summary>API 상세</summary>");
-    expect(markdown).toContain(`인벤토리 digest: ${inventoryDigest}`);
+    expect(markdown).toContain(`인벤토리 해시: ${inventoryDigest}`);
     expect(markdown).toContain("source-fetch-literal, source-request-config");
-    expect(markdown).toContain("탐지된 API operation이 없습니다.");
+    expect(markdown).toContain("탐지된 API 항목이 없습니다.");
     expect(markdown).not.toContain("## 1. Decision and review packet");
+
+    const blockedWithApiGap = PrReportV2Schema.parse({
+      ...report,
+      api: {
+        ...report.api,
+        gaps: ["GET /shops/{id} 실행 증거 누락"],
+      },
+    });
+    const blockedWithApiGapMarkdown = renderPrReportV2Markdown(blockedWithApiGap);
+    expect(blockedWithApiGapMarkdown).toContain(
+      "API 0개를 사용·검증했고, 0개는 범위에서 제외했으며, 1개는 미해결로 남았습니다.",
+    );
+    expect(blockedWithApiGapMarkdown).toContain("| 1 | 0 | 0 | 1 |");
 
     const historical = PrReportV2Schema.parse({
       ...report,
@@ -366,17 +379,137 @@ describe("workflow report renderer", () => {
     expect(readyMarkdown).not.toContain("legacy_shop_main");
     expect(readyMarkdown).toContain("| 상태 | 요구사항 | 이관 내용 |");
     expect(readyMarkdown).toContain("| 이관 | REQ-SHOP-ROUTING | Shop 메인 화면을 이관했습니다. |");
-    expect(readyMarkdown).toContain("| 화면 | 경로 · 상태 | 뷰포트 | 일치율 | 기준 | 결과 |");
     expect(readyMarkdown).toContain(
-      "| 매장 메인 | /shop/&#35;/main/1 · 초기 화면 | 390×844 @1x | 99.12% | 98.00% | 통과 |",
+      "| 화면 | 경로 · 상태 | 화면 크기 | 검토 일치율 | 픽셀 일치율 | 기준 | 결과 |",
     );
+    expect(readyMarkdown).toContain(
+      "| Shop detail | /shop/&#35;/main/1 · initial detail viewport | 390×844 @1x | 99.12% | 94.00% | 98.00% | 통과 |",
+    );
+    expect(readyMarkdown).not.toContain("shop.main");
     expect(readyMarkdown).toContain("| 기능 리뷰 | 승인 | 1/1 통과 | 0건 |");
     expect(readyMarkdown).toContain("| LCP | 364ms |");
-    expect(readyMarkdown).toContain("<summary>Run, 입력 출처, 변경 파일, 증거 보기</summary>");
+    expect(readyMarkdown).toContain(
+      "<summary>실행 정보, 입력 출처, 변경 파일, 검증 자료 보기</summary>",
+    );
     expect(readyMarkdown).toContain("### 변경 파일 1개");
     expect(readyMarkdown).toContain("## 실행 메타데이터");
     expect(readyMarkdown).not.toContain("Unexpected migration behavior.");
     expect(readyMarkdown).not.toContain("Gates: &#91;");
     expect(readyMarkdown).not.toContain("Findings: &#91;");
+
+    const mixedApiCoverage = PrReportV2Schema.parse({
+      ...ready,
+      api: {
+        ...ready.api,
+        operations: [
+          {
+            operationKey: "GET /shops/{id}",
+            method: "GET",
+            path: "/shops/{id}",
+            status: "exercised",
+            productionCallSites: ["src/api/shop.ts"],
+            executableEvidencePaths: ["evidence/shop-api.json"],
+            blocking: false,
+          },
+          {
+            operationKey: "GET /shops/{id}/ranking",
+            method: "GET",
+            path: "/shops/{id}/ranking",
+            status: "gap",
+            productionCallSites: [],
+            executableEvidencePaths: [],
+            blocking: false,
+            notes: "실행 증거가 없습니다.",
+          },
+          {
+            operationKey: "DELETE /shops/{id}/favorite",
+            method: "DELETE",
+            path: "/shops/{id}/favorite",
+            status: "intentionally-out-of-scope",
+            productionCallSites: [],
+            executableEvidencePaths: [],
+            blocking: true,
+            notes: "이번 이관 범위에서 제외했습니다.",
+          },
+        ],
+        gaps: ["GET /shops/{id}/ranking 실행 증거 누락"],
+      },
+    });
+    const mixedApiMarkdown = renderPrReportV2Markdown(mixedApiCoverage);
+
+    expect(mixedApiMarkdown).toContain(
+      "API 1개를 사용·검증했고, 1개는 범위에서 제외했으며, 1개는 미해결로 남았습니다.",
+    );
+    expect(mixedApiMarkdown).toContain("| 3 | 1 | 1 | 1 |");
+    expect(mixedApiMarkdown).toContain("| GET /shops/{id}/ranking | 미해결 | — | — |");
+    expect(mixedApiMarkdown).not.toContain("API -1개");
+
+    const prefixCollision = PrReportV2Schema.parse({
+      ...ready,
+      api: {
+        applicable: true,
+        operations: [
+          {
+            operationKey: "GET /shops",
+            method: "GET",
+            path: "/shops",
+            status: "gap",
+            productionCallSites: [],
+            executableEvidencePaths: [],
+            blocking: true,
+          },
+        ],
+        gaps: ["GET /shops/{id}: 별도 API 실행 증거 누락"],
+      },
+    });
+    const prefixCollisionMarkdown = renderPrReportV2Markdown(prefixCollision);
+    expect(prefixCollisionMarkdown).toContain("| 2 | 0 | 0 | 2 |");
+
+    const translatedStatuses = PrReportV2Schema.parse({
+      ...ready,
+      api: {
+        ...ready.api,
+        operations: [
+          {
+            operationKey: "GET /planned",
+            method: "GET",
+            path: "/planned",
+            status: "planned",
+            productionCallSites: [],
+            executableEvidencePaths: [],
+            blocking: false,
+          },
+          {
+            operationKey: "GET /blocked",
+            method: "GET",
+            path: "/blocked",
+            status: "blocked",
+            productionCallSites: [],
+            executableEvidencePaths: [],
+            blocking: true,
+          },
+        ],
+        gaps: [],
+      },
+      legacy: {
+        applicable: true,
+        coverage: [
+          {
+            featureKey: "opaque-feature-key",
+            requirementIds: ["REQ-SHOP-ROUTING"],
+            status: "planned",
+            targetFiles: [],
+            executableEvidencePaths: [],
+            rationale: "아직 이관하지 않았습니다.",
+          },
+        ],
+      },
+    });
+    const translatedStatusesMarkdown = renderPrReportV2Markdown(translatedStatuses);
+    expect(translatedStatusesMarkdown).toContain("| GET /planned | 계획 | — | — |");
+    expect(translatedStatusesMarkdown).toContain("| GET /blocked | 차단 | — | — |");
+    expect(translatedStatusesMarkdown).toContain(
+      "| 계획 | REQ-SHOP-ROUTING | 아직 이관하지 않았습니다. |",
+    );
   });
 });

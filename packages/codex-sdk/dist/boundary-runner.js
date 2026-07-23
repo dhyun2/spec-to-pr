@@ -212,6 +212,7 @@ async function inspectBlockedDiagnosticPreflight(inspect) {
 function compactStatus(status, requiredValidations, effectiveBudget) {
     return {
         runId: status.runId,
+        revision: status.revision,
         status: status.status,
         ...(status.currentStage === undefined ? {} : { currentStage: status.currentStage }),
         stages: status.stages,
@@ -264,6 +265,7 @@ function parseWorkflowStatusCandidate(value) {
         return null;
     const record = value;
     const runId = record["runId"];
+    const revision = record["revision"];
     const status = record["status"];
     const allowedStatuses = new Set([
         "running",
@@ -272,7 +274,12 @@ function parseWorkflowStatusCandidate(value) {
         "publish-ready",
         "completed",
     ]);
-    if (typeof runId !== "string" || typeof status !== "string" || !allowedStatuses.has(status)) {
+    if (typeof runId !== "string" ||
+        typeof revision !== "number" ||
+        !Number.isInteger(revision) ||
+        revision < 0 ||
+        typeof status !== "string" ||
+        !allowedStatuses.has(status)) {
         return null;
     }
     if (!Array.isArray(record["stages"]) ||
@@ -300,6 +307,7 @@ function parseWorkflowStatusCandidate(value) {
     }
     return {
         runId,
+        revision,
         status: status,
         ...(currentStage === undefined ? {} : { currentStage }),
         stages: record["stages"],

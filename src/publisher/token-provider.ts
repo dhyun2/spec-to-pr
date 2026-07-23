@@ -26,8 +26,9 @@ const HOST_CONFIG: Record<ReviewHost, HostTokenConfig> = {
   },
 };
 
-export function readPublisherToken(host: ReviewHost): PublisherToken {
+export function readPublisherToken(host: ReviewHost, hostname?: string): PublisherToken {
   const config = HOST_CONFIG[host];
+  const cli = cliForHost(config.cli, host, hostname);
 
   // 1. Environment variables take precedence (explicit, CI-friendly).
   const fromEnv = readEnvToken(config.envNames);
@@ -37,7 +38,7 @@ export function readPublisherToken(host: ReviewHost): PublisherToken {
   }
 
   // 2. Fall back to the host CLI if it is installed and authenticated.
-  const fromCli = readCliToken(config.cli);
+  const fromCli = readCliToken(cli);
 
   if (fromCli !== undefined) {
     return fromCli;
@@ -45,8 +46,21 @@ export function readPublisherToken(host: ReviewHost): PublisherToken {
 
   throw new Error(
     `${config.label} token is not configured. Set one of: ${config.envNames.join(", ")}, ` +
-      `or authenticate the ${config.cli.command} CLI (${config.cli.command} ${config.cli.args.join(" ")}).`,
+      `or authenticate the ${cli.command} CLI (${cli.command} ${cli.args.join(" ")}).`,
   );
+}
+
+function cliForHost(
+  cli: { command: string; args: string[] },
+  host: ReviewHost,
+  hostname: string | undefined,
+): { command: string; args: string[] } {
+  if (host !== "gitlab") return cli;
+
+  return {
+    command: cli.command,
+    args: [...cli.args, hostname?.trim() || "gitlab.com"],
+  };
 }
 
 function readEnvToken(names: string[]): PublisherToken | undefined {

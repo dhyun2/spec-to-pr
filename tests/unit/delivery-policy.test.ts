@@ -223,6 +223,26 @@ describe("delivery policy", () => {
     });
   });
 
+  it("requires the draft review bundle only when legacy publication is draft", () => {
+    const draft = buildDeliveryProfile({
+      mode: "legacy",
+      changeKind: "migration",
+      publication: "draft",
+      scope: uiScope,
+      legacyProjectRoot: "/tmp/legacy-app",
+    });
+    const localOnly = buildDeliveryProfile({
+      mode: "legacy",
+      changeKind: "migration",
+      publication: "none",
+      scope: uiScope,
+      legacyProjectRoot: "/tmp/legacy-app",
+    });
+
+    expect(draft.draftEvidenceBundle).toBeDefined();
+    expect(localOnly.draftEvidenceBundle).toBeUndefined();
+  });
+
   it("makes feature inherit full delivery and add only targeted E2E plus one video", () => {
     expect(
       buildDeliveryProfile({

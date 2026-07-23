@@ -1,204 +1,204 @@
 ---
 sidebar_position: 9
-title: 트러블슈팅
+title: 문제 해결
 ---
 
-# 트러블슈팅
+# 문제 해결
 
-첫 진단은 `/spec-to-pr:doctor`입니다. `workflow_info`가 contract `2.0.0`, tool 7개, stage 8개, reviewer 2개를 반환해야 합니다.
+문제가 생기면 먼저 `/spec-to-pr:doctor`를 실행하세요. `workflow_info`가 계약 버전 `2.0.0`, 도구 7개, 단계 8개, 검토자 2개를 반환해야 합니다.
 
-## 설치와 기동
+## 설치와 실행
 
-### MCP server가 시작되지 않는다
+### MCP 서버가 시작되지 않는다
 
 1. `node --version`이 22 이상인지 확인합니다.
 2. 로컬 소스 설치라면 `pnpm build` 뒤 `dist/mcp/server.js`가 있는지 확인합니다.
-3. 호스트를 재시작하거나 plugin을 reload합니다.
-4. plugin cache에서 `@modelcontextprotocol/sdk`를 직접 import해 진단하지 말고 실제 host tool인 `workflow_info`를 호출합니다.
+3. 호스트를 다시 시작하거나 플러그인을 다시 불러옵니다.
+4. 플러그인 캐시에서 `@modelcontextprotocol/sdk`를 직접 가져와 확인하지 말고, 호스트가 제공하는 실제 도구인 `workflow_info`를 호출합니다.
 
-### v1 tool/skill 이름이 보인다
+### v1 도구나 스킬 이름이 보인다
 
-현재 public surface는 `workflow_*` tool 7개와 public marketplace skill 8개뿐입니다. Marketplace를 갱신하고 plugin을 다시 설치한 뒤 새 task를 시작하세요. 오래된 task context에서 삭제된 microtool을 계속 호출하지 마세요.
+현재 공개 인터페이스에는 `workflow_*` 도구 7개와 마켓플레이스 스킬 8개만 있습니다. 마켓플레이스를 갱신하고 플러그인을 다시 설치한 뒤 새 작업을 시작하세요. 오래된 작업의 맥락에서 삭제된 세부 도구를 계속 호출하면 안 됩니다.
 
-## Mode 입력
+## 사용 방식 선택
 
-### Brief, Figma, OpenAPI를 함께 주면 mode를 무엇으로 해야 하나
+### 기획서, Figma, OpenAPI를 함께 제공할 때 어떤 방식을 선택해야 하나
 
-Mode는 source 종류가 아니라 납품·증거 정책입니다. 전체 프로세스 개발은 `brief`, 변경 기능만의 targeted E2E와 영상 한 개까지 필요하면 `feature`를 사용합니다. 두 모드 모두 `briefPath`, `figmaUrl`, `openApiPaths` 또는 `openApiUrls`를 빠짐없이 공급하세요. 추가 설명은 `docsPaths`, 프로젝트 규칙은 `guidancePaths`, 적용 후보 skill은 `skillHints`에 넣습니다. Figma URL이 있으면 real `figma-bundle`과 runtime 시각 비교가 필수입니다.
+사용 방식은 입력 자료의 종류가 아니라 최종 결과와 검증 범위를 정합니다. 전체 구현이 목적이면 `brief`, 변경 기능만 대상으로 한 E2E와 영상 1개까지 필요하면 `feature`를 선택합니다. 두 방식 모두 `briefPath`, `figmaUrl`, `openApiPaths` 또는 `openApiUrls`를 빠짐없이 제공해야 합니다. 추가 설명은 `docsPaths`, 프로젝트 규칙은 `guidancePaths`, 적용 후보 스킬은 `skillHints`에 넣습니다. Figma URL이 있으면 실제 `figma-bundle`과 실행 시점 화면 비교가 필수입니다.
 
-### Brief mode가 시작되지 않는다
+### `brief` 방식이 시작되지 않는다
 
-`briefPath`, `figmaUrl`, OpenAPI 입력 중 하나가 빠졌거나 읽을 수 없는 경우입니다. 기획서는 project-relative regular file, OpenAPI는 project-relative YAML/JSON 경로 또는 credential 없는 HTTPS URL이어야 합니다. URL 입력은 `sourceProvenance`에 주소·조회 시각·content hash가 남습니다.
+`briefPath`, `figmaUrl`, OpenAPI 입력 중 하나가 없거나 읽을 수 없는 경우입니다. 기획서는 프로젝트 상대 경로의 일반 파일이어야 합니다. OpenAPI는 프로젝트 상대 YAML/JSON 경로나 인증 정보가 포함되지 않은 HTTPS URL이어야 합니다. URL을 사용하면 주소, 조회 시각, 콘텐츠 해시가 `sourceProvenance`에 남습니다.
 
-### Legacy mode가 너무 넓게 조사한다
+### `legacy` 방식이 지정한 범위보다 넓게 조사한다
 
-`legacyProjectRoot`에는 대상 저장소와 다른 별도 레거시 프로젝트의 절대 경로를 넣고, route·동작·오류 조건처럼 concrete migration scope를 적으세요. Runtime은 레거시 프로젝트를 읽기 전용으로 bounded inventory하고, 해당 화면을 실행한 캡처를 새 결과 화면의 baseline으로 사용합니다. 저장소 전체를 무차별 현대화하거나 전체 E2E를 실행하지는 않지만, 요청 범위의 migration coverage와 시각 비교는 생략하지 않습니다.
+`legacyProjectRoot`가 의도한 절대 경로로 고정됐는지 먼저 확인하세요. 이 경로 전체를 옮길 때는 별도 기능명을 만들 필요가 없으며 “지정한 범위 전체를 이관해줘”라는 한 줄이면 충분합니다. 일부 화면만 옮길 때만 루트 안의 경로나 화면을 추가로 적으세요. 실행 엔진은 레거시 프로젝트를 읽기 전용으로 분석해 범위가 제한된 목록을 만들고, 해당 화면을 실행한 캡처를 결과 화면의 기준으로 사용합니다. 다른 기능을 찾기 위한 저장소 전체 키워드 검색이나 전체 E2E는 수행하지 않지만, 요청 범위의 이관 완료 상태와 화면 비교는 생략하지 않습니다.
 
-`LEGACY_API_METHOD_UNKNOWN`이면 source에서 method/path를 추측하지 않습니다. `nextActions`의 `collect-legacy-network-evidence`에 따라 대상 프로젝트 내부에 해당 flow만 캡처한 표준 HAR 또는 request JSON을 저장하고 `kind: legacy-network-evidence`, `evidencePath`로 제출하세요. HAR/JSON은 1 MB·1,000 request 한도이며 같은 Run의 intake가 재개됩니다.
+`LEGACY_API_METHOD_UNKNOWN`이 발생하면 코드만 보고 메서드나 경로를 추측하지 않습니다. `nextActions`의 `collect-legacy-network-evidence` 안내에 따라 대상 프로젝트 안에 해당 흐름만 캡처한 표준 HAR 또는 요청 JSON을 저장하세요. 그런 다음 `kind: legacy-network-evidence`와 `evidencePath`로 제출합니다. HAR/JSON은 최대 1 MB, 요청 1,000개까지 허용하며 같은 실행의 접수 단계부터 이어갑니다.
 
 ## Figma
 
-### URL은 있는데 contracts가 blocked다
+### URL이 있는데도 계약 단계가 차단된다
 
-URL 문자열만으로는 evidence가 아닙니다.
+URL만으로는 검증 자료가 되지 않습니다.
 
 1. 호스트에 Figma 기능이 연결되어 있고 파일 권한이 있는지 확인합니다.
-2. `node-id` 포함 URL로 대상 frame을 좁힙니다.
-3. 호스트 기능으로 실제 node/screenshot/variable/asset/component context를 수집합니다.
-4. `provider: host-connected-figma`, ISO `capturedAt`, profile과 일치하는 `fileUrl`, 비어 있지 않은 `nodeIds`, JSON `manifestPath`를 기록합니다.
-5. Strict manifest에 같은 출처 값과 PNG `visualPaths`를 기록하고, manifest와 실제 PNG 한 개 이상을 포함한 typed `figma-bundle`을 정확히 한 번 제출합니다.
+2. `node-id`가 포함된 URL로 대상 프레임을 좁힙니다.
+3. 호스트 기능으로 실제 노드, 스크린샷, 변수, 자산, 컴포넌트 정보를 수집합니다.
+4. `provider: host-connected-figma`, ISO 형식의 `capturedAt`, 프로필과 일치하는 `fileUrl`, 비어 있지 않은 `nodeIds`, JSON `manifestPath`를 기록합니다.
+5. 엄격한 형식의 매니페스트에 같은 출처 정보와 PNG `visualPaths`를 기록합니다. 그런 다음 매니페스트와 실제 PNG를 한 개 이상 포함한 `figma-bundle`을 정확히 한 번 제출합니다.
 
-같은 Run에 Figma bundle을 반복 제출하거나 SpecToPR에 Figma microtool을 추가하거나 provider 상태를 polling하는 방식으로 우회하지 않습니다. Host capability가 없다면 required evidence blocker를 해소할 때까지 `figmaUrl`이 있는 어떤 mode도 통과시킬 수 없습니다.
+같은 실행에 Figma 묶음을 반복 제출하거나, SpecToPR에 Figma 세부 도구를 추가하거나, 자료 제공 기능의 상태를 반복 조회하는 방식으로 우회하지 않습니다. 호스트에 Figma 기능이 없다면 필수 검증 자료를 준비할 때까지 `figmaUrl`이 있는 어떤 방식도 통과할 수 없습니다.
 
-## Project guidance와 optional skill
+## 프로젝트 지침과 선택 스킬
 
-### Explicit guidance가 없다고 나온다
+### 명시한 프로젝트 지침을 찾지 못한다
 
-`guidancePaths`의 파일은 project root 안에 실제 regular file로 존재해야 하고 1 MB 이하여야 합니다. Runtime은 `AGENTS.md`, `CLAUDE.md`, `README.md`, `docs/architecture/ARCHITECTURE.md`, `docs/etc/folder-structure.md`만 자동 확인하며 `docs/`를 재귀 scan하지 않습니다. 명시한 파일 누락은 blocker지만 없는 자동 후보는 무시합니다.
+`guidancePaths`의 파일은 프로젝트 루트 안에 있는 1MB 이하의 일반 파일이어야 합니다. 실행 엔진은 `AGENTS.md`, `CLAUDE.md`, `README.md`, `docs/architecture/ARCHITECTURE.md`, `docs/etc/folder-structure.md`만 자동으로 확인하며 `docs/` 전체를 재귀 검색하지 않습니다. 사용자가 명시한 파일이 없으면 실행을 막지만, 자동 검색 후보가 없는 것은 무시합니다.
 
-### Optional skill이 설치되지 않았다
+### 선택 스킬이 설치되어 있지 않다
 
-Missing optional skills do not block the Run. `skillHints`는 host가 이름을 확인해 available and applicable한 skill만 쓰도록 요청합니다. 설치되지 않았거나 관련 없는 hint는 적용 목록에서 빼고, project guidance와 나머지 required evidence를 계속 따르세요. 임의 경로에서 skill 본문을 읽거나 generic skill 조언으로 project guidance를 덮어쓰지 않습니다.
+선택 스킬이 없어도 실행을 막지 않습니다. `skillHints`는 호스트가 이름을 확인해 설치되어 있고 현재 작업에 맞는 스킬만 사용하도록 요청합니다. 설치되지 않았거나 관련 없는 힌트는 적용 목록에서 제외하고, 프로젝트 지침과 나머지 필수 검증을 계속 따르세요. 임의의 경로에서 스킬 본문을 읽거나 일반적인 스킬 조언으로 프로젝트 지침을 덮어쓰면 안 됩니다.
 
-### Guidance 때문에 UI/API gate가 잘못 켜졌다
+### 프로젝트 지침 때문에 UI/API 검증이 잘못 적용된다
 
-Project guidance는 durable instruction evidence이지만 scope classification에서 제외됩니다. `briefPath`, `docsPaths`, `openApiPaths`, `openApiUrls`, `legacyProjectRoot`, request와 Figma source로 scope를 분류해야 합니다. PR report의 explicit/discovered guidance와 applied optional skills 목록은 traceability용이며 새 gate나 stage를 만들지 않습니다.
+프로젝트 지침은 계속 보존되는 작업 근거이지만 범위를 판단할 때는 제외합니다. 범위는 `briefPath`, `docsPaths`, `openApiPaths`, `openApiUrls`, `legacyProjectRoot`, 사용자 요청, Figma 자료로 분류해야 합니다. PR 보고서에 표시되는 명시·자동 발견 지침과 적용한 선택 스킬 목록은 추적을 위한 정보이며 새 검증이나 단계를 만들지 않습니다.
 
-## Feature E2E와 영상
+## `feature` E2E와 영상
 
 ### 전체 E2E를 실행하려고 한다
 
-중단하고 변경 기능을 고르는 selector를 정하세요. Test file path, tag, browser-test project 중 하나를 사용하고 실행 command에 그 selector가 실제로 들어가야 합니다. Full-project E2E는 feature mode의 기본 요구가 아닙니다.
+중단하고 변경 기능만 고르는 선택자를 정하세요. 테스트 파일 경로, 태그, 브라우저 테스트 프로젝트 중 하나를 사용하고 실행 명령에 해당 선택자가 실제로 포함되어야 합니다. 전체 프로젝트 E2E는 `feature` 방식의 기본 요구사항이 아닙니다.
 
-### 영상이 있는데 기능 검토가 blocked다
+### 영상이 있는데도 기능 검토가 차단된다
 
 다음을 모두 확인하세요.
 
-- delivery profile이 user-facing `feature`
+- 제공 프로필이 사용자 대상 `feature`
 - `scope: targeted-feature`
-- selector가 단일 Playwright command의 실제 인자임
-- strict result JSON이 `status: passed`, 정확한 selector, implementation 제출과 같은 `implementationContextId`, 양수 `testCount`만 기록함
+- 선택자가 하나의 Playwright 명령에 실제 인자로 들어감
+- 엄격한 결과 JSON에 `status: passed`, 정확한 선택자, 구현 제출과 같은 `implementationContextId`, 양수인 `testCount`가 기록됨
 - 재생 시간이 0보다 큰 구조적으로 유효한 WebM/MP4 컨테이너가 정확히 한 개이고 25 MB 이하
-- result path와 video path가 implementation artifact 목록에 포함됨
+- 결과 경로와 영상 경로가 구현 결과물 목록에 포함됨
 
-Video는 interaction evidence이며 Figma/legacy visual baseline이나 accessibility evidence를 대신하지 않습니다.
+영상은 상호작용을 보여 주는 자료입니다. Figma·레거시 기준 화면이나 접근성 검증을 대신하지 않습니다.
 
-## API와 UI
+## API와 UI 구현
 
-### UI implementation 제출이 거부된다
+### UI 구현 제출이 거부된다
 
-API-backed UI인데 명시적 `api-ready` checkpoint가 없거나 최종 `apiReady`가 false이거나 `implementationContextId`가 다른 경우입니다. 같은 context에서 물리적으로 서로 다른 비어 있지 않은 type, schema, wrapper/client, mock 파일과 `status: passed`인 contract-test JSON을 `apiArtifacts`로 먼저 제출하고 최종 구현에 같은 ID를 쓰세요. Path, symlink, hard link alias는 별도 증거가 아닙니다. Boolean만 true로 바꾸거나 별도 API agent를 나중에 통합하는 흐름은 v2 contract가 아닙니다.
+API를 사용하는 UI인데 명시적인 `api-ready` 체크포인트가 없거나, 최종 `apiReady`가 `false`이거나, `implementationContextId`가 다른 경우입니다. 같은 구현 맥락에서 서로 다른 실제 타입, 스키마, 호출 모듈·클라이언트, 모의 응답 파일과 `status: passed`인 계약 테스트 JSON을 먼저 `apiArtifacts`로 제출하세요. 최종 구현에도 같은 ID를 사용해야 합니다. 경로 별칭, 심볼릭 링크, 하드 링크는 별도 증거로 인정하지 않습니다. 불리언 값만 `true`로 바꾸거나 API 작업을 별도 에이전트에게 맡긴 뒤 나중에 합치는 방식은 v2 계약에 맞지 않습니다.
 
-## Review와 gate
+## 검토와 필수 검증
 
-### Functional review만 있고 design review가 없다
+### 기능 검토만 있고 디자인 검토가 없다
 
-정상일 수 있습니다. Design review는 UI scope에만 적용됩니다. 반대로 UI가 실제로 바뀌었는데 scope 분류가 비-UI라면 implementation의 `uiChanged`와 intake evidence를 확인하세요.
+정상일 수 있습니다. 디자인 검토는 UI가 바뀐 작업에만 적용됩니다. 반대로 UI가 실제로 바뀌었는데 비-UI로 분류되었다면 구현 결과의 `uiChanged`와 접수 단계의 근거를 확인하세요.
 
-### 실행하지 않은 check가 blocker다
+### 실행하지 않은 검사가 차단 사유가 된다
 
-필수 gate는 empty/skipped/not-run evidence로 통과하지 않습니다. Repository의 실제 command를 실행해 project-local 결과를 제출하거나, 그 gate가 scope에 적용되지 않는다는 근거가 있을 때만 not applicable로 분류하세요.
+필수 검증은 비어 있거나 `skipped`·`not-run`인 자료로 통과할 수 없습니다. 저장소의 실제 명령을 실행해 프로젝트 안의 결과를 제출하세요. 해당 검증이 작업 범위에 적용되지 않는다는 근거가 있을 때만 `not applicable`로 분류할 수 있습니다.
 
-### Browser 검사와 진단 도구를 어떻게 고르나
+### 브라우저 검사와 진단 도구를 어떻게 고르나
 
-1. Acceptance는 Playwright Test/CLI의 web-first assertion과 structured result로 증명합니다.
-2. Browser MCP/host browser는 가능한 환경에서 interaction 재현·inspection에만 optional로 씁니다.
-3. Chrome DevTools MCP는 console error, network request, performance trace, memory, live DOM을 조사할 때만 씁니다.
-4. Screenshot, video, DevTools trace, agent 관찰은 assertion을 대신하지 않습니다.
+1. 요구사항 충족 여부는 Playwright Test/CLI의 화면 상태 기반 검증과 구조화 결과로 증명합니다.
+2. Browser MCP나 호스트 브라우저는 가능한 환경에서 상호작용을 재현하고 살펴볼 때만 선택적으로 사용합니다.
+3. Chrome DevTools MCP는 콘솔 오류, 네트워크 요청, 성능 추적 기록, 메모리, 실시간 DOM을 조사할 때만 사용합니다.
+4. 스크린샷, 영상, DevTools 추적 기록, 에이전트의 관찰만으로는 검증을 대신할 수 없습니다.
 
-Required browser command가 없거나 실행할 수 없으면 `BROWSER_NOT_RUN`입니다. Test path/tag/project selector, server start command, dependency/browser 설치와 실행 권한을 복구한 뒤 같은 Run에서 Playwright proof를 다시 제출하세요. Feature에는 변경 기능 E2E와 video 정확히 1개가 필요하지만 brief/legacy/Figma에는 이 profile 비용을 자동 추가하지 않습니다. Brief와 legacy는 대신 적용 가능한 lab Web Vitals와 field 데이터의 available/unavailable 근거를 PR에 남깁니다.
+필수 브라우저 명령이 없거나 실행할 수 없으면 `BROWSER_NOT_RUN`입니다. 테스트 경로·태그·프로젝트 선택자, 서버 시작 명령, 의존성·브라우저 설치, 실행 권한을 복구한 뒤 같은 실행에 Playwright 결과를 다시 제출하세요. `feature`에는 변경 기능 E2E와 정확히 1개의 영상이 필요하지만 `brief`, `legacy`, `figma`에는 이 비용을 자동으로 추가하지 않습니다. `brief`와 `legacy`는 대신 적용 가능한 실험실 Web Vitals와 현장 데이터의 사용 가능 여부를 PR에 남깁니다.
 
-## Typed blocker 진단
+## 차단 사유 확인
 
-`blockerDetails.kind`는 아래 일곱 runtime enum 중 하나여야 합니다. 함께 `stage`, `code`, `retryable`, `resumable`, completed work, redacted evidence, attempted recovery, unrun validations, exact unblock action을 확인합니다. Raw prompt, secret/token, transcript, unrestricted private absolute path는 넣지 않습니다.
+`blockerDetails.kind`는 아래 일곱 실행 상태 값 중 하나여야 합니다. `stage`, `code`, `retryable`, `resumable`, 완료한 작업, 민감 정보를 제거한 근거, 시도한 복구, 실행하지 못한 검증, 정확한 해결 방법도 함께 확인합니다. 원본 프롬프트, 비밀값·토큰, 대화 전문, 제한 없는 개인 절대 경로는 넣지 않습니다.
 
-| `kind`                 | 대표 상황                                             | 해소 방법                                            |
-| ---------------------- | ----------------------------------------------------- | ---------------------------------------------------- |
-| `missing-input`        | brief/path/source 같은 required input 없음            | 정확한 required input을 제공                         |
-| `missing-tool`         | Figma/browser/auth capability 또는 required tool 없음 | required tool, 연결 또는 권한을 제공                 |
-| `policy`               | source 충돌, 금지된 broad E2E/branch action           | authoritative source/허용 범위를 결정                |
-| `verification`         | test/reviewer/evidence 실패 또는 `BROWSER_NOT_RUN`    | 실패 원인을 수정하고 같은 required validation 재실행 |
-| `publish-precondition` | dirty/target branch, auth/remote/commit 문제          | 아래 preflight를 외부에서 해소한 뒤 재개             |
-| `budget-split`         | `split-required`                                      | 독립적으로 검증 가능한 scope로 나누되 gate 유지      |
-| `unexpected`           | 분류되지 않은 deterministic/runtime 오류              | redacted evidence와 재현 단계로 root cause 진단      |
+| `kind`                 | 대표 상황                                            | 해결 방법                                           |
+| ---------------------- | ---------------------------------------------------- | --------------------------------------------------- |
+| `missing-input`        | 기획서·경로·입력 자료 등 필수 입력이 없음            | 요청한 필수 입력을 정확히 제공                      |
+| `missing-tool`         | Figma·브라우저·인증 기능 또는 필수 도구가 없음       | 필요한 도구, 연결 또는 권한을 제공                  |
+| `policy`               | 입력 자료가 충돌하거나 넓은 E2E·브랜치 작업이 금지됨 | 기준으로 삼을 자료나 허용 범위를 결정               |
+| `verification`         | 테스트·검토·검증 자료 실패 또는 `BROWSER_NOT_RUN`    | 원인을 수정하고 같은 필수 검증을 다시 실행          |
+| `publish-precondition` | 작업 트리·브랜치·인증·원격 저장소·커밋 문제          | 발행 사전 조건을 외부에서 해결한 뒤 재개            |
+| `budget-split`         | `split-required`                                     | 검증 항목을 유지한 채 독립적으로 검증할 범위로 분할 |
+| `unexpected`           | 분류되지 않은 고정적 오류 또는 실행 오류             | 민감 정보를 제거한 근거와 재현 절차로 원인을 진단   |
 
-Blocker가 retryable이어도 필수 evidence를 optional로 바꾸지는 않습니다. Resumable이면 새 Run을 만들지 않고 latest `workflow_status.resumeContext`에서 이어갑니다.
+차단 사유가 재시도 가능하더라도 필수 검증을 선택 사항으로 바꾸지는 않습니다. 재개 가능하다면 새 실행을 만들지 않고 최신 `workflow_status.resumeContext`에서 이어갑니다.
 
-## Workload와 자동 경계 제어
+## 작업량과 자동 분할
 
-### Intake estimate가 부정확하다
+### 처음 표시된 작업량 예상이 부정확하다
 
-초기 estimate는 정보가 적어 `low` confidence와 넓은 범위가 정상입니다. Contracts 제출에 실제 요구사항, 관련 파일, API operation, UI surface, Figma node, test target, workspace package, uncertainty의 non-negative `workloadSignals`를 포함하세요. 완료된 같은 mode/size 표본이 10개 이상이면 SDK가 median/p90으로 보정합니다.
+처음에는 정보가 적으므로 신뢰도가 `low`이고 예상 범위가 넓을 수 있습니다. 계약을 제출할 때 실제 요구사항, 관련 파일, API 작업, UI 화면, Figma 노드, 테스트 대상, 워크스페이스 패키지, 불확실성을 0 이상의 `workloadSignals`로 포함하세요. 같은 사용 방식과 크기로 완료된 표본이 10개 이상이면 SDK가 중앙값과 p90을 사용해 예상 범위를 보정합니다.
 
 ### 80%인데 즉시 멈추지 않았다
 
-SDK가 usage를 받는 시점은 Codex turn 완료 뒤입니다. 실행 중 live token count는 없으므로 정확한 토큰에서 끊지 않고 최초로 80% 이상이 확인된 workflow action 경계에서 compact checkpoint와 fresh thread를 만듭니다. 한 turn이 매우 크면 경계 확인 전에 80%를 넘을 수 있습니다.
+SDK는 Codex 작업 차례가 끝난 뒤에야 사용량을 받습니다. 실행 중인 정확한 토큰 수는 알 수 없으므로, 완료된 작업 경계에서 처음 80% 이상이 확인되면 간결한 체크포인트를 만들고 새 작업에서 이어갑니다. 한 차례의 작업량이 매우 크면 경계를 확인하기 전에 80%를 넘을 수 있습니다.
 
-Agent가 한 action group 뒤에 멈추라는 지시를 무시하면 같은 turn 안의 이미 발생한 side effect는 SDK가 되돌릴 수 없습니다. 다만 매 action turn의 새 structured status를 요구하므로 이전 status로 같은 action을 재생하지 않고, 다음 turn 전에 budget을 다시 확인합니다.
+에이전트가 작업 묶음 하나를 마친 뒤 멈추라는 지시를 따르지 않으면 같은 작업 차례에 이미 발생한 외부 변경을 SDK가 되돌릴 수는 없습니다. 대신 작업 차례마다 새로운 구조화 상태를 요구하므로 이전 상태로 같은 작업을 반복하지 않고, 다음 차례를 시작하기 전에 남은 사용량을 다시 확인합니다.
 
-Fresh thread나 `--resume`은 기존 durable run ID로 `workflow_status`를 먼저 호출합니다. `resumeContext.goal`, `evidencePaths`, `submissions`가 비어 있거나 필요한 프로젝트 파일이 사라졌다면 새 Run을 만들지 말고 blocker로 처리하세요.
+새 작업이나 `--resume`에서는 기존 실행 ID로 `workflow_status`를 먼저 호출합니다. `resumeContext.goal`, `evidencePaths`, `submissions`가 비어 있거나 필요한 프로젝트 파일이 사라졌다면 새 실행을 만들지 말고 차단 사유로 처리하세요.
 
 ### `split-required`가 나왔다
 
-자동 hard limit 뒤 다음 action을 임의로 시작하지 않습니다. 작업 크기와 관계없이 독립적으로 검증 가능한 scope slice로 나눕니다. 나누기 어렵다면 현재 Run을 멈추고 범위를 다시 정의하되 functional/design 등 required validation은 삭제하거나 waive하지 않습니다.
+자동 한도에 도달한 뒤에는 다음 작업을 임의로 시작하지 않습니다. 작업 크기와 관계없이 독립적으로 검증할 수 있는 범위로 나눕니다. 나누기 어렵다면 현재 실행을 멈추고 범위를 다시 정하되 기능·디자인 등 필수 검증을 삭제하거나 면제하지 않습니다.
 
-### Usage history를 남기고 싶지 않다
+### 사용량 기록을 남기고 싶지 않다
 
-`--no-usage-calibration`을 사용하세요. 기본 기록은 `~/.codex/spec-to-pr/usage-history.jsonl`에 숫자/enum만 보관하며 prompt, source, code, diff, path, tool output, final response는 저장하지 않습니다. 경로 권한 문제가 있으면 `--usage-history`로 쓰기 가능한 대상 저장소 밖 위치를 지정하세요.
+`--no-usage-calibration`을 사용하세요. 기본 기록은 `~/.codex/spec-to-pr/usage-history.jsonl`에 숫자와 열거형 값만 보관하며 프롬프트, 소스, 코드, 변경 내용, 경로, 도구 출력, 최종 응답은 저장하지 않습니다. 경로 권한 문제가 있으면 `--usage-history`로 대상 저장소 밖의 쓰기 가능한 위치를 지정하세요.
 
-History read/write는 best-effort입니다. 권한 문제가 있어도 이미 완료·발행된 workflow를 실패로 뒤집지 않고 SDK 결과의 `usageCalibration.read` 또는 `write`가 `unavailable`을 보고합니다. Turn usage 자체가 없으면 calibration을 쓰지 않으며, nonterminal 실행은 `usage-unavailable`로 멈춥니다.
+사용량 기록의 읽기와 쓰기는 가능한 범위에서만 수행합니다. 권한 문제가 있어도 이미 완료하거나 발행한 워크플로를 실패로 바꾸지 않습니다. 대신 SDK 결과의 `usageCalibration.read` 또는 `write`가 `unavailable`을 표시합니다. 작업 차례의 사용량 자체가 없으면 보정 기록을 쓰지 않으며, 아직 끝나지 않은 실행은 `usage-unavailable`로 멈춥니다.
 
-`--usage-history`는 대상 저장소 밖 경로만 허용합니다. 저장소 안 JSONL은 git clean-tree와 draft publication preflight를 깨뜨릴 수 있으므로 외부 절대 경로를 사용하거나 calibration을 비활성화하세요. Terminal action이 이미 hard limit에 도달했다면 optional output-schema formatting turn도 시작하지 않습니다.
+`--usage-history`에는 대상 저장소 밖의 경로만 지정할 수 있습니다. 저장소 안의 JSONL은 깨끗한 작업 트리와 초안 발행 사전 조건을 깨뜨릴 수 있으므로 외부 절대 경로를 사용하거나 보정을 끄세요. 종료 작업이 이미 한도에 도달했다면 선택적인 출력 형식 정리를 위한 작업 차례도 시작하지 않습니다.
 
-## Publication
+## 초안 발행
 
-### Draft PR/MR이 만들어지지 않는다
+### 초안 PR/MR이 만들어지지 않는다
 
-- delivery profile의 `publication`이 `draft`인지 확인
-- `workflow_status`가 publish-ready이고 required blocker가 없는지 확인
+- 제공 프로필의 `publication`이 `draft`인지 확인
+- `workflow_status`가 발행 가능한 상태이고 필수 차단 사유가 없는지 확인
 - GitHub: `GITHUB_TOKEN` → `GH_TOKEN` → `gh auth token`
 - GitLab: `GITLAB_TOKEN` → `GITLAB_PRIVATE_TOKEN` → `glab auth token`
-- feature mode: 영상 sync가 성공했는지 확인
-- `sourceBranch`가 `targetBranch`와 다르고, working tree가 clean하며, 의도한 변경이 source에 commit되어 target보다 한 commit 이상 앞서는지 확인
+- `feature` 방식: 영상 동기화가 성공했는지 확인
+- `sourceBranch`와 `targetBranch`가 다르고, 작업 트리가 깨끗하며, 의도한 변경이 소스 브랜치에 커밋되어 대상 브랜치보다 한 커밋 이상 앞서는지 확인
 
-Publisher는 draft만 다룹니다. Merge, approve, ready 전환 실패를 publisher 문제로 취급하지 마세요. 그런 action은 애초에 수행하지 않습니다.
+발행 기능은 초안만 다룹니다. 병합, 승인, `ready` 전환 실패는 발행 기능의 권한 범위에 포함되지 않습니다.
 
-### GitLab 이미지 upload가 실패한다
+### GitLab 이미지 업로드가 실패한다
 
-`fallbackMode: gitlab-raw-evidence`가 보이면 project upload 대신 exact review commit의 raw PNG가 PR의 legacy/current 비교에 연결된 것입니다. 이는 401/403/408/429, 5xx, 또는 일시적 network 오류에서만 가능하며, baseline/current PNG가 tracked regular file이고 clean worktree의 SHA-256이 captured digest와 같은 경우에만 허용됩니다.
+`fallbackMode: gitlab-raw-evidence`가 보이면 프로젝트 업로드 대신 검토 대상 커밋의 원본(raw) PNG가 PR의 레거시/현재 화면 비교에 연결된 것입니다. 이 방식은 401/403/408/429, 5xx, 일시적인 네트워크 오류에서만 사용할 수 있습니다. 레거시/현재 PNG가 Git이 추적하는 일반 파일이고, 정확한 검토 커밋의 파일과 깨끗한 작업 트리 파일이 모두 캡처 시 기록한 해시와 같아야 합니다.
 
-diff/overlay, 영상, 누락·수정된 PNG, digest 불일치는 대체 대상이 아닙니다. 이 경우 token/파일을 바꾸거나 깨끗한 commit을 만든 뒤 같은 Run에서 publish를 다시 시도하세요. cookie/HAR/secret을 artifact나 PR에 붙여 해결하지 마세요.
+차이·겹침 이미지, 영상, 누락되거나 수정된 PNG, 해시가 다른 파일은 대체 대상이 아닙니다. 이 경우 토큰이나 파일 상태를 바로잡거나 깨끗한 커밋을 만든 뒤 같은 실행에서 발행을 다시 시도하세요. 쿠키, HAR, 비밀값을 결과물이나 PR에 붙여 해결하면 안 됩니다.
 
-### Diagnostic draft도 만들어지지 않는다
+### 진단용 초안도 만들어지지 않는다
 
-`workflow_publish intent: blocked-diagnostic`은 blocker를 우회하는 명령이 아닙니다. 다음 preflight가 이미 충족되어야 합니다.
+`workflow_publish intent: blocked-diagnostic`은 차단 사유를 우회하는 명령이 아닙니다. 다음 발행 조건이 먼저 충족되어야 합니다.
 
-- 의도한 변경만 commit되어 working tree가 clean
-- source와 target branch가 다름
-- GitHub/GitLab authentication이 유효하고 remote가 지원됨
-- target 대비 committed delta가 있으며 source가 최소 한 commit ahead
+- 의도한 변경만 커밋되어 있고 작업 트리가 깨끗함
+- 소스와 대상 브랜치가 다름
+- GitHub/GitLab 인증이 유효하고 지원하는 원격 저장소를 사용함
+- 대상 브랜치와 비교해 커밋된 변경이 있고 소스 브랜치가 최소 한 커밋 앞서 있음
 
-Delta가 없으면 `PUBLISH_NO_DELTA`이며 empty commit이나 issue fallback을 만들지 않습니다. Preflight blocker는 같은 publish action이 스스로 auth/commit/branch를 바꿔 해결할 수 없으므로 반복 호출하지 않고 **local blocked report**와 exact unblock action을 반환합니다. Diagnostic draft가 만들어져도 계속 `status: blocked`이며 report/publish 성공이 아닙니다.
+커밋 차이가 없으면 `PUBLISH_NO_DELTA`입니다. 이때 빈 커밋이나 대체 이슈를 만들지 않습니다. 같은 발행 작업이 인증·커밋·브랜치 문제를 스스로 해결할 수 없으므로 반복 호출하지 않고 **로컬 차단 보고서**와 정확한 해결 방법을 반환합니다. 진단용 초안이 만들어져도 상태는 계속 `status: blocked`이며, 보고서와 발행 검증을 통과했다는 뜻이 아닙니다.
 
 ### `diagnostic-publication-uncertain`이 반환된다
 
-Durable publication claim이 만료되었거나 heartbeat를 잃었습니다. GitHub/GitLab mutation은 성공했지만 결과 기록만 끊겼을 수 있으므로 동일 요청을 자동 재시도하면 duplicate draft 위험이 있습니다.
+발행 작업의 중복 실행을 막는 점유 정보가 만료되었거나 상태 확인 신호가 끊긴 경우입니다. GitHub/GitLab 변경은 성공했지만 결과 기록만 실패했을 수 있으므로, 같은 요청을 자동으로 다시 시도하면 초안이 중복으로 만들어질 수 있습니다.
 
-1. 추가 발행을 멈춥니다. `recoverUncertain: false`가 기본값이고 SDK는 이를 자동 승인하지 않습니다.
-2. GitHub/GitLab에서 source/target이 일치하는 existing matching draft와 `[Blocked]` 제목·본문·label을 확인합니다.
+1. 추가 발행을 멈춥니다. `recoverUncertain: false`가 기본값이며 SDK는 복구를 자동 승인하지 않습니다.
+2. GitHub/GitLab에서 소스와 대상 브랜치가 같은 기존 초안이 있는지, `[Blocked]` 제목·본문·라벨이 일치하는지 확인합니다.
 3. 확인 결과를 사용자에게 보여주고 명시적 복구 승인을 받습니다.
-4. 승인된 경우에만 같은 Run과 기존 `workflow_publish` action을 `recoverUncertain: true`로 호출합니다.
+4. 승인된 경우에만 같은 실행의 기존 `workflow_publish` 작업을 `recoverUncertain: true`로 호출합니다.
 
-이 선택적 복구는 별도 tool이나 stage를 추가하지 않습니다. Diagnostic evidence일 뿐이므로 blocked stages와 `status: blocked`를 passed로 바꾸지 않으며 required validation도 생략하지 않습니다.
+이 복구 절차는 별도 도구나 단계를 추가하지 않습니다. 진단 자료일 뿐이므로 차단된 단계와 `status: blocked`를 통과 상태로 바꾸지 않으며 필수 검증도 생략하지 않습니다.
 
-### Blocked draft를 정상 draft로 복구한다
+### 차단된 초안을 정상 초안으로 복구한다
 
-Unblock action을 수행한 뒤 **same Run**을 재개합니다. Source/target이 같은 기존 **same draft PR**을 `workflow_publish intent: ready`로 갱신하여 `[Blocked]` prefix와 blocked label을 제거하고 정상 title/body/report/assets를 반영합니다. 새 PR을 만들거나 diagnostic evidence를 passed verdict로 바꾸지 않습니다.
+안내된 해결 작업을 수행한 뒤 **같은 실행**을 재개합니다. 소스와 대상 브랜치가 같은 **기존 초안 PR**을 `workflow_publish intent: ready`로 갱신하세요. `[Blocked]` 접두사와 차단 라벨을 제거하고 정상 제목·본문·보고서·첨부 자료를 반영합니다. 새 PR을 만들거나 진단 자료를 통과 판정으로 바꾸지 않습니다.
 
-## 재개와 archive
+## 재개와 보관
 
-중단된 Run은 `workflow_status`로 blocker와 next action을 확인한 뒤 `workflow_advance`로 이어갑니다. 이미 승인된 stage를 다시 실행하지 않습니다. Diagnostic publication은 evidence일 뿐 success가 아닙니다.
+중단된 실행은 `workflow_status`로 차단 사유와 다음 작업을 확인한 뒤 `workflow_advance`로 이어갑니다. 이미 승인된 단계를 다시 실행하지 않습니다. 진단용 발행은 문제 상태를 보여 주는 자료일 뿐 성공 결과가 아닙니다.
 
-Archive는 review request의 authoritative merge evidence가 있어야 합니다. Branch push, closed 상태, 사용자 의도만으로 merge를 추측하지 않으며 runtime은 merge 상태를 polling하지 않습니다.
+보관은 PR/MR이 병합되었다는 신뢰할 수 있는 근거가 있어야 실행할 수 있습니다. 브랜치 푸시, 닫힌 상태, 사용자의 의도만으로 병합을 추측하지 않으며 실행 엔진은 병합 상태를 반복 조회하지 않습니다.
 
-해결되지 않으면 [GitHub Issues](https://github.com/dhyun2/spec-to-pr/issues)에 Doctor 결과와 redacted blocker를 함께 남겨 주세요.
+해결되지 않으면 [GitHub Issues](https://github.com/dhyun2/spec-to-pr/issues)에 진단 결과와 민감 정보를 제거한 차단 사유를 함께 남겨 주세요.

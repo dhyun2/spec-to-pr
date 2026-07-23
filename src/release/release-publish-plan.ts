@@ -52,14 +52,8 @@ export function buildReleasePublishPlan(input: ReleasePublishOptions): ReleaseCo
         args: ["check"],
       },
       {
-        id: "plugin-validate",
-        title: "Validate Claude and Codex plugin manifests",
-        command: "pnpm",
-        args: ["plugin:validate"],
-      },
-      {
         id: "release-build",
-        title: "Build and verify release package",
+        title: "Validate plugins, then build and verify the release package",
         command: "pnpm",
         args: ["release:build", version, "--full"],
       },

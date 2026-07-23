@@ -1,9 +1,15 @@
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import {
+  LEGACY_SOURCE_DIGEST_ALGORITHM_V1,
+  LEGACY_SOURCE_DIGEST_ALGORITHM_V2,
+  discoverLegacySourceGraph,
+} from "../../src/legacy/legacy-source-graph.js";
 import {
   assertLegacyInventoryFresh,
   buildLegacyInventory,
@@ -69,6 +75,7 @@ describe("legacy inventory v3", () => {
     );
     expect(first.scannedFiles).toBe(2);
     expect(first.truncated).toBe(false);
+    expect(first.sourceDigestAlgorithm).toBe(LEGACY_SOURCE_DIGEST_ALGORITHM_V2);
   });
 
   it("preserves case-sensitive API paths and discovers configured request adapters", async () => {
@@ -112,7 +119,7 @@ describe("legacy inventory v3", () => {
       expect.arrayContaining([
         "POST /API/Orders",
         "GET /v4/Thing",
-        "DELETE /API/Orders/1",
+        "DELETE /api/API/Orders/1",
         "PUT /v1/Orders/1",
         "PATCH /v1/OrderItems",
         "UNKNOWN /v2/NeedsMethod",
@@ -145,6 +152,44 @@ describe("legacy inventory v3", () => {
         .filter((entry) => entry.category === "api")
         .every((entry) => entry.apiAdapter !== undefined && entry.evidenceConfidence !== undefined),
     ).toBe(true);
+  });
+
+  it("does not promote unreferenced test or fixture files into the feature inventory", async () => {
+    const root = await temporaryLegacyProject();
+    await mkdir(path.join(root, "src", "fixtures"), { recursive: true });
+    await mkdir(path.join(root, "src", "__tests__"), { recursive: true });
+    await writeFile(
+      path.join(root, "src", "index.ts"),
+      [
+        'import "./fixtures/referenced";',
+        'export const productionRoute = { path: "/production" };',
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await writeFile(
+      path.join(root, "src", "fixtures", "referenced.ts"),
+      'export const referencedRoute = { path: "/referenced-fixture" };\n',
+      "utf8",
+    );
+    await writeFile(
+      path.join(root, "src", "fixtures", "unreferenced.ts"),
+      'export const unreferencedRoute = { path: "/unreferenced-fixture" };\n',
+      "utf8",
+    );
+    await writeFile(
+      path.join(root, "src", "__tests__", "route.test.ts"),
+      'export const testRoute = { path: "/test-only" };\n',
+      "utf8",
+    );
+
+    const inventory = await buildLegacyInventory(root);
+    const routes = inventory.entries
+      .filter((entry) => entry.category === "route")
+      .map((entry) => entry.normalizedKey)
+      .sort();
+
+    expect(routes).toEqual(["/production", "/referenced-fixture"]);
   });
 
   it("does not duplicate Shop transport calls through local facades or constructors", async () => {
@@ -319,6 +364,126 @@ describe("legacy inventory v3", () => {
     });
   });
 
+  it("promotes only API resource types from HAR while retaining explicit request arrays", async () => {
+    const root = await temporaryLegacyProject();
+    const inventory = await buildLegacyInventory(root);
+    const fromHar = mergeLegacyRuntimeNetworkEvidence(
+      inventory,
+      JSON.stringify({
+        log: {
+          entries: [
+            ...[
+              ["document", "/"],
+              ["script", "/assets/app.js"],
+              ["stylesheet", "/assets/app.css"],
+              ["image", "/assets/logo.png"],
+              ["font", "/assets/brand.woff2"],
+              ["media", "/assets/intro.mp4"],
+              ["beacon", "/telemetry/beacon"],
+              ["analytics", "/analytics/collect"],
+              ["xhr", "/api/shops"],
+              ["fetch", "/api/orders"],
+            ].map(([resourceType, url]) => ({
+              _resourceType: resourceType,
+              request: { method: "GET", url: `https://legacy.example${url}` },
+            })),
+            {
+              _resourceType: "fetch",
+              request: { method: "GET", url: "https://legacy.example/assets/fetched.js" },
+              response: { content: { mimeType: "application/javascript" } },
+            },
+            {
+              request: { method: "GET", url: "https://legacy.example/untyped-page" },
+              response: { content: { mimeType: "text/html" } },
+            },
+            {
+              request: { method: "GET", url: "https://legacy.example/api/untyped" },
+              response: { content: { mimeType: "application/json" } },
+            },
+          ],
+        },
+      }),
+      "evidence/legacy.har",
+    );
+
+    expect(
+      fromHar.apiCandidates
+        .filter((candidate) => candidate.witnesses.some((witness) => witness.kind === "runtime"))
+        .map((candidate) => candidate.operationKey)
+        .sort(),
+    ).toEqual(["GET /api/orders", "GET /api/shops", "GET /api/untyped", "GET /assets/fetched.js"]);
+
+    const fromExplicitRequests = mergeLegacyRuntimeNetworkEvidence(
+      inventory,
+      JSON.stringify({ requests: [{ method: "GET", url: "/assets/explicit.js" }] }),
+      "evidence/explicit-requests.json",
+    );
+    expect(fromExplicitRequests.apiCandidates.map((candidate) => candidate.operationKey)).toContain(
+      "GET /assets/explicit.js",
+    );
+  });
+
+  it("trusts explicit HAR API resource types before response and asset heuristics", async () => {
+    const root = await temporaryLegacyProject();
+    const inventory = await buildLegacyInventory(root);
+    const merged = mergeLegacyRuntimeNetworkEvidence(
+      inventory,
+      JSON.stringify({
+        log: {
+          entries: [
+            {
+              _resourceType: "fetch",
+              request: {
+                method: "GET",
+                url: "https://legacy.example/reports/monthly.pdf",
+                headers: [{ name: "Sec-Fetch-Dest", value: "document" }],
+              },
+              response: { content: { mimeType: "application/pdf" } },
+            },
+            {
+              resourceType: "xhr",
+              request: { method: "GET", url: "https://legacy.example/fragments/shop.html" },
+              response: { content: { mimeType: "text/html; charset=utf-8" } },
+            },
+            {
+              request: {
+                method: "GET",
+                url: "https://legacy.example/streams/updates.js",
+                resourceType: "eventsource",
+              },
+              response: { content: { mimeType: "application/javascript" } },
+            },
+            {
+              _resourceType: "script",
+              request: { method: "GET", url: "https://legacy.example/api/script-data" },
+              response: { content: { mimeType: "application/json" } },
+            },
+            {
+              _resourceType: "document",
+              request: { method: "GET", url: "https://legacy.example/api/document-data" },
+              response: { content: { mimeType: "application/json" } },
+            },
+            {
+              _resourceType: "image",
+              request: { method: "GET", url: "https://legacy.example/api/image-data" },
+              response: { content: { mimeType: "application/json" } },
+            },
+          ],
+        },
+      }),
+      "evidence/legacy.har",
+    );
+
+    expect(
+      merged.apiCandidates
+        .filter((candidate) => candidate.witnesses.some((witness) => witness.kind === "runtime"))
+        .map((candidate) => candidate.operationKey)
+        .sort(),
+    ).toEqual(
+      ["GET /fragments/shop.html", "GET /reports/monthly.pdf", "GET /streams/updates.js"].sort(),
+    );
+  });
+
   it("rejects malformed or unbounded runtime network evidence", async () => {
     const root = await temporaryLegacyProject();
     const inventory = await buildLegacyInventory(root);
@@ -342,6 +507,43 @@ describe("legacy inventory v3", () => {
         "evidence/legacy.json",
       ),
     ).toThrow(/1,000|1000|limit/i);
+    expect(() =>
+      mergeLegacyRuntimeNetworkEvidence(
+        inventory,
+        JSON.stringify({
+          log: {
+            entries: Array.from({ length: 1_001 }, () => ({
+              _resourceType: "image",
+              request: { method: "GET", url: "/assets/logo.png" },
+            })),
+          },
+        }),
+        "evidence/legacy.har",
+      ),
+    ).toThrow(/1,000|1000|limit/i);
+    expect(() =>
+      mergeLegacyRuntimeNetworkEvidence(
+        inventory,
+        JSON.stringify({
+          log: {
+            entries: [
+              {
+                _resourceType: "image",
+                request: { method: "UNSUPPORTED", url: "/assets/logo.png" },
+              },
+            ],
+          },
+        }),
+        "evidence/legacy.har",
+      ),
+    ).toThrow(/method/i);
+    expect(() =>
+      mergeLegacyRuntimeNetworkEvidence(
+        inventory,
+        " ".repeat(1024 * 1024 + 1),
+        "evidence/legacy.har",
+      ),
+    ).toThrow(/1 MB|limit/i);
   });
 
   it("does not mutate the legacy tree while scanning", async () => {
@@ -397,6 +599,95 @@ describe("legacy inventory v3", () => {
     await expect(assertLegacyInventoryFresh(root, pinned)).rejects.toThrow(/LEGACY_SOURCE_CHANGED/);
     await expect(assertLegacyInventoryFresh(root, { ...pinned, truncated: true })).rejects.toThrow(
       /LEGACY_INVENTORY_TRUNCATED/,
+    );
+  });
+
+  it("resumes an unchanged 0.3.1 Run with its original digest and still detects source changes", async () => {
+    const applicationRoot = await temporaryLegacyProject();
+    await writeFile(
+      path.join(applicationRoot, "package.json"),
+      '{"name":"legacy-compatibility-fixture"}\n',
+      "utf8",
+    );
+    const featureRoot = path.join(applicationRoot, "src", "modules", "shop");
+    await mkdir(featureRoot, { recursive: true });
+    await mkdir(path.join(applicationRoot, "src", "api"), { recursive: true });
+    await writeFile(
+      path.join(featureRoot, "profile.ts"),
+      'import { loadProfile } from "../../api"; export const profile = (id) => loadProfile(id);\n',
+      "utf8",
+    );
+    await writeFile(
+      path.join(applicationRoot, "src", "api", "index.ts"),
+      'export * from "./profileApi";\nexport * from "./ordersApi";\n',
+      "utf8",
+    );
+    const profileApiPath = path.join(applicationRoot, "src", "api", "profileApi.ts");
+    await writeFile(
+      profileApiPath,
+      "export const loadProfile = (id) => fetch(`/profiles/${id}`);\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(applicationRoot, "src", "api", "ordersApi.ts"),
+      'export const loadOrders = () => fetch("/orders");\n',
+      "utf8",
+    );
+
+    const current = await buildLegacyInventory(featureRoot);
+    const legacyGraph = await discoverLegacySourceGraph(
+      featureRoot,
+      {},
+      { digestAlgorithm: LEGACY_SOURCE_DIGEST_ALGORITHM_V1 },
+    );
+    const { sourceDigestAlgorithm: _newAlgorithm, ...withoutAlgorithm } = current;
+    const pinnedFrom031 = {
+      ...withoutAlgorithm,
+      rootDigest: legacyGraph.sourceDigest,
+      sourceDigest: legacyGraph.sourceDigest,
+    };
+
+    await expect(assertLegacyInventoryFresh(featureRoot, pinnedFrom031)).resolves.toMatchObject({
+      sourceDigestAlgorithm: LEGACY_SOURCE_DIGEST_ALGORITHM_V2,
+    });
+
+    await writeFile(
+      profileApiPath,
+      "export const loadProfile = (id) => fetch(`/changed-profiles/${id}`);\n",
+      "utf8",
+    );
+    await expect(assertLegacyInventoryFresh(featureRoot, pinnedFrom031)).rejects.toThrow(
+      /LEGACY_SOURCE_CHANGED/,
+    );
+  });
+
+  it("keeps the root-only digest contract when checking a persisted v2 Run", async () => {
+    const root = await temporaryLegacyProject();
+    const sourcePath = path.join(root, "src", "route.ts");
+    const source = 'export const route = { path: "/orders" };\n';
+    await writeFile(sourcePath, source, "utf8");
+    const current = await buildLegacyInventory(root);
+    const legacyV2Digest = `sha256:${createHash("sha256")
+      .update("src/route.ts")
+      .update("\0")
+      .update(source)
+      .update("\0")
+      .digest("hex")}` as const;
+    const { sourceDigestAlgorithm: _newAlgorithm, ...withoutAlgorithm } = current;
+    const pinnedV2 = {
+      ...withoutAlgorithm,
+      version: 2 as const,
+      rootDigest: legacyV2Digest,
+      sourceDigest: legacyV2Digest,
+    };
+
+    await expect(assertLegacyInventoryFresh(root, pinnedV2)).resolves.toMatchObject({
+      sourceDigestAlgorithm: LEGACY_SOURCE_DIGEST_ALGORITHM_V2,
+    });
+
+    await writeFile(sourcePath, 'export const route = { path: "/changed" };\n', "utf8");
+    await expect(assertLegacyInventoryFresh(root, pinnedV2)).rejects.toThrow(
+      /LEGACY_SOURCE_CHANGED/,
     );
   });
 });

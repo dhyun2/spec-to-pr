@@ -16,14 +16,14 @@ import NextStep from "@site/src/components/guide/NextStep";
 
 ## Marketplace 설치
 
-Claude Code session에서:
+Claude Code에서:
 
 ```text
 /plugin marketplace add dhyun2/spec-to-pr
 /plugin install spec-to-pr@spec-to-pr
 ```
 
-설치 직후에는 `/reload-plugins`를 실행하거나 새 session을 시작합니다.
+설치 직후에는 `/reload-plugins`를 실행하거나 새 세션을 시작합니다.
 
 업데이트:
 
@@ -73,7 +73,7 @@ codex plugin marketplace add .
 codex plugin add spec-to-pr@spec-to-pr
 ```
 
-설치 후 Codex를 다시 열고 새 task를 시작합니다. `/plugins`에서 SpecToPR marketplace와 `spec-to-pr` 설치 상태를 확인하세요.
+설치 후 Codex를 다시 열고 새 작업을 시작합니다. `/plugins`에서 SpecToPR 마켓플레이스와 `spec-to-pr` 설치 상태를 확인하세요.
 
 ## SDK runner
 
@@ -87,7 +87,7 @@ node packages/codex-sdk/dist/cli.js \
   --publish
 ```
 
-사용 가능한 mode와 option은 [설정](/reference/config)에 있습니다.
+사용 가능한 모드와 옵션은 [설정](/reference/config)에 있습니다.
 
 </TabItem>
 </Tabs>
@@ -98,28 +98,28 @@ node packages/codex-sdk/dist/cli.js \
 /spec-to-pr:doctor
 ```
 
-Doctor는 `workflow_info`를 호출해 contract version `2.0.0`과 다음 표면을 확인합니다.
+Doctor는 `workflow_info`를 호출해 계약 버전 `2.0.0`과 다음 공개 기능을 확인합니다.
 
-- tool 7개
-- durable stage 8개
-- reviewer role 2개
-- explicit API-ready-before-UI, independent reviews, conditional design review capability
+- 도구 7개
+- 중단 후 이어갈 수 있는 단계 8개
+- 독립 검토 역할 2개
+- UI 구현 전 `api-ready` 확인, 독립 기능·디자인 검토, UI 변경에만 적용되는 디자인 검토
 
-설치된 release package는 `node_modules`를 포함하지 않을 수 있습니다. plugin cache에서 SDK를 임의 import하는 방식 대신 host에 실제 노출된 `workflow_info`로 진단하세요.
+설치된 릴리스 패키지는 `node_modules`를 포함하지 않을 수 있습니다. 플러그인 캐시에서 SDK를 직접 불러오지 말고, 호스트가 실제로 제공하는 `workflow_info`로 진단하세요.
 
 ## 설치되는 구성
 
-- public marketplace skill 8개
-- `node ./dist/mcp/server.js`로 실행되는 local stdio MCP server
-- `functional-reviewer`, `design-reviewer` 정의
-- evidence ledger, artifact storage, draft publisher, explicit archive runtime
+- 공개 마켓플레이스 스킬 8개
+- `node ./dist/mcp/server.js`로 실행되는 로컬 stdio MCP 서버
+- `functional-reviewer`, `design-reviewer` 검토자 정의
+- 검증 자료 기록부, 산출물 저장소, 초안 발행기, 명시적으로 실행하는 보관 기능
 
-호스트별 tool namespace 표기는 다를 수 있지만 public contract는 같습니다.
+호스트마다 도구 이름 공간 표기는 다를 수 있지만 공개 계약은 같습니다.
 
 <NextStep
   eyebrow="설치 확인 완료"
-  title="첫 draft PR 흐름을 5분 안에 실행해 보세요"
-  description="Doctor 결과를 확인했다면, 하나의 완전한 brief 요청으로 intake부터 publish까지 이어집니다."
+  title="첫 PR 초안을 5분 안에 만들어 보세요"
+  description="Doctor 결과를 확인했다면, 요건을 갖춘 기획서 요청 하나로 접수부터 발행까지 이어집니다."
   href="/getting-started/quickstart"
   label="퀵스타트 시작"
   secondary={{ label: "설정 레퍼런스", href: "/reference/config" }}

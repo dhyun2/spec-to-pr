@@ -1,6 +1,6 @@
 # SpecToPR
 
-Turn a brief, a legacy application, a feature request, or a Figma design into an evidence-backed draft PR.
+Take a brief, legacy application, feature request, or Figma design through implementation, verification, and an evidence-backed draft PR.
 
 [한국어](README.ko.md) · [Documentation](https://dhyun2.github.io/spec-to-pr/en/) · [Choose a use case](https://dhyun2.github.io/spec-to-pr/en/usage/)
 
@@ -32,12 +32,12 @@ Restart the host, start a new task, and verify the installation:
 
 ## Choose a use case
 
-| Use case             | What you provide                                     | What arrives                                                                         | Guide                                                                |
-| -------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
-| Full delivery        | Brief/PDF/MD, Figma URL, and OpenAPI                 | Implemented API/UI, visual comparison, API gaps, Web Vitals, and a draft PR          | [Brief → PR](https://dhyun2.github.io/spec-to-pr/en/usage/brief)     |
-| Legacy migration     | Target repository and a separate legacy project path | Migration based on the running legacy application, visual comparison, and a draft PR | [Legacy → PR](https://dhyun2.github.io/spec-to-pr/en/usage/legacy)   |
-| Feature delivery     | Brief, Figma, and API sources for one feature        | Full verification plus targeted E2E, one video, and a draft PR                       | [Feature → PR](https://dhyun2.github.io/spec-to-pr/en/usage/feature) |
-| Figma implementation | Figma URL and target repository                      | Mock-backed UI, measured Figma comparison, and a draft PR                            | [Figma → PR](https://dhyun2.github.io/spec-to-pr/en/usage/figma)     |
+| Use case                                                                        | What you provide                                     | What you get                                                                         |
+| ------------------------------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| [Brief-based delivery](https://dhyun2.github.io/spec-to-pr/en/usage/brief)      | Brief/PDF/MD, Figma URL, and OpenAPI                 | Implemented API/UI, visual comparison, API gaps, Web Vitals, and a draft PR          |
+| [Legacy migration](https://dhyun2.github.io/spec-to-pr/en/usage/legacy)         | Target repository and a separate legacy project path | Migration based on the running legacy application, visual comparison, and a draft PR |
+| [Single-feature delivery](https://dhyun2.github.io/spec-to-pr/en/usage/feature) | Brief, Figma, and API sources for one feature        | Full verification, targeted E2E, one video, and a draft PR                           |
+| [Figma implementation](https://dhyun2.github.io/spec-to-pr/en/usage/figma)      | Figma URL and target repository                      | Mock-backed UI, measured Figma comparison, and a draft PR                            |
 
 Start every request with the target repository:
 
@@ -64,11 +64,11 @@ guidancePaths: []
 skillHints: []
 ```
 
-Legacy intake preserves the selected feature boundary while following only its direct imports and configuration edges. Concrete source HTTP calls are authoritative; constructors and local facades are not API operations. Environment origins and transport callsites remain in `legacyInventory`. A genuinely dynamic unresolved call returns `collect-legacy-network-evidence`, so a bounded HAR can resume the same Run instead of forcing another start.
+Legacy analysis stays inside the selected feature boundary and follows only direct imports and configuration references needed to understand it. Concrete HTTP calls are authoritative; constructors and local facades are not recorded as separate API operations. URL settings referenced from `.env*` are sanitized by removing user info, query, and fragments, then their variable names, origins, and HTTP-client callsites remain in `legacyInventory`. `collect-legacy-network-evidence` is requested only when static analysis and supplied OpenAPI cannot uniquely determine a method and path; submitting a scoped HAR then resumes the same Run.
 
-Legacy draft review material is gathered by feature under `.spec-to-pr/<feature>/`: `contracts`, `evidence`, side-by-side legacy/current `visual`, reviewer-facing `report`, and an integrity `manifest.json`. The same change records its proposal, delta spec, and tasks in `openspec/changes/`. A Run ID stays inside the manifest, so a reviewer never needs to interpret internal feature keys.
+Legacy review material is grouped by feature under `.spec-to-pr/<feature>/`: contracts, evidence, side-by-side legacy/current visuals, the reviewer-facing report, and an integrity manifest. The same change also records its proposal, delta spec, and task list under `openspec/changes/`. The manifest binds the current Run and revision to the legacy source digest, requirements, and OpenSpec file digests, so reviewers never need to interpret internal feature keys.
 
-The status surface includes `requiredValidations`, `resumeContext`, and `blockerDetails`. Reports use `pr-report-v2.1`; visual targets are submitted through `visualTargets` and `compare-visuals`, with runtime-computed similarity requiring at least 98%. If a GitLab project upload fails transiently, only verified baseline/current PNGs may fall back to raw URLs at the exact review commit. Digest mismatch, a changed worktree, and synthetic diff/overlay/video never fall back. Blocked draft runs may publish a local blocked report using `intent: blocked-diagnostic`; a `status: blocked` diagnostic can be updated on the same draft PR. Common local blockers include `PUBLISH_NO_DELTA` and `BROWSER_NOT_RUN`.
+Status includes `requiredValidations`, `resumeContext`, and `blockerDetails`. Reports use `pr-report-v2.1`; `visualTargets` and `compare-visuals` measure visual similarity at runtime and require at least 98%. If a GitLab image upload fails temporarily, verified legacy/current PNGs may use raw URLs pinned to the exact review commit. This fallback is never used for a digest mismatch, a changed worktree, or generated diffs, overlays, or video. A blocked Run can produce a local diagnostic report with `intent: blocked-diagnostic`, then update the same draft PR after recovery. Common local blockers include `PUBLISH_NO_DELTA` and `BROWSER_NOT_RUN`.
 
 ## Documentation
 

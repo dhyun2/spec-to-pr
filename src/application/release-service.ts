@@ -1,5 +1,7 @@
+import { execFile } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { promisify } from "node:util";
 
 import { z } from "zod";
 
@@ -13,6 +15,9 @@ import {
 } from "../release/index.js";
 
 const DEFAULT_RELEASE_OUTPUT_DIRECTORY = "artifacts/releases";
+const execFileAsync = promisify(execFile);
+
+type PluginValidationRunner = (input: { projectRoot: string; gitCommit: string }) => Promise<void>;
 
 export const BuildReleasePackageInputSchema = z
   .object({
@@ -79,6 +84,7 @@ export class ReleaseService {
   public constructor(
     private readonly projectRoot: string,
     private readonly now: () => string = () => new Date().toISOString(),
+    private readonly validatePlugin: PluginValidationRunner = validatePluginForCommit,
   ) {}
 
   public async buildReleasePackage(rawInput: unknown) {
@@ -90,6 +96,9 @@ export class ReleaseService {
       outputDirectory,
       allowDirty: input.allowDirty,
     });
+    if (!input.allowDirty) {
+      await this.validatePlugin({ projectRoot: this.projectRoot, gitCommit: build.gitCommit });
+    }
     const verification = await verifyReleasePackageFilesAndRuntime({
       projectRoot: this.projectRoot,
       packagePath: build.packagePath,
@@ -117,7 +126,7 @@ export class ReleaseService {
         "coverage/",
         "tmp/",
       ],
-      pluginValidationStatus: "skipped",
+      pluginValidationStatus: input.allowDirty ? "skipped" : "passed",
       features: defaultFeatureStatuses(),
     });
     const manifestPath = path.join(
@@ -223,6 +232,54 @@ export class ReleaseService {
     return path.isAbsolute(outputDirectory)
       ? outputDirectory
       : path.resolve(this.projectRoot, outputDirectory);
+  }
+}
+
+async function validatePluginForCommit(input: {
+  projectRoot: string;
+  gitCommit: string;
+}): Promise<void> {
+  await assertCurrentGitCommit(input);
+  await assertCleanGitTree(input.projectRoot);
+  try {
+    await execFileAsync("pnpm", ["plugin:validate"], {
+      cwd: input.projectRoot,
+      maxBuffer: 10 * 1024 * 1024,
+      timeout: 180_000,
+    });
+  } catch (error) {
+    throw new Error(`Plugin validation failed for release commit ${input.gitCommit}`, {
+      cause: error,
+    });
+  }
+  await assertCurrentGitCommit(input);
+  await assertCleanGitTree(input.projectRoot);
+}
+
+async function assertCurrentGitCommit(input: {
+  projectRoot: string;
+  gitCommit: string;
+}): Promise<void> {
+  const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], {
+    cwd: input.projectRoot,
+    maxBuffer: 1024 * 1024,
+  });
+  if (stdout.trim() !== input.gitCommit) {
+    throw new Error("Release commit changed while plugin validation was running");
+  }
+}
+
+async function assertCleanGitTree(projectRoot: string): Promise<void> {
+  const { stdout } = await execFileAsync(
+    "git",
+    ["status", "--porcelain=v1", "--untracked-files=all"],
+    {
+      cwd: projectRoot,
+      maxBuffer: 10 * 1024 * 1024,
+    },
+  );
+  if (stdout.trim() !== "") {
+    throw new Error("Release worktree changed while plugin validation was running");
   }
 }
 

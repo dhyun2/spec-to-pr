@@ -117,14 +117,18 @@ describe("v2 documentation", () => {
       for (const framework of ["GitHub Spec Kit", "OpenSpec", "Kiro", "BMAD"]) {
         expect(comparison, `${file}:${framework}`).toContain(framework);
       }
-      for (const dimension of [
-        "Intake / contracts",
-        "Implementation",
-        "Validation",
-        "Publication",
-        "Blocked / resume",
-        "Best fit",
-      ]) {
+      const dimensions =
+        file === "website/docs/concepts/comparison.mdx"
+          ? ["접수·계약", "구현", "검증", "발행", "차단·재개", "잘 맞는 경우"]
+          : [
+              "Intake / contracts",
+              "Implementation",
+              "Validation",
+              "Publication",
+              "Blocked / resume",
+              "Best fit",
+            ];
+      for (const dimension of dimensions) {
         expect(comparison, `${file}:${dimension}`).toContain(dimension);
       }
       for (const product of [
@@ -142,23 +146,39 @@ describe("v2 documentation", () => {
       const claudeRow =
         comparison.split("\n").find((line) => line.includes("| [Claude Code](")) ?? "";
       expect(claudeRow, `${file}:Claude Code version`).toContain("v2.1.172");
-      expect(claudeRow, `${file}:Claude Code nesting bound`).toContain("fixed maximum depth five");
+      expect(claudeRow, `${file}:Claude Code nesting bound`).toMatch(
+        file === "website/docs/concepts/comparison.mdx"
+          ? /최대 깊이는 5단계/
+          : /fixed maximum depth five/,
+      );
       expect(claudeRow, `${file}:Claude Code nesting is not configurable`).not.toMatch(
         /configurable/i,
       );
-      expect(claudeRow, `${file}:Claude Code nesting disablement`).toContain(
-        "omitting `Agent` disables nesting",
+      expect(claudeRow, `${file}:Claude Code nesting disablement`).toMatch(
+        file === "website/docs/concepts/comparison.mdx"
+          ? /`Agent`를 생략하면 중첩을 끔/
+          : /omitting `Agent` disables nesting/,
       );
       expect(claudeRow, `${file}:stale Claude Code claim`).not.toContain("no nesting");
-      expect(claudeRow, `${file}:SpecToPR nesting disposition`).toContain(
-        "SpecToPR rejects nesting",
+      expect(claudeRow, `${file}:SpecToPR nesting disposition`).toMatch(
+        file === "website/docs/concepts/comparison.mdx"
+          ? /SpecToPR은 .*중첩 위임.*사용하지 않음/
+          : /SpecToPR rejects nesting/,
       );
       expect(comparison).toContain("2026-07-15");
-      expect(comparison).toContain("Adopted");
-      expect(comparison).toContain("Conditional");
-      expect(comparison).toContain("Rejected");
-      expect(comparison).toContain("issue fallback");
-      expect(comparison).toContain("heavy permanent teams");
+      if (file === "website/docs/concepts/comparison.mdx") {
+        expect(comparison).toContain("## 채택");
+        expect(comparison).toContain("## 조건부 채택");
+        expect(comparison).toContain("## 제외");
+        expect(comparison).toContain("이슈 대체 발행");
+        expect(comparison).toContain("무거운 상시 에이전트 팀");
+      } else {
+        expect(comparison).toContain("Adopted");
+        expect(comparison).toContain("Conditional");
+        expect(comparison).toContain("Rejected");
+        expect(comparison).toContain("issue fallback");
+        expect(comparison).toContain("heavy permanent teams");
+      }
       const links = comparison.match(/https:\/\/[^)\s]+/g) ?? [];
       expect(links.length, `${file}:primary source links`).toBeGreaterThan(10);
       for (const link of links) {
@@ -242,27 +262,23 @@ describe("v2 documentation", () => {
       ]) {
         expect(contents, `${locale}:${component}`).toContain(component);
       }
-      for (const fact of [
-        "pngjs",
-        "RGBA",
-        "0.02",
-        "98%",
-        "20%",
-        "functional reviewer",
-        "design reviewer",
-      ]) {
+      for (const fact of ["pngjs", "RGBA", "0.02", "98%", "20%"]) {
         expect(contents, `${locale}:${fact}`).toContain(fact);
       }
+      expect(contents, `${locale}:functional reviewer`).toMatch(
+        locale === "ko" ? /`functional-reviewer`|기능 검토자/ : /functional reviewer/,
+      );
+      expect(contents, `${locale}:design reviewer`).toMatch(
+        locale === "ko" ? /`design-reviewer`|디자인 검토자/ : /design reviewer/,
+      );
       expect(contents, `${locale}:three comparisons`).toMatch(
-        locale === "ko" ? /비교 총 3회/ : /three total comparisons/,
+        locale === "ko" ? /(?:비교 총 3회|모두 (?:3|세) ?(?:회|번))/ : /three total comparisons/,
       );
       expect(contents, `${locale}:immutable packet`).toMatch(
-        locale === "ko" ? /immutable packet|불변 packet/ : /immutable packet/,
+        locale === "ko" ? /변경 불가 검토 묶음/ : /immutable packet/,
       );
       expect(contents, `${locale}:one writer`).toMatch(
-        locale === "ko"
-          ? /implementation writer 한 명|한 명의 implementation writer/
-          : /one implementation writer/,
+        locale === "ko" ? /한 명의 구현 담당자|구현 담당자 1명/ : /one implementation writer/,
       );
     }
 
@@ -291,6 +307,8 @@ describe("v2 documentation", () => {
       readFileSync(path.join(visualDirectory, "metrics.json"), "utf8"),
     ) as {
       schemaVersion: string;
+      provider: string;
+      capturedAt: string;
       status: string;
       attempt: number;
       metrics: {
@@ -310,6 +328,8 @@ describe("v2 documentation", () => {
       files: Record<string, { path: string; digest: string }>;
     };
     expect(metrics.schemaVersion).toBe("guide-visual-proof-v1");
+    expect(metrics.provider).toBe("playwright-chromium");
+    expect(Number.isNaN(Date.parse(metrics.capturedAt))).toBe(false);
     expect(metrics.status).toBe("passed");
     expect(metrics.attempt).toBe(1);
     expect(metrics.metrics.reviewMatchRatio).toBeGreaterThanOrEqual(0.98);
@@ -409,11 +429,19 @@ describe("v2 documentation", () => {
         expect(guide).toContain("not-run");
         expect(guide).toContain("not-applicable");
         expect(guide).toContain("spec-to-pr/evidence");
-        expect(guide).toMatch(
-          locale === "ko"
-            ? /비교 총 3회\(최초 1회 \+ repair 최대 2회\)/
-            : /three total comparison attempts \(the initial comparison plus at most two repairs\)/,
-        );
+        if (locale === "ko") {
+          expect(guide, `${locale}:${caseName}:initial visual comparison`).toMatch(
+            /최초 (?:비교 )?1회/,
+          );
+          expect(guide, `${locale}:${caseName}:visual repair limit`).toMatch(/보정 후 최대 2회/);
+          expect(guide, `${locale}:${caseName}:visual comparison total`).toMatch(
+            /(?:합쳐 )?모두 3(?:회|번)/,
+          );
+        } else {
+          expect(guide, `${locale}:${caseName}:visual comparison total`).toMatch(
+            /three total comparison attempts \(the initial comparison plus at most two repairs\)|three attempts in total: the initial comparison and up to two repairs/,
+          );
+        }
         for (const stage of [
           "intake",
           "contracts",
@@ -426,28 +454,52 @@ describe("v2 documentation", () => {
         ]) {
           expect(guide, `${locale}:${caseName}:${stage}`).toContain(`\`${stage}\``);
         }
-        for (const policy of [
-          "implementation writer",
-          "read-only scout",
-          "functional-reviewer",
-          "design-reviewer",
-          "no nesting",
-          "parallel writer",
-          "recommendedSkills",
-          "appliedSkills",
-          "workflow MCP",
-          "Playwright Test/CLI",
-          "Browser MCP",
-          "Chrome DevTools MCP",
-          "intent: ready",
-          "intent: blocked-diagnostic",
-          "local blocked report",
-          "same Run",
-          "same draft PR",
-          "status: blocked",
-          "PUBLISH_NO_DELTA",
-        ]) {
-          expect(guide, `${locale}:${caseName}:${policy}`).toContain(policy);
+        const localizedPolicies =
+          locale === "ko"
+            ? ([
+                ["implementation owner", /한 명의 구현 담당자|구현 파일은 한 명만/],
+                ["read-only scout", /읽기 전용 조사 담당자/],
+                ["functional reviewer", /`functional-reviewer`/],
+                ["design reviewer", /`design-reviewer`/],
+                ["no nesting", /중첩 위임/],
+                ["no parallel writer", /동시 편집|여러 구현 담당자가 동시에/],
+                ["recommendedSkills", /recommendedSkills/],
+                ["appliedSkills", /appliedSkills/],
+                ["workflow tools", /워크플로 도구/],
+                ["Playwright Test/CLI", /Playwright Test\/CLI/],
+                ["Browser MCP", /Browser MCP/],
+                ["Chrome DevTools MCP", /Chrome DevTools MCP/],
+                ["ready intent", /intent: ready/],
+                ["blocked diagnostic intent", /intent: blocked-diagnostic/],
+                ["local blocked report", /로컬 차단 보고서/],
+                ["same Run", /같은 (?:실행|Run)/],
+                ["same draft PR", /기존 (?:초안|draft) PR/],
+                ["blocked status", /status: blocked/],
+                ["PUBLISH_NO_DELTA", /PUBLISH_NO_DELTA/],
+              ] as const)
+            : ([
+                ["implementation writer", /implementation writer/],
+                ["read-only scout", /read-only scout/],
+                ["functional-reviewer", /functional-reviewer/],
+                ["design-reviewer", /design-reviewer/],
+                ["no nesting", /no nesting/],
+                ["parallel writer", /parallel writer/],
+                ["recommendedSkills", /recommendedSkills/],
+                ["appliedSkills", /appliedSkills/],
+                ["workflow MCP", /workflow MCP/],
+                ["Playwright Test/CLI", /Playwright Test\/CLI/],
+                ["Browser MCP", /Browser MCP/],
+                ["Chrome DevTools MCP", /Chrome DevTools MCP/],
+                ["ready intent", /intent: ready/],
+                ["blocked diagnostic intent", /intent: blocked-diagnostic/],
+                ["local blocked report", /local blocked report/],
+                ["same Run", /same Run/],
+                ["same draft PR", /same draft PR|existing draft PR for the same source and target/],
+                ["blocked status", /status: blocked/],
+                ["PUBLISH_NO_DELTA", /PUBLISH_NO_DELTA/],
+              ] as const);
+        for (const [policy, expectation] of localizedPolicies) {
+          expect(guide, `${locale}:${caseName}:${policy}`).toMatch(expectation);
         }
         const stageSkillRoute = guide.match(/^- `stageSkillRoute`:[^\n]+$/m)?.[0] ?? "";
         const recommendation = guide.match(/^- `recommendedSkills`:[^\n]+$/m)?.[0] ?? "";
@@ -476,23 +528,31 @@ describe("v2 documentation", () => {
       expect(Object.values(guides).join("\n")).toContain("implementationContextId");
       expect(guides.feature).toContain("targeted-feature");
       expect(guides.feature).toContain("featureVideo: required");
-      expect(guides.feature).toContain("full-project E2E");
+      expect(guides.feature).toMatch(
+        locale === "ko" ? /전체 프로젝트를 대상으로 한 E2E|전체 프로젝트 E2E/ : /full-project E2E/,
+      );
       expect(guides.figma).toContain("figma-bundle");
       expect(guides.figma).toContain("publication: draft");
       expect(guides.brief).toContain("briefPath");
       expect(guides.brief).toContain("figmaUrl");
       expect(guides.brief).toMatch(/openApiPaths|openApiUrls/);
       expect(guides.brief).toContain("Web Vitals");
-      expect(guides.brief).toContain("API gap");
+      expect(guides.brief).toMatch(locale === "ko" ? /API 누락/ : /API gap/);
       expect(guides.legacy).toContain("legacyProjectRoot");
       expect(guides.legacy).toContain("legacyNetworkEvidencePath");
       expect(guides.legacy).toContain("1,000");
-      expect(guides.legacy).toContain("legacy inventory");
-      expect(guides.legacy).toContain("running legacy");
+      expect(guides.legacy).toMatch(
+        locale === "ko" ? /레거시 목록|`legacyInventory`/ : /legacy inventory/,
+      );
+      expect(guides.legacy).toMatch(
+        locale === "ko" ? /실제로 실행한 레거시|실행한 레거시/ : /running legacy/,
+      );
       expect(guides.legacy).toContain("source-fetch-literal");
-      expect(guides.legacy).toMatch(/durable|Run ID/);
-      expect(guides.legacy).toMatch(/empty-inventory|빈 inventory/);
-      expect(guides.legacy).toMatch(/Optional OpenAPI|선택 OpenAPI/);
+      expect(guides.legacy).toMatch(locale === "ko" ? /실행 ID/ : /durable|Run ID/);
+      expect(guides.legacy).toMatch(
+        locale === "ko" ? /빈 목록 해시|목록 해시를 근거/ : /empty-inventory/,
+      );
+      expect(guides.legacy).toMatch(locale === "ko" ? /OpenAPI는 목록을 보완/ : /Optional OpenAPI/);
       expect(guides.legacy).not.toMatch(
         /API gaps? when OpenAPI is supplied|OpenAPI 제공 시 API gap|OpenAPI를 제공한 경우에만|required only when OpenAPI was supplied/,
       );
@@ -503,9 +563,9 @@ describe("v2 documentation", () => {
         locale === "ko" ? "지정한 레거시 범위" : "the selected legacy scope",
       );
       expect(guides.legacy).toContain(
-        locale === "ko" ? "의존성 가시성 경계" : "dependency visibility boundary",
+        locale === "ko" ? "기능 범위와 의존성 경계" : "Feature scope and dependency evidence",
       );
-      expect(guides.figma).toContain("mock");
+      expect(guides.figma).toMatch(locale === "ko" ? /모의 데이터/ : /mock/);
       expect(guides.figma).toContain("sha256");
       expect(guides.figma).toContain("98%");
       for (const caseName of cases) {
@@ -514,7 +574,7 @@ describe("v2 documentation", () => {
         expect(guides[caseName]).toContain("blocked");
         expect(guides[caseName]).toContain("`none`");
         expect(guides[caseName]).toContain("sha256");
-        expect(guides[caseName]).toMatch(/provider/);
+        expect(guides[caseName]).toMatch(locale === "ko" ? /자료 제공자|provider/ : /provider/);
       }
       for (const caseName of ["brief", "legacy", "figma"]) {
         expect(guides[caseName]).not.toContain("featureVideo: required");
@@ -708,8 +768,13 @@ describe("v2 documentation", () => {
       "archive-openspec",
     ];
 
-    for (const contents of [skills, skillsEn]) {
-      expect(contents).toContain("8 public marketplace skills");
+    for (const [locale, contents] of [
+      ["ko", skills],
+      ["en", skillsEn],
+    ] as const) {
+      expect(contents).toMatch(
+        locale === "ko" ? /공개 마켓플레이스 스킬 \*\*8개\*\*/ : /8 public marketplace skills/,
+      );
       for (const skill of publicSkills) expect(contents).toContain(`\`${skill}\``);
       expect(contents).not.toContain("`prepare-release`");
       expect(contents).toContain("recommendedSkills");
@@ -721,7 +786,7 @@ describe("v2 documentation", () => {
     expect(readmeKo).not.toContain("Unreleased");
     expect(config).toContain("Documentation · v${version}");
     expect(config).not.toContain("Development docs");
-    expect(intro).toContain("skill 8개");
+    expect(intro).toContain("스킬 8개");
     expect(adr).toContain("eight public marketplace skills");
 
     const blockedDocs = [readme, readmeKo, pipeline, troubleshooting].join("\n");
@@ -729,13 +794,15 @@ describe("v2 documentation", () => {
       "blockerDetails",
       "intent: blocked-diagnostic",
       "status: blocked",
-      "local blocked report",
       "PUBLISH_NO_DELTA",
-      "same draft PR",
       "BROWSER_NOT_RUN",
     ]) {
       expect(blockedDocs).toContain(term);
     }
+    expect(readme).toMatch(/local (?:blocked|diagnostic) report/);
+    expect([readmeKo, pipeline, troubleshooting].join("\n")).toContain("로컬 차단 보고서");
+    expect(readme).toMatch(/same draft PR|existing draft PR/);
+    expect([readmeKo, pipeline, troubleshooting].join("\n")).toMatch(/기존 (?:초안|draft) PR/);
   });
 
   it("documents explicit recovery for uncertain diagnostic publication in both locales", () => {
@@ -771,12 +838,16 @@ describe("v2 documentation", () => {
       }
       expect(troubleshooting, `${locale}:explicit approval`).toMatch(/explicit|명시적/);
       expect(troubleshooting, `${locale}:matching draft inspection`).toMatch(
-        /matching draft|일치하는 draft/,
+        locale === "ko"
+          ? /소스와 대상 브랜치가 같은 기존 (?:초안|draft)|조건이 일치하는 기존 (?:초안|draft)/
+          : /matching draft/,
       );
-      expect(pipeline, `${locale}:blocked stages remain blocked`).toContain("blocked stages");
+      expect(pipeline, `${locale}:blocked stages remain blocked`).toMatch(
+        locale === "ko" ? /차단된 단계를 통과 상태로 바꾸지도 않습니다/ : /blocked stages/,
+      );
       expect(skills, `${locale}:SDK never auto-approves`).toContain("SDK");
       expect(skills, `${locale}:SDK never auto-approves`).toMatch(
-        /never auto-approves|자동 승인하지/,
+        /never auto-approves|자동(?:으로)? 승인하지/,
       );
     }
 
@@ -810,23 +881,27 @@ describe("v2 documentation", () => {
       expect(skill, `${file}:secret values`).toMatch(/token.*password.*secret.*credential/i);
     }
 
-    const pipelines = [
-      "website/docs/concepts/pipeline.md",
-      "website/i18n/en/docusaurus-plugin-content-docs/current/concepts/pipeline.md",
-    ];
-    for (const file of pipelines) {
-      const pipeline = readFileSync(path.join(root, file), "utf8");
-      for (const term of [
-        "artifactPaths",
-        "project-relative",
-        "`/`-separated",
-        "non-portable",
-        "token/password/secret/credential",
-        "`token-validation.json`",
-      ]) {
-        expect(pipeline, `${file}:${term}`).toContain(term);
-      }
-    }
+    const pipelineKo = readFileSync(path.join(root, "website/docs/concepts/pipeline.md"), "utf8");
+    expect(pipelineKo).toContain("artifactPaths");
+    expect(pipelineKo).toContain("프로젝트 루트를 기준으로 한 상대 경로");
+    expect(pipelineKo).toContain("`/`로 구분");
+    expect(pipelineKo).toMatch(/절대 경로.*상위 폴더.*역슬래시/);
+    expect(pipelineKo).toMatch(/토큰.*비밀번호.*비밀값.*인증 정보/);
+    expect(pipelineKo).toContain("`token-validation.json`");
+
+    const pipelineEn = readFileSync(
+      path.join(
+        root,
+        "website/i18n/en/docusaurus-plugin-content-docs/current/concepts/pipeline.md",
+      ),
+      "utf8",
+    );
+    expect(pipelineEn).toContain("artifactPaths");
+    expect(pipelineEn).toContain("relative to the project root");
+    expect(pipelineEn).toMatch(/portable across operating systems.*separated with `?\/`?/);
+    expect(pipelineEn).toMatch(/absolute paths.*directory traversal.*backslashes/);
+    expect(pipelineEn).toMatch(/token.*password.*secret.*credential/i);
+    expect(pipelineEn).toContain("`token-validation.json`");
   });
 
   it("documents every blockerDetails.kind as the exact runtime enum", () => {
@@ -894,8 +969,19 @@ describe("v2 documentation", () => {
     const config = readFileSync(path.join(root, "website/docs/reference/config.md"), "utf8");
     const skills = readFileSync(path.join(root, "website/docs/reference/skills.md"), "utf8");
     const pipeline = readFileSync(path.join(root, "website/docs/concepts/pipeline.md"), "utf8");
+    const pipelineEn = readFileSync(
+      path.join(
+        root,
+        "website/i18n/en/docusaurus-plugin-content-docs/current/concepts/pipeline.md",
+      ),
+      "utf8",
+    );
     const troubleshooting = readFileSync(
       path.join(root, "website/docs/troubleshooting.md"),
+      "utf8",
+    );
+    const troubleshootingEn = readFileSync(
+      path.join(root, "website/i18n/en/docusaurus-plugin-content-docs/current/troubleshooting.md"),
       "utf8",
     );
 
@@ -949,19 +1035,23 @@ describe("v2 documentation", () => {
     ]) {
       expect(config).toContain(candidate);
     }
-    expect(config).toContain("current user request");
-    expect(config).toContain("explicit `guidancePaths`");
-    expect(config).toContain("automatically discovered project guidance");
-    expect(config).toContain("applicable installed skills");
-    expect(config).toContain("SpecToPR defaults");
+    expect(config).toContain("현재 사용자 요청");
+    expect(config).toContain("직접 지정한 `guidancePaths`");
+    expect(config).toContain("자동으로 찾은 프로젝트 지침");
+    expect(config).toContain("설치되어 있고 현재 작업에 맞는 스킬");
+    expect(config).toContain("SpecToPR 기본값");
 
-    expect(skills).toContain("available and applicable");
-    expect(skills).toContain("Missing optional skills");
-    expect(pipeline).toContain("Delivery mode controls delivery and evidence");
-    expect(pipeline).toContain("excluded from scope classification");
-    expect(troubleshooting).toContain("Missing optional skills do not block");
-    expect(troubleshooting).toContain("feature mode");
+    expect(skills).toContain("실제로 설치되어 있고 현재 작업에 맞아 사용한 스킬");
+    expect(skills).toContain("선택 스킬이 없다고 실행이 중단되지는 않습니다");
+    expect(pipeline).toContain("제공 방식은 최종 결과와 필요한 검증 자료를 정하고");
+    expect(pipeline).toContain("프로젝트 지침은 범위를 넓히는 근거로 사용하지 않으며");
+    expect(troubleshooting).toContain("선택 스킬이 없어도 실행을 막지 않습니다");
+    expect(troubleshooting).toContain("`feature`");
     expect(troubleshooting).toContain("figma-bundle");
+    expect(pipelineEn).toContain("selected mode determines the result and required evidence");
+    expect(pipelineEn).toContain("Project guidance is tracked, but it does not expand");
+    expect(troubleshootingEn).toMatch(/missing optional skills do not block/i);
+    expect(troubleshootingEn).toMatch(/Feature does not start: `feature` requires/);
   });
 });
 

@@ -4,13 +4,20 @@ import path from "node:path";
 
 import { z } from "zod";
 
-import { discoverLegacyApiCandidates } from "./legacy-api-discovery.js";
+import {
+  discoverLegacyApiCandidates,
+  productionReachableOwnedFiles,
+} from "./legacy-api-discovery.js";
 import {
   LegacyApiCandidateSchema,
   LegacySupportingDependencySchema,
   stableEndpointKey,
 } from "./legacy-api-contracts.js";
-import { discoverLegacySourceGraph } from "./legacy-source-graph.js";
+import {
+  LEGACY_SOURCE_DIGEST_ALGORITHM_V1,
+  LEGACY_SOURCE_DIGEST_ALGORITHM_V2,
+  discoverLegacySourceGraph,
+} from "./legacy-source-graph.js";
 
 const MAX_LEGACY_FILE_BYTES = 2 * 1024 * 1024;
 export type LegacyInventoryLimits = {
@@ -90,6 +97,9 @@ export const LegacyInventorySchema = z
       .string()
       .regex(/^sha256:[a-f0-9]{64}$/)
       .optional(),
+    sourceDigestAlgorithm: z
+      .enum([LEGACY_SOURCE_DIGEST_ALGORITHM_V1, LEGACY_SOURCE_DIGEST_ALGORITHM_V2])
+      .optional(),
     visitedDirectories: z.number().int().nonnegative().default(0),
     visitedEntries: z.number().int().nonnegative().default(0),
     scannedFiles: z.number().int().nonnegative(),
@@ -120,6 +130,11 @@ export async function buildLegacyInventory(
     maxElapsedMs: limits.maxElapsedMs,
   });
   const apiCandidates = discoverLegacyApiCandidates(graph);
+  const productionFeaturePaths = new Set(
+    productionReachableOwnedFiles(graph).map((file) =>
+      path.relative(graph.featureRoot, file.absolutePath).split(path.sep).join("/"),
+    ),
+  );
   const files = await collectSourceFiles(root, limits);
   const entries = new Map<string, LegacyFeatureEntry>();
   let scannedBytes = 0;
@@ -127,6 +142,7 @@ export async function buildLegacyInventory(
   let truncated = files.truncated || graph.truncated;
 
   scan: for (const relativePath of files.paths) {
+    if (!productionFeaturePaths.has(relativePath)) continue;
     const absolutePath = path.join(root, relativePath);
     if (files.startedAt + limits.maxElapsedMs <= Date.now()) {
       truncated = true;
@@ -208,6 +224,7 @@ export async function buildLegacyInventory(
     version: 3,
     rootDigest,
     sourceDigest: rootDigest,
+    sourceDigestAlgorithm: graph.digestAlgorithm,
     visitedDirectories: files.visitedDirectories,
     visitedEntries: files.visitedEntries,
     scannedFiles: Math.max(scannedFiles, graph.files.length),
@@ -246,7 +263,15 @@ export async function assertLegacyInventoryFresh(
   if (current.truncated) {
     throw new Error("LEGACY_INVENTORY_TRUNCATED: narrow the migration scope and restart intake");
   }
-  if (current.rootDigest !== (pinned.sourceDigest ?? pinned.rootDigest)) {
+  const pinnedDigest = pinned.sourceDigest ?? pinned.rootDigest;
+  const currentDigest =
+    pinned.version === 2 && pinned.sourceDigestAlgorithm === undefined
+      ? await legacyV2SourceDigest(root)
+      : pinned.sourceDigestAlgorithm === undefined ||
+          pinned.sourceDigestAlgorithm === LEGACY_SOURCE_DIGEST_ALGORITHM_V1
+        ? await legacyV1SourceDigest(root)
+        : current.rootDigest;
+  if (currentDigest !== pinnedDigest) {
     throw new Error(
       "LEGACY_SOURCE_CHANGED: restore the legacy source or restart intake from its new state",
     );
@@ -254,9 +279,83 @@ export async function assertLegacyInventoryFresh(
   return current;
 }
 
+async function legacyV2SourceDigest(root: string): Promise<`sha256:${string}`> {
+  const limits = DEFAULT_LEGACY_INVENTORY_LIMITS;
+  const files = await collectSourceFiles(root, limits);
+  if (files.truncated) {
+    throw new Error("LEGACY_INVENTORY_TRUNCATED: narrow the migration scope and restart intake");
+  }
+  const rootHash = createHash("sha256");
+  let scannedBytes = 0;
+  for (const relativePath of files.paths) {
+    if (files.startedAt + limits.maxElapsedMs <= Date.now()) {
+      throw new Error("LEGACY_INVENTORY_TRUNCATED: narrow the migration scope and restart intake");
+    }
+    const details = await lstat(path.join(root, relativePath));
+    if (
+      !details.isFile() ||
+      details.isSymbolicLink() ||
+      details.size > MAX_LEGACY_FILE_BYTES ||
+      scannedBytes + details.size > limits.maxSourceBytes
+    ) {
+      throw new Error("LEGACY_INVENTORY_TRUNCATED: narrow the migration scope and restart intake");
+    }
+    const bytes = await readFile(path.join(root, relativePath));
+    if (scannedBytes + bytes.byteLength > limits.maxSourceBytes) {
+      throw new Error("LEGACY_INVENTORY_TRUNCATED: narrow the migration scope and restart intake");
+    }
+    scannedBytes += bytes.byteLength;
+    rootHash.update(relativePath).update("\0").update(bytes).update("\0");
+  }
+  return `sha256:${rootHash.digest("hex")}`;
+}
+
+async function legacyV1SourceDigest(root: string): Promise<`sha256:${string}`> {
+  const graph = await discoverLegacySourceGraph(
+    root,
+    {
+      maxFiles: DEFAULT_LEGACY_INVENTORY_LIMITS.maxSourceFiles,
+      maxBytes: DEFAULT_LEGACY_INVENTORY_LIMITS.maxSourceBytes,
+      maxDepth: DEFAULT_LEGACY_INVENTORY_LIMITS.maxDepth,
+      maxElapsedMs: DEFAULT_LEGACY_INVENTORY_LIMITS.maxElapsedMs,
+    },
+    { digestAlgorithm: LEGACY_SOURCE_DIGEST_ALGORITHM_V1 },
+  );
+  if (graph.truncated) {
+    throw new Error("LEGACY_INVENTORY_TRUNCATED: narrow the migration scope and restart intake");
+  }
+  return graph.sourceDigest;
+}
+
 const MAX_RUNTIME_NETWORK_ENTRIES = 1_000;
 const MAX_RUNTIME_NETWORK_BYTES = 1024 * 1024;
 const HTTP_METHODS = new Set(["GET", "PUT", "POST", "DELETE", "OPTIONS", "HEAD", "PATCH", "TRACE"]);
+const API_HAR_RESOURCE_TYPES = new Set(["xhr", "fetch", "xmlhttprequest", "eventsource"]);
+const NON_API_FETCH_DESTINATIONS = new Set([
+  "audio",
+  "document",
+  "embed",
+  "font",
+  "frame",
+  "iframe",
+  "image",
+  "manifest",
+  "object",
+  "script",
+  "sharedworker",
+  "style",
+  "track",
+  "video",
+  "worker",
+]);
+const STATIC_ASSET_PATH =
+  /\.(?:avif|bmp|cjs|css|eot|gif|html?|ico|jpe?g|js|jsx|m4a|map|mjs|mov|mp3|mp4|mpeg|oga|ogg|ogv|otf|pdf|png|svg|tiff?|ttf|wasm|wav|webm|webp|woff2?)$/iu;
+
+type RuntimeNetworkRequest = {
+  method: string;
+  url: string;
+  sourceIndex: number;
+};
 
 export function mergeLegacyRuntimeNetworkEvidence(
   inventory: LegacyInventory,
@@ -268,7 +367,8 @@ export function mergeLegacyRuntimeNetworkEvidence(
   const apiCandidates = new Map(
     inventory.apiCandidates.map((candidate) => [candidate.endpointKey, candidate]),
   );
-  requests.forEach((request, index) => {
+  requests.forEach((request) => {
+    const index = request.sourceIndex;
     const method = request.method.trim().toUpperCase();
     const operationPath = runtimeRequestPath(request.url, index);
     const normalizedKey = `${method} ${operationPath}`;
@@ -353,9 +453,7 @@ export function validateLegacyRuntimeNetworkEvidence(rawContent: string): void {
   parseLegacyRuntimeNetworkEvidence(rawContent);
 }
 
-function parseLegacyRuntimeNetworkEvidence(
-  rawContent: string,
-): Array<{ method: string; url: string }> {
+function parseLegacyRuntimeNetworkEvidence(rawContent: string): RuntimeNetworkRequest[] {
   if (Buffer.byteLength(rawContent, "utf8") > MAX_RUNTIME_NETWORK_BYTES) {
     throw new Error("Legacy runtime network evidence exceeds the 1 MB limit");
   }
@@ -369,49 +467,135 @@ function parseLegacyRuntimeNetworkEvidence(
   if (requests.length > MAX_RUNTIME_NETWORK_ENTRIES) {
     throw new Error("Legacy runtime network evidence exceeds the 1,000 request limit");
   }
-  requests.forEach((request, index) => {
-    const method = request.method.trim().toUpperCase();
-    if (!HTTP_METHODS.has(method)) {
-      throw new Error(`Legacy runtime network request ${index + 1} has an unsupported method`);
-    }
-    runtimeRequestPath(request.url, index);
-  });
   return requests;
 }
 
-function runtimeNetworkRequests(value: unknown): Array<{ method: string; url: string }> {
-  let candidates: unknown[];
+function runtimeNetworkRequests(value: unknown): RuntimeNetworkRequest[] {
+  let candidates: Array<{ request: unknown; sourceIndex: number; authoritative: boolean }>;
   if (Array.isArray(value)) {
-    candidates = value;
+    candidates = value.map((request, sourceIndex) => ({
+      request,
+      sourceIndex,
+      authoritative: true,
+    }));
   } else if (isUnknownRecord(value) && Array.isArray(value["requests"])) {
-    candidates = value["requests"];
+    candidates = value["requests"].map((request, sourceIndex) => ({
+      request,
+      sourceIndex,
+      authoritative: true,
+    }));
   } else if (
     isUnknownRecord(value) &&
     isUnknownRecord(value["log"]) &&
     Array.isArray(value["log"]["entries"])
   ) {
-    candidates = value["log"]["entries"].map((entry) =>
-      isUnknownRecord(entry) ? entry["request"] : undefined,
-    );
+    candidates = value["log"]["entries"].map((entry, sourceIndex) => ({
+      request: isUnknownRecord(entry) ? entry["request"] : undefined,
+      sourceIndex,
+      authoritative: authoritativeHarApiEntry(entry),
+    }));
   } else {
     throw new Error(
       "Legacy runtime network evidence must be a HAR log, a requests array, or a request array",
     );
   }
 
-  return candidates.map((candidate, index) => {
+  if (candidates.length > MAX_RUNTIME_NETWORK_ENTRIES) {
+    throw new Error("Legacy runtime network evidence exceeds the 1,000 request limit");
+  }
+
+  return candidates
+    .map(({ request, sourceIndex, authoritative }) => {
+      if (
+        !isUnknownRecord(request) ||
+        typeof request["method"] !== "string" ||
+        request["method"].trim() === ""
+      ) {
+        throw new Error(`Legacy runtime network request ${sourceIndex + 1} requires a method`);
+      }
+      if (typeof request["url"] !== "string" || request["url"].trim() === "") {
+        throw new Error(`Legacy runtime network request ${sourceIndex + 1} requires a URL`);
+      }
+      const method = request["method"].trim().toUpperCase();
+      if (!HTTP_METHODS.has(method)) {
+        throw new Error(
+          `Legacy runtime network request ${sourceIndex + 1} has an unsupported method`,
+        );
+      }
+      runtimeRequestPath(request["url"], sourceIndex);
+      return {
+        request: { method: request["method"], url: request["url"], sourceIndex },
+        authoritative,
+      };
+    })
+    .filter(({ authoritative }) => authoritative)
+    .map(({ request }) => request);
+}
+
+function authoritativeHarApiEntry(entry: unknown): boolean {
+  if (!isUnknownRecord(entry)) return true;
+  const request = isUnknownRecord(entry["request"]) ? entry["request"] : undefined;
+  const resourceType = [
+    entry["_resourceType"],
+    entry["resourceType"],
+    request?.["_resourceType"],
+    request?.["resourceType"],
+  ].find((value): value is string => typeof value === "string" && value.trim() !== "");
+  if (resourceType !== undefined) {
+    return API_HAR_RESOURCE_TYPES.has(resourceType.trim().toLowerCase());
+  }
+  return !clearlyNonApiHarEntry(entry, request);
+}
+
+function clearlyNonApiHarEntry(
+  entry: Record<string, unknown>,
+  request: Record<string, unknown> | undefined,
+): boolean {
+  const rawUrl = typeof request?.["url"] === "string" ? request["url"] : undefined;
+  const requestPath = rawUrl?.trim().split(/[?#]/u, 1)[0];
+  if (requestPath !== undefined && STATIC_ASSET_PATH.test(requestPath)) return true;
+
+  const response = isUnknownRecord(entry["response"]) ? entry["response"] : undefined;
+  const content = isUnknownRecord(response?.["content"]) ? response["content"] : undefined;
+  const mimeType =
+    typeof content?.["mimeType"] === "string"
+      ? content["mimeType"].split(";", 1)[0]!.trim().toLowerCase()
+      : undefined;
+  if (mimeType !== undefined && nonApiMimeType(mimeType)) return true;
+
+  const destination = harRequestHeader(request, "sec-fetch-dest")?.toLowerCase();
+  return destination !== undefined && NON_API_FETCH_DESTINATIONS.has(destination);
+}
+
+function nonApiMimeType(mimeType: string): boolean {
+  return (
+    mimeType.startsWith("audio/") ||
+    mimeType.startsWith("font/") ||
+    mimeType.startsWith("image/") ||
+    mimeType.startsWith("video/") ||
+    mimeType === "text/css" ||
+    mimeType === "text/html" ||
+    /(?:java|ecma)script/u.test(mimeType) ||
+    /(?:font|woff)/u.test(mimeType)
+  );
+}
+
+function harRequestHeader(
+  request: Record<string, unknown> | undefined,
+  name: string,
+): string | undefined {
+  if (!Array.isArray(request?.["headers"])) return undefined;
+  for (const header of request["headers"]) {
     if (
-      !isUnknownRecord(candidate) ||
-      typeof candidate["method"] !== "string" ||
-      candidate["method"].trim() === ""
+      isUnknownRecord(header) &&
+      typeof header["name"] === "string" &&
+      header["name"].trim().toLowerCase() === name &&
+      typeof header["value"] === "string"
     ) {
-      throw new Error(`Legacy runtime network request ${index + 1} requires a method`);
+      return header["value"].trim();
     }
-    if (typeof candidate["url"] !== "string" || candidate["url"].trim() === "") {
-      throw new Error(`Legacy runtime network request ${index + 1} requires a URL`);
-    }
-    return { method: candidate["method"], url: candidate["url"] };
-  });
+  }
+  return undefined;
 }
 
 function runtimeRequestPath(rawUrl: string, index: number): string {

@@ -1,46 +1,48 @@
 ---
 sidebar_position: 2
-title: 2. 레거시 마이그레이션 → draft PR
+title: 2. 레거시 이관 → 초안 PR
 description: 별도 레거시 프로젝트를 실행 기준선으로 삼아 대상 프로젝트로 이관하는 방법
 ---
 
 import RunPipeline from "@site/src/components/guide/RunPipeline";
 import NextStep from "@site/src/components/guide/NextStep";
 
-Intake 직후 `XS`~`XL` workload, 예상 token range, confidence와 근거가 표시됩니다. 이는 고정 약속이 아닙니다. 80% 경계에서는 checkpoint와 compact context로 이어가며, 한계에 도달해도 `requiredValidations`를 빼지 않고 범위를 나누거나 사용자의 결정을 기다립니다.
+요청을 접수하면 예상 작업량(`XS`~`XL`), 토큰 범위, 신뢰도와 산정 근거를 바로 보여 줍니다. 이 값은 확정된 약속이 아니라 현재 정보에 따른 예상치입니다. 사용량이 80%에 이르면 진행 상태를 저장하고 간결한 맥락으로 이어갑니다. 한계에 도달하더라도 `requiredValidations`를 줄이지 않고, 검증 가능한 단위로 범위를 나누거나 사용자의 결정을 기다립니다.
 
 ## 이 케이스를 쓰는 경우 <span id="use-this-case-legacy"></span>
 
-별도 레거시 프로젝트를 읽고 실행해 기능을 현재 대상 프로젝트로 이관할 때 사용합니다. 이전 코드를 그대로 복사하는 것이 아니라, 레거시의 동작·API·상태·화면을 inventory로 고정한 뒤 대상 구조에 맞게 더 낫게 구현합니다. 화면 일치율의 baseline은 Figma가 아니라 **running legacy 화면**입니다.
+별도의 레거시 프로젝트를 분석하고 실행해 기능을 현재 프로젝트로 옮길 때 사용합니다. 이전 코드를 그대로 복사하지 않습니다. 레거시의 동작·API·상태·화면을 목록으로 확정한 다음, 사용자 경험은 유지하면서 대상 프로젝트의 구조와 규칙에 맞게 구현합니다. 화면 일치율은 Figma가 아니라 **실제로 실행한 레거시 화면**을 기준으로 계산합니다.
 
 :::tip[입력 / 결과]
-**입력:** 대상 저장소 + 별도 `legacyProjectRoot` + 이관 범위 · **결과:** migration coverage, running legacy 대비 화면 비교, Web Vitals, inventory에서 파생한 API 사용/gap, 15개 섹션 draft PR
+**입력:** 대상 저장소 + 별도 `legacyProjectRoot` + 이관 범위 · **결과:** 이관 범위별 완료 상태, 실행한 레거시와의 화면 비교, Web Vitals, 레거시에서 확인한 API 사용 현황과 차이, 15개 섹션으로 구성된 초안 PR
 :::
 
 <RunPipeline locale="ko" mode="legacy" />
 
 ## 반드시 제공할 것 <span id="required-inputs-legacy"></span>
 
-| 입력                | 요구사항                                             |
-| ------------------- | ---------------------------------------------------- |
-| 대상 저장소         | 새 구현과 PR이 만들어질 Git 저장소 절대 경로         |
-| `mode`              | `legacy`                                             |
-| `legacyProjectRoot` | 대상과 다른 레거시 프로젝트의 절대 경로              |
-| 이관 범위           | route, 화면, 사용자 동작, 관련 API를 구체적으로 기술 |
-| `changeKind`        | `migration`                                          |
-| `scope`             | `ui`                                                 |
-| `publication`       | PR이면 `draft`, 발행하지 않으면 `none`               |
+| 입력                | 요구사항                                                                                                |
+| ------------------- | ------------------------------------------------------------------------------------------------------- |
+| 대상 저장소         | 새 구현과 PR이 만들어질 Git 저장소 절대 경로                                                            |
+| `mode`              | `legacy`                                                                                                |
+| `legacyProjectRoot` | 대상과 다른 레거시 프로젝트의 절대 경로                                                                 |
+| 이관 요청           | 루트 전체라면 “지정한 범위 전체를 이관해줘” 한 줄이면 충분. 일부만 옮길 때만 루트 안의 경로·화면을 추가 |
+| `changeKind`        | `migration`                                                                                             |
+| `scope`             | `ui`                                                                                                    |
+| `publication`       | PR이면 `draft`, 발행하지 않으면 `none`                                                                  |
 
 ## 선택 입력 <span id="optional-inputs-legacy"></span>
 
-- 두 프로젝트의 실행 명령, fixture 계정, route/state: running baseline을 빠르게 고정합니다.
-- `legacyNetworkEvidencePath`: source adapter가 method/path를 확정하지 못할 때만 대상 프로젝트 내부의 gitignore된 evidence 디렉터리에 저장한 scoped legacy flow HAR/JSON을 제공합니다. 표준 HAR, `{requests:[{method,url}]}`, `[{method,url}]` 형식을 최대 1 MB·1,000 request까지 받습니다. 원문 header/cookie/body/query는 durable artifact/PR에 복사하지 않고 locator·digest·정규화한 method/path·adapter만 남깁니다.
-- `briefPath`, `docsPaths`, `openApiPaths`, `openApiUrls`: 이관 범위의 추가 계약 근거입니다.
-- `guidancePaths`, `skillHints`: 프로젝트 규칙과 적용 가능한 보조 skill을 명시합니다.
+- 두 프로젝트의 실행 명령, 테스트 계정, 경로와 화면 상태를 알려 주면 같은 조건의 기준 화면을 더 빠르게 준비할 수 있습니다.
+- `legacyNetworkEvidencePath`: 코드만으로 HTTP 메서드와 경로를 확정할 수 없을 때 사용합니다. 해당 흐름만 캡처한 HAR/JSON을 대상 프로젝트 안의 `.gitignore` 적용 폴더에 저장하세요. 표준 HAR, `{requests:[{method,url}]}`, `[{method,url}]` 형식을 지원하며 최대 크기는 1MB, 요청 수는 1,000개입니다. 원본 헤더·쿠키·본문·쿼리는 장기 보관 자료나 PR에 복사하지 않습니다. 파일 위치, 해시, 정규화한 메서드·경로, 사용한 탐지 방식만 남깁니다.
+- `briefPath`, `docsPaths`, `openApiPaths`, `openApiUrls`: 이관 범위를 보충하는 계약 근거입니다.
+- `guidancePaths`, `skillHints`: 프로젝트 규칙과 적용할 수 있는 보조 스킬을 지정합니다.
 
 ## 기능 범위와 의존성 경계 <span id="scope-and-dependencies-legacy"></span>
 
-`legacyProjectRoot`는 **변경할 수 없는 기능 범위**이지 의존성 가시성 경계가 아닙니다. route·화면·상태·사용자 동작은 이 root의 inventory에서만 선택합니다. 다만 in-root 코드가 import/configuration으로 직접 참조한 HTTP client, alias 설정, 환경변수 이름의 schema/example, package/type 선언, 상위 build/start 설정은 해당 기능을 해석하고 실행하는 데 필요한 범위까지만 읽을 수 있습니다. 이 증거는 in-root 기능을 해석할 뿐 sibling 기능을 추가하지 않으며, repository-wide 키워드 검색으로 범위를 넓힐 수 없습니다. 실제 secret 값은 읽거나 artifact에 저장하지 않습니다. 환경 URL은 path로 잘라 버리지 않고 `originRef`로, 인증/비인증 client 차이는 transport callsite로 보존한 뒤 대상 프로젝트의 기존 env와 HTTP client 규칙에 대응시킵니다.
+`legacyProjectRoot`는 **변경할 수 없는 기능 범위**입니다. 다만 기능을 이해하는 데 필요한 의존성까지 모두 이 폴더 안에 있어야 한다는 뜻은 아닙니다. 경로·화면·상태·사용자 동작은 이 루트에서 만든 목록에서만 선택합니다. 루트 안의 코드가 가져오거나 설정에서 직접 참조하는 HTTP 클라이언트, 경로 별칭, 환경변수, 패키지·타입 선언, 상위 실행·빌드 설정은 기능을 이해하고 실행하는 데 필요한 만큼 확인할 수 있습니다. 이 자료는 선택한 기능을 해석하기 위한 근거일 뿐, 같은 저장소의 다른 기능까지 범위에 넣는 근거가 되지 않습니다. 저장소 전체 키워드 검색으로 범위를 넓히지도 않습니다.
+
+`.env*`에서는 코드가 참조한 URL 계열 변수만 확인합니다. 사용자 정보·쿼리·해시를 제거한 안전한 원본 URL과 환경변수 이름을 `originRef`에 기록하며, 토큰·비밀번호 같은 비밀값은 결과물에 남기지 않습니다. 인증용 클라이언트와 기본 클라이언트의 차이도 호출 위치와 함께 기록해 대상 프로젝트 규칙에 맞춥니다.
 
 ## 최소 프롬프트 <span id="minimal-prompt-legacy"></span>
 
@@ -52,7 +54,7 @@ legacyProjectRoot: /absolute/path/to/legacy-app
 changeKind: migration
 publication: draft
 지정한 레거시 범위 전체를 대상 프로젝트 구조에 맞게 이관해줘.
-레거시와 결과를 같은 route/state/viewport로 실행해 화면 일치율까지 비교하고 draft PR로 발행해줘.
+레거시와 결과를 같은 경로·상태·화면 크기로 실행해 화면 일치율까지 비교하고 초안 PR로 발행해줘.
 ```
 
 ## 전체 프롬프트 예시 <span id="full-prompt-legacy"></span>
@@ -69,75 +71,75 @@ guidancePaths: [AGENTS.md, docs/architecture/ARCHITECTURE.md]
 skillHints: [api-generator]
 changeKind: migration
 publication: draft
-지정한 레거시 범위의 route, component, API, state, persistence를 inventory로 고정하고 대상 프로젝트로 이관해줘.
-두 앱을 실행해 레거시 화면을 visual baseline으로 사용하고 같은 fixture/viewport의 결과와 비교해.
-이전 코드를 복사하지 말고 대상 architecture와 guidance에 맞게 개선하되 사용자 동작은 보존해.
+지정한 레거시 범위의 경로, 컴포넌트, API, 상태, 저장 방식을 목록으로 확정하고 대상 프로젝트로 이관해줘.
+두 앱을 실행해 레거시 화면을 기준으로 삼고 같은 테스트 데이터·화면 크기의 결과와 비교해.
+이전 코드를 그대로 복사하지 말고 대상 프로젝트의 구조와 지침에 맞게 개선하되 사용자 동작은 보존해.
 ```
 
 ## SpecToPR이 진행하는 과정 <span id="process-legacy"></span>
 
-1. **Intake / legacy inventory:** 별도 root를 read-only로 정규화하고 route/component/API/state/persistence/bridge/asset 등을 bounded `legacyInventory`로 만듭니다. AST가 실제 terminal HTTP call만 `apiCandidates`로 만들며 생성자와 로컬 facade는 중복 operation으로 등록하지 않습니다. 선택 HAR/JSON을 주면 raw digest, `runtime-network-har` adapter, 관측된 method/path를 같은 inventory digest에 고정합니다. 정말 동적인 호출만 남으면 `collect-legacy-network-evidence`가 나오며 `legacy-network-evidence` submission으로 같은 Run을 재개합니다.
-2. **Contracts:** stable feature key를 수용 조건과 `planned` coverage로 연결하고 running legacy screenshot을 `visualTargets`로 고정합니다. 구현 전에는 migrated 파일이나 증거를 주장하지 않습니다.
-3. **Implementation:** 한 implementation writer가 대상 프로젝트 규칙에 맞게 이관하고 같은 stable key를 current-packet `migrated`/제외 coverage로 교체합니다. Legacy inventory는 semantic AST와 `source-fetch-literal`, `source-http-client`, `source-request-config` 같은 bounded adapter로 API 후보, environment origin, transport/callsite, confidence를 기록합니다. 후보가 있으면 operation별 client/mock/test와 정확히 일치하는 `apiCoverage`/`api-ready` 증거를 요구하고, 후보가 0개면 API 섹션을 adapter 목록과 inventory digest에 묶어 `complete`로 기록합니다. Method/path가 모호한 request는 추측하지 않으며 scoped runtime/OpenAPI가 유일하게 확정하면 병합합니다. 선택 OpenAPI는 이 inventory를 보강하지만 적용 여부를 결정하지 않습니다.
-4. **Compare / performance:** 두 앱을 같은 route/state/fixture/viewport로 실행합니다. 각 actual capture는 target의 route/state/viewport/device scale/fixture를 반복하고 provider, ISO capture time, PNG path, `sha256:` digest를 기록합니다. `compare-visuals`는 target drift·digest mismatch를 거부하고 exact/review ratio, diff, overlay를 계산합니다. 런타임 기준은 최소 98%, 정당한 mask 최대 20%, 비교 총 3회(최초 1회 + repair 최대 2회)입니다. Web Vitals도 측정합니다.
-5. **Independent reviews:** functional과 design reviewer가 migration coverage, 화면, interaction, accessibility를 독립 판정합니다.
-6. **Report / publish:** `pr-report-v2.1` 15개 섹션으로 migrated/out-of-scope/gap/blocked와 rollback을 공개하고 draft PR을 만듭니다.
+1. **접수 및 레거시 목록 작성:** 별도 루트를 읽기 전용으로 확인하고 경로, 컴포넌트, API, 상태, 저장 방식, 연결 코드, 자산을 범위가 제한된 `legacyInventory`로 정리합니다. 구문 트리는 실제 HTTP 요청만 `apiCandidates`로 수집하며 생성자와 로컬 파사드를 별도 API 작업으로 중복 등록하지 않습니다. HAR/JSON을 제공하면 원본 해시, `runtime-network-har` 탐지 방식, 확인된 메서드와 경로를 같은 목록의 해시에 묶습니다. 정적 분석과 제공된 OpenAPI만으로 메서드와 경로를 하나로 확정할 수 없으면 `collect-legacy-network-evidence`를 요청하고, `legacy-network-evidence`를 제출받아 같은 실행을 이어갑니다.
+2. **계약 확정:** 안정적인 기능 키를 수용 조건과 `planned` 상태에 연결하고, 실행한 레거시 화면을 `visualTargets`로 확정합니다. 구현 전에는 이관 파일이나 검증 결과가 이미 있다고 주장하지 않습니다.
+3. **구현:** 한 명의 구현 담당자가 대상 프로젝트의 규칙에 맞게 기능을 옮기고, 각 기능 키의 상태를 현재 검토 묶음의 `migrated` 또는 제외 상태로 바꿉니다. `legacyInventory`는 구문 트리와 `source-fetch-literal`, `source-http-client`, `source-request-config` 같은 제한된 탐지 방식을 사용해 API 후보, 환경별 원본 URL, 호출 방식과 위치, 신뢰도를 기록합니다. API 후보가 있으면 각 API 작업이 클라이언트·모의 응답·테스트와 정확히 연결됐다는 `apiCoverage` 및 `api-ready` 근거가 필요합니다. 후보가 없으면 사용한 탐지 방식과 목록 해시를 근거로 API 섹션을 `complete`로 남깁니다. 메서드나 경로가 모호한 요청은 추측하지 않으며, 해당 범위의 실행 기록이나 OpenAPI가 하나의 결과로 확정할 때만 연결합니다. OpenAPI는 목록을 보완하는 자료일 뿐, 기능의 적용 여부를 결정하지 않습니다.
+4. **화면 비교 및 성능 측정:** 두 앱을 같은 경로·상태·테스트 데이터·화면 크기로 실행합니다. 각 캡처에는 기준과 같은 경로·상태·화면 크기·기기 배율·테스트 데이터, 자료 제공자, ISO 형식의 촬영 시각, PNG 경로, `sha256:` 해시를 기록합니다. `compare-visuals`는 비교 조건이 달라졌거나 해시가 일치하지 않으면 거부하고 정확 일치율·검토 일치율·차이 이미지·겹침 이미지를 계산합니다. 화면 일치율은 최소 98%, 근거가 있는 마스킹 영역은 최대 20%이며 비교는 최초 1회와 보정 후 최대 2회까지, 모두 3번 수행할 수 있습니다. Web Vitals도 함께 측정합니다.
+5. **독립 검토:** 기능 검토자와 디자인 검토자가 이관 범위, 화면, 상호작용, 접근성을 각각 독립적으로 판정합니다.
+6. **보고서 및 발행:** `pr-report-v2.1`의 15개 섹션에 이관·범위 제외·차이·차단 상태와 롤백 방법을 정리하고 초안 PR을 만듭니다.
 
-각 보고서 섹션은 `complete`, `not-run`, `blocked`, `not-applicable` 중 하나입니다. 현재 review packet에 속하지 않는 stale path는 PR에서 생략합니다. GitHub 이미지·diff·overlay는 실행별 branch가 아니라 단일 관리 branch `spec-to-pr/evidence`의 immutable 경로에 올리고 upload commit SHA로 고정합니다.
+각 보고서 섹션의 상태는 `complete`, `not-run`, `blocked`, `not-applicable` 중 하나입니다. 현재 검토 묶음에 속하지 않는 이전 경로는 PR에서 제외합니다. 초안 PR에는 레거시·이관 결과·차이 이미지와 일치율을 제공합니다. GitHub용 이미지는 실행마다 새 브랜치를 만들지 않고 관리 브랜치 `spec-to-pr/evidence`의 변경되지 않는 경로에 올린 뒤 업로드 커밋 SHA로 고정합니다.
 
-## 실행 정책: stage, agent, skill, tool
+## 단계와 작업 담당
 
-| Durable stage       | 이 케이스의 정확한 동작                                                                                  |
-| ------------------- | -------------------------------------------------------------------------------------------------------- |
-| `intake`            | current/desired behavior, affected entry point, scope, publication과 workload를 기록합니다.              |
-| `contracts`         | `legacyInventory`, planned coverage, running legacy `visualTargets`, `requiredValidations`를 확정합니다. |
-| `implementation`    | 한 writer가 이관하고 current-packet migrated/excluded coverage와 파생 API/performance 증거를 만듭니다.   |
-| `functional-review` | read-only `functional-reviewer`가 before/after evidence와 affected regression을 판정합니다.              |
-| `design-review`     | UI delta일 때만 read-only `design-reviewer`가 적용되고 non-UI면 not applicable입니다.                    |
-| `report`            | `pr-report-v2.1` 15개 섹션에 migration/API/visual/performance gap과 blocker를 기록합니다.                |
-| `publish`           | ready이고 `publication: draft`일 때만 draft PR/MR을 생성·갱신합니다.                                     |
-| `archive`           | merge가 확인된 뒤 별도 사용자 action으로만 실행합니다.                                                   |
+| 단계                | 이 방식에서 수행하는 작업                                                                               |
+| ------------------- | ------------------------------------------------------------------------------------------------------- |
+| `intake`            | 현재·목표 동작, 변경할 진입점, 범위, 발행 방식, 예상 작업량을 기록합니다.                               |
+| `contracts`         | `legacyInventory`, 예정된 이관 범위, 실행한 레거시 `visualTargets`, `requiredValidations`를 확정합니다. |
+| `implementation`    | 한 명의 구현 담당자가 기능을 옮기고 현재 검토 묶음의 이관·제외 상태와 API·성능 근거를 만듭니다.         |
+| `functional-review` | 읽기 전용 `functional-reviewer`가 변경 전후 자료와 관련 회귀 가능성을 판정합니다.                       |
+| `design-review`     | UI가 바뀐 경우에만 읽기 전용 `design-reviewer`가 검토하며, 비-UI 작업에는 적용하지 않습니다.            |
+| `report`            | `pr-report-v2.1`의 15개 섹션에 이관, API, 화면, 성능 차이와 차단 사유를 기록합니다.                     |
+| `publish`           | 검증이 끝나고 `publication: draft`일 때만 초안 PR/MR을 생성하거나 갱신합니다.                           |
+| `archive`           | 병합이 확인된 뒤 사용자가 별도로 요청한 경우에만 실행합니다.                                            |
 
-Agent 정책은 XS/S read-only scout 0명, M 최대 1명, L/XL 최대 2명이며 큰 legacy discovery도 독립적인 read-heavy 범위로 제한합니다. 한 implementation writer만 편집하고 **no nesting**, **parallel writer 금지**입니다. Reviewer 병렬 실행은 implementation 뒤 UI scope인 L/XL에서만 켜집니다.
+작업량이 XS/S이면 별도 조사 담당자를 두지 않고, M이면 최대 1명, L/XL이면 최대 2명의 읽기 전용 조사 담당자를 둘 수 있습니다. 큰 레거시 조사도 서로 독립적이고 편집이 필요 없는 범위로만 나눕니다. 구현 파일은 한 명만 편집하며 중첩 위임과 동시 편집은 허용하지 않습니다. 검토자 동시 실행은 구현이 끝난 뒤 UI 범위의 L/XL 작업에서만 사용합니다.
 
-- `stageSkillRoute`: public action은 `intake-contracts` → `implement` → `review-functional` 순서이며 UI delta면 `review-design`, draft면 `publish`로 이어집니다. 이 routing은 `deliveryProfile.recommendedSkills`가 아닙니다.
-- `recommendedSkills`: `figmaUrl` → `figma`, `design-system`; `openApiPaths`/`openApiUrls` → `api-generator`; 감지된 React/Next package → `react-best-practices`, `next-best-practices` optional candidate입니다.
-- Legacy UI라는 이유만으로 `playwright`를 추천하지 않습니다. `mode: feature` + UI mapping만 해당 candidate를 추가합니다.
-- `appliedSkills`: `recommendedSkills`와 실제 available/applicable한 `skillHints`의 optional-skill 허용 합집합만 기록합니다. Missing optional skills로 baseline이나 필수 회귀 검증을 생략하지 않습니다.
-- **workflow MCP:** durable Run에 필수. **Figma host:** `figmaUrl`이 있을 때만 필수. **Playwright Test/CLI:** affected browser regression이 required일 때 focused selector와 structured assertion을 사용하며 full-project E2E나 영상은 요구하지 않습니다.
-- **Browser MCP:** optional interactive reproduction. **Chrome DevTools MCP:** console/network/performance/memory/live-DOM 원인 진단에만 conditional이며 acceptance oracle가 아닙니다.
+- `stageSkillRoute`: 공개 작업은 `intake-contracts` → `implement` → `review-functional` 순서로 진행합니다. UI가 바뀌면 `review-design`, draft 발행이면 `publish`가 이어집니다. 이 경로는 `deliveryProfile.recommendedSkills`와 별개입니다.
+- `recommendedSkills`: `figmaUrl`이 있으면 `figma`와 `design-system`, `openApiPaths`나 `openApiUrls`가 있으면 `api-generator`를 후보로 둡니다. React/Next 패키지가 확인되면 `react-best-practices`, `next-best-practices`를 선택 후보로 추가합니다.
+- 레거시 UI라는 이유만으로 `playwright`를 추천하지 않습니다. `mode: feature`이고 UI 연결이 있을 때만 후보에 추가합니다.
+- `appliedSkills`: 추천 스킬과 `skillHints` 중 실제로 설치되어 있고 현재 작업에 맞는 선택 스킬만 기록합니다. 선택 스킬이 없다는 이유로 기준 화면 비교나 필수 회귀 검증을 생략하지 않습니다.
+- **워크플로 도구:** 상태를 보존하는 실행에 필수입니다. **Figma 호스트 기능:** `figmaUrl`이 있을 때만 필요합니다. **Playwright Test/CLI:** 변경 범위의 브라우저 회귀 검증이 필요할 때 정확한 선택자와 구조화 검증을 사용합니다. 전체 프로젝트 E2E나 영상은 요구하지 않습니다.
+- **Browser MCP:** 상호작용을 재현하고 살펴볼 때 선택적으로 사용합니다. **Chrome DevTools MCP:** 콘솔·네트워크·성능·메모리·실시간 DOM의 원인을 진단할 때만 사용하며, 요구사항 통과 여부를 결정하지 않습니다.
 
-### Ready, blocked diagnostic, resume
+### 정상 발행, 차단 진단, 재개
 
-정상 경로는 `workflow_publish intent: ready`로 evidence-backed draft를 만듭니다. `pr-report-v2.1`의 동일한 15개 섹션을 blocked에도 사용하므로 멈춘 stage, 완료된 migration, 미실행 검증, exact unblock action이 PR에 남습니다. Preflight를 통과할 때만 `workflow_publish intent: blocked-diagnostic` draft를 내며 결과는 계속 `status: blocked`입니다. Clean tree, non-target branch, 인증, 지원 remote, committed delta, target보다 한 commit ahead가 없거나 `PUBLISH_NO_DELTA`면 empty commit과 issue fallback 없이 **local blocked report**만 반환합니다.
+정상 흐름에서는 `workflow_publish intent: ready`로 검증 자료가 포함된 초안 PR을 만듭니다. 차단된 경우에도 `pr-report-v2.1`의 같은 15개 섹션을 사용하므로 멈춘 단계, 완료한 이관 작업, 실행하지 못한 검증, 정확한 해결 방법이 PR에 남습니다. 사전 조건을 통과한 경우에만 `workflow_publish intent: blocked-diagnostic`으로 진단용 초안을 만들 수 있으며, 결과 상태는 계속 `status: blocked`입니다. 작업 트리가 깨끗하고, 대상과 다른 브랜치이며, 인증된 지원 원격 저장소를 사용하고, 변경이 커밋되어 있고, 대상 브랜치보다 한 커밋 이상 앞서야 합니다. 하나라도 충족하지 못하거나 `PUBLISH_NO_DELTA`가 발생하면 빈 커밋이나 이슈를 만들지 않고 **로컬 차단 보고서**만 반환합니다.
 
-`diagnostic-publication-uncertain`이면 자동 재발행하지 않습니다. GitHub/GitLab에서 matching draft를 확인해 사용자에게 보여주고, 명시적 승인을 받은 경우에만 같은 `workflow_publish`를 `recoverUncertain: true`로 호출합니다.
+`diagnostic-publication-uncertain`이 반환되면 자동으로 다시 발행하지 않습니다. GitHub/GitLab에서 소스·대상 브랜치가 같은 초안이 이미 만들어졌는지 확인해 사용자에게 보여 주고, 명시적인 승인을 받은 뒤에만 같은 `workflow_publish`를 `recoverUncertain: true`로 호출합니다.
 
-입력·환경을 고친 뒤 **same Run**의 latest status에서 재개합니다. Diagnostic draft가 있었다면 같은 source/target의 **same draft PR**을 `[Blocked]`에서 정상 `intent: ready` 제목/본문으로 갱신하고 blocked label을 제거합니다.
+입력이나 환경을 고친 뒤에는 새 실행을 만들지 않고 **같은 실행**의 최신 상태에서 이어갑니다. 진단용 초안이 있었다면 소스·대상 브랜치가 같은 **기존 초안 PR**의 `[Blocked]` 제목과 본문을 정상 `intent: ready` 내용으로 바꾸고 차단 라벨을 제거합니다.
 
 ## 증거와 검증 <span id="evidence-legacy"></span>
 
-| 증거       | 예상 예시                               | 통과 기준                                                            |
-| ---------- | --------------------------------------- | -------------------------------------------------------------------- |
-| inventory  | `evidence/legacy/inventory.json`        | stable feature key와 source path가 기록됨                            |
-| coverage   | `evidence/legacy/coverage.json`         | 모든 scope key가 migrated/out-of-scope/gap/blocked 중 하나           |
-| visual     | `evidence/visual/migration-report.json` | running legacy/결과 ratio ≥ 98%, mask ≤ 20%, diff/overlay            |
-| API gap    | `evidence/api/coverage.json`            | 파생 후보 전체의 production/mock/test 매핑, 또는 빈 inventory digest |
-| Web Vitals | `evidence/performance/migration.json`   | lab metrics와 field source/미가용 사유                               |
+| 증거       | 경로 예시                         | 통과 기준                                                     |
+| ---------- | --------------------------------- | ------------------------------------------------------------- |
+| 기능 목록  | `contracts/legacy-inventory.json` | 안정적인 기능 키와 소스 경로가 기록됨                         |
+| 이관 범위  | `contracts/legacy-coverage.json`  | 모든 범위 키에 이관·제외·차이·차단 상태가 기록됨              |
+| 화면 비교  | `visual/migration-report.json`    | 레거시/결과 일치율 ≥ 98%, 마스크 ≤ 20%, 차이·겹침 이미지 포함 |
+| API 차이   | `evidence/api-coverage.json`      | 모든 API 후보의 구현·모의 응답·테스트 연결 또는 빈 목록 해시  |
+| Web Vitals | `evidence/performance.json`       | 실험실 지표와 현장 자료 또는 미수집 사유                      |
 
-파일명은 **예상 예시**입니다. Figma 또는 UI source가 있다면 별도 design evidence가 추가되지만 기능 개발용 영상은 자동 요구하지 않습니다.
+경로는 `.spec-to-pr/<feature>/`를 기준으로 한 **예시**입니다. Figma 또는 UI 자료가 있으면 디자인 검증 자료가 추가되지만, 기능 개발용 영상까지 자동으로 요구하지는 않습니다.
 
-### Draft 검토 자료의 위치
+### 초안 검토 자료의 위치
 
-레거시 이관은 프로젝트 루트의 `.spec-to-pr/<feature>/`에 기능별 draft bundle을 만듭니다. 이름의 `<feature>`는 inventory의 내부 stable key가 아니라 읽을 수 있는 기능 slug이며, 리뷰어가 opaque key를 해석할 필요가 없습니다.
+`publication: draft`인 레거시 이관의 검토 자료는 프로젝트 루트의 `.spec-to-pr/<feature>/`에 기능별로 모입니다. `<feature>`는 대개 레거시 루트 폴더 이름을 읽기 쉬운 슬러그로 바꿔 사용하며, 이름을 만들 수 없으면 안정적인 짧은 해시를 붙입니다. 어느 경우든 검토자가 내부 기능 키를 해석할 필요는 없습니다. `publication: none`이면 이 초안 전용 묶음을 요구하지 않습니다.
 
 ```text
 .spec-to-pr/<feature>/
-├── manifest.json        # digest, 현재 packet, Run 추적 정보
-├── contracts/           # 수용 조건과 migration coverage
+├── manifest.json        # 현재 실행·리비전과 입력 자료·요구사항·OpenSpec 해시
+├── contracts/           # 수용 조건과 이관 범위
 ├── evidence/            # API·검증·성능 근거
-├── visual/              # legacy / current PNG와 비교 결과
-└── report/              # draft PR에 쓰이는 reviewer용 JSON/Markdown
+├── visual/              # 레거시 / 현재 PNG와 비교 결과
+└── report/              # 초안 PR에 쓰이는 검토자용 JSON/Markdown
 
 openspec/changes/<change-name>/
 ├── proposal.md
@@ -145,76 +147,76 @@ openspec/changes/<change-name>/
 └── tasks.md
 ```
 
-`manifest.json`만 Run ID와 digest를 추적합니다. PR 본문은 요구사항의 제목·상태·결과 파일과 **legacy/current 나란히 보기**를 우선하며, internal feature key나 모든 구현 파일의 반복 목록은 기본적으로 숨깁니다. raw HAR, cookie, token, 전체 로그도 bundle이나 PR에 복사하지 않습니다.
+`manifest.json`은 `pre-implementation` 시점의 실행 ID·리비전, 레거시 루트 해시, 요구사항 ID, OpenSpec 경로와 파일 해시를 하나로 묶습니다. 이 값이 현재 실행 또는 실제 파일과 다르면 계약 단계가 통과하지 않습니다. PR 본문에는 요구사항 제목·상태·결과 파일과 **레거시/현재 화면 나란히 보기**를 먼저 보여 줍니다. 차이 이미지는 별도 검토 자료로 연결하고 일치율을 함께 표시합니다. 내부 기능 키와 반복되는 전체 구현 파일 목록은 기본적으로 숨깁니다. 원본 HAR, 쿠키, 토큰, 전체 로그도 이 폴더나 PR에 복사하지 않습니다.
 
-### GitLab 이미지 대체 발행
+### GitLab 이미지 업로드가 실패할 때
 
-GitLab project upload가 인증·일시적 네트워크·5xx 오류로 실패하면, 검증된 legacy/current PNG만 exact review commit의 raw URL로 대체해 draft PR을 계속 만들 수 있습니다. 대체 전에 파일이 tracked regular file인지, commit SHA와 worktree가 일치하는지, captured digest가 현재 파일과 같은지를 모두 확인합니다. 생성된 diff/overlay, 영상, 누락·변경된 파일, digest 불일치 파일은 절대 대체하지 않고 정확한 실패 원인을 남깁니다.
+GitLab 프로젝트 이미지 업로드가 인증 오류, 일시적인 네트워크 오류, 5xx 응답으로 실패하면 검증을 마친 레거시/현재 PNG만 검토 대상 커밋의 원본(raw) URL로 대신 연결해 초안 PR 발행을 이어갈 수 있습니다. 먼저 파일이 Git에서 추적하는 일반 파일인지 확인합니다. 검토 대상 커밋의 정확한 파일과 깨끗한 작업 트리 파일이 모두 캡처할 때 기록한 해시와 같아야 합니다. 생성된 차이·겹침 이미지, 영상, 누락되거나 변경된 파일, 해시가 다른 파일에는 이 방식을 사용하지 않고 정확한 실패 원인을 남깁니다.
 
 ## 예상 브랜치와 커밋 <span id="branch-and-commits-legacy"></span>
 
-- 브랜치 예상 예시: `codex/legacy-scope-migration`
-- 커밋 예상 예시: `feat: migrate selected legacy scope`
-- 큰 formatting, dependency upgrade, unrelated cleanup은 같은 커밋에 섞지 않습니다.
-- 발행 전에 clean tree와 target보다 앞선 source commit을 확인합니다.
+- 브랜치 예시: `codex/legacy-scope-migration`
+- 커밋 예시: `feat: migrate selected legacy scope`
+- 대규모 서식 변경, 의존성 업그레이드, 관련 없는 정리는 같은 커밋에 섞지 않습니다.
+- 발행하기 전에 작업 트리가 깨끗하고 소스 브랜치가 대상 브랜치보다 앞서 있는지 확인합니다.
 
-## 예상 Draft PR <span id="expected-pr-legacy"></span>
+## 예상 초안 PR <span id="expected-pr-legacy"></span>
 
-**예상 예시 제목:** `feat: migrate selected legacy scope`
+**제목 예시:** `feat: migrate selected legacy scope`
 
 ```md
-## Legacy migration coverage
+## 레거시 이관
 
-- legacy_scope_feature: migrated → src/features/migrated-scope
+- 매장 탐색 및 상세: 이관 완료 → src/pages/shop
 
-## Visual fidelity
+## 화면 일치율
 
-- running legacy vs target: review match 98.62%
-- baseline / target / diff / overlay links
+- 실행한 레거시와 현재 화면: 98.62%
+- 레거시 / 현재 / 차이 이미지와 일치율
 
-## API, performance, reviews
+## API·성능·검토
 
-- documented API operations: 4/4 covered, gap none
+- 확인한 API: 4/4 검증, 미해결 없음
 - LCP 2.2s, CLS 0.03, TBT 140ms
-- functional-reviewer: approved
-- design-reviewer: approved
+- 기능 검토: 승인
+- 디자인·접근성 검토: 승인
 
-## Risk / rollback
+## 위험과 되돌리기
 
 - 지정한 레거시 범위 외 동작은 변경하지 않음
-- revert 가능한 단일 커밋
+- 되돌릴 수 있는 단일 커밋
 ```
 
-## Run이 멈추는 경우 <span id="blockers-legacy"></span>
+## 실행이 멈추는 경우 <span id="blockers-legacy"></span>
 
-| 중단 원인                                           | 사용자가 할 일                                |
-| --------------------------------------------------- | --------------------------------------------- |
-| `legacyProjectRoot`가 없거나 대상과 같음            | 별도 레거시 디렉터리 절대 경로 제공           |
-| `LEGACY_API_METHOD_UNKNOWN`                         | 액션이 요청한 scoped HAR을 같은 Run에 제출    |
-| HAR/JSON이 1 MB·1,000 request 한도/형식을 위반      | 해당 flow만 다시 캡처해 bounded 형식으로 저장 |
-| 레거시/대상 앱을 실행할 수 없음                     | 실행 명령, fixture, 환경 조건 제공            |
-| baseline과 source가 충돌                            | 기대 동작의 authoritative source를 선택       |
-| 검사 환경이 없어 required regression을 만들 수 없음 | 최소 실행 방법이나 승인된 대체 증거 제공      |
-| publication preflight 실패                          | 변경을 정리·커밋해 clean source branch로 재개 |
+| 중단 원인                                      | 사용자가 할 일                                   |
+| ---------------------------------------------- | ------------------------------------------------ |
+| `legacyProjectRoot`가 없거나 대상과 같음       | 별도 레거시 디렉터리 절대 경로 제공              |
+| `LEGACY_API_METHOD_UNKNOWN`                    | 안내에서 요청한 범위 제한 HAR을 같은 실행에 제출 |
+| HAR/JSON이 1MB·요청 1,000개 한도나 형식을 위반 | 해당 흐름만 다시 캡처해 제한 형식으로 저장       |
+| 레거시/대상 앱을 실행할 수 없음                | 실행 명령, 테스트 데이터, 환경 조건 제공         |
+| 기준 화면과 소스 자료가 충돌                   | 기대 동작의 기준 자료를 선택                     |
+| 검사 환경이 없어 필수 회귀 검증을 만들 수 없음 | 최소 실행 방법이나 승인된 대체 증거 제공         |
+| 발행 사전 검사 실패                            | 변경을 정리·커밋해 깨끗한 소스 브랜치로 재개     |
 
 ## 이 케이스가 하지 않는 것 <span id="exclusions-legacy"></span>
 
-- dependency/build output을 무제한 스캔하거나 레거시 저장소를 편집하지 않습니다.
-- 이전 코드를 무조건 복사하거나 현재 대상 architecture를 훼손하지 않습니다.
-- full-project E2E나 기능 영상을 자동 요구하지 않습니다.
-- Figma를 visual baseline으로 사용하지 않습니다. 이 케이스의 baseline은 running legacy입니다.
+- 의존성 폴더나 빌드 결과물을 무제한으로 훑거나 레거시 저장소를 편집하지 않습니다.
+- 이전 코드를 무조건 복사하거나 현재 대상 프로젝트의 구조를 훼손하지 않습니다.
+- 전체 프로젝트 E2E나 기능 영상을 자동으로 요구하지 않습니다.
+- Figma를 화면 기준으로 사용하지 않습니다. 이 방식의 기준은 실제로 실행한 레거시입니다.
 
 <NextStep
   eyebrow="비교 기준 확인"
-  title="실행한 레거시가 어떻게 수치화된 baseline이 되는지 보세요"
-  description="같은 route·state·viewport로 캡처한 두 화면이 RGBA metrics, diff, overlay와 design verdict로 이어집니다."
+  title="실행한 레거시가 어떻게 수치화된 기준이 되는지 보세요"
+  description="같은 경로·상태·화면 크기로 캡처한 두 화면이 RGBA 지표, 차이·겹침 이미지, 디자인 판정으로 이어지는 과정을 확인하세요."
   href="/concepts/visual-verification"
   label="시각 검증 보기"
-  secondary={{ label: "Run 파이프라인 보기", href: "/concepts/pipeline" }}
+  secondary={{ label: "전체 실행 흐름 보기", href: "/concepts/pipeline" }}
 />
 
 ## 다른 사용법
 
-- [기획서 → draft PR](./brief)
-- [기능 개발 → E2E·영상·draft PR](./feature)
+- [기획서 → 초안 PR](./brief)
+- [기능 개발 → E2E·영상·초안 PR](./feature)
 - [Figma → 디자인 구현](./figma)

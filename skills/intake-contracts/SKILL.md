@@ -12,7 +12,40 @@ Read `deliveryProfile`. Accept only `auto | ui | non-ui | docs` as `scope`. Requ
 - Read any `briefPath`, `docsPaths`, local `openApiPaths`, and fetched HTTPS `openApiUrls`; preserve acceptance criteria, API operations and schemas, contradictions, raw/resolved locators, capture timestamps, and digests. Treat `deliveryProfile.sourceProvenance` and the complete runtime-generated `openApiOperations` inventory as immutable pinned input evidence.
 - Read explicit `guidancePaths` and `discoveredGuidancePaths` as durable project instructions. Block on a missing explicit path; ignore missing automatic candidates. Exclude project guidance from scope classification.
 - `legacy`: use the read-only, separate `legacyProjectRoot` and the bounded `workflow_status.legacyInventory`. Treat them as the immutable feature boundary, not a dependency visibility boundary. Resolve each requested feature against that inventory; when no feature key matches, report an in-bound scope mismatch. A sibling, parent, or keyword-similar module requires an explicit replacement `legacyProjectRoot` and is never inferred from repository-wide search. Inspect directly referenced dependency evidence outside the root only when an explicit in-root import or configuration edge requires it: HTTP client/alias configuration, environment-name schemas/examples, package metadata/type declarations, and enclosing build/start metadata. Keep that traversal bounded; do not scan dependency trees or build output broadly, read secret values, or promote dependency evidence into unrelated feature keys, routes, screens, or API candidates. Use `legacyInventory.apiCandidates` as the API authority: terminal HTTP calls carry method/path, `originRef`, transport, and callsites; constructors and local facade calls are never separate operations. Map environment origins and authenticated/default transport semantics onto the target project's existing configuration and client conventions. Do not reduce an environment-based URL to a path-only implementation. If `legacyNetworkEvidencePath` is present, treat its project-local bounded HAR/request JSON, source-provenance digest, and `runtime-network-har` adapter as pinned evidence. Never infer a method missing from both source and runtime/OpenAPI evidence. When intake returns `collect-legacy-network-evidence`, capture only in-bound runtime requests and submit `kind: legacy-network-evidence` with `evidencePath`; remain in the same Run and then continue to contracts. Run both projects and submit `legacyBaseline` with a bounded scope, running legacy screenshots, evidence paths, and passed checks. Declare each running legacy screenshot as a `visualTargets` item with `baselineKind: legacy-screenshot`, route, state, fixture, viewport, scale, and justified masks. In contracts, map every in-scope stable inventory key through `legacyCoverage` as `planned` or intentionally out of scope; never claim migrated files or executable evidence before implementation.
-- When `deliveryProfile.draftEvidenceBundle` is present, treat it as the exact stable review-artifact location. Keep production code and test source in the target project's normal feature locations; write only concise final review evidence under the bundle's `contractsRoot`, `evidenceRoot`, `visualRoot`, and `reportRoot`. Create its `manifestPath` with Run/revision/head/digest metadata but never put a run ID in a directory name. For a legacy migration, also create `openspec/changes/<changeName>/proposal.md`, at least one delta `spec.md`, and `tasks.md`; include those paths, the bundle manifest, and `draftBundle` `{ manifestPath, changeName, proposalPath, specPaths, tasksPath }` in the passed contracts submission. Do not copy raw browser logs, credentials, headers, full HAR files, or intermediate captures into the bundle.
+- When `deliveryProfile.draftEvidenceBundle` is present, treat it as the exact stable review-artifact location. Keep production code and test source in the target project's normal feature locations; write only concise final review evidence under the bundle's `contractsRoot`, `evidenceRoot`, `visualRoot`, and `reportRoot`. Never put a run ID in a directory name. For a legacy migration, also create `openspec/changes/<changeName>/proposal.md`, at least one delta `spec.md`, and `tasks.md`; include those paths, the bundle manifest, and `draftBundle` `{ manifestPath, changeName, proposalPath, specPaths, tasksPath }` in the passed contracts submission. Do not copy raw browser logs, credentials, headers, full HAR files, or intermediate captures into the bundle.
+
+  Create `draftEvidenceBundle.manifestPath` using the public `schemas/runtime/draft-evidence-manifest.schema.json` contract. Replace the placeholders in this exact-shape example. The manifest accepts no additional fields:
+
+  ```json
+  {
+    "schemaVersion": "draft-evidence-manifest-v1",
+    "runId": "run_<32 lowercase hex characters>",
+    "runRevision": 0,
+    "phase": "pre-implementation",
+    "legacyRootDigest": "sha256:<64 lowercase hex characters>",
+    "requirementIds": ["REQ-SHOP-ROUTING"],
+    "openSpec": {
+      "changeName": "shop-migration",
+      "proposal": {
+        "path": "openspec/changes/shop-migration/proposal.md",
+        "digest": "sha256:<64 lowercase hex characters>"
+      },
+      "specs": [
+        {
+          "path": "openspec/changes/shop-migration/specs/shop/spec.md",
+          "digest": "sha256:<64 lowercase hex characters>"
+        }
+      ],
+      "tasks": {
+        "path": "openspec/changes/shop-migration/tasks.md",
+        "digest": "sha256:<64 lowercase hex characters>"
+      }
+    }
+  }
+  ```
+
+  Copy `runId` and `runRevision` from the latest `workflow_status`, and copy `legacyRootDigest` from the bounded legacy inventory. `requirementIds` must be the unique IDs in the submitted requirement manifest. Each artifact `digest` is the SHA-256 of the exact file bytes at its project-relative `path`, written as `sha256:` followed by 64 lowercase hexadecimal characters.
+
 - Legacy OpenAPI is optional enrichment, not an applicability switch. Derive API candidates from the bounded inventory. Preserve the zero-candidate inventory digest so the final API section can be `complete` with no operations; when candidates exist, require exact operation-aware `api-ready` and `apiCoverage` evidence.
 - For any supplied `figmaUrl`, use the host's connected Figma capability to fetch real nodes, screenshots, variables, assets, and component context. Before contracts, submit exactly one `kind: figma-bundle` with `provider: host-connected-figma`, ISO `capturedAt`, `fileUrl` exactly matching the delivery profile, nonempty `nodeIds`, a declared JSON `manifestPath`, and project-local `artifactPaths` containing that manifest plus one or more actual PNG files. The strict manifest repeats `provider`, `capturedAt`, `fileUrl`, and `nodeIds`, and its `visualPaths` exactly list the PNG paths. Add one `visualTargets` entry per required route/state using the corresponding PNG as `baselineKind: figma`. Do not use URL-only claims, repeat the bundle, poll, or add runtime Figma micro-tools.
 - Treat `skillHints` as optional names. Ask the host to use a hint only when that skill is available and applicable. Missing optional skills do not block the Run.

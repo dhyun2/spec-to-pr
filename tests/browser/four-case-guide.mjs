@@ -4,15 +4,15 @@ import { chromium } from "playwright";
 
 const origin = process.env.GUIDE_BASE_URL ?? "http://127.0.0.1:3000/spec-to-pr";
 const cases = [
-  { value: "brief", ko: "1. 기획서 → draft PR", en: "1. Brief → draft PR" },
+  { value: "brief", ko: "1. 기획서 → 초안 PR", en: "1. Brief → draft PR" },
   {
     value: "legacy",
-    ko: "2. 레거시 마이그레이션 → draft PR",
+    ko: "2. 레거시 이관 → 초안 PR",
     en: "2. Legacy migration → draft PR",
   },
   {
     value: "feature",
-    ko: "3. 기능 개발 → E2E·영상·draft PR",
+    ko: "3. 기능 개발 → E2E·영상·초안 PR",
     en: "3. Feature → E2E, video, and draft PR",
   },
   { value: "figma", ko: "4. Figma → 디자인 구현", en: "4. Figma → design implementation" },
@@ -27,7 +27,7 @@ const viewports = [
 ];
 const comparison = {
   value: "comparison",
-  ko: "Spec-to-development 비교와 채택 정책",
+  ko: "명세 기반 개발 도구 비교와 채택 원칙",
   en: "Spec-to-development comparison and adoption policy",
 };
 const experiencePages = [
@@ -48,8 +48,8 @@ const experiencePages = [
   {
     value: "pipeline",
     path: "/concepts/pipeline",
-    ko: "Run은 어떻게 움직이나요?",
-    en: "How a Run moves",
+    ko: "실행은 어떻게 진행되나요?",
+    en: "How a Run works",
     marker: '[data-testid="run-pipeline"]',
   },
   {
@@ -274,7 +274,10 @@ async function assertMobileNavigation(page, locale, targetPath, label) {
   await page.locator(".navbar-sidebar").waitFor();
 
   if ((await page.locator(".navbar-sidebar__items--show-secondary").count()) > 0) {
-    await page.locator(".navbar-sidebar__back").click({ force: true });
+    const back = page.locator(".navbar-sidebar__back");
+    await back.focus();
+    await assertFocusVisible(back, `${label}:mobile secondary-menu back`);
+    await page.keyboard.press("Enter");
     await page.waitForFunction(
       () => !document.querySelector(".navbar-sidebar__item.menu")?.hasAttribute("inert"),
     );
@@ -465,10 +468,9 @@ try {
           }
           const detail = page.locator('[data-testid="run-pipeline-detail"]');
           await detail.waitFor();
+          const detailText = (await detail.innerText()).toLocaleLowerCase();
           assert.ok(
-            (await detail.innerText()).includes(
-              locale.name === "ko" ? "통과 조건" : "Pass condition",
-            ),
+            detailText.includes(locale.name === "ko" ? "통과 조건" : "pass condition"),
             `${label}:stage action and pass condition`,
           );
         }

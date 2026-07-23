@@ -99,7 +99,9 @@ export function buildDeliveryProfile(input: {
     ...(input.legacyProjectRoot === undefined
       ? {}
       : { legacyProjectRoot: input.legacyProjectRoot }),
-    ...(input.mode === "legacy" && input.legacyProjectRoot !== undefined
+    ...(input.mode === "legacy" &&
+    input.publication === "draft" &&
+    input.legacyProjectRoot !== undefined
       ? {
           draftEvidenceBundle: createDraftEvidenceBundle({
             mode: "legacy",
