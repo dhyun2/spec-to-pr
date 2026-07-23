@@ -1253,6 +1253,12 @@ function injectVisualEvidencePreview(input: {
   }
 
   const cleaned = removeVisualEvidencePreview(input.body).trimEnd();
+  const slotIndex = cleaned.indexOf(VISUAL_PREVIEW_SLOT);
+
+  if (slotIndex !== -1) {
+    return `${cleaned.slice(0, slotIndex).trimEnd()}\n\n${preview}\n\n${cleaned.slice(slotIndex + VISUAL_PREVIEW_SLOT.length).trimStart()}`;
+  }
+
   const runMetadataIndex =
     locale === "ko"
       ? cleaned.indexOf("\n## 실행 메타데이터")
@@ -1267,6 +1273,7 @@ function injectVisualEvidencePreview(input: {
 
 const VISUAL_PREVIEW_START = "<!-- spec-to-pr:visual-evidence:start -->";
 const VISUAL_PREVIEW_END = "<!-- spec-to-pr:visual-evidence:end -->";
+const VISUAL_PREVIEW_SLOT = "<!-- spec-to-pr:visual-evidence:slot -->";
 const FEATURE_VIDEO_START = "<!-- spec-to-pr:feature-video:start -->";
 const FEATURE_VIDEO_END = "<!-- spec-to-pr:feature-video:end -->";
 
@@ -1311,7 +1318,7 @@ function renderVisualEvidencePreview(
   }
 
   const assetByTargetAndRole = new Map<string, PublishedReviewAsset>();
-  const labels = visualPreviewLabels(report);
+  const labels = visualPreviewLabels(report, locale);
 
   for (const asset of assets) {
     assetByTargetAndRole.set(`${asset.targetId}:${asset.role}`, asset);
@@ -1324,13 +1331,20 @@ function renderVisualEvidencePreview(
     const reviewMatch = `${(result.metrics.reviewMatchRatio * 100).toFixed(2)}%`;
     const exactMatch = `${(result.metrics.exactMatchRatio * 100).toFixed(2)}%`;
 
-    return [
-      escapeMarkdownTableCell(result.targetId),
-      imageCell(figma, labels.baseline),
-      imageCell(browser, labels.actual),
-      imageCell(diff, "Diff"),
-      `${reviewMatch}<br>exact ${exactMatch}<br>${result.status}`,
-    ];
+    return locale === "ko"
+      ? [
+          escapeMarkdownTableCell(result.targetId),
+          imageCell(figma, labels.baseline),
+          imageCell(browser, labels.actual),
+          `${reviewMatch}<br>${result.status === "passed" ? "통과" : "실패"}`,
+        ]
+      : [
+          escapeMarkdownTableCell(result.targetId),
+          imageCell(figma, labels.baseline),
+          imageCell(browser, labels.actual),
+          imageCell(diff, "Diff"),
+          `${reviewMatch}<br>exact ${exactMatch}<br>${result.status}`,
+        ];
   });
 
   const hasNonEmbeddable = assets.some((asset) => asset.embeddable === false);
@@ -1348,15 +1362,23 @@ function renderVisualEvidencePreview(
     fallbackNote,
     "",
     locale === "ko"
-      ? `| 대상 | ${labels.baseline} | ${labels.actual} | Diff | 점수 |`
+      ? `| 화면 | ${labels.baseline} | ${labels.actual} | 일치율 |`
       : `| Target | ${labels.baseline} | ${labels.actual} | Diff | Score |`,
-    "| --- | --- | --- | --- | --- |",
+    locale === "ko" ? "| --- | --- | --- | ---: |" : "| --- | --- | --- | --- | --- |",
     ...rows.map((row) => `| ${row.join(" | ")} |`),
     VISUAL_PREVIEW_END,
   ].join("\n");
 }
 
-function visualPreviewLabels(report: VisualReport): { baseline: string; actual: string } {
+function visualPreviewLabels(
+  report: VisualReport,
+  locale: "ko" | "en" = "en",
+): { baseline: string; actual: string } {
+  if (locale === "ko") {
+    return report.visualBaseline === "legacy-screenshot"
+      ? { baseline: "레거시", actual: "이관 결과" }
+      : { baseline: "Figma", actual: "브라우저" };
+  }
   return report.visualBaseline === "legacy-screenshot"
     ? { baseline: "Legacy baseline", actual: "Target" }
     : { baseline: "Figma", actual: "Browser" };
@@ -1365,7 +1387,7 @@ function visualPreviewLabels(report: VisualReport): { baseline: string; actual: 
 function visualPreviewDescription(report: VisualReport, locale: "ko" | "en"): string {
   if (report.visualBaseline === "legacy-screenshot") {
     return locale === "ko"
-      ? "legacy screenshot baseline, target screenshot, visual diff 이미지를 리뷰용으로 업로드했습니다."
+      ? "레거시 화면과 이관 결과를 같은 조건으로 비교했습니다."
       : "Legacy screenshot baseline, target screenshot, and visual diff are uploaded for review.";
   }
 

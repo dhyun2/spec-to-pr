@@ -233,9 +233,15 @@ describe("workflow report renderer", () => {
     const markdown = renderPrReportV2Markdown(report);
     expect(() => assertCurrentPrReportV2(report)).not.toThrow();
     expect(report.api.inventoryDigest).toBe(inventoryDigest);
-    expect(markdown).toContain(`- Inventory digest: ${inventoryDigest}`);
+    expect(markdown).toContain("# 요약");
+    expect(markdown).toContain("검증이 차단되어 구현·리뷰가 완료되지 않았습니다.");
+    expect(markdown).toContain("## 검증 결과");
+    expect(markdown).toContain("| API | 완료 |");
+    expect(markdown).toContain("<summary>API 상세</summary>");
+    expect(markdown).toContain(`인벤토리 digest: ${inventoryDigest}`);
     expect(markdown).toContain("source-fetch-literal, source-request-config");
-    expect(markdown).toContain("No API operations detected");
+    expect(markdown).toContain("탐지된 API operation이 없습니다.");
+    expect(markdown).not.toContain("## 1. Decision and review packet");
 
     const historical = PrReportV2Schema.parse({
       ...report,
@@ -243,5 +249,129 @@ describe("workflow report renderer", () => {
     });
     expect(historical.api.inventoryDigest).toBeUndefined();
     expect(() => assertCurrentPrReportV2(historical)).toThrow(/inventory digest/i);
+
+    const ready = PrReportV2Schema.parse({
+      ...report,
+      decision: "ready",
+      binding: {
+        reviewPacketId: `packet_${"b".repeat(64)}`,
+        revision: 8,
+        baseSha: "a".repeat(40),
+        headSha: "b".repeat(40),
+        evidenceDigest: `sha256:${"c".repeat(64)}`,
+        diffDigest: `sha256:${"d".repeat(64)}`,
+      },
+      sectionStatuses: {
+        api: "complete",
+        legacy: "complete",
+        visual: "complete",
+        "functional-review": "complete",
+        "design-review": "complete",
+        performance: "complete",
+        "feature-evidence": "not-applicable",
+      },
+      summary: {
+        title: "SpecToPR legacy delivery",
+        bullets: ["Completed the legacy Shop migration."],
+        exclusions: [],
+      },
+      requirements: [
+        {
+          id: "REQ-SHOP-ROUTING",
+          title: "Shop MPA entry and route parity",
+          acceptanceCriteria: ["레거시 화면과 동일하게 동작합니다."],
+          implementationFiles: ["src/pages/shop/App.vue"],
+          reviewVerdicts: ["approved"],
+        },
+      ],
+      changedFiles: ["src/pages/shop/App.vue"],
+      implementationNotes: ["Vue 3 composition API를 사용했습니다."],
+      legacy: {
+        applicable: true,
+        coverage: [
+          {
+            featureKey: "legacy_shop_main",
+            requirementIds: ["REQ-SHOP-ROUTING"],
+            status: "migrated",
+            targetFiles: ["src/pages/shop/App.vue"],
+            executableEvidencePaths: ["evidence/shop.json"],
+            rationale: "Shop 메인 화면을 이관했습니다.",
+          },
+        ],
+      },
+      visual: {
+        applicable: true,
+        attempt: 1,
+        status: "passed",
+        results: [
+          {
+            targetId: "shop.main",
+            name: "Shop detail",
+            state: "initial detail viewport",
+            route: "/shop/#/main/1",
+            baselineKind: "legacy-screenshot",
+            viewport: { width: 390, height: 844 },
+            deviceScaleFactor: 1,
+            fixture: "QA Shop 1",
+            masks: [],
+            status: "passed",
+            metrics: {
+              exactMatchRatio: 0.94,
+              reviewMatchRatio: 0.9912,
+              threshold: 0.98,
+              maskedAreaRatio: 0,
+            },
+            baselineArtifactId: `art_${"1".repeat(32)}`,
+            actualArtifactId: `art_${"2".repeat(32)}`,
+            diffArtifactId: `art_${"3".repeat(32)}`,
+            overlayArtifactId: `art_${"4".repeat(32)}`,
+          },
+        ],
+      },
+      reviews: [
+        {
+          kind: "functional-review",
+          verdict: "approved",
+          summary: "기능 요구사항을 충족했습니다.",
+          gates: [{ id: "functional", status: "passed" }],
+          findings: [],
+        },
+        {
+          kind: "design-review",
+          verdict: "approved",
+          summary: "디자인과 접근성 요구사항을 충족했습니다.",
+          gates: [{ id: "visual", status: "passed" }],
+          findings: [],
+        },
+      ],
+      performance: {
+        applicable: true,
+        evidence: {
+          lab: { metrics: { lcpMs: 364, cls: 0, tbtMs: 0 } },
+          field: { status: "unavailable" },
+        },
+      },
+      blockers: [],
+      unrunValidations: [],
+      evidencePaths: ["evidence/shop.json"],
+    });
+    const readyMarkdown = renderPrReportV2Markdown(ready);
+
+    expect(readyMarkdown).toContain("**레거시 이관 결과**");
+    expect(readyMarkdown).not.toContain("SpecToPR legacy delivery");
+    expect(readyMarkdown).not.toContain("Completed the legacy Shop migration.");
+    expect(readyMarkdown).toContain("REQ-SHOP-ROUTING: 라우팅 및 진입점");
+    expect(readyMarkdown).toContain("| 화면 | 경로 · 상태 | 뷰포트 | 일치율 | 기준 | 결과 |");
+    expect(readyMarkdown).toContain(
+      "| 매장 메인 | /shop/&#35;/main/1 · 초기 화면 | 390×844 @1x | 99.12% | 98.00% | 통과 |",
+    );
+    expect(readyMarkdown).toContain("| 기능 리뷰 | 승인 | 1/1 통과 | 0건 |");
+    expect(readyMarkdown).toContain("| LCP | 364ms |");
+    expect(readyMarkdown).toContain("<summary>Run, 입력 출처, 변경 파일, 증거 보기</summary>");
+    expect(readyMarkdown).toContain("### 변경 파일 1개");
+    expect(readyMarkdown).toContain("## 실행 메타데이터");
+    expect(readyMarkdown).not.toContain("Unexpected migration behavior.");
+    expect(readyMarkdown).not.toContain("Gates: &#91;");
+    expect(readyMarkdown).not.toContain("Findings: &#91;");
   });
 });

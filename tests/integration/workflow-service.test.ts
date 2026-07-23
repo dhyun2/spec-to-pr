@@ -1908,8 +1908,11 @@ describe("WorkflowService", () => {
     expect(reportedRun.revision).toBe(blockedRun.revision + 1);
     expect(reportedRun.stages.find((item) => item.name === "report")).toEqual(reportStageBefore);
     const markdown = (await artifactStore.readContent(first.digest)).toString("utf8");
-    expect(markdown).toContain("- Decision: blocked");
-    expect(markdown).toContain("## 15. Rollback and exact unblock action");
+    expect(markdown).toContain("| 상태 | 차단 |");
+    expect(markdown).toContain("검증이 차단되어 구현·리뷰가 완료되지 않았습니다.");
+    expect(markdown).toContain("## 확인 필요");
+    expect(markdown).toContain("| 재개 | Provide the missing input and resume contracts. |");
+    expect(markdown).toContain("## 롤백");
     expect(markdown).not.toContain(directory);
     const jsonArtifact = reportedRun.artifacts.find(
       (artifact) => artifact.id === first.metadata["reportJsonArtifactId"],
@@ -2024,17 +2027,13 @@ describe("WorkflowService", () => {
     const diagnostic = await service.ensureBlockedDiagnosticReport({ runId: started.runId });
     const markdown = (await artifactStore.readContent(diagnostic.digest)).toString("utf8");
     const unrunSection = markdown.slice(
-      markdown.indexOf("## 13. Gaps, blockers, and unrun validations"),
-      markdown.indexOf("## 14. Risks and mitigations"),
+      markdown.indexOf("## 확인 필요"),
+      markdown.indexOf("## 롤백"),
     );
-    expect(unrunSection).toContain("- Not run: draft-publication-preflight");
-    expect(unrunSection).not.toContain("- Not run: functional");
-    expect(unrunSection).not.toContain("- Not run: accessibility");
-    const functionalSection = markdown.slice(
-      markdown.indexOf("## 9. Functional checks and independent review"),
-      markdown.indexOf("## 10. Design and accessibility review"),
-    );
-    expect(functionalSection).toContain("Functional validation passed.");
+    expect(unrunSection).toContain("| 미실행 | draft-publication-preflight |");
+    expect(unrunSection).not.toContain("| 미실행 | functional |");
+    expect(unrunSection).not.toContain("| 미실행 | accessibility |");
+    expect(markdown).toContain("| 기능 리뷰 | 승인 | 1/1 통과 | 0건 |");
   });
 
   it("omits stale packet, review, visual, and changed-file claims from blocked reports", async () => {
@@ -4311,18 +4310,15 @@ describe("WorkflowService", () => {
     });
     await service.advance({ runId: started.runId, until: "report" });
     const report = await reportMarkdown(store, artifactStore, started.runId);
-    expect(report).toContain("## 3. Input sources and pinned provenance");
+    expect(report).toContain("## 실행 메타데이터");
+    expect(report).toContain("<summary>Run, 입력 출처, 변경 파일, 증거 보기</summary>");
     expect(report).toContain("docs/architecture/ARCHITECTURE.md");
     expect(report).toContain("docs/rules&#92;n&#35;&#35; Injected heading");
     expect(report).not.toContain("\n## Injected heading");
     expect(report).not.toContain("<!-- injected-comment -->");
     expect(report).toContain("AGENTS.md");
-    expect(report).toContain("### Applied skills");
-    expect(report).toContain("react-best-practices");
-    expect(report).toContain("api-generator");
     expect(report).not.toContain("not-installed");
-    expect(report).toContain("## 4. Requirement traceability");
-    expect(report).toContain("## 12. Feature-targeted E2E and video");
+    expect(report).toContain("## 요구사항");
     expect(report).toContain("test-results/checkout.mp4");
     const readyRun = await store.get(started.runId);
     const jsonReportArtifact = readyRun.artifacts.find(
@@ -4923,16 +4919,17 @@ describe("WorkflowService", () => {
     expect(ready.currentStage).toBe("publish");
     expect(ready.resumeContext.evidencePaths.length).toBeGreaterThanOrEqual(4);
     const report = await reportMarkdown(store, artifactStore, started.runId);
-    expect(report).toContain("checkout-states");
-    expect(report).toContain("Checkout \\| states");
-    expect(report).toContain("Empty \\| loading&#92;nSuccess states render.");
-    expect(report).toContain("checkout-submit");
+    expect(report).toContain("checkout-states: 요구사항");
+    expect(report).toContain("checkout-submit: 요구사항");
     expect(report).toContain("src/checkout.tsx");
-    expect(report).toMatch(/Diff digest: sha256:[a-f0-9]{64}/);
-    expect(report).toContain("## 9. Functional checks and independent review");
-    expect(report).toContain("- Verdict: approved");
-    expect(report).toContain("## 14. Risks and mitigations");
-    expect(report).toContain("## 12. Feature-targeted E2E and video");
+    expect(report).toMatch(/Diff digest \| sha256:[a-f0-9]{64} \|/);
+    expect(report).toContain("| 기능 리뷰 | 승인 | 1/1 통과 | 0건 |");
+    expect(report).toContain("| 디자인·접근성 리뷰 | 승인 | 1/1 통과 | 0건 |");
+    expect(report).not.toContain("## API");
+    expect(report).not.toContain("## 레거시 이관");
+    expect(report).not.toContain("## 화면 일치율");
+    expect(report).not.toContain("Gates: &#91;");
+    expect(report).not.toContain("Findings: &#91;");
   });
 
   it("skips design review for non-UI scope", async () => {

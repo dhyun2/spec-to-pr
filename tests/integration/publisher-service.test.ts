@@ -282,7 +282,7 @@ describe("PublisherService", () => {
     expect(githubPublisher.createdPayloads[0]?.body).toContain(
       "https://github.example/assets/browser.png",
     );
-    expect(githubPublisher.createdPayloads[0]?.body).toContain(
+    expect(githubPublisher.createdPayloads[0]?.body).not.toContain(
       "https://github.example/assets/diff.png",
     );
     expect(githubPublisher.createdPayloads[0]?.body).not.toContain(
@@ -1148,9 +1148,12 @@ describe("PublisherService", () => {
       confirm: true,
     });
 
-    expect(githubPublisher.createdPayloads[0]?.body).toContain("Legacy baseline");
-    expect(githubPublisher.createdPayloads[0]?.body).toContain("Target");
-    expect(githubPublisher.createdPayloads[0]?.body).toContain("legacy screenshot baseline");
+    expect(githubPublisher.createdPayloads[0]?.body).toContain(
+      "| 화면 | 레거시 | 이관 결과 | 일치율 |",
+    );
+    expect(githubPublisher.createdPayloads[0]?.body).toContain(
+      "레거시 화면과 이관 결과를 같은 조건으로 비교했습니다.",
+    );
     expect(githubPublisher.createdPayloads[0]?.body).not.toContain(
       "| 대상 | Figma | Browser | Diff",
     );
