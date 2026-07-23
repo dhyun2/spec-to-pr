@@ -110,6 +110,7 @@ import {
 import {
   WorkspaceStartInputSchema,
   assertChangedFilesWithinWorkspace,
+  assertWorkspaceFresh,
   resolveWorkspaceBinding,
 } from "../workspace/workspace-binding.js";
 import { createVisualLineage } from "../workflow/visual-repair-lineage.js";
@@ -1430,6 +1431,17 @@ export class WorkflowService {
     const run = await this.dependencies.runStore.get(input.runId);
     if (deliveryProfileFromRun(run).publication !== "draft") {
       throw new Error("Draft publication was not requested for this workflow");
+    }
+    if (run.workspaceBinding !== undefined) {
+      const packet = reviewPacketFromRun(run);
+      await assertWorkspaceFresh(run.workspaceBinding, {
+        sourceBranch: input.sourceBranch,
+        targetBranch: input.targetBranch,
+        remoteName: input.remoteName,
+        ...(input.intent !== "ready" || packet?.headSha === null || packet?.headSha === undefined
+          ? {}
+          : { reviewedHeadSha: packet.headSha }),
+      });
     }
     if (input.intent === "blocked-diagnostic") {
       return this.publishBlockedDiagnostic(input, run, publisher);

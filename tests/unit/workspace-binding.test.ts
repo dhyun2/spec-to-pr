@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import {
   WorkspaceBindingSchema,
   assertChangedFilesWithinWorkspace,
+  assertWorkspaceFresh,
   resolveWorkspaceBinding,
 } from "../../src/workspace/workspace-binding.js";
 
@@ -83,6 +84,12 @@ describe("workspace binding", () => {
       remoteUrl: "git@gitlab.com:example/mobydick.git",
       remoteProvider: "gitlab",
       remoteHost: "gitlab.com",
+      publicationTarget: {
+        host: "gitlab",
+        webBaseUrl: "https://gitlab.com",
+        apiBaseUrl: "https://gitlab.com/api/v4",
+        projectPath: "example/mobydick",
+      },
     });
 
     expect(() =>
@@ -94,6 +101,101 @@ describe("workspace binding", () => {
     expect(() => assertChangedFilesWithinWorkspace(["src/pages/other/App.ts"], binding)).toThrow(
       /WORKSPACE_TARGET_PATH_INVALID.*src\/pages\/other\/App.ts/,
     );
+  });
+
+  it("pins publication to the bound branch, reviewed head, target ref, and remote", async () => {
+    const repository = await createRepository();
+    const binding = await resolveWorkspaceBinding({
+      requestedPath: path.join(repository.root, "src/pages/shop"),
+      sourceBranch: "codex/shop",
+      targetBranch: "release-qa",
+      remoteName: "origin",
+    });
+    await writeFile(path.join(repository.root, "src/pages/shop/App.ts"), "export const app = 2;\n");
+    await git(repository.root, "add", ".");
+    await git(repository.root, "commit", "-m", "implementation");
+    const reviewedHeadSha = await git(repository.root, "rev-parse", "HEAD");
+
+    await expect(
+      assertWorkspaceFresh(binding, {
+        sourceBranch: "codex/shop",
+        targetBranch: "release-qa",
+        remoteName: "origin",
+        reviewedHeadSha,
+      }),
+    ).resolves.toBeUndefined();
+
+    await expect(
+      assertWorkspaceFresh(binding, {
+        sourceBranch: "codex/other",
+        targetBranch: "release-qa",
+        remoteName: "origin",
+        reviewedHeadSha,
+      }),
+    ).rejects.toThrow(/WORKSPACE_BRANCH_MISMATCH/);
+    await expect(
+      assertWorkspaceFresh(binding, {
+        sourceBranch: "codex/shop",
+        targetBranch: "main",
+        remoteName: "origin",
+        reviewedHeadSha,
+      }),
+    ).rejects.toThrow(/WORKSPACE_TARGET_REF_MISMATCH/);
+    await expect(
+      assertWorkspaceFresh(binding, {
+        sourceBranch: "codex/shop",
+        targetBranch: "release-qa",
+        remoteName: "upstream",
+        reviewedHeadSha,
+      }),
+    ).rejects.toThrow(/WORKSPACE_REMOTE_MISMATCH/);
+  });
+
+  it("rejects target-ref and remote drift after workflow start", async () => {
+    const targetDrift = await createRepository();
+    const targetBinding = await resolveWorkspaceBinding({
+      requestedPath: path.join(targetDrift.root, "src/pages/shop"),
+      sourceBranch: "codex/shop",
+      targetBranch: "release-qa",
+      remoteName: "origin",
+    });
+    await writeFile(path.join(targetDrift.root, "src/pages/shop/App.ts"), "export const app = 2;\n");
+    await git(targetDrift.root, "add", ".");
+    await git(targetDrift.root, "commit", "-m", "implementation");
+    const targetHead = await git(targetDrift.root, "rev-parse", "HEAD");
+    await git(targetDrift.root, "branch", "-f", "release-qa", targetHead);
+
+    await expect(
+      assertWorkspaceFresh(targetBinding, {
+        sourceBranch: "codex/shop",
+        targetBranch: "release-qa",
+        remoteName: "origin",
+        reviewedHeadSha: targetHead,
+      }),
+    ).rejects.toThrow(/WORKSPACE_TARGET_REF_MISMATCH/);
+
+    const remoteDrift = await createRepository();
+    const remoteBinding = await resolveWorkspaceBinding({
+      requestedPath: path.join(remoteDrift.root, "src/pages/shop"),
+      sourceBranch: "codex/shop",
+      targetBranch: "release-qa",
+      remoteName: "origin",
+    });
+    await git(
+      remoteDrift.root,
+      "remote",
+      "set-url",
+      "origin",
+      "git@gitlab.com:attacker/mobydick.git",
+    );
+
+    await expect(
+      assertWorkspaceFresh(remoteBinding, {
+        sourceBranch: "codex/shop",
+        targetBranch: "release-qa",
+        remoteName: "origin",
+      }),
+    ).rejects.toThrow(/WORKSPACE_REMOTE_MISMATCH/);
   });
 });
 

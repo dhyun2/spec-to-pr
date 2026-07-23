@@ -5,7 +5,13 @@ import { promisify } from "node:util";
 
 import { z } from "zod";
 
-import { detectPublishTargetFromRemote, normalizeGitRemoteUrl } from "../publisher/index.js";
+import {
+  PublishTargetSchema,
+  normalizeGitRemoteUrl,
+  preflightPublishTarget,
+  type PublishAuthProbe,
+  type PublishPreflightEnvironment,
+} from "../publisher/index.js";
 import { GitObjectIdSchema } from "../runtime/scalars.js";
 
 const execFileAsync = promisify(execFile);
@@ -43,11 +49,30 @@ export const WorkspaceBindingSchema = z
     remoteUrl: z.string().trim().min(1).max(4_000),
     remoteProvider: z.enum(["github", "gitlab"]),
     remoteHost: z.string().trim().min(1).max(500),
+    publicationTarget: PublishTargetSchema,
   })
   .strict();
 
 export type WorkspaceStartInput = z.input<typeof WorkspaceStartInputSchema>;
 export type WorkspaceBinding = z.infer<typeof WorkspaceBindingSchema>;
+export type WorkspaceGitRunner = (
+  cwd: string,
+  args: string[],
+) => Promise<{ stdout: string; stderr: string }>;
+
+export type WorkspaceFreshnessInput = {
+  sourceBranch: string;
+  targetBranch: string;
+  remoteName: string;
+  remoteUrl?: string;
+  reviewedHeadSha?: string;
+};
+
+export type WorkspaceFreshnessOptions = {
+  git?: WorkspaceGitRunner;
+  environment?: PublishPreflightEnvironment;
+  authProbe?: PublishAuthProbe;
+};
 
 export async function resolveWorkspaceBinding(
   rawInput: WorkspaceStartInput & { requestedPath: string },
@@ -105,7 +130,11 @@ export async function resolveWorkspaceBinding(
   );
   const supportingPaths = normalizeWorkspacePaths(input.supportingPaths);
   const remoteUrl = await git(repositoryRoot, ["remote", "get-url", input.remoteName]);
-  const target = detectPublishTargetFromRemote({ name: input.remoteName, url: remoteUrl });
+  const preflight = await preflightPublishTarget({
+    name: input.remoteName,
+    url: remoteUrl,
+  });
+  const target = preflight.public;
   const remote = normalizeGitRemoteUrl(remoteUrl);
 
   return WorkspaceBindingSchema.parse({
@@ -120,6 +149,7 @@ export async function resolveWorkspaceBinding(
     remoteUrl,
     remoteProvider: target.host,
     remoteHost: remote.host,
+    publicationTarget: target,
   });
 }
 
@@ -136,6 +166,139 @@ export function assertChangedFilesWithinWorkspace(
     throw workspaceError(
       "WORKSPACE_TARGET_PATH_INVALID",
       `changed files are outside the declared target paths: ${outside.join(", ")}`,
+    );
+  }
+}
+
+export async function assertWorkspaceFresh(
+  rawBinding: WorkspaceBinding,
+  input: WorkspaceFreshnessInput,
+  options: WorkspaceFreshnessOptions = {},
+): Promise<void> {
+  const binding = WorkspaceBindingSchema.parse(rawBinding);
+  if (input.sourceBranch !== binding.sourceBranch) {
+    throw workspaceError(
+      "WORKSPACE_BRANCH_MISMATCH",
+      `publication source branch must remain ${binding.sourceBranch}`,
+    );
+  }
+  if (input.targetBranch !== binding.targetBranch) {
+    throw workspaceError(
+      "WORKSPACE_TARGET_REF_MISMATCH",
+      `publication target branch must remain ${binding.targetBranch}`,
+    );
+  }
+  if (input.remoteName !== binding.remoteName) {
+    throw workspaceError(
+      "WORKSPACE_REMOTE_MISMATCH",
+      `publication remote must remain ${binding.remoteName}`,
+    );
+  }
+  if (input.remoteUrl !== undefined && input.remoteUrl.trim() !== binding.remoteUrl) {
+    throw workspaceError(
+      "WORKSPACE_REMOTE_MISMATCH",
+      "publication remote URL must match the workflow-start binding",
+    );
+  }
+
+  const runGit = options.git ?? defaultWorkspaceGitRunner;
+  let canonicalRoot: string;
+  let reportedRoot: string;
+  try {
+    canonicalRoot = await realpath(binding.repositoryRoot);
+    reportedRoot = await realpath(
+      await workspaceGit(runGit, binding.repositoryRoot, ["rev-parse", "--show-toplevel"]),
+    );
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw workspaceError("WORKSPACE_ROOT_MISMATCH", message);
+  }
+  if (canonicalRoot !== binding.repositoryRoot || reportedRoot !== binding.repositoryRoot) {
+    throw workspaceError(
+      "WORKSPACE_ROOT_MISMATCH",
+      "publication must use the canonical repository root captured at workflow_start",
+    );
+  }
+
+  const status = await workspaceGit(runGit, binding.repositoryRoot, [
+    "status",
+    "--porcelain=v1",
+    "--untracked-files=all",
+  ]);
+  if (status !== "") {
+    throw workspaceError(
+      "WORKSPACE_ROOT_MISMATCH",
+      "publication requires a clean bound worktree",
+    );
+  }
+
+  const [currentBranch, headSha, sourceSha, targetSha, remoteUrl] = await Promise.all([
+    workspaceGit(runGit, binding.repositoryRoot, [
+      "symbolic-ref",
+      "--quiet",
+      "--short",
+      "HEAD",
+    ]),
+    workspaceGit(runGit, binding.repositoryRoot, ["rev-parse", "--verify", "HEAD"]),
+    workspaceGit(runGit, binding.repositoryRoot, [
+      "rev-parse",
+      "--verify",
+      binding.sourceBranch,
+    ]),
+    workspaceGit(runGit, binding.repositoryRoot, [
+      "rev-parse",
+      "--verify",
+      `${binding.targetBranch}^{commit}`,
+    ]),
+    workspaceGit(runGit, binding.repositoryRoot, [
+      "remote",
+      "get-url",
+      binding.remoteName,
+    ]),
+  ]);
+  if (currentBranch !== binding.sourceBranch) {
+    throw workspaceError(
+      "WORKSPACE_BRANCH_MISMATCH",
+      `expected checked-out source branch ${binding.sourceBranch}, found ${currentBranch || "detached HEAD"}`,
+    );
+  }
+  if (headSha !== sourceSha) {
+    throw workspaceError(
+      "WORKSPACE_BRANCH_MISMATCH",
+      `checked-out HEAD does not match ${binding.sourceBranch}`,
+    );
+  }
+  if (input.reviewedHeadSha !== undefined && headSha !== input.reviewedHeadSha) {
+    throw workspaceError(
+      "WORKSPACE_BRANCH_MISMATCH",
+      `source HEAD ${headSha} does not match reviewed HEAD ${input.reviewedHeadSha}`,
+    );
+  }
+  if (targetSha !== binding.baseSha) {
+    throw workspaceError(
+      "WORKSPACE_TARGET_REF_MISMATCH",
+      `${binding.targetBranch} moved from ${binding.baseSha} to ${targetSha}`,
+    );
+  }
+  if (remoteUrl !== binding.remoteUrl) {
+    throw workspaceError(
+      "WORKSPACE_REMOTE_MISMATCH",
+      "the bound Git remote URL changed after workflow_start",
+    );
+  }
+
+  const preflight = await preflightPublishTarget(
+    { name: binding.remoteName, url: remoteUrl },
+    options.environment,
+    options.authProbe,
+  );
+  if (
+    preflight.remoteHost !== binding.remoteHost ||
+    JSON.stringify(preflight.public) !== JSON.stringify(binding.publicationTarget)
+  ) {
+    throw workspaceError(
+      "WORKSPACE_REMOTE_MISMATCH",
+      "the resolved publication target changed after workflow_start",
     );
   }
 }
@@ -185,14 +348,28 @@ function workspaceError(code: string, message: string): Error {
 
 async function git(cwd: string, args: string[]): Promise<string> {
   try {
-    const result = await execFileAsync("git", args, {
-      cwd,
-      encoding: "utf8",
-      maxBuffer: 5 * 1024 * 1024,
-    });
-    return result.stdout.trim();
+    return await workspaceGit(defaultWorkspaceGitRunner, cwd, args);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`git ${args.join(" ")} failed: ${message}`);
   }
+}
+
+async function defaultWorkspaceGitRunner(
+  cwd: string,
+  args: string[],
+): Promise<{ stdout: string; stderr: string }> {
+  return execFileAsync("git", args, {
+    cwd,
+    encoding: "utf8",
+    maxBuffer: 5 * 1024 * 1024,
+  });
+}
+
+async function workspaceGit(
+  runner: WorkspaceGitRunner,
+  cwd: string,
+  args: string[],
+): Promise<string> {
+  return (await runner(cwd, args)).stdout.trim();
 }

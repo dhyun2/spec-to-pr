@@ -53,6 +53,7 @@ import type { RunStore } from "../store/run-store.js";
 import { RevisionConflictError } from "../store/errors.js";
 import { VisualReportSchema, type VisualReport } from "../visual/visual-model.js";
 import { isSafeDurableEvidencePath } from "../workflow/workflow-contracts.js";
+import { assertWorkspaceFresh } from "../workspace/workspace-binding.js";
 
 const execFileAsync = promisify(execFile);
 const PUBLISHER_ADAPTER = "publisher-v1" as const;
@@ -262,6 +263,30 @@ export class PublisherService {
   public async detectTarget(rawInput: unknown) {
     const input = DetectPublishTargetInputSchema.parse(rawInput);
     const run = await this.runStore.get(input.runId);
+    if (run.workspaceBinding !== undefined) {
+      await assertWorkspaceFresh(
+        run.workspaceBinding,
+        {
+          sourceBranch: run.workspaceBinding.sourceBranch,
+          targetBranch: run.workspaceBinding.targetBranch,
+          remoteName: input.remoteName,
+          ...(input.remoteUrl === undefined ? {} : { remoteUrl: input.remoteUrl }),
+        },
+        { git: (cwd, args) => this.git(cwd, args) },
+      );
+      const target = run.workspaceBinding.publicationTarget;
+      if (input.host !== undefined && target.host !== input.host) {
+        throw new Error(
+          `Requested host ${input.host} but ${input.remoteName} remote is ${target.host}`,
+        );
+      }
+      return DetectPublishTargetResultSchema.parse({
+        run: summarizeRun(run),
+        remoteName: run.workspaceBinding.remoteName,
+        remoteUrl: run.workspaceBinding.remoteUrl,
+        target,
+      });
+    }
     const remoteUrl =
       input.remoteUrl ??
       (await this.git(run.projectRoot, ["remote", "get-url", input.remoteName])).stdout.trim();
@@ -287,19 +312,40 @@ export class PublisherService {
   public async plan(rawInput: unknown) {
     const input = PlanReviewRequestPublishInputSchema.parse(rawInput);
     const run = await this.runStore.get(input.runId);
+    if (run.workspaceBinding !== undefined) {
+      await assertWorkspaceFresh(
+        run.workspaceBinding,
+        {
+          sourceBranch: input.sourceBranch,
+          targetBranch: input.targetBranch,
+          remoteName: input.remoteName,
+          ...(input.remoteUrl === undefined ? {} : { remoteUrl: input.remoteUrl }),
+          ...(input.headSha === undefined || input.intent === "blocked-diagnostic"
+            ? {}
+            : { reviewedHeadSha: input.headSha }),
+        },
+        { git: (cwd, args) => this.git(cwd, args) },
+      );
+    }
     const timestamp = IsoDateTimeSchema.parse(this.now());
     const reportArtifact = resolvePrReportArtifact(run.artifacts, input.reportArtifactId);
     const reportBody = (await this.artifactStore.readContent(reportArtifact.digest)).toString(
       "utf8",
     );
     const reportMetadata = reportMetadataFromArtifact(reportArtifact);
-    const detected = await this.detectTarget({
-      runId: input.runId,
-      remoteName: input.remoteName,
-      ...(input.remoteUrl === undefined ? {} : { remoteUrl: input.remoteUrl }),
-      ...(input.host === undefined ? {} : { host: input.host }),
-    });
-    const target = detected.target as PublishTarget;
+    const target =
+      run.workspaceBinding?.publicationTarget ??
+      ((
+        await this.detectTarget({
+          runId: input.runId,
+          remoteName: input.remoteName,
+          ...(input.remoteUrl === undefined ? {} : { remoteUrl: input.remoteUrl }),
+          ...(input.host === undefined ? {} : { host: input.host }),
+        })
+      ).target as PublishTarget);
+    if (input.host !== undefined && target.host !== input.host) {
+      throw new Error(`Requested host ${input.host} but ${input.remoteName} remote is ${target.host}`);
+    }
     const reviewPacketId = reportArtifact.metadata["reviewPacketId"];
     const payload = ReviewRequestPayloadSchema.parse({
       runId: run.id,
@@ -390,7 +436,7 @@ export class PublisherService {
 
     try {
       await this.assertPublishBranchReady({
-        projectRoot: run.projectRoot,
+        projectRoot: publicationProjectRoot(run),
         sourceBranch: input.sourceBranch,
         targetBranch: input.targetBranch,
         ...(input.headSha === undefined || plan.intent === "blocked-diagnostic"
@@ -618,7 +664,7 @@ export class PublisherService {
       );
 
       if (input.pushBranch) {
-        await this.git(input.run.projectRoot, [
+        await this.git(publicationProjectRoot(input.run), [
           "push",
           "--set-upstream",
           input.remoteName,
@@ -925,10 +971,11 @@ export class PublisherService {
       return undefined;
     }
 
+    const projectRoot = publicationProjectRoot(input.run);
     const checkedOutHead = (
-      await this.git(input.run.projectRoot, ["rev-parse", "--verify", "HEAD"])
+      await this.git(projectRoot, ["rev-parse", "--verify", "HEAD"])
     ).stdout.trim();
-    const status = (await this.git(input.run.projectRoot, ["status", "--porcelain"])).stdout.trim();
+    const status = (await this.git(projectRoot, ["status", "--porcelain"])).stdout.trim();
     if (checkedOutHead !== input.payload.headSha || status.length > 0) return undefined;
 
     const rawAssets: PublishedReviewAsset[] = [];
@@ -942,10 +989,10 @@ export class PublisherService {
       ) {
         return undefined;
       }
-      const evidencePath = path.resolve(input.run.projectRoot, evidence.projectRelativePath);
-      if (!isPathWithinRoot(input.run.projectRoot, evidencePath)) return undefined;
+      const evidencePath = path.resolve(projectRoot, evidence.projectRelativePath);
+      if (!isPathWithinRoot(projectRoot, evidencePath)) return undefined;
 
-      const tracked = await this.git(input.run.projectRoot, [
+      const tracked = await this.git(projectRoot, [
         "ls-tree",
         "-r",
         input.payload.headSha,
@@ -959,7 +1006,7 @@ export class PublisherService {
       let committedContent: Buffer;
       try {
         const objectName = `${input.payload.headSha}:${evidence.projectRelativePath}`;
-        const result = await this.git(input.run.projectRoot, ["cat-file", "blob", objectName], {
+        const result = await this.git(projectRoot, ["cat-file", "blob", objectName], {
           encoding: "latin1",
           maxBuffer: 50 * 1024 * 1024,
         });
@@ -1428,6 +1475,10 @@ function isPathWithinRoot(projectRoot: string, candidatePath: string): boolean {
   const candidate = path.resolve(candidatePath);
 
   return candidate.startsWith(`${root}${path.sep}`);
+}
+
+function publicationProjectRoot(run: Awaited<ReturnType<RunStore["get"]>>): string {
+  return run.workspaceBinding?.repositoryRoot ?? run.projectRoot;
 }
 
 function gitTreeContainsRegularFile(output: string, projectRelativePath: string): boolean {

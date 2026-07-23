@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -45,6 +45,7 @@ beforeEach(async () => {
   await mkdir(projectRoot, {
     recursive: true,
   });
+  projectRoot = await realpath(projectRoot);
 
   originalGithubToken = process.env["GITHUB_TOKEN"];
   process.env["GITHUB_TOKEN"] = "ghp_test_token";
@@ -81,6 +82,9 @@ beforeEach(async () => {
         return { stdout: `${gitCurrentBranch}\n`, stderr: "" };
       }
       if (args[0] === "rev-parse") {
+        if (args.at(-1) === "--show-toplevel") {
+          return { stdout: `${projectRoot}\n`, stderr: "" };
+        }
         return { stdout: `${gitHead}\n`, stderr: "" };
       }
       return {
@@ -106,6 +110,57 @@ afterEach(async () => {
 });
 
 describe("PublisherService", () => {
+  it("rejects caller overrides and workspace drift for a pinned publication", async () => {
+    gitCurrentBranch = "codex/pinned";
+    const run = await runService.createRun({
+      projectRoot,
+      workspaceBinding: {
+        repositoryRoot: projectRoot,
+        targetPaths: ["src/page/shop"],
+        supportingPaths: [],
+        sourceBranch: "codex/pinned",
+        targetBranch: "release-qa",
+        baseSha: gitHead,
+        initialHeadSha: gitHead,
+        remoteName: "origin",
+        remoteUrl: "https://github.com/acme/spec-to-pr.git",
+        remoteProvider: "github",
+        remoteHost: "github.com",
+        publicationTarget: {
+          host: "github",
+          webBaseUrl: "https://github.com",
+          apiBaseUrl: "https://api.github.com",
+          owner: "acme",
+          repo: "spec-to-pr",
+        },
+      },
+    });
+    await markRunReadyForPublish(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    const baseInput = {
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "codex/pinned",
+      targetBranch: "release-qa",
+      remoteName: "origin",
+      pushBranch: false,
+    } as const;
+
+    await expect(
+      publisherService.plan({ ...baseInput, sourceBranch: "codex/other" }),
+    ).rejects.toThrow(/WORKSPACE_BRANCH_MISMATCH/);
+    await expect(
+      publisherService.plan({
+        ...baseInput,
+        remoteUrl: "https://github.com/attacker/spec-to-pr.git",
+      }),
+    ).rejects.toThrow(/WORKSPACE_REMOTE_MISMATCH/);
+
+    gitCurrentBranch = "codex/other";
+    await expect(publisherService.plan(baseInput)).rejects.toThrow(/WORKSPACE_BRANCH_MISMATCH/);
+    expect(githubPublisher.createdPayloads).toHaveLength(0);
+  });
+
   it("rejects a lookalike remote before any provider request", async () => {
     const previousHostOverride = process.env["SPEC_TO_PR_GIT_HOST"];
     delete process.env["SPEC_TO_PR_GIT_HOST"];
