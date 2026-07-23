@@ -16,6 +16,35 @@ type AbortableRequestInit = Omit<RequestInit, "signal"> & {
   signal?: AbortSignal | undefined;
 };
 
+/**
+ * An upload-only failure. The application layer uses this type to distinguish
+ * a project-upload outage from a create/update MR failure; only the former can
+ * fall back to already-committed, digest-verified evidence files.
+ */
+export class GitLabAssetUploadError extends Error {
+  public override readonly name = "GitLabAssetUploadError";
+
+  public constructor(
+    message: string,
+    public readonly status?: number,
+  ) {
+    super(message);
+  }
+}
+
+export function canUseGitLabRawEvidenceFallback(error: unknown): boolean {
+  if (!(error instanceof GitLabAssetUploadError)) return false;
+  if (error.status === undefined) return true;
+
+  return (
+    error.status === 401 ||
+    error.status === 403 ||
+    error.status === 408 ||
+    error.status === 429 ||
+    error.status >= 500
+  );
+}
+
 export class GitLabPublisherAdapter implements ReviewRequestPublisher {
   public constructor(private readonly fetchImpl: FetchLike = fetch) {}
 
@@ -143,19 +172,26 @@ export class GitLabPublisherAdapter implements ReviewRequestPublisher {
 
       form.append("file", new Blob([asset.content], { type: asset.mediaType }), asset.filename);
 
-      const response = await this.gitlabFetch(
-        `${input.target.apiBaseUrl}/projects/${project}/uploads`,
-        input.token,
-        {
-          method: "POST",
-          signal: input.signal,
-          body: form,
-        },
-      );
+      let response: Response;
+      try {
+        response = await this.gitlabFetch(
+          `${input.target.apiBaseUrl}/projects/${project}/uploads`,
+          input.token,
+          {
+            method: "POST",
+            signal: input.signal,
+            body: form,
+          },
+        );
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new GitLabAssetUploadError(`GitLab upload review asset network failure: ${message}`);
+      }
 
       if (!response.ok) {
-        throw new Error(
+        throw new GitLabAssetUploadError(
           `GitLab upload review asset failed: ${response.status} ${await response.text()}`,
+          response.status,
         );
       }
 

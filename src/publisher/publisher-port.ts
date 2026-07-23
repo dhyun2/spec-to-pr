@@ -15,6 +15,16 @@ export type ReviewRequestAsset = {
   filename: string;
   mediaType: string;
   content: Buffer;
+  /**
+   * Immutable on-branch source evidence used only when a GitLab project-upload
+   * failure is eligible for the safe raw-file fallback. It is deliberately
+   * absent for generated diffs and overlays.
+   */
+  evidence?: {
+    projectRelativePath: string;
+    digest: string;
+    headSha?: string;
+  };
 };
 
 export type ReviewRequestSynchronizationPhase = "labels" | "reviewers";

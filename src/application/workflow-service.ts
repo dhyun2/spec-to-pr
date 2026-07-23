@@ -2133,10 +2133,7 @@ export class WorkflowService {
       }
 
       const mediaType = mediaTypeForPath(resolvedPath);
-      const openSpecChangeName = openSpecChangeForContractArtifact(
-        submission,
-        projectRelativePath,
-      );
+      const openSpecChangeName = openSpecChangeForContractArtifact(submission, projectRelativePath);
       const blob = await this.dependencies.artifactStore.writeBlob({
         content,
         mediaType,
@@ -2150,9 +2147,9 @@ export class WorkflowService {
             openSpecChangeName !== undefined
               ? "openspec"
               : (submission.kind === "figma-bundle" && /\.png$/i.test(evidencePath)) ||
-            submission.kind === "visual-comparison"
-              ? "screenshot"
-              : "other",
+                  submission.kind === "visual-comparison"
+                ? "screenshot"
+                : "other",
           uri: blob.uri,
           mediaType,
           digest: blob.digest,

@@ -10,7 +10,6 @@ import {
   WorkflowStatusInputSchema,
   WorkflowSubmitInputSchema,
 } from "../application/workflow-service.js";
-import { WorkflowStatusSchema } from "../workflow/workflow-contracts.js";
 import type { ServicesProvider } from "./run-service-provider.js";
 
 const CONTRACT_VERSION = "2.0.0" as const;
@@ -123,7 +122,6 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
       description:
         "Return compact stage, workload, scope, blocker, action, and submission-evidence status.",
       inputSchema: WorkflowStatusInputSchema.shape,
-      outputSchema: WorkflowStatusSchema.shape,
       annotations: { readOnlyHint: true },
     },
     async (input) => toolResult(await (await servicesProvider()).workflowService.status(input)),

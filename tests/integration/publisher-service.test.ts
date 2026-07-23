@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -17,6 +17,7 @@ import type {
   ReviewRequestUpdate,
 } from "../../src/publisher/index.js";
 import { GitHubPublisherAdapter } from "../../src/publisher/index.js";
+import { GitLabAssetUploadError } from "../../src/publisher/gitlab-publisher.js";
 import { SqliteRunStore } from "../../src/store/sqlite-run-store.js";
 import type { RunStore } from "../../src/store/run-store.js";
 
@@ -1259,6 +1260,139 @@ describe("PublisherService", () => {
     expect(loadedRun.agentResults.some((result) => result.kind === "publishing")).toBe(false);
   });
 
+  it("publishes a Korean legacy side-by-side preview from immutable GitLab raw evidence when uploads fail", async () => {
+    const originalGitLabToken = process.env["GITLAB_TOKEN"];
+    process.env["GITLAB_TOKEN"] = "glpat_test_token";
+
+    try {
+      const run = await runService.createRun({ projectRoot });
+      await markRunReadyForPublish(run.id);
+      await addVisualEvidence(run.id, { visualBaseline: "legacy-screenshot" });
+      await bindVisualEvidenceToCommittedFiles(run.id);
+      const report = await prReportService.generatePrReport({ runId: run.id });
+      const rawFallbackService = createGitLabRawFallbackService();
+      gitlabPublisher.assetUploadError = new GitLabAssetUploadError(
+        "GitLab upload review asset failed: 503 uploads unavailable",
+        503,
+      );
+
+      const published = await rawFallbackService.publish({
+        runId: run.id,
+        reportArtifactId: report.markdownArtifactId,
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        remoteUrl: "https://gitlab.com/acme/spec-to-pr.git",
+        headSha: gitHead,
+        pushBranch: false,
+        confirm: true,
+      });
+
+      expect(published.result).toMatchObject({
+        status: "passed",
+        requestSynced: true,
+        visualPreviewExpected: true,
+        visualPreviewSynced: true,
+        fallbackMode: "gitlab-raw-evidence",
+        partialReasons: [],
+      });
+      expect(published.result.fallbackReason).toContain("GitLab review-asset upload failed");
+      expect(published.agentResultId).toMatch(/^ar_/);
+      expect(gitlabPublisher.createdPayloads[0]?.body).toContain("## 시각 증거 미리보기");
+      expect(gitlabPublisher.createdPayloads[0]?.body).toContain(
+        `https://gitlab.com/acme/spec-to-pr/-/raw/${gitHead}/.spec-to-pr/shop/visual/legacy.png`,
+      );
+      expect(gitlabPublisher.createdPayloads[0]?.body).toContain(
+        `https://gitlab.com/acme/spec-to-pr/-/raw/${gitHead}/.spec-to-pr/shop/visual/current.png`,
+      );
+      expect(gitlabPublisher.createdPayloads[0]?.body).not.toContain("diff.png");
+    } finally {
+      if (originalGitLabToken === undefined) delete process.env["GITLAB_TOKEN"];
+      else process.env["GITLAB_TOKEN"] = originalGitLabToken;
+    }
+  });
+
+  it("refuses the GitLab raw-evidence fallback when a committed screenshot no longer matches its captured digest", async () => {
+    const originalGitLabToken = process.env["GITLAB_TOKEN"];
+    process.env["GITLAB_TOKEN"] = "glpat_test_token";
+
+    try {
+      const run = await runService.createRun({ projectRoot });
+      await markRunReadyForPublish(run.id);
+      await addVisualEvidence(run.id, { visualBaseline: "legacy-screenshot" });
+      await bindVisualEvidenceToCommittedFiles(run.id);
+      await writeFile(
+        path.join(projectRoot, ".spec-to-pr", "shop", "visual", "current.png"),
+        Buffer.from("tampered-current-png"),
+      );
+      const report = await prReportService.generatePrReport({ runId: run.id });
+      gitlabPublisher.assetUploadError = new GitLabAssetUploadError(
+        "GitLab upload review asset failed: 503 uploads unavailable",
+        503,
+      );
+
+      const published = await createGitLabRawFallbackService().publish({
+        runId: run.id,
+        reportArtifactId: report.markdownArtifactId,
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        remoteUrl: "https://gitlab.com/acme/spec-to-pr.git",
+        headSha: gitHead,
+        pushBranch: false,
+        confirm: true,
+      });
+
+      expect(published.result).toMatchObject({
+        status: "failed",
+        requestSynced: false,
+        visualPreviewExpected: true,
+        visualPreviewSynced: false,
+        fallbackMode: "none",
+      });
+      expect(gitlabPublisher.createdPayloads).toHaveLength(0);
+    } finally {
+      if (originalGitLabToken === undefined) delete process.env["GITLAB_TOKEN"];
+      else process.env["GITLAB_TOKEN"] = originalGitLabToken;
+    }
+  });
+
+  it("refuses the GitLab raw-evidence fallback for a tracked symlink", async () => {
+    const originalGitLabToken = process.env["GITLAB_TOKEN"];
+    process.env["GITLAB_TOKEN"] = "glpat_test_token";
+
+    try {
+      const run = await runService.createRun({ projectRoot });
+      await markRunReadyForPublish(run.id);
+      await addVisualEvidence(run.id, { visualBaseline: "legacy-screenshot" });
+      await bindVisualEvidenceToCommittedFiles(run.id);
+      const report = await prReportService.generatePrReport({ runId: run.id });
+      gitlabPublisher.assetUploadError = new GitLabAssetUploadError(
+        "GitLab upload review asset failed: 503 uploads unavailable",
+        503,
+      );
+
+      const published = await createGitLabRawFallbackService({ treeMode: "120000" }).publish({
+        runId: run.id,
+        reportArtifactId: report.markdownArtifactId,
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        remoteUrl: "https://gitlab.com/acme/spec-to-pr.git",
+        headSha: gitHead,
+        pushBranch: false,
+        confirm: true,
+      });
+
+      expect(published.result).toMatchObject({
+        status: "failed",
+        requestSynced: false,
+        fallbackMode: "none",
+      });
+      expect(gitlabPublisher.createdPayloads).toHaveLength(0);
+    } finally {
+      if (originalGitLabToken === undefined) delete process.env["GITLAB_TOKEN"];
+      else process.env["GITLAB_TOKEN"] = originalGitLabToken;
+    }
+  });
+
   it("publishes one feature E2E video as a link without treating it as a visual preview", async () => {
     const run = await runService.createRun({ projectRoot });
     await markRunReadyForPublish(run.id);
@@ -1679,6 +1813,93 @@ async function addVisualEvidence(
   );
 }
 
+async function bindVisualEvidenceToCommittedFiles(runId: string): Promise<void> {
+  const visualDirectory = path.join(projectRoot, ".spec-to-pr", "shop", "visual");
+  await mkdir(visualDirectory, { recursive: true });
+  await writeFile(path.join(visualDirectory, "legacy.png"), Buffer.from("figma-png"));
+  await writeFile(path.join(visualDirectory, "current.png"), Buffer.from("browser-png"));
+
+  const run = await store.get(runId);
+  const baseline = run.artifacts.find(
+    (artifact) => artifact.id === "art_22222222222222222222222222222222",
+  );
+  const actual = run.artifacts.find(
+    (artifact) => artifact.id === "art_33333333333333333333333333333333",
+  );
+  if (baseline === undefined || actual === undefined) {
+    throw new Error("Visual evidence fixture is incomplete");
+  }
+
+  const sourceBaseline = ArtifactRefSchema.parse({
+    ...baseline,
+    id: "art_77777777777777777777777777777777",
+    metadata: {
+      ...baseline.metadata,
+      projectRelativePath: ".spec-to-pr/shop/visual/legacy.png",
+    },
+  });
+  const linkedBaseline = ArtifactRefSchema.parse({
+    ...baseline,
+    metadata: {
+      ...baseline.metadata,
+      projectRelativePath: "visual/home-desktop.baseline.png",
+      sourceArtifactId: sourceBaseline.id,
+      headSha: gitHead,
+    },
+  });
+  const linkedActual = ArtifactRefSchema.parse({
+    ...actual,
+    metadata: {
+      ...actual.metadata,
+      projectRelativePath: ".spec-to-pr/shop/visual/current.png",
+      headSha: gitHead,
+    },
+  });
+
+  await store.save(
+    {
+      ...run,
+      revision: run.revision + 1,
+      updatedAt: "2026-06-23T00:00:00.800Z",
+      artifacts: [
+        ...run.artifacts.map((artifact) => {
+          if (artifact.id === linkedBaseline.id) return linkedBaseline;
+          if (artifact.id === linkedActual.id) return linkedActual;
+          return artifact;
+        }),
+        sourceBaseline,
+      ],
+    },
+    run.revision,
+  );
+}
+
+function createGitLabRawFallbackService(
+  options: { treeMode?: "100644" | "120000" } = {},
+): PublisherService {
+  return new PublisherService(
+    store,
+    artifactStore,
+    () => "2026-06-23T00:00:02.000Z",
+    { github: githubPublisher, gitlab: gitlabPublisher },
+    async (_cwd, args) => {
+      gitCalls.push(args);
+      if (args[0] === "status") return { stdout: "", stderr: "" };
+      if (args[0] === "rev-list") return { stdout: "1\n", stderr: "" };
+      if (args[0] === "symbolic-ref") return { stdout: `${gitCurrentBranch}\n`, stderr: "" };
+      if (args[0] === "rev-parse") return { stdout: `${gitHead}\n`, stderr: "" };
+      if (args[0] === "ls-tree") {
+        return {
+          stdout: `${options.treeMode ?? "100644"} blob ${"b".repeat(40)}\t${args.at(-1)}\n`,
+          stderr: "",
+        };
+      }
+
+      return { stdout: "https://gitlab.com/acme/spec-to-pr.git\n", stderr: "" };
+    },
+  );
+}
+
 async function addParsedIntakePolicy(
   runId: string,
   visualPreviewPolicy: { includeDiff?: boolean },
@@ -1783,6 +2004,7 @@ class FakePublisher implements ReviewRequestPublisher {
   public readonly receivedSignals: Array<AbortSignal | undefined> = [];
   public failCreate = false;
   public failAssetUpload = false;
+  public assetUploadError: Error | undefined;
   public existingRequest: PublishedReviewRequest | undefined;
   public forceNonDraftResult = false;
 
@@ -1798,6 +2020,9 @@ class FakePublisher implements ReviewRequestPublisher {
   public async publishAssets(input: {
     assets: Array<{ role: string; artifactId: string; label: string; targetId: string }>;
   }) {
+    if (this.assetUploadError !== undefined) {
+      throw this.assetUploadError;
+    }
     if (this.failAssetUpload) {
       throw new Error("forced visual evidence upload failure");
     }

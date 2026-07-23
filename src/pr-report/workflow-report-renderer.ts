@@ -319,11 +319,7 @@ export function renderPrReportV2Markdown(report: PrReportV2): string {
           "",
           ...(report.legacy.coverage.length === 0
             ? ["- 기록된 레거시 항목이 없습니다."]
-            : [
-                "| 상태 | 요구사항 | 이관 내용 |",
-                "| --- | --- | --- |",
-                ...legacyRows,
-              ]),
+            : ["| 상태 | 요구사항 | 이관 내용 |", "| --- | --- | --- |", ...legacyRows]),
           "",
           "</details>",
           "",

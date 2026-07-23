@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { GitLabPublisherAdapter } from "../../src/publisher/gitlab-publisher.js";
+import {
+  GitLabAssetUploadError,
+  GitLabPublisherAdapter,
+} from "../../src/publisher/gitlab-publisher.js";
 import type { PublishTarget, ReviewRequestPayload } from "../../src/publisher/index.js";
 
 describe("GitLabPublisherAdapter", () => {
@@ -163,6 +166,65 @@ describe("GitLabPublisherAdapter", () => {
         embeddable: true,
       },
     ]);
+  });
+
+  it.each([401, 403, 503])(
+    "classifies an upload HTTP %i failure so the workflow can safely consider a raw-evidence fallback",
+    async (status) => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(new Response("uploads unavailable", { status }));
+      const adapter = new GitLabPublisherAdapter(fetchMock);
+
+      await expect(
+        adapter.publishAssets({
+          target: gitlabTarget(),
+          payload: payload(),
+          token: "glpat-example",
+          assets: [
+            {
+              artifactId: "art_22222222222222222222222222222222",
+              targetId: "home",
+              role: "figma",
+              label: "Figma",
+              filename: "figma.png",
+              mediaType: "image/png",
+              content: Buffer.from("png"),
+            },
+          ],
+        }),
+      ).rejects.toMatchObject({
+        name: "GitLabAssetUploadError",
+        status,
+      } satisfies Partial<GitLabAssetUploadError>);
+    },
+  );
+
+  it("classifies an upload network failure so the workflow can safely consider a raw-evidence fallback", async () => {
+    const fetchMock = vi.fn().mockRejectedValueOnce(new TypeError("connection reset"));
+    const adapter = new GitLabPublisherAdapter(fetchMock);
+
+    await expect(
+      adapter.publishAssets({
+        target: gitlabTarget(),
+        payload: payload(),
+        token: "glpat-example",
+        assets: [
+          {
+            artifactId: "art_22222222222222222222222222222222",
+            targetId: "home",
+            role: "figma",
+            label: "Figma",
+            filename: "figma.png",
+            mediaType: "image/png",
+            content: Buffer.from("png"),
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({
+      name: "GitLabAssetUploadError",
+      status: undefined,
+    } satisfies Partial<GitLabAssetUploadError>);
   });
 });
 

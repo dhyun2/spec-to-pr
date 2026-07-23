@@ -4948,8 +4948,10 @@ describe("WorkflowService", () => {
     expect(ready.currentStage).toBe("publish");
     expect(ready.resumeContext.evidencePaths.length).toBeGreaterThanOrEqual(4);
     const report = await reportMarkdown(store, artifactStore, started.runId);
-    expect(report).toContain("checkout-states: 요구사항");
-    expect(report).toContain("checkout-submit: 요구사항");
+    expect(report).toContain("| Checkout \\| states | 디자인 승인 |");
+    expect(report).toContain("| checkout submit | 기능 승인 |");
+    expect(report).not.toContain("checkout-states: 요구사항");
+    expect(report).not.toContain("checkout-submit: 요구사항");
     expect(report).toContain("src/checkout.tsx");
     expect(report).toMatch(/Diff digest \| sha256:[a-f0-9]{64} \|/);
     expect(report).toContain("| 기능 리뷰 | 승인 | 1/1 통과 | 0건 |");

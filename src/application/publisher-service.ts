@@ -1,4 +1,7 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { promisify } from "node:util";
 
 import { z } from "zod";
@@ -6,6 +9,7 @@ import { z } from "zod";
 import type { ArtifactBlobStore } from "../artifact-registry/artifact-blob-store.js";
 import {
   detectPublishTargetFromRemote,
+  canUseGitLabRawEvidenceFallback,
   GitHubPublisherAdapter,
   GitLabPublisherAdapter,
   PublishedReviewRequestSchema,
@@ -47,6 +51,7 @@ import type { ArtifactRef } from "../runtime/index.js";
 import type { RunStore } from "../store/run-store.js";
 import { RevisionConflictError } from "../store/errors.js";
 import { VisualReportSchema, type VisualReport } from "../visual/visual-model.js";
+import { isSafeDurableEvidencePath } from "../workflow/workflow-contracts.js";
 
 const execFileAsync = promisify(execFile);
 const PUBLISHER_ADAPTER = "publisher-v1" as const;
@@ -631,7 +636,10 @@ export class PublisherService {
         visualPreviewSynced: prepared.visualPreviewSynced,
         featureVideoExpected: prepared.featureVideoExpected,
         featureVideoSynced: prepared.featureVideoSynced,
-        fallbackMode: "none",
+        fallbackMode: prepared.fallbackMode,
+        ...(prepared.fallbackReason === undefined
+          ? {}
+          : { fallbackReason: prepared.fallbackReason }),
         partialReasons: prepared.partialReasons,
         retryable: false,
         publishedAt: input.timestamp,
@@ -701,7 +709,10 @@ export class PublisherService {
         visualPreviewSynced: prepared.visualPreviewSynced,
         featureVideoExpected: prepared.featureVideoExpected,
         featureVideoSynced: prepared.featureVideoSynced,
-        fallbackMode: "none",
+        fallbackMode: prepared.fallbackMode,
+        ...(prepared.fallbackReason === undefined
+          ? {}
+          : { fallbackReason: prepared.fallbackReason }),
         partialReasons: prepared.partialReasons,
         retryable: false,
         publishedAt: input.timestamp,
@@ -731,6 +742,8 @@ export class PublisherService {
     visualPreviewSynced: boolean;
     featureVideoExpected: boolean;
     featureVideoSynced: boolean;
+    fallbackMode: "none" | "gitlab-raw-evidence";
+    fallbackReason?: string;
     partialReasons: string[];
   }> {
     const visualPreview = await this.collectVisualPreviewAssets(input.run, input.plan.payload);
@@ -748,11 +761,15 @@ export class PublisherService {
         visualPreviewSynced: false,
         featureVideoExpected: false,
         featureVideoSynced: false,
+        fallbackMode: "none",
         partialReasons: [],
       };
     }
 
     let publishedAssets: PublishedReviewAsset[];
+    let fallbackMode: "none" | "gitlab-raw-evidence" = "none";
+    let fallbackReason: string | undefined;
+    const partialReasons: string[] = [];
     try {
       publishedAssets = await input.publisher.publishAssets({
         target: input.plan.target,
@@ -761,17 +778,31 @@ export class PublisherService {
         assets,
         ...(input.signal === undefined ? {} : { signal: input.signal }),
       });
-    } catch (error) {
+    } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      const label = visualPreviewExpected ? "visual evidence" : "feature video";
-      throw new PublishPreparationError(`${label} upload failed: ${message}`, {
-        visualPreviewExpected,
-        featureVideoExpected,
-        partialReasons: [`${label} upload failed: ${redactSecrets(message)}`],
+      const rawFallback = await this.tryGitLabRawVisualFallback({
+        run: input.run,
+        target: input.plan.target,
+        payload: input.plan.payload,
+        visualPreview,
+        featureVideo,
+        error,
       });
+      if (rawFallback !== undefined) {
+        publishedAssets = rawFallback;
+        fallbackMode = "gitlab-raw-evidence";
+        fallbackReason = `GitLab review-asset upload failed; used immutable raw visual evidence instead: ${redactSecrets(message)}`;
+      } else {
+        const label = visualPreviewExpected ? "visual evidence" : "feature video";
+        throw new PublishPreparationError(`${label} upload failed: ${message}`, {
+          visualPreviewExpected,
+          featureVideoExpected,
+          partialReasons: [`${label} upload failed: ${redactSecrets(message)}`],
+        });
+      }
     }
 
-    if (publishedAssets.length !== assets.length) {
+    if (fallbackMode === "none" && publishedAssets.length !== assets.length) {
       throw new PublishPreparationError(
         `review evidence upload incomplete: ${publishedAssets.length}/${assets.length} asset(s) uploaded`,
         {
@@ -809,8 +840,108 @@ export class PublisherService {
       visualPreviewSynced: visualPreviewExpected,
       featureVideoExpected,
       featureVideoSynced: featureVideoExpected,
-      partialReasons: [],
+      fallbackMode,
+      ...(fallbackReason === undefined ? {} : { fallbackReason }),
+      partialReasons,
     };
+  }
+
+  private async tryGitLabRawVisualFallback(input: {
+    run: Awaited<ReturnType<RunStore["get"]>>;
+    target: PublishTarget;
+    payload: ReviewRequestPayload;
+    visualPreview: {
+      report?: VisualReport;
+      assets: ReviewRequestAsset[];
+      locale?: "ko" | "en";
+    };
+    featureVideo: ReviewRequestAsset | undefined;
+    error: unknown;
+  }): Promise<PublishedReviewAsset[] | undefined> {
+    if (
+      input.target.host !== "gitlab" ||
+      input.payload.headSha === undefined ||
+      input.visualPreview.report === undefined ||
+      input.featureVideo !== undefined ||
+      !canUseGitLabRawEvidenceFallback(input.error)
+    ) {
+      return undefined;
+    }
+
+    const required = new Map<string, ReviewRequestAsset>();
+    for (const asset of input.visualPreview.assets) {
+      if (asset.role !== "figma" && asset.role !== "browser") continue;
+      const key = `${asset.targetId}:${asset.role}`;
+      if (required.has(key)) return undefined;
+      required.set(key, asset);
+    }
+    const expectedKeys = input.visualPreview.report.results.flatMap((result) => [
+      `${result.targetId}:figma`,
+      `${result.targetId}:browser`,
+    ]);
+    if (required.size !== expectedKeys.length || expectedKeys.some((key) => !required.has(key))) {
+      return undefined;
+    }
+
+    const checkedOutHead = (
+      await this.git(input.run.projectRoot, ["rev-parse", "--verify", "HEAD"])
+    ).stdout.trim();
+    const status = (await this.git(input.run.projectRoot, ["status", "--porcelain"])).stdout.trim();
+    if (checkedOutHead !== input.payload.headSha || status.length > 0) return undefined;
+
+    const rawAssets: PublishedReviewAsset[] = [];
+    for (const key of expectedKeys) {
+      const asset = required.get(key)!;
+      const evidence = asset.evidence;
+      if (
+        evidence === undefined ||
+        evidence.headSha !== input.payload.headSha ||
+        !isSafeGitLabRawEvidencePath(evidence.projectRelativePath)
+      ) {
+        return undefined;
+      }
+      const evidencePath = path.resolve(input.run.projectRoot, evidence.projectRelativePath);
+      if (!isPathWithinRoot(input.run.projectRoot, evidencePath)) return undefined;
+
+      const tracked = await this.git(input.run.projectRoot, [
+        "ls-tree",
+        "-r",
+        input.payload.headSha,
+        "--",
+        evidence.projectRelativePath,
+      ]);
+      if (!gitTreeContainsRegularFile(tracked.stdout, evidence.projectRelativePath)) {
+        return undefined;
+      }
+
+      let content: Buffer;
+      try {
+        content = await readFile(evidencePath);
+      } catch {
+        return undefined;
+      }
+      const digest = `sha256:${createHash("sha256").update(content).digest("hex")}`;
+      if (digest !== evidence.digest) return undefined;
+
+      const url = gitLabRawEvidenceUrl({
+        target: input.target,
+        headSha: input.payload.headSha,
+        projectRelativePath: evidence.projectRelativePath,
+      });
+      if (url === undefined) return undefined;
+      rawAssets.push({
+        artifactId: asset.artifactId,
+        targetId: asset.targetId,
+        role: asset.role,
+        label: asset.label,
+        url,
+        // A same-project GitLab raw URL is authenticated by the reviewer session
+        // and can render inline in the MR description.
+        embeddable: true,
+      });
+    }
+
+    return rawAssets;
   }
 
   private async collectFeatureVideoAsset(
@@ -951,6 +1082,7 @@ export class PublisherService {
     payload: ReviewRequestPayload;
   }): Promise<ReviewRequestAsset> {
     const artifact = requireArtifact(input.artifacts, input.artifactId);
+    const sourceArtifact = resolveSourceVisualArtifact(input.artifacts, artifact);
 
     if (!artifact.mediaType.startsWith("image/")) {
       throw new Error(`Visual artifact is not an image: ${artifact.id}`);
@@ -972,6 +1104,9 @@ export class PublisherService {
         ].join("-") + extension,
       mediaType: artifact.mediaType,
       content: await this.artifactStore.readContent(artifact.digest),
+      ...(sourceArtifact.digest !== artifact.digest
+        ? {}
+        : rawEvidenceFromArtifacts({ artifact, sourceArtifact })),
     };
   }
 
@@ -1001,6 +1136,10 @@ export class PublisherService {
         visualPreviewSynced: input.result.visualPreviewSynced,
         featureVideoExpected: input.result.featureVideoExpected,
         featureVideoSynced: input.result.featureVideoSynced,
+        fallbackMode: input.result.fallbackMode,
+        ...(input.result.fallbackReason === undefined
+          ? {}
+          : { fallbackReason: input.result.fallbackReason }),
         publishIntent: reportArtifact.metadata["reportIntent"],
         diagnosticReportKey: reportArtifact.metadata["idempotencyKey"],
         sourceBranch: input.payload.sourceBranch,
@@ -1169,6 +1308,77 @@ function requireArtifact(artifacts: ArtifactRef[], artifactId: string): Artifact
   }
 
   return artifact;
+}
+
+function resolveSourceVisualArtifact(artifacts: ArtifactRef[], artifact: ArtifactRef): ArtifactRef {
+  let current = artifact;
+  const visited = new Set<string>([artifact.id]);
+
+  while (typeof current.metadata["sourceArtifactId"] === "string") {
+    const sourceArtifactId = current.metadata["sourceArtifactId"];
+    if (visited.has(sourceArtifactId)) return artifact;
+    const source = artifacts.find((candidate) => candidate.id === sourceArtifactId);
+    if (source === undefined) return artifact;
+    visited.add(source.id);
+    current = source;
+  }
+
+  return current;
+}
+
+function rawEvidenceFromArtifacts(input: {
+  artifact: ArtifactRef;
+  sourceArtifact: ArtifactRef;
+}): Pick<ReviewRequestAsset, "evidence"> {
+  const projectRelativePath = input.sourceArtifact.metadata["projectRelativePath"];
+  const headSha = input.artifact.metadata["headSha"];
+
+  if (typeof projectRelativePath !== "string") return {};
+
+  return {
+    evidence: {
+      projectRelativePath,
+      digest: input.sourceArtifact.digest,
+      ...(typeof headSha !== "string" ? {} : { headSha }),
+    },
+  };
+}
+
+function isSafeGitLabRawEvidencePath(projectRelativePath: string): boolean {
+  // `visual/*.png` is synthetic comparison output held only by the artifact
+  // store; it is never a durable source file. Feature-scoped visual evidence
+  // lives under `.spec-to-pr/<feature>/visual/` and remains eligible.
+  return (
+    isSafeDurableEvidencePath(projectRelativePath) && !projectRelativePath.startsWith("visual/")
+  );
+}
+
+function isPathWithinRoot(projectRoot: string, candidatePath: string): boolean {
+  const root = path.resolve(projectRoot);
+  const candidate = path.resolve(candidatePath);
+
+  return candidate.startsWith(`${root}${path.sep}`);
+}
+
+function gitTreeContainsRegularFile(output: string, projectRelativePath: string): boolean {
+  return output.split(/\r?\n/).some((line) => {
+    const match = /^(100644|100755) blob [a-f0-9]{40,64}\t(.+)$/iu.exec(line);
+    return match?.[2] === projectRelativePath;
+  });
+}
+
+function gitLabRawEvidenceUrl(input: {
+  target: PublishTarget;
+  headSha: string;
+  projectRelativePath: string;
+}): string | undefined {
+  if (input.target.host !== "gitlab" || input.target.projectPath === undefined) return undefined;
+
+  const projectPath = input.target.projectPath.split("/").map(encodeURIComponent).join("/");
+  const evidencePath = input.projectRelativePath.split("/").map(encodeURIComponent).join("/");
+  const webBaseUrl = input.target.webBaseUrl.replace(/\/+$/, "");
+
+  return `${webBaseUrl}/${projectPath}/-/raw/${encodeURIComponent(input.headSha)}/${evidencePath}`;
 }
 
 function latestPublishResultArtifact(artifacts: ArtifactRef[]): ArtifactRef {
