@@ -1328,6 +1328,13 @@ export const FigmaBundleSubmissionSchema = z
           message: "Figma bundle targets must use the Figma baseline kind",
         });
       }
+      if (target.figmaCapture === undefined) {
+        context.addIssue({
+          code: "custom",
+          path: ["visualTargets", index, "figmaCapture"],
+          message: "Figma bundle targets require native capture geometry",
+        });
+      }
       if (!submission.artifactPaths.includes(target.baselinePath)) {
         context.addIssue({
           code: "custom",

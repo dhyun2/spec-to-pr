@@ -980,6 +980,23 @@ describe("workflow v2 contracts", () => {
         ...base,
         artifactPaths: ["figma/design-context.json", "visual/checkout.png"],
       }).success,
+    ).toBe(false);
+    expect(
+      WorkflowSubmissionSchema.safeParse({
+        ...base,
+        visualTargets: base.visualTargets.map((target) => ({
+          ...target,
+          figmaCapture: {
+            nodeId: "1:2",
+            captureKind: "viewport",
+            logicalSize: { width: 1440, height: 900 },
+            exportScale: 1,
+            bitmapSize: { width: 1440, height: 900 },
+            colorSpace: "srgb",
+          },
+        })),
+        artifactPaths: ["figma/design-context.json", "visual/checkout.png"],
+      }).success,
     ).toBe(true);
     expect(
       WorkflowSubmissionSchema.safeParse({

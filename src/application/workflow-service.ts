@@ -95,6 +95,8 @@ import {
   type VisualTargetManifest,
 } from "../visual/visual-comparator.js";
 import { decodeBoundedPng } from "../visual/png-decoder.js";
+import { normalizeVisualPng } from "../visual/visual-normalizer.js";
+import { assertFigmaCaptureGeometry } from "../figma/figma-capture-contract.js";
 import {
   WorkspaceStartInputSchema,
   assertChangedFilesWithinWorkspace,
@@ -2184,7 +2186,20 @@ export class WorkflowService {
         if (evidencePath === submission.manifestPath) {
           assertFigmaManifest(content, evidencePath, submission);
         } else {
-          await assertPng(content, evidencePath);
+          const target = submission.visualTargets.find(
+            (candidate) => candidate.baselinePath === evidencePath,
+          );
+          if (target === undefined || target.figmaCapture === undefined) {
+            throw new Error(
+              `FIGMA_CAPTURE_GEOMETRY_INVALID: ${evidencePath} is not bound to a Figma target`,
+            );
+          }
+          const decoded = await decodeBoundedPng(content, evidencePath);
+          assertFigmaCaptureGeometry({
+            geometry: target.figmaCapture,
+            viewport: target.viewport,
+            decodedSize: { width: decoded.width, height: decoded.height },
+          });
         }
       }
       if (submission.kind === "visual-comparison") {
@@ -2363,30 +2378,90 @@ export class WorkflowService {
           );
         }
 
+        const artifactBase = `visual/${target.targetId}`;
+        const baselineContent = await this.dependencies.artifactStore.readContent(
+          baselineArtifact.digest,
+        );
+        const actualContent = await this.dependencies.artifactStore.readContent(
+          actualArtifact.digest,
+        );
+        let comparisonBaseline = baselineContent;
+        let comparisonActual = actualContent;
+        let comparedActualArtifact = actualArtifact;
+        let baselineRef: ArtifactRef;
+
+        if (target.figmaCapture !== undefined) {
+          const normalizedBaseline = await normalizeVisualPng({
+            content: baselineContent,
+            sourceSize: target.figmaCapture.bitmapSize,
+            logicalSize: target.figmaCapture.logicalSize,
+            colorSpace: target.figmaCapture.colorSpace,
+            role: `${target.targetId} Figma baseline`,
+          });
+          const normalizedActual = await normalizeVisualPng({
+            content: actualContent,
+            sourceSize: {
+              width: Math.round(target.viewport.width * target.deviceScaleFactor),
+              height: Math.round(target.viewport.height * target.deviceScaleFactor),
+            },
+            logicalSize: target.figmaCapture.logicalSize,
+            colorSpace: target.figmaCapture.colorSpace,
+            role: `${target.targetId} browser capture`,
+          });
+          comparisonBaseline = normalizedBaseline.content;
+          comparisonActual = normalizedActual.content;
+          baselineRef = await this.writeVisualArtifact({
+            content: normalizedBaseline.content,
+            kind: "screenshot",
+            projectRelativePath: `${artifactBase}.baseline.normalized.png`,
+            targetId: target.targetId,
+            role: "baseline-normalized",
+            packet,
+            attempt,
+            timestamp,
+            sourceArtifactId: baselineArtifact.id,
+            normalizerVersion: normalizedBaseline.version,
+          });
+          comparedActualArtifact = await this.writeVisualArtifact({
+            content: normalizedActual.content,
+            kind: "screenshot",
+            projectRelativePath: `${artifactBase}.actual.normalized.png`,
+            targetId: target.targetId,
+            role: "actual-normalized",
+            packet,
+            attempt,
+            timestamp,
+            sourceArtifactId: actualArtifact.id,
+            normalizerVersion: normalizedActual.version,
+          });
+          generatedArtifacts.push(baselineRef, comparedActualArtifact);
+        } else {
+          baselineRef = ArtifactRefSchema.parse({
+            ...baselineArtifact,
+            id: createArtifactId(),
+            kind: "screenshot",
+            producedBy: "orchestrator",
+            createdAt: timestamp,
+            metadata: {
+              ...baselineArtifact.metadata,
+              projectRelativePath: `${artifactBase}.baseline.png`,
+              reviewPacketId: packet.id,
+              headSha: packet.headSha,
+              diffDigest: packet.diffDigest,
+              targetId: target.targetId,
+              visualRole: "baseline",
+              visualComparisonAttempt: attempt,
+              sourceArtifactId: baselineArtifact.id,
+            },
+          });
+          generatedArtifacts.push(baselineRef);
+        }
+
         const comparison = await compareVisualPngs({
-          baseline: await this.dependencies.artifactStore.readContent(baselineArtifact.digest),
-          actual: await this.dependencies.artifactStore.readContent(actualArtifact.digest),
+          baseline: comparisonBaseline,
+          actual: comparisonActual,
           masks: target.masks,
           reviewThreshold: target.reviewThreshold,
-        });
-        const artifactBase = `visual/${target.targetId}`;
-        const baselineRef = ArtifactRefSchema.parse({
-          ...baselineArtifact,
-          id: createArtifactId(),
-          kind: "screenshot",
-          producedBy: "orchestrator",
-          createdAt: timestamp,
-          metadata: {
-            ...baselineArtifact.metadata,
-            projectRelativePath: `${artifactBase}.baseline.png`,
-            reviewPacketId: packet.id,
-            headSha: packet.headSha,
-            diffDigest: packet.diffDigest,
-            targetId: target.targetId,
-            visualRole: "baseline",
-            visualComparisonAttempt: attempt,
-            sourceArtifactId: baselineArtifact.id,
-          },
         });
         const diffArtifact = await this.writeVisualArtifact({
           content: comparison.diff,
@@ -2408,7 +2483,7 @@ export class WorkflowService {
           attempt,
           timestamp,
         });
-        generatedArtifacts.push(baselineRef, diffArtifact, overlayArtifact);
+        generatedArtifacts.push(diffArtifact, overlayArtifact);
         results.push({
           targetId: target.targetId,
           name: target.name,
@@ -2426,7 +2501,16 @@ export class WorkflowService {
           status: comparison.status,
           metrics: comparison.metrics,
           baselineArtifactId: baselineRef.id,
-          actualArtifactId: actualArtifact.id,
+          actualArtifactId: comparedActualArtifact.id,
+          sourceBaselineArtifactId: baselineArtifact.id,
+          sourceActualArtifactId: actualArtifact.id,
+          ...(target.figmaCapture === undefined
+            ? {}
+            : {
+                normalizerVersion: "visual-normalizer-v1",
+                normalizedBaselineDigest: baselineRef.digest,
+                normalizedActualDigest: comparedActualArtifact.digest,
+              }),
           diffArtifactId: diffArtifact.id,
           overlayArtifactId: overlayArtifact.id,
         });
@@ -2658,10 +2742,12 @@ export class WorkflowService {
     kind: "screenshot" | "visual-diff";
     projectRelativePath: string;
     targetId: string;
-    role: "diff" | "overlay";
+    role: "baseline-normalized" | "actual-normalized" | "diff" | "overlay";
     packet: ImplementationReviewPacket;
     attempt: number;
     timestamp: string;
+    sourceArtifactId?: string;
+    normalizerVersion?: "visual-normalizer-v1";
   }): Promise<ArtifactRef> {
     const blob = await this.dependencies.artifactStore.writeBlob({
       content: input.content,
@@ -2687,6 +2773,12 @@ export class WorkflowService {
         targetId: input.targetId,
         visualRole: input.role,
         visualComparisonAttempt: input.attempt,
+        ...(input.sourceArtifactId === undefined
+          ? {}
+          : { sourceArtifactId: input.sourceArtifactId }),
+        ...(input.normalizerVersion === undefined
+          ? {}
+          : { normalizerVersion: input.normalizerVersion }),
       },
     });
   }

@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { FigmaCaptureGeometrySchema } from "../figma/figma-capture-contract.js";
 import { IsoDateTimeSchema, Sha256DigestSchema } from "../runtime/scalars.js";
 import { VISUAL_POLICY } from "../workflow/delivery-mode-policy.js";
 import { decodeBoundedPng } from "./png-decoder.js";
@@ -43,6 +44,7 @@ export const VisualTargetManifestSchema = z
       .strict(),
     deviceScaleFactor: z.number().positive().max(8),
     fixture: z.string().trim().min(1).max(2_000),
+    figmaCapture: FigmaCaptureGeometrySchema.optional(),
     masks: z.array(VisualMaskSchema).max(50).default([]),
     reviewThreshold: z
       .number()

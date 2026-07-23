@@ -4856,6 +4856,67 @@ describe("WorkflowService", () => {
     );
   });
 
+  it("rejects a scaled Figma thumbnail declared as the browser viewport", async () => {
+    const target = {
+      targetId: "shop-list",
+      name: "Shop list",
+      state: "default",
+      route: "/shop",
+      baselineKind: "figma" as const,
+      baselinePath: "visual/figma-thumbnail.png",
+      viewport: { width: 202, height: 1024 },
+      deviceScaleFactor: 1,
+      fixture: "mock:shop-list",
+      figmaCapture: {
+        nodeId: "2558:4382",
+        captureKind: "full-frame" as const,
+        logicalSize: { width: 360, height: 1824 },
+        exportScale: 202 / 360,
+        bitmapSize: { width: 202, height: 1024 },
+        colorSpace: "srgb" as const,
+      },
+      masks: [],
+    };
+    const thumbnail = new PNG({ width: 202, height: 1024 });
+    await writeFile(path.join(directory, target.baselinePath), PNG.sync.write(thumbnail));
+    await writeFile(
+      path.join(directory, "figma/design-context.json"),
+      JSON.stringify({
+        provider: "host-connected-figma",
+        capturedAt: "2026-07-13T00:00:00.000Z",
+        fileUrl: FIGMA_URL,
+        nodeIds: ["2558:4382"],
+        visualPaths: [target.baselinePath],
+        visualTargets: [target],
+      }),
+      "utf8",
+    );
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: `Implement ${FIGMA_URL}`,
+      scope: "ui",
+      mode: "figma",
+      changeKind: "design",
+      figmaUrl: FIGMA_URL,
+    });
+
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "figma-bundle",
+          provider: "host-connected-figma",
+          capturedAt: "2026-07-13T00:00:00.000Z",
+          fileUrl: FIGMA_URL,
+          nodeIds: ["2558:4382"],
+          manifestPath: "figma/design-context.json",
+          visualTargets: [target],
+          artifactPaths: ["figma/design-context.json", target.baselinePath],
+        },
+      }),
+    ).rejects.toThrow(/FIGMA_CAPTURE_GEOMETRY_INVALID/);
+  });
+
   it("records at most one Figma bundle under concurrent submissions", async () => {
     const started = await service.start({
       projectRoot: directory,
@@ -4889,6 +4950,11 @@ describe("WorkflowService", () => {
   });
 
   it("computes visual evidence in the runtime, binds it to the packet, and caps repairs at three", async () => {
+    const baseline = new PNG({ width: 1, height: 1 });
+    baseline.data.set([0, 0, 0, 255]);
+    await writeFile(path.join(directory, "visual/diff.png"), PNG.sync.write(baseline));
+    await execFileAsync("git", ["add", "visual/diff.png"], { cwd: directory });
+    await execFileAsync("git", ["commit", "-qm", "opaque visual baseline"], { cwd: directory });
     const started = await service.start({
       projectRoot: directory,
       requestText: "Implement the supplied checkout design",
@@ -5049,6 +5115,13 @@ describe("WorkflowService", () => {
     const run = await store.get(started.runId);
     const reports = run.artifacts.filter((artifact) => artifact.kind === "visual-report");
     expect(reports).toHaveLength(3);
+    expect(
+      run.artifacts.filter(
+        (artifact) =>
+          artifact.metadata["visualRole"] === "baseline-normalized" ||
+          artifact.metadata["visualRole"] === "actual-normalized",
+      ),
+    ).toHaveLength(6);
     expect(
       reports.every(
         (artifact) =>
@@ -6179,6 +6252,14 @@ function figmaVisualTargets() {
       viewport: { width: 1, height: 1 },
       deviceScaleFactor: 1,
       fixture: "mock:checkout",
+      figmaCapture: {
+        nodeId: "1:2",
+        captureKind: "viewport" as const,
+        logicalSize: { width: 1, height: 1 },
+        exportScale: 1,
+        bitmapSize: { width: 1, height: 1 },
+        colorSpace: "srgb" as const,
+      },
       masks: [],
     },
   ];
