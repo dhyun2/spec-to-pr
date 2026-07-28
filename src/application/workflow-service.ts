@@ -2689,12 +2689,11 @@ export class WorkflowService {
     const historicalFigmaTarget = targets.find(
       (target) =>
         target.baselineKind === "figma" &&
-        target.figmaCapture !== undefined &&
-        !("schemaVersion" in target.figmaCapture),
+        (target.figmaCapture === undefined || !("schemaVersion" in target.figmaCapture)),
     );
     if (historicalFigmaTarget !== undefined) {
       throw new Error(
-        `FIGMA_CAPTURE_GEOMETRY_REACQUISITION_REQUIRED: persisted target ${historicalFigmaTarget.targetId} uses display-only v1 geometry`,
+        `FIGMA_CAPTURE_GEOMETRY_REACQUISITION_REQUIRED: persisted target ${historicalFigmaTarget.targetId} lacks present v2 geometry`,
       );
     }
     const captures = new Map(submission.captures.map((capture) => [capture.targetId, capture]));
