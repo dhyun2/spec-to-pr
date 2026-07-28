@@ -8,6 +8,7 @@ import { WorkloadEstimateSchema, WorkloadSignalsSchema } from "./workload-policy
 import {
   VisualCaptureSchema,
   VisualComparisonMetricsV2Schema,
+  VisualRendererLineageBindingSchema,
   VisualTargetManifestSchema,
 } from "../visual/visual-comparator.js";
 import { WorkspaceBindingSchema } from "../workspace/workspace-binding.js";
@@ -1619,6 +1620,7 @@ export const VisualRepairEvidenceV2Schema = z
     lineageId: ReviewPacketIdSchema,
     reviewPacketId: ReviewPacketIdSchema,
     headSha: GitObjectIdSchema,
+    rendererLineageId: VisualRendererLineageBindingSchema.shape.rendererLineageId.optional(),
     attempt: z.union([z.literal(1), z.literal(2), z.literal(3)]),
     generatedAt: IsoDateTimeSchema,
     failedTargets: z
@@ -1667,6 +1669,7 @@ export const VisualLineageOutcomeV2Schema = z
     lineageId: ReviewPacketIdSchema,
     reviewPacketId: ReviewPacketIdSchema,
     headSha: GitObjectIdSchema,
+    rendererLineageId: VisualRendererLineageBindingSchema.shape.rendererLineageId.optional(),
     attempt: z.union([z.literal(1), z.literal(2), z.literal(3)]),
     generatedAt: IsoDateTimeSchema,
     status: z.literal("closed"),

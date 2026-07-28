@@ -102,12 +102,18 @@ import {
   normalizeVisualTargetManifest,
   VisualTargetManifestCompatibilitySchema,
   VisualTargetManifestSchema,
+  VisualRendererLineageBindingSchema,
   compareVisualPngs,
   type VisualTargetManifest,
 } from "../visual/visual-comparator.js";
 import { decodeBoundedPng } from "../visual/png-decoder.js";
 import { normalizeVisualPng } from "../visual/visual-normalizer.js";
-import { VisualCaptureReceiptSchema, assertCaptureReceipt } from "../visual/capture-receipt.js";
+import {
+  VisualCaptureReceiptSchema,
+  VisualCaptureReceiptV2Schema,
+  assertCaptureReceipt,
+  captureRendererLineageId,
+} from "../visual/capture-receipt.js";
 import {
   CapturedFigmaComponentSchema,
   FigmaDesignMappingSchema,
@@ -2546,12 +2552,13 @@ export class WorkflowService {
     targets: VisualTargetManifest[],
     evidenceArtifacts: ArtifactRef[],
     preparedContent: ReadonlyMap<string, Buffer>,
-  ): Promise<void> {
+  ): Promise<`sha256:${string}` | undefined> {
     const mapping = figmaDesignMappingFromRun(run);
     const expectedFonts =
       mapping?.fonts.flatMap((font) =>
         font.digest === undefined ? [] : [{ family: font.family, digest: font.digest }],
       ) ?? [];
+    let rendererLineageId: `sha256:${string}` | undefined;
     const expectedAssets =
       mapping?.components.flatMap((component) =>
         component.resolution.kind === "asset"
@@ -2664,7 +2671,18 @@ export class WorkflowService {
           `VISUAL_CAPTURE_PROVENANCE_INVALID: receipt timestamp does not match ${target.targetId}`,
         );
       }
+      const captureLineageId = captureRendererLineageId(validated.environment);
+      if (rendererLineageId !== undefined && captureLineageId !== rendererLineageId) {
+        throw rendererDriftError(
+          `target ${target.targetId} uses ${captureLineageId}, expected ${rendererLineageId}`,
+        );
+      }
+      rendererLineageId = captureLineageId;
     }
+    if (rendererLineageId !== undefined) {
+      assertRendererLineageMatchesCommittedAttempts(run, packet, rendererLineageId);
+    }
+    return rendererLineageId;
   }
 
   private async recordVisualComparison(
@@ -2738,7 +2756,59 @@ export class WorkflowService {
     if (stage(run, "implementation").status !== "passed" && !committedReplay) {
       throw new Error("Implementation must pass before visual comparison");
     }
-    const reservationResult = await this.reserveVisualAttempt(run.id, packet, submissionIdentity);
+    const preparedEvidence = await this.prepareVisualSubmissionEvidence(run, submission);
+    const actualArtifacts = preparedEvidence.map((item) => item.artifact);
+    const boundEvidenceArtifacts = actualArtifacts.map((artifact) => {
+      const capture = submission.captures.find(
+        (capture) => capture.actualPath === artifact.metadata["projectRelativePath"],
+      );
+      const receiptCapture = submission.captures.find(
+        (capture) => capture.receiptPath === artifact.metadata["projectRelativePath"],
+      );
+      if (capture !== undefined && capture.actualDigest !== artifact.digest) {
+        throw new Error(
+          `VISUAL_CAPTURE_DIGEST_MISMATCH: ${capture.actualPath} does not match its declared digest`,
+        );
+      }
+      if (receiptCapture !== undefined && receiptCapture.receiptDigest !== artifact.digest) {
+        throw new Error(
+          `VISUAL_CAPTURE_PROVENANCE_INVALID: ${receiptCapture.receiptPath} does not match its declared digest`,
+        );
+      }
+      return ArtifactRefSchema.parse({
+        ...artifact,
+        metadata: {
+          ...artifact.metadata,
+          ...(capture === undefined && receiptCapture === undefined
+            ? {}
+            : {
+                targetId: (capture ?? receiptCapture)!.targetId,
+                captureProvider: (capture ?? receiptCapture)!.provider,
+                visualCapturedAt: (capture ?? receiptCapture)!.capturedAt,
+                ...(capture === undefined
+                  ? { declaredReceiptDigest: receiptCapture!.receiptDigest }
+                  : { declaredCaptureDigest: capture.actualDigest }),
+              }),
+        },
+      });
+    });
+    const preparedContent = new Map(
+      preparedEvidence.map((item) => [item.artifact.digest, item.content] as const),
+    );
+    const rendererLineageId = await this.assertVisualCaptureAcquisition(
+      run,
+      packet,
+      submission,
+      targets,
+      boundEvidenceArtifacts,
+      preparedContent,
+    );
+    const reservationResult = await this.reserveVisualAttempt(
+      run.id,
+      packet,
+      submissionIdentity,
+      rendererLineageId,
+    );
     if (reservationResult.kind === "busy") {
       throw new Error(
         "VISUAL_ATTEMPT_IN_PROGRESS: a visual comparison lease is active; refresh workflow_status and retry",
@@ -2749,53 +2819,6 @@ export class WorkflowService {
     const lineageId = visualLineageId(packet);
 
     try {
-      const preparedEvidence = await this.prepareVisualSubmissionEvidence(run, submission);
-      const actualArtifacts = preparedEvidence.map((item) => item.artifact);
-      const boundEvidenceArtifacts = actualArtifacts.map((artifact) => {
-        const capture = submission.captures.find(
-          (capture) => capture.actualPath === artifact.metadata["projectRelativePath"],
-        );
-        const receiptCapture = submission.captures.find(
-          (capture) => capture.receiptPath === artifact.metadata["projectRelativePath"],
-        );
-        if (capture !== undefined && capture.actualDigest !== artifact.digest) {
-          throw new Error(
-            `VISUAL_CAPTURE_DIGEST_MISMATCH: ${capture.actualPath} does not match its declared digest`,
-          );
-        }
-        if (receiptCapture !== undefined && receiptCapture.receiptDigest !== artifact.digest) {
-          throw new Error(
-            `VISUAL_CAPTURE_PROVENANCE_INVALID: ${receiptCapture.receiptPath} does not match its declared digest`,
-          );
-        }
-        return ArtifactRefSchema.parse({
-          ...artifact,
-          metadata: {
-            ...artifact.metadata,
-            ...(capture === undefined && receiptCapture === undefined
-              ? {}
-              : {
-                  targetId: (capture ?? receiptCapture)!.targetId,
-                  captureProvider: (capture ?? receiptCapture)!.provider,
-                  visualCapturedAt: (capture ?? receiptCapture)!.capturedAt,
-                  ...(capture === undefined
-                    ? { declaredReceiptDigest: receiptCapture!.receiptDigest }
-                    : { declaredCaptureDigest: capture.actualDigest }),
-                }),
-          },
-        });
-      });
-      const preparedContent = new Map(
-        preparedEvidence.map((item) => [item.artifact.digest, item.content] as const),
-      );
-      await this.assertVisualCaptureAcquisition(
-        run,
-        packet,
-        submission,
-        targets,
-        boundEvidenceArtifacts,
-        preparedContent,
-      );
       if (reservationResult.kind === "committed-replay") return;
       await this.persistPreparedVisualEvidence(preparedEvidence);
       const attemptEvidenceArtifacts = boundEvidenceArtifacts.map((artifact) =>
@@ -2821,7 +2844,7 @@ export class WorkflowService {
         const receipt =
           receiptArtifact === undefined
             ? undefined
-            : VisualCaptureReceiptSchema.parse(
+            : VisualCaptureReceiptV2Schema.parse(
                 JSON.parse(
                   (
                     preparedContent.get(receiptArtifact.digest) ??
@@ -2972,9 +2995,9 @@ export class WorkflowService {
             : {
                 captureSummary: {
                   provider: capture.provider,
-                  browser: `${receipt.browserName} ${receipt.browserVersion}`,
-                  fontsReady: receipt.fonts.length > 0,
-                  assetsReady: receipt.assetsComplete,
+                  browser: `${receipt.environment.browser.family} ${receipt.environment.browser.version}`,
+                  fontsReady: receipt.environment.readiness.fontsReady,
+                  assetsReady: receipt.environment.readiness.assetsReady,
                 },
               }),
           capturedAt: capture.capturedAt,
@@ -3002,6 +3025,13 @@ export class WorkflowService {
       const visualStatus = results.every((result) => result["status"] === "passed")
         ? "passed"
         : "failed";
+      const rendererLineageBinding =
+        rendererLineageId === undefined
+          ? undefined
+          : VisualRendererLineageBindingSchema.parse({
+              visualLineageId: lineageId,
+              rendererLineageId,
+            });
       const reportContent = Buffer.from(
         `${JSON.stringify(
           {
@@ -3009,6 +3039,7 @@ export class WorkflowService {
             runId: run.id,
             reviewPacketId: packet.id,
             visualLineageId: lineageId,
+            ...(rendererLineageBinding === undefined ? {} : rendererLineageBinding),
             headSha: packet.headSha,
             diffDigest: packet.diffDigest,
             attempt,
@@ -3043,6 +3074,7 @@ export class WorkflowService {
           workflowSubmissionKind: "visual-comparison",
           reviewPacketId: packet.id,
           visualLineageId: lineageId,
+          ...(rendererLineageBinding === undefined ? {} : rendererLineageBinding),
           headSha: packet.headSha,
           diffDigest: packet.diffDigest,
           visualComparisonAttempt: attempt,
@@ -3059,6 +3091,7 @@ export class WorkflowService {
         runId: run.id,
         packet,
         lineageId,
+        rendererLineageId,
         attempt,
         visualStatus,
         results,
@@ -3099,6 +3132,7 @@ export class WorkflowService {
     runId: string;
     packet: ImplementationReviewPacket;
     lineageId: string;
+    rendererLineageId: `sha256:${string}` | undefined;
     attempt: 1 | 2 | 3;
     visualStatus: "passed" | "failed";
     results: Array<Record<string, unknown>>;
@@ -3179,6 +3213,9 @@ export class WorkflowService {
             lineageId: input.lineageId,
             reviewPacketId: input.packet.id,
             headSha: input.packet.headSha,
+            ...(input.rendererLineageId === undefined
+              ? {}
+              : { rendererLineageId: input.rendererLineageId }),
             attempt: input.attempt,
             generatedAt: input.timestamp,
             failedTargets,
@@ -3192,6 +3229,9 @@ export class WorkflowService {
           lineageId: input.lineageId,
           reviewPacketId: input.packet.id,
           headSha: input.packet.headSha,
+          ...(input.rendererLineageId === undefined
+            ? {}
+            : { rendererLineageId: input.rendererLineageId }),
           attempt: input.attempt,
           generatedAt: input.timestamp,
           status,
@@ -3224,6 +3264,9 @@ export class WorkflowService {
         schemaVersion:
           evidence === undefined ? "visual-repair-lineage-v2" : "visual-repair-evidence-v2",
         visualLineageId: input.lineageId,
+        ...(input.rendererLineageId === undefined
+          ? {}
+          : { rendererLineageId: input.rendererLineageId }),
         visualLineageAttempt: input.attempt,
         visualLineageStatus: status,
         sourcePacketId: input.packet.id,
@@ -3370,6 +3413,7 @@ export class WorkflowService {
     runId: string,
     packet: ImplementationReviewPacket,
     submissionIdentity: string,
+    rendererLineageId: `sha256:${string}` | undefined,
   ): Promise<VisualAttemptReservationResult> {
     for (let retry = 0; retry < 12; retry += 1) {
       const current = await this.dependencies.runStore.get(runId);
@@ -3378,6 +3422,9 @@ export class WorkflowService {
         throw new Error(
           "Visual comparison must reference the current implementation review packet",
         );
+      }
+      if (rendererLineageId !== undefined) {
+        assertRendererLineageMatchesCommittedAttempts(current, packet, rendererLineageId);
       }
       const events = visualAttemptReservations(current, visualLineageId(packet));
       const summary = reduceVisualReservations(events, this.now());
@@ -6104,6 +6151,34 @@ function visualLineageId(packet: ImplementationReviewPacket): string {
   return packet.visualLineageId ?? packet.id;
 }
 
+function assertRendererLineageMatchesCommittedAttempts(
+  run: RunManifest,
+  packet: ImplementationReviewPacket,
+  rendererLineageId: string,
+): void {
+  const lineageId = visualLineageId(packet);
+  for (const artifact of run.artifacts) {
+    if (artifact.kind !== "visual-report" || artifact.metadata["visualLineageId"] !== lineageId) {
+      continue;
+    }
+    const committedRendererLineageId = artifact.metadata["rendererLineageId"];
+    if (typeof committedRendererLineageId !== "string") {
+      throw rendererDriftError(
+        `committed attempt ${String(artifact.metadata["visualComparisonAttempt"])} is missing renderer lineage`,
+      );
+    }
+    if (committedRendererLineageId !== rendererLineageId) {
+      throw rendererDriftError(
+        `capture uses ${rendererLineageId}, committed attempts use ${committedRendererLineageId}`,
+      );
+    }
+  }
+}
+
+function rendererDriftError(reason: string): Error {
+  return new Error(`VISUAL_CAPTURE_RENDERER_DRIFT: ${reason}`);
+}
+
 async function activeVisualRepairAction(
   run: RunManifest,
   artifactStore: ArtifactBlobStore,
@@ -6260,6 +6335,7 @@ async function visualLineageRecords(
         parsed.data.reviewPacketId !== sourcePacketId ||
         parsed.data.headSha !== sourcePacket.headSha ||
         artifact.metadata["headSha"] !== sourcePacket.headSha ||
+        parsed.data.rendererLineageId !== artifact.metadata["rendererLineageId"] ||
         parsed.data.attempt !== attempt
       ) {
         throw invalidVisualRepairEvidence("rich evidence does not match its lineage metadata");
@@ -6306,6 +6382,7 @@ async function visualLineageRecords(
       parsed.data.reviewPacketId !== sourcePacketId ||
       parsed.data.headSha !== sourcePacket.headSha ||
       artifact.metadata["headSha"] !== sourcePacket.headSha ||
+      parsed.data.rendererLineageId !== artifact.metadata["rendererLineageId"] ||
       parsed.data.attempt !== attempt
     ) {
       throw invalidVisualRepairEvidence("closed outcome does not match its lineage metadata");

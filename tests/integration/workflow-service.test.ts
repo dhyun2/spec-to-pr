@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { link, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -4898,21 +4898,39 @@ describe("WorkflowService", () => {
       `visual/actual/${visualAction.reviewPacketId}/checkout.json` as const;
     const featureReceiptBytes = Buffer.from(
       JSON.stringify({
+        schemaVersion: "visual-capture-receipt-v2",
         reviewPacketId: visualAction.reviewPacketId,
         headSha: featurePacket.headSha,
         targetId: "checkout-default",
-        route: "/checkout",
+        route: "http://127.0.0.1:4173/checkout",
         state: "default",
         captureKind: "viewport",
         logicalSize: { width: 1, height: 1 },
         deviceScaleFactor: 1,
-        playwrightVersion: "1.54.1",
-        browserName: "chromium",
-        browserVersion: "138.0.7204.168",
-        locale: "ko-KR",
-        colorScheme: "light",
-        timezone: "Asia/Seoul",
-        userAgent: "Mozilla/5.0 Chromium",
+        environment: {
+          browser: {
+            family: "chromium",
+            channel: "chromium",
+            version: "138.0.7204.168",
+            userAgent: "Mozilla/5.0 Chromium",
+          },
+          renderer: {
+            adapter: "spec-to-pr-playwright",
+            adapterVersion: "capture-runner-v2",
+            playwrightVersion: "1.61.1",
+          },
+          locale: "ko-KR",
+          timezone: "Asia/Seoul",
+          colorScheme: "light",
+          reducedMotion: "reduce",
+          serverOrigin: "http://127.0.0.1:4173",
+          readiness: {
+            documentReadyState: "complete",
+            fontsReady: true,
+            imagesReady: true,
+            assetsReady: true,
+          },
+        },
         fonts: [],
         fixture: {
           id: "mock:checkout",
@@ -4921,13 +4939,11 @@ describe("WorkflowService", () => {
             .digest("hex")}`,
         },
         assets: [],
-        assetsComplete: true,
         actual: {
           path: featureActualPath,
           digest: featureActualDigest,
           bitmapSize: { width: 1, height: 1 },
         },
-        runnerVersion: "capture-runner-v1",
         normalizerVersion: "visual-normalizer-v1",
         capturedAt: "2026-07-20T00:00:00.000Z",
       }),
@@ -5758,7 +5774,7 @@ describe("WorkflowService", () => {
     );
   });
 
-  it("repairs implementation across packets and blocks after three visual comparison failures", async () => {
+  it("repairs implementation across packets with capture receipt renderer lineage and blocks after three visual comparison failures", async () => {
     const baseline = new PNG({ width: 1, height: 1 });
     baseline.data.set([0, 0, 0, 255]);
     await writeFile(path.join(directory, "visual/diff.png"), PNG.sync.write(baseline));
@@ -6045,21 +6061,39 @@ describe("WorkflowService", () => {
         const receiptPath = `visual/actual/${action.reviewPacketId}/${name}-${suffix}.json`;
         const receiptBytes = Buffer.from(
           JSON.stringify({
+            schemaVersion: "visual-capture-receipt-v2",
             reviewPacketId: action.reviewPacketId,
             headSha: packetHeadSha,
             targetId,
-            route: "/checkout",
+            route: "http://127.0.0.1:4173/checkout",
             state: targetState,
             captureKind: "viewport",
             logicalSize: { width: 1, height: 1 },
             deviceScaleFactor: 1,
-            playwrightVersion: "1.54.1",
-            browserName: "chromium",
-            browserVersion: "138.0.7204.168",
-            locale: "ko-KR",
-            colorScheme: "light",
-            timezone: "Asia/Seoul",
-            userAgent: "Mozilla/5.0 Chromium",
+            environment: {
+              browser: {
+                family: "chromium",
+                channel: "chromium",
+                version: "138.0.7204.168",
+                userAgent: "Mozilla/5.0 Chromium",
+              },
+              renderer: {
+                adapter: "spec-to-pr-playwright",
+                adapterVersion: "capture-runner-v2",
+                playwrightVersion: "1.61.1",
+              },
+              locale: "ko-KR",
+              timezone: "Asia/Seoul",
+              colorScheme: "light",
+              reducedMotion: "reduce",
+              serverOrigin: "http://127.0.0.1:4173",
+              readiness: {
+                documentReadyState: "complete",
+                fontsReady: true,
+                imagesReady: true,
+                assetsReady: true,
+              },
+            },
             fonts: [],
             fixture: {
               id: fixtureId,
@@ -6068,13 +6102,11 @@ describe("WorkflowService", () => {
                 `sha256:${createHash("sha256").update(fixtureBytes).digest("hex")}`,
             },
             assets: [],
-            assetsComplete: true,
             actual: {
               path: actualPath,
               digest: actualDigest,
               bitmapSize: { width: 1, height: 1 },
             },
-            runnerVersion: "capture-runner-v1",
             normalizerVersion: "visual-normalizer-v1",
             capturedAt: "2026-07-20T00:00:00.000Z",
           }),
@@ -6117,6 +6149,36 @@ describe("WorkflowService", () => {
         ]),
       };
     };
+    const mutateReceiptAt = async (
+      submission: Awaited<ReturnType<typeof visualSubmission>>,
+      receiptIndex: number,
+      mutate: (receipt: Record<string, unknown>) => void,
+    ) => {
+      const capture = submission.captures[receiptIndex]!;
+      if (capture.receiptPath === undefined) throw new Error("Missing receipt path");
+      const receipt = JSON.parse(
+        await readFile(path.join(directory, capture.receiptPath), "utf8"),
+      ) as Record<string, unknown>;
+      mutate(receipt);
+      const receiptBytes = Buffer.from(JSON.stringify(receipt), "utf8");
+      await writeFile(path.join(directory, capture.receiptPath), receiptBytes);
+      return {
+        ...submission,
+        captures: submission.captures.map((candidate, index) =>
+          index === receiptIndex
+            ? {
+                ...candidate,
+                receiptDigest:
+                  `sha256:${createHash("sha256").update(receiptBytes).digest("hex")}` as const,
+              }
+            : candidate,
+        ),
+      };
+    };
+    const visualReservationCount = async () =>
+      (await store.get(started.runId)).artifacts.filter(
+        (artifact) => artifact.metadata["adapter"] === "visual-attempt-reservation-v3",
+      ).length;
 
     const appendVisualReservation = async (input: {
       submissionIdentity: string;
@@ -6198,6 +6260,124 @@ describe("WorkflowService", () => {
       status: "aborted",
     });
 
+    const invalidReceiptCases: Array<{
+      name: string;
+      mutate: (receipt: Record<string, unknown>) => void;
+    }> = [
+      {
+        name: "missing browser channel",
+        mutate: (receipt) => {
+          delete (
+            (receipt["environment"] as Record<string, unknown>)["browser"] as Record<
+              string,
+              unknown
+            >
+          )["channel"];
+        },
+      },
+      {
+        name: "missing reduced motion",
+        mutate: (receipt) => {
+          delete (receipt["environment"] as Record<string, unknown>)["reducedMotion"];
+        },
+      },
+      {
+        name: "wrong renderer adapter",
+        mutate: (receipt) => {
+          (
+            (receipt["environment"] as Record<string, unknown>)["renderer"] as Record<
+              string,
+              unknown
+            >
+          )["adapter"] = "custom-screenshotter";
+        },
+      },
+      {
+        name: "wrong server origin",
+        mutate: (receipt) => {
+          (receipt["environment"] as Record<string, unknown>)["serverOrigin"] =
+            "http://127.0.0.1:5173";
+        },
+      },
+      {
+        name: "wrong route",
+        mutate: (receipt) => {
+          receipt["route"] = "http://127.0.0.1:4173/wrong";
+        },
+      },
+      {
+        name: "incomplete document readiness",
+        mutate: (receipt) => {
+          (
+            (receipt["environment"] as Record<string, unknown>)["readiness"] as Record<
+              string,
+              unknown
+            >
+          )["documentReadyState"] = "interactive";
+        },
+      },
+      ...(["fontsReady", "imagesReady", "assetsReady"] as const).map((field) => ({
+        name: `${field} false`,
+        mutate: (receipt: Record<string, unknown>) => {
+          (
+            (receipt["environment"] as Record<string, unknown>)["readiness"] as Record<
+              string,
+              unknown
+            >
+          )[field] = false;
+        },
+      })),
+      {
+        name: "wrong actual PNG digest",
+        mutate: (receipt) => {
+          (receipt["actual"] as Record<string, unknown>)["digest"] = `sha256:${"9".repeat(64)}`;
+        },
+      },
+      {
+        name: "unexpected font digest",
+        mutate: (receipt) => {
+          receipt["fonts"] = [{ family: "Unbound Font", digest: `sha256:${"9".repeat(64)}` }];
+        },
+      },
+      {
+        name: "unexpected asset digest",
+        mutate: (receipt) => {
+          receipt["assets"] = [{ path: "assets/unbound.png", digest: `sha256:${"9".repeat(64)}` }];
+        },
+      },
+    ];
+    for (const invalidCase of invalidReceiptCases) {
+      const candidate = await visualSubmission(
+        compareAction,
+        implementationPacket.headSha,
+        `invalid-${invalidCase.name.replaceAll(" ", "-")}`,
+        [255, 255, 255, 255],
+      );
+      const invalid = await mutateReceiptAt(candidate, 0, invalidCase.mutate);
+      const reservationsBefore = await visualReservationCount();
+      await expect(
+        service.submit({ runId: started.runId, submission: invalid }),
+        invalidCase.name,
+      ).rejects.toThrow(/VISUAL_CAPTURE_PROVENANCE_INVALID/);
+      expect(await visualReservationCount(), invalidCase.name).toBe(reservationsBefore);
+    }
+    const mixedRendererSubmission = await visualSubmission(
+      compareAction,
+      implementationPacket.headSha,
+      "mixed-renderer",
+      [255, 255, 255, 255],
+    );
+    const mixedRenderer = await mutateReceiptAt(mixedRendererSubmission, 0, (receipt) => {
+      ((receipt["environment"] as Record<string, unknown>)["browser"] as Record<string, unknown>)[
+        "channel"
+      ] = "chrome";
+    });
+    const reservationsBeforeMixedRenderer = await visualReservationCount();
+    await expect(
+      service.submit({ runId: started.runId, submission: mixedRenderer }),
+    ).rejects.toThrow(/VISUAL_CAPTURE_RENDERER_DRIFT/);
+    expect(await visualReservationCount()).toBe(reservationsBeforeMixedRenderer);
+
     const invalidPng = await visualSubmission(
       compareAction,
       implementationPacket.headSha,
@@ -6224,10 +6404,7 @@ describe("WorkflowService", () => {
           attempt: artifact.metadata["visualComparisonAttempt"],
           status: artifact.metadata["reservationStatus"],
         })),
-    ).toEqual([
-      { attempt: 1, status: "in-progress" },
-      { attempt: 1, status: "aborted" },
-    ]);
+    ).toEqual([]);
     expect(
       (await service.status({ runId: started.runId })).nextActions.find(
         (action) => action.kind === "compare-visuals",
@@ -6248,15 +6425,11 @@ describe("WorkflowService", () => {
     const receiptlessReservations = beforeValidCapture.artifacts.filter(
       (artifact) => artifact.metadata["adapter"] === "visual-attempt-reservation-v3",
     );
-    expect(
-      receiptlessReservations.slice(-2).map((artifact) => ({
-        attempt: artifact.metadata["visualComparisonAttempt"],
-        status: artifact.metadata["reservationStatus"],
-      })),
-    ).toEqual([
-      { attempt: 1, status: "in-progress" },
-      { attempt: 1, status: "aborted" },
-    ]);
+    expect(receiptlessReservations).toEqual(
+      beforeInvalidPng.artifacts.filter(
+        (artifact) => artifact.metadata["adapter"] === "visual-attempt-reservation-v3",
+      ),
+    );
     const wrongFixtureReceipt = await visualSubmission(
       compareAction,
       implementationPacket.headSha,
@@ -6272,15 +6445,7 @@ describe("WorkflowService", () => {
     const wrongFixtureReservations = afterWrongFixture.artifacts.filter(
       (artifact) => artifact.metadata["adapter"] === "visual-attempt-reservation-v3",
     );
-    expect(
-      wrongFixtureReservations.slice(-2).map((artifact) => ({
-        attempt: artifact.metadata["visualComparisonAttempt"],
-        status: artifact.metadata["reservationStatus"],
-      })),
-    ).toEqual([
-      { attempt: 1, status: "in-progress" },
-      { attempt: 1, status: "aborted" },
-    ]);
+    expect(wrongFixtureReservations).toEqual(receiptlessReservations);
 
     const packetHeadFor = async (reviewPacketId: string) => {
       const current = await store.get(started.runId);
@@ -6437,6 +6602,7 @@ describe("WorkflowService", () => {
       lineageId: firstRepair.lineageId,
       reviewPacketId: firstRepair.reviewPacketId,
       headSha: implementationPacket.headSha,
+      rendererLineageId: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
       attempt: 1,
       failedTargets: [
         {
@@ -6447,10 +6613,10 @@ describe("WorkflowService", () => {
           captureSummary: {
             provider: "playwright",
             browser: "chromium 138.0.7204.168",
-            fontsReady: false,
+            fontsReady: true,
             assetsReady: true,
           },
-          causeHints: ["implementation", "acquisition"],
+          causeHints: ["implementation"],
         },
       ],
     });
@@ -6580,6 +6746,114 @@ describe("WorkflowService", () => {
       "attempt-2",
       [192, 192, 192, 255],
     );
+    const rendererDrifts: Array<{
+      name: string;
+      mutate: (receipt: Record<string, unknown>) => void;
+    }> = [
+      {
+        name: "browser family",
+        mutate: (receipt) => {
+          (
+            (receipt["environment"] as Record<string, unknown>)["browser"] as Record<
+              string,
+              unknown
+            >
+          )["family"] = "firefox";
+        },
+      },
+      {
+        name: "browser channel",
+        mutate: (receipt) => {
+          (
+            (receipt["environment"] as Record<string, unknown>)["browser"] as Record<
+              string,
+              unknown
+            >
+          )["channel"] = "chrome";
+        },
+      },
+      {
+        name: "browser version",
+        mutate: (receipt) => {
+          (
+            (receipt["environment"] as Record<string, unknown>)["browser"] as Record<
+              string,
+              unknown
+            >
+          )["version"] = "139.0.0.0";
+        },
+      },
+      {
+        name: "adapter version",
+        mutate: (receipt) => {
+          (
+            (receipt["environment"] as Record<string, unknown>)["renderer"] as Record<
+              string,
+              unknown
+            >
+          )["adapterVersion"] = "capture-runner-v3";
+        },
+      },
+      {
+        name: "Playwright version",
+        mutate: (receipt) => {
+          (
+            (receipt["environment"] as Record<string, unknown>)["renderer"] as Record<
+              string,
+              unknown
+            >
+          )["playwrightVersion"] = "1.62.0";
+        },
+      },
+      {
+        name: "locale",
+        mutate: (receipt) => {
+          (receipt["environment"] as Record<string, unknown>)["locale"] = "en-US";
+        },
+      },
+      {
+        name: "timezone",
+        mutate: (receipt) => {
+          (receipt["environment"] as Record<string, unknown>)["timezone"] = "UTC";
+        },
+      },
+      {
+        name: "color scheme",
+        mutate: (receipt) => {
+          (receipt["environment"] as Record<string, unknown>)["colorScheme"] = "dark";
+        },
+      },
+      {
+        name: "reduced motion",
+        mutate: (receipt) => {
+          (receipt["environment"] as Record<string, unknown>)["reducedMotion"] = "no-preference";
+        },
+      },
+      {
+        name: "server origin",
+        mutate: (receipt) => {
+          (receipt["environment"] as Record<string, unknown>)["serverOrigin"] =
+            "http://127.0.0.1:5173";
+          receipt["route"] = "http://127.0.0.1:5173/checkout";
+        },
+      },
+    ];
+    for (const drift of rendererDrifts) {
+      let drifted = await visualSubmission(
+        compareSecond,
+        await packetHeadFor(compareSecond.reviewPacketId),
+        `drift-${drift.name.replaceAll(" ", "-")}`,
+        [192, 192, 192, 255],
+      );
+      drifted = await mutateReceiptAt(drifted, 0, drift.mutate);
+      drifted = await mutateReceiptAt(drifted, 1, drift.mutate);
+      const reservationsBefore = await visualReservationCount();
+      await expect(
+        service.submit({ runId: started.runId, submission: drifted }),
+        drift.name,
+      ).rejects.toThrow(/VISUAL_CAPTURE_RENDERER_DRIFT/);
+      expect(await visualReservationCount(), drift.name).toBe(reservationsBefore);
+    }
     await expect(
       service.submit({
         runId: started.runId,
@@ -6672,6 +6946,7 @@ describe("WorkflowService", () => {
       reports.every(
         (artifact) =>
           artifact.metadata["visualLineageId"] === firstRepair?.lineageId &&
+          typeof artifact.metadata["rendererLineageId"] === "string" &&
           artifact.metadata["visualStatus"] === "failed",
       ),
     ).toBe(true);
@@ -6722,6 +6997,7 @@ describe("WorkflowService", () => {
       status: "failed",
       reviewPacketId: compareThird.reviewPacketId,
       visualLineageId: firstRepair?.lineageId,
+      rendererLineageId: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
       results: expect.arrayContaining([
         expect.objectContaining({
           targetId: "checkout-default",

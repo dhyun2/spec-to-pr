@@ -20,6 +20,7 @@ import {
   DeliveryProfileSchema,
   GuidanceTraceSchema,
   ImplementationReviewPacketSchema,
+  VisualLineageOutcomeV2Schema,
   VisualRepairEvidenceV2Schema,
   WorkflowActionSchema,
   WorkflowBlockerSchema,
@@ -67,6 +68,7 @@ describe("workflow v2 contracts", () => {
       lineageId: `packet_${"b".repeat(64)}`,
       reviewPacketId: `packet_${"c".repeat(64)}`,
       headSha: "d".repeat(40),
+      rendererLineageId: `sha256:${"e".repeat(64)}`,
       attempt: 1,
       generatedAt: "2026-07-28T00:00:00.000Z",
       failedTargets: [
@@ -111,6 +113,22 @@ describe("workflow v2 contracts", () => {
     });
     const { headSha: _headSha, ...unbound } = evidence;
     expect(VisualRepairEvidenceV2Schema.safeParse(unbound).success).toBe(false);
+  });
+
+  it("binds closed visual lineage outcomes to the committed renderer lineage", () => {
+    const outcome = {
+      schemaVersion: "visual-repair-lineage-v2",
+      runId: `run_${"a".repeat(32)}`,
+      lineageId: `packet_${"b".repeat(64)}`,
+      reviewPacketId: `packet_${"c".repeat(64)}`,
+      headSha: "d".repeat(40),
+      rendererLineageId: `sha256:${"e".repeat(64)}`,
+      attempt: 1,
+      generatedAt: "2026-07-28T00:00:00.000Z",
+      status: "closed",
+    } as const;
+
+    expect(VisualLineageOutcomeV2Schema.parse(outcome)).toEqual(outcome);
   });
 
   it("defines the bounded strict workflow blocker contract", () => {

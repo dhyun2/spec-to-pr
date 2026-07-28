@@ -11,6 +11,15 @@ export const DEFAULT_VISUAL_PIXEL_TOLERANCE = 0.02;
 export const MAX_VISUAL_MASK_AREA_RATIO = VISUAL_POLICY.maxMaskedAreaRatio;
 export const MAX_VISUAL_REPAIR_ATTEMPTS = VISUAL_POLICY.maxComparisonAttempts;
 
+export const VisualRendererLineageBindingSchema = z
+  .object({
+    visualLineageId: z
+      .string()
+      .regex(/^packet_[a-f0-9]{64}$/, "Expected packet_<64 lowercase hex characters>"),
+    rendererLineageId: Sha256DigestSchema,
+  })
+  .strict();
+
 export const VisualMaskSchema = z
   .object({
     x: z.number().int().nonnegative(),
@@ -55,9 +64,7 @@ export const VisualTargetManifestCompatibilitySchema = VisualTargetManifestCoreS
 }).strict();
 
 export const VisualTargetManifestSchema = VisualTargetManifestCoreSchema.extend({
-  reviewThreshold: z
-    .literal(VISUAL_POLICY.reviewThreshold)
-    .default(VISUAL_POLICY.reviewThreshold),
+  reviewThreshold: z.literal(VISUAL_POLICY.reviewThreshold).default(VISUAL_POLICY.reviewThreshold),
 }).strict();
 
 export const VisualCaptureSchema = z
