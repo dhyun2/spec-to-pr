@@ -76,7 +76,7 @@ Implement checkout end to end. Run only the checkout test path, tag, or project 
 1. **Intake:** Normalize every source and feature boundary; report workload/token estimates and `requiredValidations`.
 2. **Contracts:** Freeze `sourceProvenance`, requirements, API operations, and Figma `visualTargets`.
 3. **API-ready:** Submit distinct non-empty type/schema/wrapper/mock files plus a passing contract-test JSON under one `implementationContextId`.
-4. **UI / visual / performance:** Connect UI/API, make `apiCoverage` exactly match all intake operations, and record Web Vitals. Every actual capture repeats the target route/state/viewport/device scale/fixture and records provider, ISO capture time, PNG path, and `sha256:` digest. Runtime rejects target drift or digest mismatch before Figma/result `compare-visuals`, which requires at least 98%, at most 20% justified masking, and three total comparison attempts (the initial comparison plus at most two repairs).
+4. **UI / visual / performance:** Connect UI/API, make `apiCoverage` exactly match all intake operations, and record Web Vitals. Every actual capture repeats the target route/state/viewport/device scale/fixture and records provider, ISO capture time, PNG path, and `sha256:` digest. Runtime rejects target drift or digest mismatch without consuming an attempt before Figma/result `compare-visuals`, which requires the fixed 92%, at most 20% justified masking, and automatically runs the initial comparison plus at most two repairs. A third valid failure remains blocked with failed media; focused UI assertions remain independent.
 5. **Independent reviews:** Functional and design reviewers separately judge frozen contracts, diff, and evidence.
 6. **Targeted feature proof:** Run one Playwright invocation selecting the changed feature and record strict JSON plus one valid video.
 7. **Report / publish:** Put source/API/visual/performance/E2E/video in packet-bound 15-section `pr-report-v2.1` and publish the draft.
@@ -120,7 +120,7 @@ After recovery, resume the **same Run** and repeat only the failed required proo
 | --------------- | ------------------------------------------------- | ----------------------------------------------------------------------------------- |
 | API-ready       | `evidence/api/api-ready.json`                     | Four physical artifact roles, passing contract test, same `implementationContextId` |
 | Figma           | `evidence/figma/figma-bundle.json`                | If URL supplied: real connected-host bundle and actual PNGs                         |
-| Visual fidelity | `evidence/visual/checkout-report.json`            | Figma/result ratio ≥ 98%, baseline/target/diff/overlay                              |
+| Visual fidelity | `evidence/visual/checkout-report.json`            | Figma/result ratio ≥ 92%, baseline/target/diff/overlay                              |
 | API gap         | `evidence/api/coverage.json`                      | Operation-level production/mock/test mapping                                        |
 | Web Vitals      | `evidence/performance/checkout.json`              | Lab budget and field source or unavailable reason                                   |
 | Reviews         | `evidence/reviews/functional.json`, `design.json` | Both independent verdicts approved                                                  |

@@ -76,7 +76,7 @@ publication: draft
 1. **접수:** 모든 입력 자료와 기능 경계를 정리하고 예상 작업량·토큰 범위와 `requiredValidations`를 보여 줍니다.
 2. **계약 확정:** `sourceProvenance`, 요구사항, API 작업, Figma `visualTargets`를 고정합니다.
 3. **API 준비:** 서로 다른 실제 타입·스키마·호출 모듈·모의 응답 파일과 통과한 계약 테스트 JSON을 하나의 `implementationContextId`로 먼저 제출합니다.
-4. **UI·화면 비교·성능 측정:** 같은 맥락 ID에서 UI와 실제 API를 연결하고, 접수 단계의 전체 API 작업과 정확히 일치하는 `apiCoverage`, Web Vitals, Figma/결과 `compare-visuals`를 만듭니다. 각 결과 화면에는 기준과 같은 경로·상태·화면 크기·기기 배율·테스트 데이터, 자료 제공자, ISO 형식의 촬영 시각, PNG 경로, `sha256:` 해시를 기록합니다. 실행 엔진은 비교 조건이나 해시가 달라지면 거부합니다. 기준은 일치율 98% 이상, 마스킹 영역 20% 이하이며, 최초 비교 1회와 보정 후 최대 2회를 합쳐 모두 3번까지 비교할 수 있습니다.
+4. **UI·화면 비교·성능 측정:** 같은 맥락 ID에서 UI와 실제 API를 연결하고, 접수 단계의 전체 API 작업과 정확히 일치하는 `apiCoverage`, Web Vitals, Figma/결과 `compare-visuals`를 만듭니다. 각 결과 화면에는 기준과 같은 경로·상태·화면 크기·기기 배율·테스트 데이터, 자료 제공자, ISO 형식의 촬영 시각, PNG 경로, `sha256:` 해시를 기록합니다. 실행 엔진은 비교 조건이나 해시가 달라지면 시도 횟수를 소비하지 않고 거부합니다. 고정 기준은 일치율 92% 이상, 마스킹 영역 20% 이하입니다. 최초 비교와 보정 후 최대 2회를 자동으로 수행하며, 세 번째 유효 실패는 실패 이미지를 보존한 진단 초안과 함께 실행을 차단합니다. 집중 UI 검증은 전체 점수와 독립적입니다.
 5. **독립 검토:** `functional-reviewer`와 `design-reviewer`가 고정된 계약, 코드 차이, 검증 자료를 각각 판정합니다.
 6. **기능 검증:** 변경 기능을 선택하는 Playwright 명령 하나만 실행하고 엄격한 JSON 결과와 유효한 영상 하나를 기록합니다.
 7. **보고서 및 발행:** 검토 묶음에 연결된 `pr-report-v2.1` 15개 섹션에 입력 자료, API, 화면, 성능, E2E, 영상을 담아 초안 PR을 발행합니다.
@@ -125,7 +125,7 @@ publication: draft
 | ---------------- | ------------------------------------------------- | ------------------------------------------------------------------------------ |
 | API 준비         | `evidence/api/api-ready.json`                     | 서로 다른 실제 파일 4종, 통과한 계약 테스트, 같은 `implementationContextId`    |
 | Figma            | `evidence/figma/figma-bundle.json`                | URL을 제공했다면 연결된 호스트의 실제 자료 묶음과 PNG                          |
-| 화면 일치        | `evidence/visual/checkout-report.json`            | 검토 일치율 98% 이상, 기준·결과·차이·겹침 이미지                               |
+| 화면 일치        | `evidence/visual/checkout-report.json`            | 검토 일치율 92% 이상, 기준·결과·차이·겹침 이미지                               |
 | API 현황         | `evidence/api/coverage.json`                      | API 작업별 실제 호출·모의 응답·테스트 연결                                     |
 | Web Vitals       | `evidence/performance/checkout.json`              | 실험실 기준과 현장 자료 또는 수집하지 못한 이유                                |
 | 기능·디자인 검토 | `evidence/reviews/functional.json`, `design.json` | 두 독립 판정이 모두 승인됨                                                     |

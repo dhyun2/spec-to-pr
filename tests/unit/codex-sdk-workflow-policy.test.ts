@@ -812,7 +812,7 @@ describe("Codex SDK workflow policy", () => {
     expect(prompt).toContain("figma-bundle");
     expect(prompt).toContain("before contracts");
     expect(prompt).toContain("deterministic mock data");
-    expect(prompt).toContain("98%");
+    expect(prompt).toContain("92%");
     expect(prompt).toContain("compare-visuals");
   });
 

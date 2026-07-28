@@ -272,7 +272,7 @@ describe("v2 documentation", () => {
       ]) {
         expect(contents, `${locale}:${component}`).toContain(component);
       }
-      for (const fact of ["pngjs", "RGBA", "0.02", "98%", "20%"]) {
+      for (const fact of ["pngjs", "RGBA", "0.02", "92%", "20%"]) {
         expect(contents, `${locale}:${fact}`).toContain(fact);
       }
       expect(contents, `${locale}:functional reviewer`).toMatch(
@@ -282,7 +282,9 @@ describe("v2 documentation", () => {
         locale === "ko" ? /`design-reviewer`|디자인 검토자/ : /design reviewer/,
       );
       expect(contents, `${locale}:three comparisons`).toMatch(
-        locale === "ko" ? /(?:비교 총 3회|모두 (?:3|세) ?(?:회|번))/ : /three total comparisons/,
+        locale === "ko"
+          ? /(?:비교 총 3회|모두 (?:3|세) ?(?:회|번)|유효한 수치 비교 세 번)/
+          : /three (?:total|valid numeric) comparisons/i,
       );
       expect(contents, `${locale}:immutable packet`).toMatch(
         locale === "ko" ? /변경할 수 없는 (?:동일한|하나의) 검토 묶음/ : /immutable packet/,
@@ -342,7 +344,7 @@ describe("v2 documentation", () => {
     expect(Number.isNaN(Date.parse(metrics.capturedAt))).toBe(false);
     expect(metrics.status).toBe("passed");
     expect(metrics.attempt).toBe(1);
-    expect(metrics.metrics.reviewMatchRatio).toBeGreaterThanOrEqual(0.98);
+    expect(metrics.metrics.reviewMatchRatio).toBeGreaterThanOrEqual(0.92);
     expect(metrics.metrics.pixelTolerance).toBe(0.02);
     for (const [name, file] of Object.entries(metrics.files)) {
       expect(file.path).toBe(`${name}.png`);
@@ -441,16 +443,24 @@ describe("v2 documentation", () => {
         expect(guide).toContain("spec-to-pr/evidence");
         if (locale === "ko") {
           expect(guide, `${locale}:${caseName}:initial visual comparison`).toMatch(
-            /최초 (?:비교 )?1회/,
+            /최초 비교(?: 1회)?/,
           );
-          expect(guide, `${locale}:${caseName}:visual repair limit`).toMatch(/보정 후 최대 2회/);
-          expect(guide, `${locale}:${caseName}:visual comparison total`).toMatch(
-            /(?:합쳐 )?모두 3(?:회|번)/,
+          expect(guide, `${locale}:${caseName}:visual repair limit`).toMatch(
+            /보정 후 최대 2회|첫 두 유효 실패/,
           );
+          expect(guide, `${locale}:${caseName}:visual comparison total`).toMatch(/세 번째 유효/);
+          expect(guide, `${locale}:${caseName}:automatic visual loop`).toContain("자동");
         } else {
-          expect(guide, `${locale}:${caseName}:visual comparison total`).toMatch(
-            /three total comparison attempts \(the initial comparison plus at most two repairs\)|three attempts in total: the initial comparison and up to two repairs/,
+          expect(guide, `${locale}:${caseName}:initial visual comparison`).toMatch(
+            /initial comparison/i,
           );
+          expect(guide, `${locale}:${caseName}:visual repair limit`).toMatch(
+            /(?:at most|up to) two repairs|first two valid failures/i,
+          );
+          expect(guide, `${locale}:${caseName}:visual comparison total`).toMatch(
+            /third valid failure/i,
+          );
+          expect(guide, `${locale}:${caseName}:automatic visual loop`).toMatch(/automatic/i);
         }
         for (const stage of [
           "intake",
@@ -577,7 +587,7 @@ describe("v2 documentation", () => {
       );
       expect(guides.figma).toMatch(locale === "ko" ? /모의 데이터/ : /mock/);
       expect(guides.figma).toContain("sha256");
-      expect(guides.figma).toContain("98%");
+      expect(guides.figma).toContain("92%");
       for (const caseName of cases) {
         expect(guides[caseName]).toContain("pr-report-v2.1");
         expect(guides[caseName]).toContain("15");
@@ -747,7 +757,7 @@ describe("v2 documentation", () => {
     expect(contents).toContain("legacyInventory");
     expect(contents).toContain("apiCoverage");
     expect(contents).toContain("pr-report-v2");
-    expect(contents).toContain("98%");
+    expect(contents).toContain("92%");
   });
 
   it("synchronizes the eight public skills, blocked diagnostics, and release labels", () => {

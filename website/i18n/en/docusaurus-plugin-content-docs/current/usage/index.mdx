@@ -34,7 +34,7 @@ Mode chooses the delivery and required evidence; sources compose independently. 
 
 ## The promise shared by every case
 
-Exactly one implementation writer owns implementation. The functional reviewer and, for UI, the design reviewer independently inspect an immutable packet. Visual verification decodes RGBA pixels with `pngjs`, compares them in linear color space with tolerance `0.02`, requires a `98%` review ratio, limits masks to `20%`, and permits three total comparisons.
+Exactly one implementation writer owns implementation. The functional reviewer and, for UI, the design reviewer independently inspect an immutable packet. Visual verification decodes RGBA pixels with `pngjs`, compares them in linear color space with tolerance `0.02`, requires the fixed `92%` review ratio, limits masks to `20%`, and runs three valid comparisons automatically. Invalid acquisition consumes no attempt; a third valid failure remains blocked with failed media, and focused UI assertions remain independent gates.
 
 <NextStep
   eyebrow="Recommended first path"

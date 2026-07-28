@@ -75,7 +75,7 @@ Create API contract evidence first, then implement the UI in the same implementa
 1. **Intake:** Normalize paths and publication intent; report workload, token range, and confidence.
 2. **Contracts:** Freeze raw-digest `sourceProvenance`, acceptance criteria, API operations, and Figma `visualTargets`.
 3. **Implementation:** Produce API types/schema/wrapper/mock/contract tests first, connect UI in the same `implementationContextId`, and map operation-complete `apiCoverage`.
-4. **Visual / performance:** Every actual capture repeats the target route/state/viewport/device scale/fixture and records provider, ISO capture time, PNG path, and `sha256:` digest. Runtime rejects target drift or digest mismatch before `compare-visuals` computes exact/review ratios, diff, and overlay. It enforces at least 98%, no more than 20% justified masking, and three total comparison attempts (the initial comparison plus at most two repairs). Record lab metrics and field Web Vitals or an unavailable reason.
+4. **Visual / performance:** Every actual capture repeats the target route/state/viewport/device scale/fixture and records provider, ISO capture time, PNG path, and `sha256:` digest. Runtime rejects target drift or digest mismatch without consuming an attempt before `compare-visuals` computes exact/review ratios, diff, and overlay. It enforces the fixed 92%, no more than 20% justified masking, and automatically runs the initial comparison plus at most two repairs. A third valid failure remains blocked with failed media; focused UI assertions remain independent. Record lab metrics and field Web Vitals or an unavailable reason.
 5. **Independent reviews:** `functional-reviewer` and `design-reviewer` judge the same immutable packet independently.
 6. **Report / publish:** Create packet-bound `pr-report-v2.1` JSON and Markdown with 15 sections, then publish the draft.
 
@@ -123,7 +123,7 @@ The paths below are an **Illustrative expectation**.
 | API-ready           | `evidence/api/contract-test.json`                            | When API applies: passed status, physical artifacts, same `implementationContextId` |
 | Focused checks      | `evidence/tests/focused-checks.json`                         | Applicable commands pass and are not skipped or empty                               |
 | Figma               | `evidence/figma/figma-bundle.json`                           | When a URL exists: connected-host provenance and actual PNGs                        |
-| Visual comparison   | `evidence/visual/checkout-report.json`                       | Figma/result ratios ≥ 98%, with baseline/target/diff/overlay                        |
+| Visual comparison   | `evidence/visual/checkout-report.json`                       | Figma/result ratios ≥ 92%, with baseline/target/diff/overlay                        |
 | API gap             | `evidence/api/coverage.json`                                 | Every operation maps to production/mock/test evidence or an explicit blocker        |
 | Web Vitals          | `evidence/performance/checkout.json`                         | Lab budgets plus field source or unavailable reason                                 |
 | Reviews             | `evidence/reviews/functional.json`, and `design.json` for UI | Independent verdicts are approved                                                   |
