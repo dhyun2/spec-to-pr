@@ -1059,6 +1059,21 @@ describe("v2 documentation", () => {
     }
   });
 
+  it("requires blocked publication to preserve the complete visual report template", () => {
+    const publish = readFileSync(path.join(root, "skills", "publish", "SKILL.md"), "utf8");
+
+    for (const marker of [
+      "same 15-section template",
+      "equal-size baseline/current",
+      "diff",
+      "overlay",
+      "partial media synchronization",
+      "blocked",
+    ]) {
+      expect(publish, `publish:${marker}`).toContain(marker);
+    }
+  });
+
   it("documents composable sources, guidance precedence, and the zero-to-100 feature recipe", () => {
     const readmes = ["README.md", "README.ko.md", "packages/codex-sdk/README.md"].map((file) =>
       readFileSync(path.join(root, file), "utf8"),
