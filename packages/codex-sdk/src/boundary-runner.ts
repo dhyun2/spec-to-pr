@@ -145,7 +145,9 @@ export async function executeBudgetedBoundaryTurns(input: {
       input.blockedDiagnosticTokenReserve <= 0 ||
       input.blockedDiagnosticTokenReserve >= input.hardLimitTokens)
   ) {
-    throw new Error("blockedDiagnosticTokenReserve must be a positive integer below hardLimitTokens");
+    throw new Error(
+      "blockedDiagnosticTokenReserve must be a positive integer below hardLimitTokens",
+    );
   }
 
   let thread =
@@ -215,11 +217,15 @@ export async function executeBudgetedBoundaryTurns(input: {
     }
     if (workflowStatus.status === "blocked") {
       state = "blocked";
+      const blockedDiagnosticReserveRemaining =
+        !blockedDiagnosticReserveLatched ||
+        usage.totalTokens <= activeHardLimitTokens - (input.blockedDiagnosticTokenReserve ?? 0);
       if (
         !blockedFinalizationAttempted &&
         canAttemptBlockedDiagnosticFinalization(workflowStatus) &&
         usage.availability === "complete" &&
         usage.totalTokens < activeHardLimitTokens &&
+        blockedDiagnosticReserveRemaining &&
         turnCount < input.maxTurns
       ) {
         const preflight = await inspectBlockedDiagnosticPreflight(

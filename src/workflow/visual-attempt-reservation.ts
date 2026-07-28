@@ -56,14 +56,16 @@ export function reduceVisualReservations(
   const collapsed = [...byIdentity.values()];
   const committed: VisualAttemptReservation[] = [];
   for (const attempt of [1, 2, 3] as const) {
-    const candidate = latest(
-      collapsed.filter(
-        ({ reservation }) =>
-          reservation.status === "committed" &&
-          reservation.attempt === attempt &&
-          hasCompleteReport(reservation),
-      ),
+    const candidates = collapsed.filter(
+      ({ reservation }) =>
+        reservation.status === "committed" &&
+        reservation.attempt === attempt &&
+        hasCompleteReport(reservation),
     );
+    if (candidates.length > 1) {
+      throw new Error(`Duplicate committed visual attempt ${String(attempt)}`);
+    }
+    const candidate = candidates[0];
     if (candidate === undefined) break;
     committed.push(candidate.reservation);
   }

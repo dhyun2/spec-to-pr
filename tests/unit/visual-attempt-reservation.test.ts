@@ -128,22 +128,21 @@ describe("visual attempt reservations", () => {
     });
   });
 
-  it("counts a concurrently duplicated attempt number once", () => {
-    const summary = reduceVisualReservations(
-      [
-        committed(1),
-        committed(1, {
-          submissionIdentity: "submission-concurrent",
-          ownerToken: "owner-concurrent",
-          reportArtifactId: "artifact-concurrent",
-          reportDigest: `sha256:${"a".repeat(64)}`,
-        }),
-      ],
-      now,
-    );
-
-    expect(summary.committed).toHaveLength(1);
-    expect(nextCommittedVisualAttempt(summary)).toBe(2);
+  it("rejects multiple committed submission identities for one attempt", () => {
+    expect(() =>
+      reduceVisualReservations(
+        [
+          committed(1),
+          committed(1, {
+            submissionIdentity: "submission-concurrent",
+            ownerToken: "owner-concurrent",
+            reportArtifactId: "artifact-concurrent",
+            reportDigest: `sha256:${"a".repeat(64)}`,
+          }),
+        ],
+        now,
+      ),
+    ).toThrow(/duplicate committed visual attempt 1/i);
   });
 
   it("requires committed attempt numbers to be contiguous", () => {

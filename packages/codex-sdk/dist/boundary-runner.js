@@ -69,10 +69,13 @@ export async function executeBudgetedBoundaryTurns(input) {
         }
         if (workflowStatus.status === "blocked") {
             state = "blocked";
+            const blockedDiagnosticReserveRemaining = !blockedDiagnosticReserveLatched ||
+                usage.totalTokens <= activeHardLimitTokens - (input.blockedDiagnosticTokenReserve ?? 0);
             if (!blockedFinalizationAttempted &&
                 canAttemptBlockedDiagnosticFinalization(workflowStatus) &&
                 usage.availability === "complete" &&
                 usage.totalTokens < activeHardLimitTokens &&
+                blockedDiagnosticReserveRemaining &&
                 turnCount < input.maxTurns) {
                 const preflight = await inspectBlockedDiagnosticPreflight(input.inspectBlockedDiagnosticPreflight);
                 if (preflight.eligible) {

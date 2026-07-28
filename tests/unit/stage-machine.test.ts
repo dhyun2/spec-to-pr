@@ -361,10 +361,24 @@ describe("stage machine", () => {
         ].includes(stage.name)
           ? {
               ...stage,
-              status: "passed" as const,
+              status: stage.name === "implementation" ? ("passed" as const) : ("running" as const),
+              attempt: 2,
               startedAt: "2026-06-23T00:00:10.000Z",
               completedAt: "2026-06-23T00:00:15.000Z",
-              artifactIds: [],
+              lease:
+                stage.name === "implementation"
+                  ? undefined
+                  : {
+                      id: "lease_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                      workerId: "stale-worker",
+                      acquiredAt: "2026-06-23T00:00:10.000Z",
+                      heartbeatAt: "2026-06-23T00:00:12.000Z",
+                      expiresAt: "2026-06-23T00:00:30.000Z",
+                    },
+              artifactIds:
+                stage.name === "implementation" ? [] : ["art_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+              gapIds:
+                stage.name === "implementation" ? [] : ["gap_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
               checkpoint:
                 stage.name === "implementation"
                   ? {
@@ -376,6 +390,14 @@ describe("stage machine", () => {
                       name: `${stage.name}-complete`,
                       data: { stale: true },
                       updatedAt: "2026-06-23T00:00:15.000Z",
+                    },
+              error:
+                stage.name === "implementation"
+                  ? undefined
+                  : {
+                      code: "STALE_DOWNSTREAM_STATE",
+                      message: "This downstream state must be invalidated.",
+                      retryable: true,
                     },
             }
           : stage,
@@ -426,14 +448,18 @@ describe("stage machine", () => {
       },
     });
     for (const name of ["functional-review", "design-review", "report", "publish", "archive"]) {
-      expect(terminal.stages.find((stage) => stage.name === name)).toMatchObject({
+      const invalidated = terminal.stages.find((stage) => stage.name === name);
+      expect(invalidated).toMatchObject({
         status: "pending",
         attempt: 0,
         artifactIds: [],
         gapIds: [],
       });
-      expect(terminal.stages.find((stage) => stage.name === name)?.checkpoint).toBeUndefined();
-      expect(terminal.stages.find((stage) => stage.name === name)?.error).toBeUndefined();
+      expect(invalidated?.startedAt).toBeUndefined();
+      expect(invalidated?.completedAt).toBeUndefined();
+      expect(invalidated?.lease).toBeUndefined();
+      expect(invalidated?.checkpoint).toBeUndefined();
+      expect(invalidated?.error).toBeUndefined();
     }
   });
 });

@@ -696,6 +696,49 @@ describe("Codex SDK workload budget", () => {
     expect(prompts[1]).toContain('intent: "blocked-diagnostic"');
   });
 
+  it("does not launch blocked finalization when the first blocked turn already consumed the reserve", async () => {
+    let calls = 0;
+    const client = {
+      startThread: () => ({
+        id: "thread-1",
+        run: async () => {
+          calls += 1;
+          return turnResult(
+            40_000,
+            workflowStatus("blocked", undefined, {
+              hardLimitTokens: 48_000,
+              publication: "draft",
+              blockerKind: "verification",
+            }),
+          );
+        },
+      }),
+      resumeThread: () => {
+        throw new Error("not expected");
+      },
+    };
+
+    const result = await executeBudgetedBoundaryTurns({
+      client,
+      initialPrompt: "implement",
+      hardLimitTokens: 48_000,
+      workloadSize: "M",
+      requiredValidations: ["functional"],
+      maxTurns: 2,
+      blockedDiagnosticTokenReserve: 24_000,
+      inspectBlockedDiagnosticPreflight: () => ({
+        eligible: true,
+        sourceBranch: "codex/checkout",
+        targetBranch: "main",
+        remoteName: "origin",
+      }),
+    });
+
+    expect(result.state).toBe("blocked");
+    expect(result.turnCount).toBe(1);
+    expect(calls).toBe(1);
+  });
+
   it("does not let nonterminal draft work consume its reserved finalization turn", async () => {
     let calls = 0;
     const client = {
