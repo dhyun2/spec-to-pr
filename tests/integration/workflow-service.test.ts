@@ -3184,19 +3184,67 @@ describe("WorkflowService", () => {
         }),
       );
 
-      const started = await service.start({
-        projectRoot: directory,
-        legacyProjectRoot: legacyRoot,
-        requestText: "Migrate the bounded legacy feature inventory",
-        mode: "legacy",
-        changeKind: "migration",
-        publication: "none",
-      });
+      const readContent = vi.spyOn(artifactStore, "readContent");
+      const started = await service.start(
+        {
+          projectRoot: directory,
+          legacyProjectRoot: legacyRoot,
+          requestText: "Migrate the bounded legacy feature inventory",
+          mode: "legacy",
+          changeKind: "migration",
+          publication: "none",
+        },
+        "action",
+      );
       const originalRun = await store.get(started.runId);
       const inventoryArtifact = originalRun.artifacts.find(
         (artifact) => artifact.kind === "legacy-feature-inventory",
       );
       if (inventoryArtifact === undefined) throw new Error("Missing legacy inventory artifact");
+      expect(started.view).toBe("action");
+      expect(started).not.toHaveProperty("legacyInventory");
+      expect(readContent.mock.calls.some(([digest]) => digest === inventoryArtifact.digest)).toBe(
+        false,
+      );
+
+      readContent.mockClear();
+      const advanced = await service.advance({ runId: started.runId }, "action");
+      expect(advanced.view).toBe("action");
+      expect(readContent.mock.calls.some(([digest]) => digest === inventoryArtifact.digest)).toBe(
+        false,
+      );
+
+      readContent.mockClear();
+      const submitted = await service.submit(
+        {
+          runId: started.runId,
+          submission: {
+            kind: "contracts",
+            status: "blocked",
+            summary: "Approval is required before migration.",
+            blocker: {
+              stage: "contracts",
+              code: "MISSING_APPROVAL",
+              kind: "missing-input",
+              summary: "Approval is required before migration.",
+              retryable: false,
+              resumable: true,
+              completedWork: ["Legacy intake passed."],
+              evidencePaths: [],
+              attemptedRecovery: [],
+              unrunValidations: ["functional"],
+              exactUnblockAction: "Provide migration approval.",
+            },
+          },
+        },
+        "action",
+      );
+      expect(submitted.view).toBe("action");
+      expect(readContent.mock.calls.some(([digest]) => digest === inventoryArtifact.digest)).toBe(
+        false,
+      );
+
+      const runAfterMutations = await store.get(started.runId);
       const template = originalRun.artifacts[0]!;
       const appendedArtifacts = Array.from({ length: 20 }, (_, index) =>
         ArtifactRefSchema.parse({
@@ -3214,14 +3262,14 @@ describe("WorkflowService", () => {
       );
       await store.save(
         {
-          ...originalRun,
-          revision: originalRun.revision + 1,
-          artifacts: [...originalRun.artifacts, ...appendedArtifacts],
+          ...runAfterMutations,
+          revision: runAfterMutations.revision + 1,
+          artifacts: [...runAfterMutations.artifacts, ...appendedArtifacts],
         },
-        originalRun.revision,
+        runAfterMutations.revision,
       );
 
-      const readContent = vi.spyOn(artifactStore, "readContent");
+      readContent.mockClear();
       const action = await service.status({ runId: started.runId, view: "action" });
       expect(action).toMatchObject({
         view: "action",

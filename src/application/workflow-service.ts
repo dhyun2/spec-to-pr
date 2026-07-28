@@ -532,6 +532,9 @@ type PreparedVisualEvidence = {
   label: string;
 };
 
+type MutatingStatusView = "action" | "detail";
+type MutatingWorkflowStatus = WorkflowActionStatus | WorkflowDetailStatus;
+
 export class WorkflowService {
   private readonly now: () => string;
   private readonly externalLeaseTtlMs: number;
@@ -567,22 +570,33 @@ export class WorkflowService {
     return measured();
   }
 
-  public async start(rawInput: unknown): Promise<WorkflowDetailStatus> {
+  public async start(rawInput: unknown): Promise<WorkflowDetailStatus>;
+  public async start(rawInput: unknown, view: "action"): Promise<WorkflowActionStatus>;
+  public async start(rawInput: unknown, view: "detail"): Promise<WorkflowDetailStatus>;
+  public async start(
+    rawInput: unknown,
+    view: MutatingStatusView = "detail",
+  ): Promise<MutatingWorkflowStatus> {
     if (this.metrics instanceof RuntimeMetricsRecorder) {
       const recorder = this.metrics;
       const pending = recorder.beginRun();
       return recorder.withPendingRun(pending, async () => {
         const status = await this.measureWorkflowAction(rawInput, "start", () =>
-          this.startUninstrumented(rawInput),
+          this.startUninstrumented(rawInput, view),
         );
         recorder.bindPendingRun(pending, status.runId);
         return status;
       });
     }
-    return this.measureWorkflowAction(rawInput, "start", () => this.startUninstrumented(rawInput));
+    return this.measureWorkflowAction(rawInput, "start", () =>
+      this.startUninstrumented(rawInput, view),
+    );
   }
 
-  private async startUninstrumented(rawInput: unknown): Promise<WorkflowDetailStatus> {
+  private async startUninstrumented(
+    rawInput: unknown,
+    view: MutatingStatusView,
+  ): Promise<MutatingWorkflowStatus> {
     const input = WorkflowStartInputSchema.parse(rawInput);
     const workspaceBinding =
       input.workspace === undefined
@@ -840,7 +854,7 @@ export class WorkflowService {
           },
         },
       });
-      return this.status({ runId: created.id, view: "detail" });
+      return this.mutatingStatus(created.id, view);
     }
 
     await this.dependencies.stageService.complete({
@@ -864,7 +878,7 @@ export class WorkflowService {
       },
     });
 
-    return this.status({ runId: created.id, view: "detail" });
+    return this.mutatingStatus(created.id, view);
   }
 
   private async recordLegacyInventory(
@@ -927,13 +941,22 @@ export class WorkflowService {
     return { artifact, inventory };
   }
 
-  public async advance(rawInput: unknown): Promise<WorkflowDetailStatus> {
+  public async advance(rawInput: unknown): Promise<WorkflowDetailStatus>;
+  public async advance(rawInput: unknown, view: "action"): Promise<WorkflowActionStatus>;
+  public async advance(rawInput: unknown, view: "detail"): Promise<WorkflowDetailStatus>;
+  public async advance(
+    rawInput: unknown,
+    view: MutatingStatusView = "detail",
+  ): Promise<MutatingWorkflowStatus> {
     return this.measureWorkflowAction(rawInput, "advance", () =>
-      this.advanceUninstrumented(rawInput),
+      this.advanceUninstrumented(rawInput, view),
     );
   }
 
-  private async advanceUninstrumented(rawInput: unknown): Promise<WorkflowDetailStatus> {
+  private async advanceUninstrumented(
+    rawInput: unknown,
+    view: MutatingStatusView,
+  ): Promise<MutatingWorkflowStatus> {
     const input = WorkflowAdvanceInputSchema.parse(rawInput);
 
     for (let step = 0; step < 8; step += 1) {
@@ -956,7 +979,7 @@ export class WorkflowService {
       ) {
         await this.generateReport(run.id);
         if (input.until === "report") {
-          return this.status({ runId: run.id, view: "detail" });
+          return this.mutatingStatus(run.id, view);
         }
         continue;
       }
@@ -971,24 +994,33 @@ export class WorkflowService {
         continue;
       }
 
-      return this.status({ runId: input.runId, view: "detail" });
+      return this.mutatingStatus(input.runId, view);
     }
 
     throw new Error(`Workflow ${input.runId} exceeded the deterministic advance limit`);
   }
 
-  public async submit(rawInput: unknown): Promise<WorkflowDetailStatus> {
+  public async submit(rawInput: unknown): Promise<WorkflowDetailStatus>;
+  public async submit(rawInput: unknown, view: "action"): Promise<WorkflowActionStatus>;
+  public async submit(rawInput: unknown, view: "detail"): Promise<WorkflowDetailStatus>;
+  public async submit(
+    rawInput: unknown,
+    view: MutatingStatusView = "detail",
+  ): Promise<MutatingWorkflowStatus> {
     return this.measureWorkflowAction(rawInput, "submit", () =>
-      this.submitUninstrumented(rawInput),
+      this.submitUninstrumented(rawInput, view),
     );
   }
 
-  private async submitUninstrumented(rawInput: unknown): Promise<WorkflowDetailStatus> {
+  private async submitUninstrumented(
+    rawInput: unknown,
+    view: MutatingStatusView,
+  ): Promise<MutatingWorkflowStatus> {
     const input = WorkflowSubmitInputSchema.parse(rawInput);
     const run = await this.dependencies.runStore.get(input.runId);
     const submission = input.submission;
     if (submission.kind === "legacy-network-evidence") {
-      return this.submitLegacyNetworkEvidence(run, submission.evidencePath);
+      return this.submitLegacyNetworkEvidence(run, submission.evidencePath, view);
     }
     if (
       submission.kind === "visual-comparison" ||
@@ -999,7 +1031,7 @@ export class WorkflowService {
     }
     if (submission.kind === "visual-comparison") {
       await this.recordVisualComparison(run, submission);
-      return this.status({ runId: run.id, view: "detail" });
+      return this.mutatingStatus(run.id, view);
     }
     assertSubmissionPrerequisites(run, submission, this.now());
     await assertDraftBundleIntegrity(run, submission);
@@ -1034,7 +1066,7 @@ export class WorkflowService {
 
     if (submission.kind === "figma-bundle") {
       await this.recordSubmissionArtifact(run, submission, evidenceArtifacts);
-      return this.status({ runId: run.id, view: "detail" });
+      return this.mutatingStatus(run.id, view);
     }
 
     if (submission.kind === "api-ready") {
@@ -1045,7 +1077,7 @@ export class WorkflowService {
         submission.implementationContextId,
         submission.operations,
       );
-      return this.status({ runId: run.id, view: "detail" });
+      return this.mutatingStatus(run.id, view);
     }
 
     const stageName = stageForSubmission(submission);
@@ -1097,7 +1129,7 @@ export class WorkflowService {
         },
         current.revision,
       );
-      return this.status({ runId: run.id, view: "detail" });
+      return this.mutatingStatus(run.id, view);
     }
 
     if (outcome === "passed") {
@@ -1145,7 +1177,7 @@ export class WorkflowService {
       });
     }
 
-    return this.status({ runId: run.id, view: "detail" });
+    return this.mutatingStatus(run.id, view);
   }
 
   private async startFencedReviewStage(
@@ -1173,7 +1205,8 @@ export class WorkflowService {
   private async submitLegacyNetworkEvidence(
     run: RunManifest,
     evidencePath: string,
-  ): Promise<WorkflowDetailStatus> {
+    view: MutatingStatusView,
+  ): Promise<MutatingWorkflowStatus> {
     const intake = stage(run, "intake");
     const profile = deliveryProfileFromRun(run);
     if (
@@ -1236,7 +1269,7 @@ export class WorkflowService {
               },
             }),
       });
-      return this.status({ runId: run.id, view: "detail" });
+      return this.mutatingStatus(run.id, view);
     }
     const scope = scopeFromRun(run);
     const updatedProfile = DeliveryProfileSchema.parse({
@@ -1291,7 +1324,16 @@ export class WorkflowService {
         },
       },
     });
-    return this.status({ runId: run.id, view: "detail" });
+    return this.mutatingStatus(run.id, view);
+  }
+
+  private async mutatingStatus(
+    runId: string,
+    view: MutatingStatusView,
+  ): Promise<MutatingWorkflowStatus> {
+    return view === "action"
+      ? this.status({ runId, view: "action" })
+      : this.status({ runId, view: "detail" });
   }
 
   public async status(input: { runId: string; view: "action" }): Promise<WorkflowActionStatus>;

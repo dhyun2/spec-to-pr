@@ -115,9 +115,10 @@ describe("spec-to-pr MCP workflow facade", () => {
     const runId = (started.structuredContent as { runId: string }).runId;
 
     expect(started.structuredContent).toMatchObject({
+      view: "action",
       status: "needs-external-action",
       currentStage: "contracts",
-      deliveryProfile: { mode: "auto", publication: "draft" },
+      deliveryProfile: { publication: "draft" },
       workload: {
         size: expect.stringMatching(/^(XS|S|M|L|XL)$/),
         confidence: "low",
@@ -160,6 +161,57 @@ describe("spec-to-pr MCP workflow facade", () => {
       deliveryProfile: { mode: "auto", publication: "draft" },
     });
 
+    const advanced = await client.callTool({
+      name: "workflow_advance",
+      arguments: { runId },
+    });
+    expect(advanced.structuredContent).toMatchObject({
+      view: "action",
+      runId,
+      currentStage: "contracts",
+    });
+    expect(advanced.structuredContent).not.toHaveProperty("scope");
+    expect(advanced.structuredContent).not.toHaveProperty("resumeContext");
+
+    const submitted = await client.callTool({
+      name: "workflow_submit",
+      arguments: {
+        runId,
+        submission: {
+          kind: "contracts",
+          status: "blocked",
+          summary: "Approval is required.",
+          blocker: {
+            stage: "contracts",
+            code: "MISSING_APPROVAL",
+            kind: "missing-input",
+            summary: "Approval is required.",
+            retryable: false,
+            resumable: true,
+            completedWork: ["Intake passed."],
+            evidencePaths: [],
+            attemptedRecovery: [],
+            unrunValidations: ["functional"],
+            exactUnblockAction: "Provide approval.",
+          },
+        },
+      },
+    });
+    expect(submitted.structuredContent).toMatchObject({
+      view: "action",
+      runId,
+      status: "blocked",
+    });
+    expect(submitted.structuredContent).not.toHaveProperty("scope");
+    expect(submitted.structuredContent).not.toHaveProperty("resumeContext");
+
+    const invalidStatus = await client.callTool({
+      name: "workflow_status",
+      arguments: { runId, view: "action", extra: true },
+    });
+    expect(invalidStatus.isError).toBe(true);
+    expect(JSON.stringify(invalidStatus.content)).toMatch(/unrecognized|unknown/i);
+
     await mkdir(path.join(projectDirectory, "docs"), { recursive: true });
     await writeFile(
       path.join(projectDirectory, "docs", "brief.pdf"),
@@ -184,8 +236,9 @@ describe("spec-to-pr MCP workflow facade", () => {
     });
     if (pdfStarted.isError) throw new Error(JSON.stringify(pdfStarted.content));
     expect(pdfStarted.structuredContent).toMatchObject({
+      view: "action",
       status: "needs-external-action",
-      deliveryProfile: { mode: "brief", briefPath: "docs/brief.pdf" },
+      deliveryProfile: { publication: "draft" },
     });
   });
 });

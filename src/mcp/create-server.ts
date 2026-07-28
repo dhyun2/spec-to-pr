@@ -115,7 +115,8 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
         "Create a Run, capture intake, estimate workload, classify scope, and stop at the next boundary.",
       inputSchema: WorkflowStartInputSchema.shape,
     },
-    async (input) => workflowToolResult(servicesProvider, (workflow) => workflow.start(input)),
+    async (input) =>
+      workflowToolResult(servicesProvider, (workflow) => workflow.start(input, "action")),
   );
 
   server.registerTool(
@@ -125,7 +126,8 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
       description: "Run deterministic steps until completion, a blocker, or an external action.",
       inputSchema: WorkflowAdvanceInputSchema.shape,
     },
-    async (input) => workflowToolResult(servicesProvider, (workflow) => workflow.advance(input)),
+    async (input) =>
+      workflowToolResult(servicesProvider, (workflow) => workflow.advance(input, "action")),
   );
 
   server.registerTool(
@@ -137,7 +139,8 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
       // discriminated submission contract before any state can change.
       inputSchema: WorkflowSubmitToolInputSchema,
     },
-    async (input) => workflowToolResult(servicesProvider, (workflow) => workflow.submit(input)),
+    async (input) =>
+      workflowToolResult(servicesProvider, (workflow) => workflow.submit(input, "action")),
   );
 
   server.registerTool(
@@ -146,7 +149,7 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
       title: "Workflow status",
       description:
         "Return action (default), checkpoint, or detail workflow status. Use action after external actions, checkpoint for continuation, and detail only for immutable reviewer or report evidence.",
-      inputSchema: WorkflowStatusInputSchema.shape,
+      inputSchema: WorkflowStatusInputSchema,
       annotations: { readOnlyHint: true },
     },
     async (input) => workflowToolResult(servicesProvider, (workflow) => workflow.status(input)),

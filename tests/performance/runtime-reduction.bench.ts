@@ -48,6 +48,11 @@ let statusRunId: `run_${string}`;
 let statusDetailBytes = 0;
 const measuredStatusActionBytes: number[] = [];
 const measuredStatusArtifactReads: number[] = [];
+const measuredMutatingInventoryReads: number[] = [];
+const measuredMutatingStartBytes: number[] = [];
+const measuredMutatingAdvanceBytes: number[] = [];
+const measuredMutatingSubmitBytes: number[] = [];
+let mutatingIteration = 0;
 const visualPng = PNG.sync.write(new PNG({ width: 360, height: 1831 }));
 
 const fixtures = {
@@ -83,6 +88,11 @@ const fixtures = {
     view: "action",
     legacyFiles: 250,
     maximumDetailRatio: 0.25,
+    maximumInventoryReads: 0,
+  },
+  mutatingStatus: {
+    views: ["start", "advance", "submit"],
+    legacyFiles: 250,
     maximumInventoryReads: 0,
   },
 } as const;
@@ -360,6 +370,101 @@ describe("runtime reduction fixtures", () => {
   );
 
   bench(
+    "mutating action hot path: start, advance, and submit for a 250-file legacy Run",
+    async () => {
+      mutatingIteration += 1;
+      const runId = `run_${mutatingIteration.toString(16).padStart(32, "0")}` as `run_${string}`;
+      await measureFixture(runId, "mutating-action", async (recorder) => {
+        const artifactStore = new ArtifactBlobStore(
+          path.join(statusDirectory, "artifacts"),
+          recorder,
+        );
+        const readDigests: string[] = [];
+        const readContent = artifactStore.readContent.bind(artifactStore);
+        artifactStore.readContent = async (digest) => {
+          readDigests.push(digest);
+          return readContent(digest);
+        };
+        const service = new WorkflowService({
+          runStore: statusStore,
+          artifactStore,
+          runService: new RunService(statusStore, {
+            pluginVersion: "benchmark",
+            now: () => collectedAt,
+            newRunId: () => runId,
+          }),
+          intakeRequestService: new IntakeRequestService(
+            statusStore,
+            new SourceSnapshotStore(path.join(statusDirectory, "source-snapshots")),
+            artifactStore,
+            () => collectedAt,
+          ),
+          stageService: new StageService(statusStore, () => collectedAt),
+          now: () => collectedAt,
+          metrics: recorder,
+        });
+        const started = await service.start(
+          {
+            projectRoot: statusDirectory,
+            legacyProjectRoot: legacyDirectory,
+            requestText: "Measure compact mutating action responses.",
+            mode: "legacy",
+            changeKind: "migration",
+            publication: "none",
+          },
+          "action",
+        );
+        if (started.view !== "action") {
+          throw new Error(`mutating start returned ${started.view} instead of action`);
+        }
+        const run = await statusStore.get(runId);
+        const inventoryDigest = run.artifacts.find(
+          (artifact) => artifact.kind === "legacy-feature-inventory",
+        )?.digest;
+        if (inventoryDigest === undefined) throw new Error("mutating benchmark inventory missing");
+        const advanced = await service.advance({ runId }, "action");
+        if (advanced.view !== "action") {
+          throw new Error(`mutating advance returned ${advanced.view} instead of action`);
+        }
+        const submitted = await service.submit(
+          {
+            runId,
+            submission: {
+              kind: "contracts",
+              status: "blocked",
+              summary: "Approval is required.",
+              blocker: {
+                stage: "contracts",
+                code: "MISSING_APPROVAL",
+                kind: "missing-input",
+                summary: "Approval is required.",
+                retryable: false,
+                resumable: true,
+                completedWork: ["Legacy intake passed."],
+                evidencePaths: [],
+                attemptedRecovery: [],
+                unrunValidations: ["functional"],
+                exactUnblockAction: "Provide approval.",
+              },
+            },
+          },
+          "action",
+        );
+        if (submitted.view !== "action") {
+          throw new Error(`mutating submit returned ${submitted.view} instead of action`);
+        }
+        measuredMutatingInventoryReads.push(
+          readDigests.filter((digest) => digest === inventoryDigest).length,
+        );
+        measuredMutatingStartBytes.push(Buffer.byteLength(JSON.stringify(started), "utf8"));
+        measuredMutatingAdvanceBytes.push(Buffer.byteLength(JSON.stringify(advanced), "utf8"));
+        measuredMutatingSubmitBytes.push(Buffer.byteLength(JSON.stringify(submitted), "utf8"));
+      });
+    },
+    { iterations: 5, warmupIterations: 1, time: 0, warmupTime: 0 },
+  );
+
+  bench(
     "visual: two 360x1831 targets across three valid comparisons",
     async () => {
       await measureFixture("run_33333333333333333333333333333333", "visual", async (recorder) => {
@@ -394,6 +499,24 @@ afterAll(async () => {
     throw new Error(
       "mixed intake source concurrency must be four and derived from the production pool",
     );
+  }
+  if (
+    measuredMutatingInventoryReads.some(
+      (reads) => reads !== fixtures.mutatingStatus.maximumInventoryReads,
+    )
+  ) {
+    throw new Error(
+      `mutating action hot path read inventory blobs: ${JSON.stringify(measuredMutatingInventoryReads)}`,
+    );
+  }
+  for (const [name, samples] of [
+    ["start", measuredMutatingStartBytes],
+    ["advance", measuredMutatingAdvanceBytes],
+    ["submit", measuredMutatingSubmitBytes],
+  ] as const) {
+    if (new Set(samples).size !== 1 || samples[0] === undefined) {
+      throw new Error(`mutating ${name} serialized bytes must be deterministic`);
+    }
   }
   const mixedIntakeMaxSourceConcurrency = observedMixedIntakeMaxSourceConcurrency[0];
   const observedMixedIntakeRunSaves = [...new Set(measuredMixedIntakeRunSaves)];
@@ -456,7 +579,9 @@ afterAll(async () => {
                 ? fixtures.legacy
                 : name === "status-action"
                   ? fixtures.status
-                  : fixtures.visual,
+                  : name === "mutating-action"
+                    ? fixtures.mutatingStatus
+                    : fixtures.visual,
           ),
         ),
       ),
@@ -492,7 +617,15 @@ afterAll(async () => {
                   actionSerializedBytes: statusActionBytes[0],
                   detailSerializedBytes: statusDetailBytes,
                 }
-              : { targets: 2, comparisons: 3, pixelsPerTarget: 659160 },
+              : name === "mutating-action"
+                ? {
+                    legacyFiles: fixtures.mutatingStatus.legacyFiles,
+                    inventoryReads: measuredMutatingInventoryReads[0]!,
+                    startSerializedBytes: measuredMutatingStartBytes[0]!,
+                    advanceSerializedBytes: measuredMutatingAdvanceBytes[0]!,
+                    submitSerializedBytes: measuredMutatingSubmitBytes[0]!,
+                  }
+                : { targets: 2, comparisons: 3, pixelsPerTarget: 659160 },
     };
   });
   const receipt = {
@@ -521,6 +654,10 @@ afterAll(async () => {
       statusActionArtifactReads: measuredStatusArtifactReads[0]!,
       statusActionSerializedBytes: statusActionBytes[0],
       statusDetailSerializedBytes: statusDetailBytes,
+      mutatingActionInventoryReads: measuredMutatingInventoryReads[0]!,
+      mutatingStartSerializedBytes: measuredMutatingStartBytes[0]!,
+      mutatingAdvanceSerializedBytes: measuredMutatingAdvanceBytes[0]!,
+      mutatingSubmitSerializedBytes: measuredMutatingSubmitBytes[0]!,
       visualComparisons: fixtures.visual.comparisons.length,
     },
   };
