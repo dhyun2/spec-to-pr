@@ -196,6 +196,69 @@ describe("legacy inventory v3", () => {
     );
   });
 
+  it("persists rejected conditional-export probes and refreshes them without a warm parse", async () => {
+    const root = await temporaryLegacyProject();
+    await writeFile(
+      path.join(root, "package.json"),
+      '{"name":"conditional-export-probe"}\n',
+      "utf8",
+    );
+    const featureRoot = path.join(root, "src", "modules", "shop");
+    const apiRoot = path.join(root, "src", "api");
+    await mkdir(featureRoot, { recursive: true });
+    await mkdir(apiRoot, { recursive: true });
+    await writeFile(
+      path.join(featureRoot, "profile.ts"),
+      'import { loadProfile } from "../../api"; export const profile = loadProfile;\n',
+      "utf8",
+    );
+    await writeFile(path.join(apiRoot, "index.ts"), 'export * from "./candidate";\n', "utf8");
+    const candidatePath = path.join(apiRoot, "candidate.ts");
+    await writeFile(candidatePath, "export const unrelated = true;\n", "utf8");
+    const cache = new LegacySourceCache();
+    const pinned = await buildLegacyInventory(featureRoot, {}, { sourceCache: cache });
+
+    expect(pinned.sourceManifest?.files).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ applicationRelativePath: "src/api/candidate.ts" }),
+      ]),
+    );
+    const parsesAfterBuild = cache.snapshotStats().astParses;
+    await expect(
+      assertLegacyInventoryFresh(featureRoot, pinned, { sourceCache: cache }),
+    ).resolves.toBe(pinned);
+    expect(cache.snapshotStats().astParses).toBe(parsesAfterBuild);
+
+    await writeFile(
+      candidatePath,
+      'export const loadProfile = () => fetch("/api/profile");\n',
+      "utf8",
+    );
+
+    await expect(
+      assertLegacyInventoryFresh(featureRoot, pinned, { sourceCache: cache }),
+    ).rejects.toThrow(/LEGACY_SOURCE_CHANGED/);
+  });
+
+  it("truncates deterministically at the persisted resolver-decision bound", async () => {
+    const root = await temporaryLegacyProject();
+    await writeFile(
+      path.join(root, "src", "index.ts"),
+      Array.from(
+        { length: 5_001 },
+        (_, index) => `import "package-${String(index).padStart(4, "0")}";`,
+      ).join("\n"),
+      "utf8",
+    );
+
+    const inventory = await buildLegacyInventory(root, { maxElapsedMs: 20_000 });
+
+    expect(inventory.truncated).toBe(true);
+    expect(inventory.sourceResolutionDecisions).toHaveLength(5_000);
+    expect(inventory.sourceResolutionDecisions?.[0]?.specifier).toBe("package-0000");
+    expect(inventory.sourceResolutionDecisions?.at(-1)?.specifier).toBe("package-4999");
+  }, 20_000);
+
   it("uses one cache across a deterministic 250-file cold, warm, and change cycle", async () => {
     const root = await temporaryLegacyProject();
     await Promise.all(

@@ -17,12 +17,14 @@ import {
   LEGACY_SOURCE_DIGEST_ALGORITHM_V1,
   LEGACY_SOURCE_DIGEST_ALGORITHM_V2,
   discoverLegacySourceGraph,
+  discoverLegacySourceGraphFromSnapshot,
 } from "./legacy-source-graph.js";
 import {
   LegacySourceCache,
   LegacySourceEnvironmentReferenceSchema,
   LegacySourceManifestSchema,
   LegacyResolutionDecisionSchema,
+  MAX_LEGACY_RESOLUTION_DECISIONS,
   currentLegacySourceManifest,
   type LegacySourceManifest,
 } from "./legacy-source-cache.js";
@@ -114,7 +116,10 @@ export const LegacyInventorySchema = z
       .regex(/^sha256:[a-f0-9]{64}$/)
       .optional(),
     sourceEnvironmentRefs: z.array(LegacySourceEnvironmentReferenceSchema).optional(),
-    sourceResolutionDecisions: z.array(LegacyResolutionDecisionSchema).max(5_000).optional(),
+    sourceResolutionDecisions: z
+      .array(LegacyResolutionDecisionSchema)
+      .max(MAX_LEGACY_RESOLUTION_DECISIONS)
+      .optional(),
     visitedDirectories: z.number().int().nonnegative().default(0),
     visitedEntries: z.number().int().nonnegative().default(0),
     scannedFiles: z.number().int().nonnegative(),
@@ -145,7 +150,7 @@ export async function buildLegacyInventory(
   const sourceCache = options.sourceCache ?? new LegacySourceCache();
   sourceCache.beginSnapshot();
   sourceCache.recordSemanticRebuild();
-  const graph = await discoverLegacySourceGraph(
+  const graph = await discoverLegacySourceGraphFromSnapshot(
     root,
     {
       maxFiles: limits.maxSourceFiles,

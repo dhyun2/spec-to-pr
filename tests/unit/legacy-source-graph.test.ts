@@ -19,6 +19,29 @@ afterEach(async () => {
 });
 
 describe("legacy source graph", () => {
+  it("starts a fresh source snapshot for every public graph discovery", async () => {
+    const project = await vueFixture({
+      "src/route.ts": 'export const route = { path: "/before" };',
+    });
+    const sourcePath = path.join(project, "src", "route.ts");
+    const cache = new LegacySourceCache();
+    const before = await discoverLegacySourceGraph(
+      path.join(project, "src"),
+      {},
+      { sourceCache: cache },
+    );
+
+    await writeFile(sourcePath, 'export const route = { path: "/after" };\n', "utf8");
+    const after = await discoverLegacySourceGraph(
+      path.join(project, "src"),
+      {},
+      { sourceCache: cache },
+    );
+
+    expect(after.sourceDigest).not.toBe(before.sourceDigest);
+    expect(after.files.find((file) => file.sourcePath === "route.ts")?.content).toContain("/after");
+  });
+
   it("reads and parses each of 250 included code files at most once", async () => {
     const files = Object.fromEntries(
       Array.from({ length: 250 }, (_, index) => [

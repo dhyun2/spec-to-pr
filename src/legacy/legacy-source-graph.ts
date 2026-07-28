@@ -4,6 +4,7 @@ import path from "node:path";
 
 import {
   LegacySourceCache,
+  MAX_LEGACY_RESOLUTION_DECISIONS,
   createLegacySourceManifest,
   findLegacyApplicationRoot,
   isSafeLegacyUrlEnvironmentName,
@@ -148,11 +149,27 @@ type SourceReadBudget = {
 };
 
 type ExportInspection = {
+  applicationRoot: string;
+  candidatePaths: Set<string>;
   readBudget: SourceReadBudget;
   results: Map<string, boolean>;
 };
 
 export async function discoverLegacySourceGraph(
+  featureRoot: string,
+  limitOverrides: Partial<LegacySourceGraphLimits> = {},
+  options: LegacySourceGraphOptions = {},
+): Promise<LegacySourceGraph> {
+  const sourceCache = options.sourceCache ?? new LegacySourceCache();
+  sourceCache.beginSnapshot();
+  return discoverLegacySourceGraphFromSnapshot(featureRoot, limitOverrides, {
+    ...options,
+    sourceCache,
+  });
+}
+
+/** @internal Compose graph discovery inside a caller-owned source snapshot. */
+export async function discoverLegacySourceGraphFromSnapshot(
   featureRoot: string,
   limitOverrides: Partial<LegacySourceGraphLimits> = {},
   options: LegacySourceGraphOptions = {},
@@ -182,6 +199,8 @@ export async function discoverLegacySourceGraph(
     scannedBytes: 0,
   };
   const exportInspection: ExportInspection = {
+    applicationRoot,
+    candidatePaths: new Set(),
     readBudget,
     results: new Map(),
   };
@@ -273,13 +292,23 @@ export async function discoverLegacySourceGraph(
           }))
         : discoverModuleReferences(parsed, requestedExports);
     for (const reference of references) {
+      const decisionKey = `${graphFile.sourcePath}\0${reference.specifier}`;
+      if (
+        !resolutionDecisions.has(decisionKey) &&
+        resolutionDecisions.size >= MAX_LEGACY_RESOLUTION_DECISIONS
+      ) {
+        truncation = {
+          limit: "maxResolutionDecisions",
+          sourcePath: graphFile.sourcePath,
+        };
+        break traversal;
+      }
       const resolved = await resolveGraphDependency({
         importer: next.absolutePath,
         specifier: reference.specifier,
         applicationRoot,
         aliases,
       });
-      const decisionKey = `${graphFile.sourcePath}\0${reference.specifier}`;
       if (!resolutionDecisions.has(decisionKey)) {
         resolutionDecisions.set(decisionKey, {
           importer: graphFile.sourcePath,
@@ -360,9 +389,22 @@ export async function discoverLegacySourceGraph(
     decisions: sortedResolutionDecisions,
   });
   const sourceManifest = createLegacySourceManifest({
-    files: allFiles.flatMap((file) => {
-      const record = sourceCache.record(file.absolutePath, file.digest);
-      return record === undefined ? [] : [legacyManifestFile(record, file.applicationRelativePath)];
+    files: [
+      ...new Map(
+        [...allFiles.map((file) => file.absolutePath), ...exportInspection.candidatePaths].map(
+          (absolutePath) => [absolutePath, absolutePath] as const,
+        ),
+      ).values(),
+    ].flatMap((absolutePath) => {
+      const record = readBudget.files.get(absolutePath);
+      return record === undefined
+        ? []
+        : [
+            legacyManifestFile(
+              record,
+              path.relative(applicationRoot, absolutePath).split(path.sep).join("/"),
+            ),
+          ];
     }),
     environmentDigest: legacyEnvironmentReferencesDigest(environmentRefs),
     configDigest: legacyManifestConfigDigest(resolutionConfig.digest, resolutionStateDigest),
@@ -830,6 +872,7 @@ async function sourceDirectlyExports(
   visited.add(absolutePath);
   const source = await readBudgetedSourceFile(absolutePath, inspection.readBudget);
   if (source === undefined) return false;
+  inspection.candidatePaths.add(absolutePath);
   const parsed = source.parsed();
   if (Date.now() - inspection.readBudget.startedAt >= inspection.readBudget.limits.maxElapsedMs) {
     inspection.readBudget.truncation = { limit: "maxElapsedMs", absolutePath };
@@ -889,6 +932,7 @@ async function sourceDirectlyExports(
     const target = await resolveSourceFile(path.resolve(path.dirname(absolutePath), source));
     if (
       target !== undefined &&
+      isWithin(inspection.applicationRoot, target) &&
       (await sourceDirectlyExports(target, namedRequests, inspection, new Set(visited), depth + 1))
     ) {
       inspection.results.set(resultKey, true);
