@@ -51,6 +51,60 @@ export type ValidatedFigmaGeometry = {
   aspectRatioDelta: number;
 };
 
+const UiAssertionScalarSchema = z.union([z.string(), z.number(), z.boolean()]);
+
+export const UiAssertionGeometrySnapshotSchema = z
+  .object({
+    x: z.number().finite(),
+    y: z.number().finite(),
+    width: z.number().nonnegative(),
+    height: z.number().nonnegative(),
+  })
+  .strict();
+
+const UiAssertionDefinitionBaseFields = {
+  id: z.string().trim().min(1),
+  selector: z.string().trim().min(1),
+  subject: z.string().trim().min(1),
+} as const;
+
+export const UiAssertionDefinitionSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      ...UiAssertionDefinitionBaseFields,
+      kind: z.literal("geometry"),
+      expected: UiAssertionGeometrySnapshotSchema,
+      maxTolerance: z.number().min(0).max(0.5),
+    })
+    .strict(),
+  z
+    .object({
+      ...UiAssertionDefinitionBaseFields,
+      kind: z.literal("computed-style"),
+      property: z.string().trim().min(1),
+      expected: z.string(),
+    })
+    .strict(),
+  z
+    .object({
+      ...UiAssertionDefinitionBaseFields,
+      kind: z.literal("accessibility"),
+      check: z.enum(["focus-visible", "keyboard-focus", "heading-order", "accessible-name"]),
+      expected: UiAssertionScalarSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...UiAssertionDefinitionBaseFields,
+      kind: z.literal("interaction"),
+      action: z.enum(["click", "keyboard"]),
+      expected: UiAssertionScalarSchema,
+    })
+    .strict(),
+]);
+
+export type UiAssertionDefinition = z.infer<typeof UiAssertionDefinitionSchema>;
+
 export const FigmaStateFactSchema = z
   .object({
     id: z.string().trim().min(1),
@@ -66,8 +120,36 @@ export const FigmaStateFactSchema = z
     ]),
     subject: z.string().trim().min(1),
     value: z.union([z.string(), z.number(), z.boolean()]),
+    mappingId: z.string().trim().min(1).optional(),
+    bindingAspect: z
+      .enum(["export", "token", "width", "height", "alignment", "flexShrink"])
+      .optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((fact, context) => {
+    const bindingKind = ["icon", "token", "geometry"].includes(fact.kind);
+    if (bindingKind !== (fact.mappingId !== undefined && fact.bindingAspect !== undefined)) {
+      context.addIssue({
+        code: "custom",
+        path: ["mappingId"],
+        message:
+          "Icon, token, and geometry facts must carry a mapping ID and binding aspect; other facts must not",
+      });
+      return;
+    }
+    const validAspect =
+      (fact.kind === "icon" && fact.bindingAspect === "export") ||
+      (fact.kind === "token" && fact.bindingAspect === "token") ||
+      (fact.kind === "geometry" &&
+        ["width", "height", "alignment", "flexShrink"].includes(fact.bindingAspect ?? ""));
+    if (bindingKind && !validAspect) {
+      context.addIssue({
+        code: "custom",
+        path: ["bindingAspect"],
+        message: `Binding aspect ${fact.bindingAspect} does not match ${fact.kind}`,
+      });
+    }
+  });
 
 const FigmaStateContractFieldsSchema = z
   .object({
@@ -76,7 +158,8 @@ const FigmaStateContractFieldsSchema = z
     state: z.string().trim().min(1),
     fixtureId: z.string().trim().min(1),
     facts: z.array(FigmaStateFactSchema).min(1).max(2_000),
-    requiredAssertionIds: z.array(z.string().trim().min(1)).min(1).max(500),
+    requiredAssertions: z.array(UiAssertionDefinitionSchema).min(1).max(500),
+    designBindingIds: z.array(z.string().trim().min(1)).max(1_000).default([]),
   })
   .strict();
 
@@ -96,8 +179,13 @@ export function figmaStateFactsDigest(rawFields: FigmaStateContractFields): `sha
         kind: fact.kind,
         subject: fact.subject,
         value: fact.value,
+        ...(fact.mappingId === undefined ? {} : { mappingId: fact.mappingId }),
+        ...(fact.bindingAspect === undefined ? {} : { bindingAspect: fact.bindingAspect }),
       })),
-    requiredAssertionIds: [...fields.requiredAssertionIds].sort(),
+    requiredAssertions: [...fields.requiredAssertions]
+      .sort((left, right) => compareCanonicalStrings(left.id, right.id))
+      .map(canonicalUiAssertionDefinition),
+    designBindingIds: [...fields.designBindingIds].sort(compareCanonicalStrings),
   };
   return `sha256:${createHash("sha256").update(JSON.stringify(canonical)).digest("hex")}`;
 }
@@ -115,12 +203,22 @@ export const FigmaStateContractSchema = FigmaStateContractFieldsSchema.extend({
         message: `Duplicate Figma state fact IDs: ${duplicateFactIds.join(", ")}`,
       });
     }
-    const duplicateAssertionIds = duplicates(contract.requiredAssertionIds);
+    const duplicateAssertionIds = duplicates(
+      contract.requiredAssertions.map((assertion) => assertion.id),
+    );
     if (duplicateAssertionIds.length > 0) {
       context.addIssue({
         code: "custom",
-        path: ["requiredAssertionIds"],
+        path: ["requiredAssertions"],
         message: `Duplicate required assertion IDs: ${duplicateAssertionIds.join(", ")}`,
+      });
+    }
+    const duplicateDesignBindingIds = duplicates(contract.designBindingIds);
+    if (duplicateDesignBindingIds.length > 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["designBindingIds"],
+        message: `Duplicate state design binding IDs: ${duplicateDesignBindingIds.join(", ")}`,
       });
     }
     const { digest: _digest, ...fields } = contract;
@@ -146,8 +244,10 @@ export function assertFigmaStateContracts(rawInput: {
   nodeIds: string[];
   targets: FigmaStateTarget[];
   stateContracts: FigmaStateContract[];
+  mapping: FigmaDesignMapping;
 }): void {
   const targets = rawInput.targets;
+  const mapping = FigmaDesignMappingSchema.parse(rawInput.mapping);
   const parsedContracts = z
     .array(FigmaStateContractSchema)
     .min(1)
@@ -208,6 +308,51 @@ export function assertFigmaStateContracts(rawInput: {
     );
   }
 
+  const mappingsById = new Map(mapping.components.map((binding) => [binding.id, binding]));
+  for (const contract of contracts) {
+    const bindingIdSet = new Set(contract.designBindingIds);
+    const unknownBindingIds = contract.designBindingIds.filter(
+      (mappingId) => !mappingsById.has(mappingId),
+    );
+    const unboundFacts = contract.facts.filter(
+      (fact) => fact.mappingId !== undefined && !bindingIdSet.has(fact.mappingId),
+    );
+    if (unknownBindingIds.length > 0 || unboundFacts.length > 0) {
+      throw stateContractError(
+        `state ${contract.targetId} has unknown design bindings: ${unknownBindingIds.join(", ") || "none"}; facts outside designBindingIds: ${unboundFacts.map((fact) => fact.id).join(", ") || "none"}`,
+      );
+    }
+    for (const mappingId of contract.designBindingIds) {
+      const binding = mappingsById.get(mappingId)!;
+      const bindingFacts = contract.facts.filter((fact) => fact.mappingId === mappingId);
+      if (binding.role !== "icon") {
+        if (bindingFacts.length === 0) {
+          throw stateContractError(
+            `state ${contract.targetId} design binding ${mappingId} has no mapping-linked facts`,
+          );
+        }
+        continue;
+      }
+      const expectedFacts = expectedIconStateFacts(binding);
+      const mismatched = [...expectedFacts].filter(([aspect, expectedValue]) => {
+        const fact = bindingFacts.find((candidate) => candidate.bindingAspect === aspect);
+        return fact === undefined || fact.value !== expectedValue;
+      });
+      const unknownAspects = bindingFacts.filter(
+        (fact) => !expectedFacts.has(fact.bindingAspect ?? ""),
+      );
+      if (
+        bindingFacts.length !== expectedFacts.size ||
+        mismatched.length > 0 ||
+        unknownAspects.length > 0
+      ) {
+        throw stateContractError(
+          `state ${contract.targetId} icon binding ${mappingId} must exact-match export, token, width, height, alignment, and flexShrink facts`,
+        );
+      }
+    }
+  }
+
   for (let leftIndex = 0; leftIndex < contracts.length; leftIndex += 1) {
     for (let rightIndex = leftIndex + 1; rightIndex < contracts.length; rightIndex += 1) {
       const left = contracts[leftIndex]!;
@@ -245,6 +390,156 @@ export const CapturedFigmaComponentSchema = z
   .strict();
 
 const FigmaBindingPropValueSchema = z.union([z.string(), z.number(), z.boolean()]);
+const ExactSemanticVersionSchema = z
+  .string()
+  .trim()
+  .regex(
+    /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/,
+    "Design-system package version must be an exact semantic version",
+  );
+
+const FrontendUiPublicModuleSchema = z.enum([
+  "@frontend/ui",
+  "@frontend/ui/icons/vue",
+  "@frontend/ui/icons/react",
+]);
+
+const FigmaPublicApiCatalogFieldsSchema = z
+  .object({
+    schemaVersion: z.literal("figma-public-api-catalog-v1"),
+    packageName: z.literal("@frontend/ui"),
+    packageVersion: ExactSemanticVersionSchema,
+    publicBarrels: z
+      .array(
+        z
+          .object({
+            module: FrontendUiPublicModuleSchema,
+            path: RepositoryPathSchema,
+            digest: Sha256DigestSchema,
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(10),
+    codeConnectManifest: z
+      .object({
+        path: RepositoryPathSchema,
+        digest: Sha256DigestSchema,
+      })
+      .strict(),
+    exports: z
+      .array(
+        z
+          .object({
+            figmaComponent: z.string().trim().min(1),
+            nodeId: z.string().trim().min(1),
+            module: FrontendUiPublicModuleSchema,
+            exportName: z
+              .string()
+              .trim()
+              .min(1)
+              .max(300)
+              .regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/),
+            allowedProps: z
+              .array(
+                z
+                  .string()
+                  .trim()
+                  .min(1)
+                  .max(200)
+                  .regex(/^[A-Za-z_$][A-Za-z0-9_$-]*$/),
+              )
+              .max(100),
+          })
+          .strict(),
+      )
+      .max(2_000),
+  })
+  .strict();
+
+export type FigmaPublicApiCatalogFields = z.infer<typeof FigmaPublicApiCatalogFieldsSchema>;
+
+export function figmaPublicApiCatalogDigest(
+  rawFields: FigmaPublicApiCatalogFields,
+): `sha256:${string}` {
+  const fields = FigmaPublicApiCatalogFieldsSchema.parse(rawFields);
+  const canonical = {
+    schemaVersion: fields.schemaVersion,
+    packageName: fields.packageName,
+    packageVersion: fields.packageVersion,
+    publicBarrels: [...fields.publicBarrels].sort((left, right) =>
+      compareCanonicalStrings(left.module, right.module),
+    ),
+    codeConnectManifest: fields.codeConnectManifest,
+    exports: [...fields.exports]
+      .sort((left, right) =>
+        compareCanonicalStrings(
+          `${left.figmaComponent}\u0000${left.nodeId}`,
+          `${right.figmaComponent}\u0000${right.nodeId}`,
+        ),
+      )
+      .map((entry) => ({
+        ...entry,
+        allowedProps: [...entry.allowedProps].sort(compareCanonicalStrings),
+      })),
+  };
+  return `sha256:${createHash("sha256").update(JSON.stringify(canonical)).digest("hex")}`;
+}
+
+export const FigmaPublicApiCatalogSchema = FigmaPublicApiCatalogFieldsSchema.extend({
+  digest: Sha256DigestSchema,
+})
+  .strict()
+  .superRefine((catalog, context) => {
+    const { digest: _digest, ...fields } = catalog;
+    if (catalog.digest !== figmaPublicApiCatalogDigest(fields)) {
+      context.addIssue({
+        code: "custom",
+        path: ["digest"],
+        message: "Public API catalog digest does not match its canonical contents",
+      });
+    }
+    const duplicateBarrels = duplicates(catalog.publicBarrels.map((barrel) => barrel.module));
+    const duplicateExports = duplicates(
+      catalog.exports.map(
+        (entry) =>
+          `${entry.figmaComponent}\u0000${entry.nodeId}\u0000${entry.module}\u0000${entry.exportName}`,
+      ),
+    );
+    if (duplicateBarrels.length > 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["publicBarrels"],
+        message: `Duplicate public barrel modules: ${duplicateBarrels.join(", ")}`,
+      });
+    }
+    if (duplicateExports.length > 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["exports"],
+        message: `Duplicate public API exports: ${duplicateExports.join(", ")}`,
+      });
+    }
+    for (const [index, entry] of catalog.exports.entries()) {
+      if (!catalog.publicBarrels.some((barrel) => barrel.module === entry.module)) {
+        context.addIssue({
+          code: "custom",
+          path: ["exports", index, "module"],
+          message: `Export ${entry.exportName} has no digest-bound public barrel`,
+        });
+      }
+      const duplicateProps = duplicates(entry.allowedProps);
+      if (duplicateProps.length > 0) {
+        context.addIssue({
+          code: "custom",
+          path: ["exports", index, "allowedProps"],
+          message: `Duplicate allowed props: ${duplicateProps.join(", ")}`,
+        });
+      }
+    }
+  });
+
+export type FigmaPublicApiCatalog = z.infer<typeof FigmaPublicApiCatalogSchema>;
 
 export const FigmaSemanticTokenBindingSchema = z
   .object({
@@ -298,6 +593,29 @@ const ComponentResolutionSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("exception"),
       reason: z.string().trim().min(1).max(1_000),
+      unavailableExport: z
+        .object({
+          requestedModule: FrontendUiPublicModuleSchema,
+          requestedExport: z
+            .string()
+            .trim()
+            .min(1)
+            .max(300)
+            .regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/),
+          catalogDigest: Sha256DigestSchema,
+        })
+        .strict(),
+      substitute: z
+        .object({
+          path: RepositoryPathSchema,
+          digest: Sha256DigestSchema,
+          size: z.number().positive(),
+          color: z
+            .string()
+            .trim()
+            .regex(/^--semantic-[a-z0-9-]+$/i),
+        })
+        .strict(),
     })
     .strict(),
 ]);
@@ -324,8 +642,58 @@ export const FigmaDesignBindingSchema = z
         message: "Semantic token bindings must be unique",
       });
     }
-    if (binding.role !== "icon" || binding.resolution.kind !== "component") return;
-    if (!/^@?[^/]+(?:\/[^/]+)?\/icons\/(?:vue|react)$/.test(binding.resolution.module)) {
+    if (binding.role !== "icon") return;
+    if (binding.resolution.kind === "asset") {
+      context.addIssue({
+        code: "custom",
+        path: ["resolution"],
+        message:
+          "Icon bindings must use a public component or a proof-bearing unavailable-export exception",
+      });
+      return;
+    }
+    const iconTokens = binding.semanticTokens.filter((token) => token.role === "icon");
+    if (iconTokens.length !== 1 || binding.semanticTokens.length !== 1) {
+      context.addIssue({
+        code: "custom",
+        path: ["semanticTokens"],
+        message: "Icon bindings require exactly one icon-role semantic token",
+      });
+    }
+    if (
+      binding.expectedGeometry?.width === undefined ||
+      binding.expectedGeometry.height === undefined ||
+      binding.expectedGeometry.alignment === undefined ||
+      binding.expectedGeometry.flexShrink === undefined
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["expectedGeometry"],
+        message: "Icon bindings require exact width, height, alignment, and flex-shrink geometry",
+      });
+    }
+    const iconToken = iconTokens[0];
+    if (binding.resolution.kind === "exception") {
+      if (iconToken !== undefined && binding.resolution.substitute.color !== iconToken.codeToken) {
+        context.addIssue({
+          code: "custom",
+          path: ["resolution", "substitute", "color"],
+          message: "Exception substitute color must exactly match its icon semantic token",
+        });
+      }
+      if (
+        binding.expectedGeometry?.width !== binding.resolution.substitute.size ||
+        binding.expectedGeometry.height !== binding.resolution.substitute.size
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["expectedGeometry"],
+          message: "Exception substitute size must match exact icon width and height",
+        });
+      }
+      return;
+    }
+    if (!/^@frontend\/ui\/icons\/(?:vue|react)$/.test(binding.resolution.module)) {
       context.addIssue({
         code: "custom",
         path: ["resolution", "module"],
@@ -341,34 +709,18 @@ export const FigmaDesignBindingSchema = z
         message: "Icon bindings require an exact positive numeric size prop",
       });
     }
-    if (
-      binding.semanticTokens.some((token) => token.role === "icon") &&
-      (typeof color !== "string" || !/^--semantic-[a-z0-9-]+$/i.test(color))
-    ) {
+    if (typeof color !== "string" || !/^--semantic-[a-z0-9-]+$/i.test(color)) {
       context.addIssue({
         code: "custom",
         path: ["resolution", "props", "color"],
         message: "Icon color props must use a bare --semantic-* custom property name",
       });
     }
-    const iconToken = binding.semanticTokens.find((token) => token.role === "icon");
     if (iconToken !== undefined && color !== iconToken.codeToken) {
       context.addIssue({
         code: "custom",
         path: ["resolution", "props", "color"],
         message: "Icon color prop must exactly match its semantic token binding",
-      });
-    }
-    if (
-      binding.expectedGeometry?.width === undefined ||
-      binding.expectedGeometry.height === undefined ||
-      binding.expectedGeometry.alignment === undefined ||
-      binding.expectedGeometry.flexShrink === undefined
-    ) {
-      context.addIssue({
-        code: "custom",
-        path: ["expectedGeometry"],
-        message: "Icon bindings require exact width, height, alignment, and flex-shrink geometry",
       });
     }
     if (
@@ -387,22 +739,13 @@ export const FigmaDesignMappingSchema = z
   .object({
     designSystem: z
       .object({
-        packageName: z
-          .string()
-          .trim()
-          .min(1)
-          .max(214)
-          .regex(/^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/i),
-        packageVersion: z
-          .string()
-          .trim()
-          .regex(
-            /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/,
-            "Design-system package version must be an exact semantic version",
-          ),
+        packageName: z.literal("@frontend/ui"),
+        packageVersion: ExactSemanticVersionSchema,
+        catalogDigest: Sha256DigestSchema,
         guidanceSkill: z.string().trim().min(1).max(500).optional(),
       })
       .strict(),
+    publicApiCatalog: FigmaPublicApiCatalogSchema,
     components: z.array(FigmaDesignBindingSchema).max(1_000),
     fonts: z
       .array(
@@ -428,6 +771,18 @@ export const FigmaDesignMappingSchema = z
   })
   .strict()
   .superRefine((mapping, context) => {
+    if (
+      mapping.publicApiCatalog.packageName !== mapping.designSystem.packageName ||
+      mapping.publicApiCatalog.packageVersion !== mapping.designSystem.packageVersion ||
+      mapping.publicApiCatalog.digest !== mapping.designSystem.catalogDigest
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["publicApiCatalog"],
+        message:
+          "Public API catalog must bind the exact @frontend/ui package, resolved semver, and catalog digest",
+      });
+    }
     const duplicateIds = duplicates(mapping.components.map((component) => component.id));
     if (duplicateIds.length > 0) {
       context.addIssue({
@@ -437,21 +792,68 @@ export const FigmaDesignMappingSchema = z
       });
     }
     mapping.components.forEach((component, index) => {
+      if (component.resolution.kind === "exception") {
+        const resolution = component.resolution;
+        if (resolution.unavailableExport.catalogDigest !== mapping.publicApiCatalog.digest) {
+          context.addIssue({
+            code: "custom",
+            path: ["components", index, "resolution", "unavailableExport", "catalogDigest"],
+            message: `Exception ${component.id} must bind the exact public API catalog digest`,
+          });
+        }
+        const requestedIsPublished = mapping.publicApiCatalog.exports.some(
+          (entry) =>
+            entry.module === resolution.unavailableExport.requestedModule &&
+            entry.exportName === resolution.unavailableExport.requestedExport,
+        );
+        if (requestedIsPublished) {
+          context.addIssue({
+            code: "custom",
+            path: ["components", index, "resolution", "unavailableExport"],
+            message: `Exception ${component.id} cannot claim an export that the catalog publishes`,
+          });
+        }
+        return;
+      }
       if (component.resolution.kind !== "component") return;
+      const resolution = component.resolution;
       const expectedModule =
         component.role === "icon"
-          ? new Set([
-              `${mapping.designSystem.packageName}/icons/vue`,
-              `${mapping.designSystem.packageName}/icons/react`,
-            ])
-          : new Set([mapping.designSystem.packageName]);
-      if (!expectedModule.has(component.resolution.module)) {
+          ? new Set(["@frontend/ui/icons/vue", "@frontend/ui/icons/react"])
+          : new Set(["@frontend/ui"]);
+      if (!expectedModule.has(resolution.module)) {
         context.addIssue({
           code: "custom",
           path: ["components", index, "resolution", "module"],
           message: `Binding ${component.id} must use a public module from ${mapping.designSystem.packageName}`,
         });
       }
+      const catalogEntry = mapping.publicApiCatalog.exports.find(
+        (entry) =>
+          entry.figmaComponent === component.figmaComponent &&
+          entry.nodeId === component.nodeId &&
+          entry.module === resolution.module &&
+          entry.exportName === resolution.exportName,
+      );
+      if (catalogEntry === undefined) {
+        context.addIssue({
+          code: "custom",
+          path: ["components", index, "resolution"],
+          message: `Binding ${component.id} is not present in the digest-bound public API/Code Connect catalog`,
+        });
+      } else {
+        const unknownProps = Object.keys(resolution.props).filter(
+          (prop) => !catalogEntry.allowedProps.includes(prop),
+        );
+        if (unknownProps.length > 0) {
+          context.addIssue({
+            code: "custom",
+            path: ["components", index, "resolution", "props"],
+            message: `Binding ${component.id} uses props absent from the public API catalog: ${unknownProps.join(", ")}`,
+          });
+        }
+      }
+      assertKnownIconContract(component, index, context);
     });
   });
 
@@ -481,6 +883,24 @@ const FigmaImplementationResolutionSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("exception"),
       reason: z.string().trim().min(1),
+      unavailableExport: z
+        .object({
+          requestedModule: FrontendUiPublicModuleSchema,
+          requestedExport: z.string().trim().min(1),
+          catalogDigest: Sha256DigestSchema,
+        })
+        .strict(),
+      substitute: z
+        .object({
+          path: RepositoryPathSchema,
+          digest: Sha256DigestSchema,
+          size: z.number().positive(),
+          color: z
+            .string()
+            .trim()
+            .regex(/^--semantic-[a-z0-9-]+$/i),
+        })
+        .strict(),
     })
     .strict(),
 ]);
@@ -736,8 +1156,51 @@ function canonicalFacts(facts: Array<z.infer<typeof FigmaStateFactSchema>>): str
         kind: fact.kind,
         subject: fact.subject,
         value: fact.value,
+        ...(fact.mappingId === undefined ? {} : { mappingId: fact.mappingId }),
+        ...(fact.bindingAspect === undefined ? {} : { bindingAspect: fact.bindingAspect }),
       })),
   );
+}
+
+function canonicalUiAssertionDefinition(definition: UiAssertionDefinition): unknown {
+  if (definition.kind === "geometry") {
+    return {
+      id: definition.id,
+      kind: definition.kind,
+      selector: definition.selector,
+      subject: definition.subject,
+      expected: definition.expected,
+      maxTolerance: definition.maxTolerance,
+    };
+  }
+  if (definition.kind === "computed-style") {
+    return {
+      id: definition.id,
+      kind: definition.kind,
+      selector: definition.selector,
+      subject: definition.subject,
+      property: definition.property,
+      expected: definition.expected,
+    };
+  }
+  if (definition.kind === "accessibility") {
+    return {
+      id: definition.id,
+      kind: definition.kind,
+      selector: definition.selector,
+      subject: definition.subject,
+      check: definition.check,
+      expected: definition.expected,
+    };
+  }
+  return {
+    id: definition.id,
+    kind: definition.kind,
+    selector: definition.selector,
+    subject: definition.subject,
+    action: definition.action,
+    expected: definition.expected,
+  };
 }
 
 function compareCanonicalStrings(left: string, right: string): number {
@@ -750,6 +1213,81 @@ function semanticCodeToken(
 ): string {
   const customProperty = `--${figmaVariable.trim().replaceAll("/", "-")}`;
   return role === "icon" ? customProperty : `var(${customProperty})`;
+}
+
+function assertKnownIconContract(
+  binding: FigmaDesignBinding,
+  index: number,
+  context: z.RefinementCtx,
+): void {
+  if (binding.role !== "icon" || binding.resolution.kind !== "component") return;
+  const known = {
+    "icon/normal/spot": {
+      exportName: "Spot",
+      props: { size: 16, color: "--semantic-text-tertiary", state: "normal" },
+      token: {
+        role: "icon",
+        figmaVariable: "semantic/text/tertiary",
+        codeToken: "--semantic-text-tertiary",
+      },
+    },
+    "icon/status/circle": {
+      exportName: "Circle",
+      props: { size: 16, color: "--semantic-status-positive", state: "available" },
+      token: {
+        role: "icon",
+        figmaVariable: "semantic/status/positive",
+        codeToken: "--semantic-status-positive",
+      },
+    },
+    "icon/status/close": {
+      exportName: "Close",
+      props: { size: 16, color: "--semantic-status-negative", state: "unavailable" },
+      token: {
+        role: "icon",
+        figmaVariable: "semantic/status/negative",
+        codeToken: "--semantic-status-negative",
+      },
+    },
+  } as const;
+  const expected = known[binding.figmaComponent as keyof typeof known];
+  if (expected === undefined) return;
+  if (
+    binding.resolution.module !== "@frontend/ui/icons/vue" ||
+    binding.resolution.exportName !== expected.exportName ||
+    canonicalBindingValue(binding.resolution.props) !== canonicalBindingValue(expected.props) ||
+    canonicalBindingValue(binding.semanticTokens) !== canonicalBindingValue([expected.token]) ||
+    canonicalBindingValue(binding.expectedGeometry) !==
+      canonicalBindingValue({ width: 16, height: 16, alignment: "center", flexShrink: 0 })
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["components", index],
+      message: `${binding.figmaComponent} must exact-match its public Vue export, props, semantic token, and geometry`,
+    });
+  }
+}
+
+function expectedIconStateFacts(
+  binding: FigmaDesignBinding,
+): Map<string, string | number | boolean> {
+  if (binding.role !== "icon") return new Map();
+  const token = binding.semanticTokens.find((candidate) => candidate.role === "icon");
+  const geometry = binding.expectedGeometry;
+  const exportName =
+    binding.resolution.kind === "component"
+      ? binding.resolution.exportName
+      : binding.resolution.kind === "exception"
+        ? binding.resolution.unavailableExport.requestedExport
+        : "";
+  return new Map<string, string | number | boolean>([
+    ["export", exportName],
+    ["token", token?.codeToken ?? ""],
+    ["width", geometry?.width ?? -1],
+    ["height", geometry?.height ?? -1],
+    ["alignment", geometry?.alignment ?? ""],
+    ["flexShrink", geometry?.flexShrink ?? -1],
+  ]);
 }
 
 function canonicalBindingValue(value: unknown): string {

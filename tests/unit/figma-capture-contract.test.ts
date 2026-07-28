@@ -165,7 +165,17 @@ describe("Figma state facts", () => {
       state: "available",
       fixtureId: "fixture:shop-available",
       facts: [...facts].sort((left, right) => left.id.localeCompare(right.id)),
-      requiredAssertionIds: ["assert-state-facts"],
+      requiredAssertions: [
+        {
+          id: "assert-state-facts",
+          kind: "interaction" as const,
+          selector: "[data-state-facts]",
+          subject: "state facts",
+          action: "click" as const,
+          expected: true,
+        },
+      ],
+      designBindingIds: [],
     };
     const expected = `sha256:${createHash("sha256")
       .update(JSON.stringify(canonical))

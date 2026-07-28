@@ -121,6 +121,7 @@ import {
   assertBaselineIsolation,
 } from "../visual/baseline-isolation.js";
 import {
+  PlaywrightCliResultSchema,
   UiAssertionReportSchema,
   assertUiAssertionReport,
 } from "../visual/ui-assertion-contract.js";
@@ -2163,7 +2164,15 @@ export class WorkflowService {
       projectRelativePath: string;
     }> = [];
 
-    for (const evidencePath of submission.artifactPaths) {
+    const submissionEvidencePaths =
+      submission.kind === "figma-bundle"
+        ? [
+            ...submission.artifactPaths,
+            ...submission.designMapping.publicApiCatalog.publicBarrels.map((barrel) => barrel.path),
+            submission.designMapping.publicApiCatalog.codeConnectManifest.path,
+          ]
+        : submission.artifactPaths;
+    for (const evidencePath of [...new Set(submissionEvidencePaths)]) {
       if (path.isAbsolute(evidencePath)) {
         throw new Error(
           "Evidence path must be a project-relative durable evidence path within the project root",
@@ -2313,32 +2322,45 @@ export class WorkflowService {
         if (evidencePath === submission.manifestPath) {
           assertFigmaManifest(content, evidencePath, submission);
         } else {
-          const target = submission.visualTargets.find(
-            (candidate) => candidate.baselinePath === evidencePath,
-          );
-          if (target === undefined || target.figmaCapture === undefined) {
-            throw new Error(
-              `FIGMA_CAPTURE_GEOMETRY_INVALID: ${evidencePath} is not bound to a Figma target`,
+          const catalogEvidence = [
+            ...submission.designMapping.publicApiCatalog.publicBarrels,
+            submission.designMapping.publicApiCatalog.codeConnectManifest,
+          ].find((candidate) => candidate.path === evidencePath);
+          if (catalogEvidence !== undefined) {
+            const digest = `sha256:${createHash("sha256").update(content).digest("hex")}`;
+            if (digest !== catalogEvidence.digest) {
+              throw new Error(
+                `FIGMA_DESIGN_MAPPING_INCOMPLETE: public API/Code Connect evidence digest does not match: ${evidencePath}`,
+              );
+            }
+          } else {
+            const target = submission.visualTargets.find(
+              (candidate) => candidate.baselinePath === evidencePath,
             );
-          }
-          const decoded = await decodeBoundedPng(content, evidencePath);
-          const stateContract = submission.stateContracts.find(
-            (contract) => contract.targetId === target.targetId,
-          );
-          if (stateContract === undefined) {
-            throw new Error(
-              `FIGMA_STATE_CONTRACT_INVALID: missing expected node/state binding for ${target.targetId}`,
+            if (target === undefined || target.figmaCapture === undefined) {
+              throw new Error(
+                `FIGMA_CAPTURE_GEOMETRY_INVALID: ${evidencePath} is not bound to a Figma target`,
+              );
+            }
+            const decoded = await decodeBoundedPng(content, evidencePath);
+            const stateContract = submission.stateContracts.find(
+              (contract) => contract.targetId === target.targetId,
             );
+            if (stateContract === undefined) {
+              throw new Error(
+                `FIGMA_STATE_CONTRACT_INVALID: missing expected node/state binding for ${target.targetId}`,
+              );
+            }
+            assertFigmaCaptureGeometry({
+              geometry: target.figmaCapture,
+              target: {
+                nodeId: stateContract.nodeId,
+                state: stateContract.state,
+              },
+              viewport: target.viewport,
+              decodedSize: { width: decoded.width, height: decoded.height },
+            });
           }
-          assertFigmaCaptureGeometry({
-            geometry: target.figmaCapture,
-            target: {
-              nodeId: stateContract.nodeId,
-              state: stateContract.state,
-            },
-            viewport: target.viewport,
-            decodedSize: { width: decoded.width, height: decoded.height },
-          });
         }
       }
       const visualCapture =
@@ -2512,6 +2534,9 @@ export class WorkflowService {
       const visualAssertion = submission.captures.find(
         (capture) => capture.assertionReportPath === evidencePath,
       );
+      const visualAssertionResult = submission.captures.find(
+        (capture) => capture.assertionResultPath === evidencePath,
+      );
       const baselineIsolationEvidence = submission.baselineIsolationPath === evidencePath;
       if (baselineIsolationEvidence) {
         let rawEvidence: unknown;
@@ -2557,6 +2582,21 @@ export class WorkflowService {
             `UI_ASSERTION_REPORT_INVALID: report schema is invalid: ${evidencePath}: ${parsedAssertionReport.error.issues.map((issue) => issue.message).join("; ")}`,
           );
         }
+      } else if (visualAssertionResult !== undefined) {
+        let rawResult: unknown;
+        try {
+          rawResult = JSON.parse(content.toString("utf8"));
+        } catch {
+          throw new Error(
+            `UI_ASSERTION_REPORT_INVALID: Playwright CLI result must be strict JSON: ${evidencePath}`,
+          );
+        }
+        const parsedResult = PlaywrightCliResultSchema.safeParse(rawResult);
+        if (!parsedResult.success) {
+          throw new Error(
+            `UI_ASSERTION_REPORT_INVALID: Playwright CLI result schema is invalid: ${evidencePath}: ${parsedResult.error.issues.map((issue) => issue.message).join("; ")}`,
+          );
+        }
       } else if (visualCapture !== undefined) {
         await assertPng(content, evidencePath);
       } else {
@@ -2593,10 +2633,15 @@ export class WorkflowService {
                 ? "capture-receipt"
                 : visualAssertion !== undefined
                   ? "ui-assertions"
-                  : "actual",
+                  : visualAssertionResult !== undefined
+                    ? "ui-assertion-result"
+                    : "actual",
             ...(visualCapture === undefined ? {} : { targetId: visualCapture.targetId }),
             ...(visualReceipt === undefined ? {} : { targetId: visualReceipt.targetId }),
             ...(visualAssertion === undefined ? {} : { targetId: visualAssertion.targetId }),
+            ...(visualAssertionResult === undefined
+              ? {}
+              : { targetId: visualAssertionResult.targetId }),
           },
         }),
       });
@@ -2671,6 +2716,14 @@ export class WorkflowService {
       }
 
       if (target.figmaCapture === undefined) {
+        if (
+          capture.assertionReportPath !== undefined ||
+          capture.assertionResultPath !== undefined
+        ) {
+          throw new Error(
+            `UI_ASSERTION_REPORT_INVALID: compatibility target ${target.targetId} forbids unbound UI assertion artifacts`,
+          );
+        }
         if (actualArtifact.digest === baselineArtifact.digest) {
           throw new Error(
             "VISUAL_CAPTURE_REPLAY: identical compatibility captures require a strict packet receipt",
@@ -2681,6 +2734,16 @@ export class WorkflowService {
       if (capture.receiptPath === undefined || capture.receiptDigest === undefined) {
         throw new Error(
           `VISUAL_CAPTURE_PROVENANCE_INVALID: strict target ${target.targetId} requires a capture receipt`,
+        );
+      }
+      if (
+        capture.assertionReportPath === undefined ||
+        capture.assertionReportDigest === undefined ||
+        capture.assertionResultPath === undefined ||
+        capture.assertionResultDigest === undefined
+      ) {
+        throw new Error(
+          `UI_ASSERTION_REPORT_INVALID: strict target ${target.targetId} requires a report and Playwright CLI result`,
         );
       }
       const receiptArtifact = evidenceArtifacts.find(
@@ -2728,6 +2791,14 @@ export class WorkflowService {
           `VISUAL_CAPTURE_PROVENANCE_INVALID: receipt must be strict JSON for ${target.targetId}`,
         );
       }
+      const stateContract = figmaStateContractsFromRun(run).find(
+        (contract) => contract.targetId === target.targetId,
+      );
+      if (stateContract === undefined) {
+        throw new Error(
+          `UI_ASSERTION_REPORT_INVALID: missing state contract for ${target.targetId}`,
+        );
+      }
       const validated = assertCaptureReceipt({
         receipt,
         packet,
@@ -2737,6 +2808,7 @@ export class WorkflowService {
         actualPath: capture.actualPath,
         expectedFonts,
         expectedAssets,
+        stateContractDigest: stateContract.digest,
       });
       if (validated.capturedAt !== capture.capturedAt) {
         throw new Error(
@@ -2751,12 +2823,14 @@ export class WorkflowService {
       if (assertionArtifact === undefined) {
         throw new Error(`UI_ASSERTION_REPORT_INVALID: missing report for ${target.targetId}`);
       }
-      const stateContract = figmaStateContractsFromRun(run).find(
-        (contract) => contract.targetId === target.targetId,
+      const assertionResultArtifact = evidenceArtifacts.find(
+        (artifact) =>
+          artifact.metadata["projectRelativePath"] === capture.assertionResultPath &&
+          artifact.metadata["visualRole"] === "ui-assertion-result",
       );
-      if (stateContract === undefined) {
+      if (assertionResultArtifact === undefined) {
         throw new Error(
-          `UI_ASSERTION_REPORT_INVALID: missing state contract for ${target.targetId}`,
+          `UI_ASSERTION_REPORT_INVALID: missing Playwright CLI result for ${target.targetId}`,
         );
       }
       let assertionReport: unknown;
@@ -2770,12 +2844,26 @@ export class WorkflowService {
           `UI_ASSERTION_REPORT_INVALID: report must be strict JSON for ${target.targetId}`,
         );
       }
+      let assertionResult: unknown;
+      try {
+        const assertionResultContent =
+          preparedContent.get(assertionResultArtifact.digest) ??
+          (await this.dependencies.artifactStore.readContent(assertionResultArtifact.digest));
+        assertionResult = JSON.parse(assertionResultContent.toString("utf8"));
+      } catch {
+        throw new Error(
+          `UI_ASSERTION_REPORT_INVALID: Playwright CLI result must be strict JSON for ${target.targetId}`,
+        );
+      }
       assertUiAssertionReport({
         report: assertionReport,
         packet,
         target,
         stateContract,
         captureReceiptDigest: capture.receiptDigest,
+        producerResultPath: capture.assertionResultPath,
+        producerResultDigest: capture.assertionResultDigest,
+        producerResult: assertionResult,
       });
       const captureLineageId = captureRendererLineageId(validated.environment);
       if (rendererLineageId !== undefined && captureLineageId !== rendererLineageId) {
@@ -2919,6 +3007,9 @@ export class WorkflowService {
       const assertionCapture = submission.captures.find(
         (capture) => capture.assertionReportPath === artifact.metadata["projectRelativePath"],
       );
+      const assertionResultCapture = submission.captures.find(
+        (capture) => capture.assertionResultPath === artifact.metadata["projectRelativePath"],
+      );
       const baselineIsolationArtifact =
         submission.baselineIsolationPath === artifact.metadata["projectRelativePath"];
       if (capture !== undefined && capture.actualDigest !== artifact.digest) {
@@ -2939,6 +3030,14 @@ export class WorkflowService {
           `UI_ASSERTION_REPORT_INVALID: ${assertionCapture.assertionReportPath} does not match its declared digest`,
         );
       }
+      if (
+        assertionResultCapture !== undefined &&
+        assertionResultCapture.assertionResultDigest !== artifact.digest
+      ) {
+        throw new Error(
+          `UI_ASSERTION_REPORT_INVALID: ${assertionResultCapture.assertionResultPath} does not match its declared digest`,
+        );
+      }
       if (baselineIsolationArtifact && submission.baselineIsolationDigest !== artifact.digest) {
         throw new Error(
           `VISUAL_BASELINE_ISOLATION_INVALID: ${submission.baselineIsolationPath} does not match its declared digest`,
@@ -2950,19 +3049,32 @@ export class WorkflowService {
           ...artifact.metadata,
           ...(capture === undefined &&
           receiptCapture === undefined &&
-          assertionCapture === undefined
+          assertionCapture === undefined &&
+          assertionResultCapture === undefined
             ? {}
             : {
-                targetId: (capture ?? receiptCapture ?? assertionCapture)!.targetId,
-                captureProvider: (capture ?? receiptCapture ?? assertionCapture)!.provider,
-                visualCapturedAt: (capture ?? receiptCapture ?? assertionCapture)!.capturedAt,
+                targetId: (capture ?? receiptCapture ?? assertionCapture ?? assertionResultCapture)!
+                  .targetId,
+                captureProvider: (capture ??
+                  receiptCapture ??
+                  assertionCapture ??
+                  assertionResultCapture)!.provider,
+                visualCapturedAt: (capture ??
+                  receiptCapture ??
+                  assertionCapture ??
+                  assertionResultCapture)!.capturedAt,
                 ...(capture !== undefined
                   ? { declaredCaptureDigest: capture.actualDigest }
                   : receiptCapture !== undefined
                     ? { declaredReceiptDigest: receiptCapture!.receiptDigest }
-                    : {
-                        declaredAssertionReportDigest: assertionCapture!.assertionReportDigest,
-                      }),
+                    : assertionCapture !== undefined
+                      ? {
+                          declaredAssertionReportDigest: assertionCapture!.assertionReportDigest,
+                        }
+                      : {
+                          declaredAssertionResultDigest:
+                            assertionResultCapture!.assertionResultDigest,
+                        }),
               }),
         },
       });
@@ -6830,8 +6942,10 @@ function visualSubmissionIdentity(
     capturedAt: string;
     actualPath: string;
     actualDigest: string;
-    assertionReportPath: string;
-    assertionReportDigest: string;
+    assertionReportPath?: string | undefined;
+    assertionReportDigest?: string | undefined;
+    assertionResultPath?: string | undefined;
+    assertionResultDigest?: string | undefined;
     receiptPath?: string | undefined;
     receiptDigest?: string | undefined;
   }>,
@@ -6851,8 +6965,18 @@ function visualSubmissionIdentity(
       capturedAt: capture.capturedAt,
       actualPath: capture.actualPath,
       actualDigest: capture.actualDigest,
-      assertionReportPath: capture.assertionReportPath,
-      assertionReportDigest: capture.assertionReportDigest,
+      ...(capture.assertionReportPath === undefined
+        ? {}
+        : { assertionReportPath: capture.assertionReportPath }),
+      ...(capture.assertionReportDigest === undefined
+        ? {}
+        : { assertionReportDigest: capture.assertionReportDigest }),
+      ...(capture.assertionResultPath === undefined
+        ? {}
+        : { assertionResultPath: capture.assertionResultPath }),
+      ...(capture.assertionResultDigest === undefined
+        ? {}
+        : { assertionResultDigest: capture.assertionResultDigest }),
       ...(capture.receiptPath === undefined ? {} : { receiptPath: capture.receiptPath }),
       ...(capture.receiptDigest === undefined ? {} : { receiptDigest: capture.receiptDigest }),
     }))
@@ -7167,24 +7291,30 @@ async function assertFigmaDesignAssets(
   mapping: FigmaDesignMapping,
 ): Promise<void> {
   for (const component of mapping.components) {
-    if (component.resolution.kind !== "asset") continue;
-    const requestedPath = path.resolve(projectRoot, component.resolution.path);
-    assertWithinProjectRoot(projectRoot, requestedPath, component.resolution.path);
+    const asset =
+      component.resolution.kind === "asset"
+        ? component.resolution
+        : component.resolution.kind === "exception"
+          ? component.resolution.substitute
+          : undefined;
+    if (asset === undefined) continue;
+    const requestedPath = path.resolve(projectRoot, asset.path);
+    assertWithinProjectRoot(projectRoot, requestedPath, asset.path);
     let resolvedPath: string;
     try {
       resolvedPath = await realpath(requestedPath);
     } catch {
       throw new Error(
-        `FIGMA_DESIGN_MAPPING_INCOMPLETE: canonical asset does not exist: ${component.resolution.path}`,
+        `FIGMA_DESIGN_MAPPING_INCOMPLETE: canonical asset does not exist: ${asset.path}`,
       );
     }
-    assertWithinProjectRoot(projectRoot, resolvedPath, component.resolution.path);
+    assertWithinProjectRoot(projectRoot, resolvedPath, asset.path);
     const digest = `sha256:${createHash("sha256")
       .update(await readFile(resolvedPath))
       .digest("hex")}`;
-    if (digest !== component.resolution.digest) {
+    if (digest !== asset.digest) {
       throw new Error(
-        `FIGMA_DESIGN_MAPPING_INCOMPLETE: canonical asset digest does not match: ${component.resolution.path}`,
+        `FIGMA_DESIGN_MAPPING_INCOMPLETE: canonical asset digest does not match: ${asset.path}`,
       );
     }
   }
@@ -7209,10 +7339,16 @@ function assertFigmaManifest(
     nodeIds: parsed.data.nodeIds,
     targets: parsed.data.visualTargets,
     stateContracts: parsed.data.stateContracts,
+    mapping: parsed.data.designMapping,
   });
   const submittedFileUrls = submission.fileUrls ?? [submission.fileUrl];
+  const catalogEvidencePaths = [
+    ...submission.designMapping.publicApiCatalog.publicBarrels.map((barrel) => barrel.path),
+    submission.designMapping.publicApiCatalog.codeConnectManifest.path,
+  ];
   const expectedVisualPaths = submission.artifactPaths.filter(
-    (artifactPath) => artifactPath !== submission.manifestPath,
+    (artifactPath) =>
+      artifactPath !== submission.manifestPath && !catalogEvidencePaths.includes(artifactPath),
   );
   if (
     parsed.data.provider !== submission.provider ||

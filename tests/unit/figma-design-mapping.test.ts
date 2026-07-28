@@ -1,5 +1,8 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it } from "vitest";
 
+import * as figmaContract from "../../src/figma/figma-capture-contract.js";
 import {
   assertCompleteDesignMapping,
   assertExactFigmaImplementationBindings,
@@ -8,11 +11,8 @@ import {
 
 const digest = `sha256:${"a".repeat(64)}` as const;
 const otherDigest = `sha256:${"b".repeat(64)}` as const;
-const designSystem = {
-  packageName: "@frontend/ui",
-  packageVersion: "1.2.3",
-  guidanceSkill: "@frontend/codex-skill-design-system",
-};
+const barrelDigest = `sha256:${"c".repeat(64)}` as const;
+const codeConnectDigest = `sha256:${"d".repeat(64)}` as const;
 const logo = { name: "Logo/Normal/nxplus_park", nodeId: "1:2" };
 
 const spotBinding = {
@@ -22,7 +22,7 @@ const spotBinding = {
   role: "icon" as const,
   resolution: {
     kind: "component" as const,
-    module: "@frontend/ui/icons/vue",
+    module: "@frontend/ui/icons/vue" as const,
     exportName: "Spot",
     props: {
       size: 16,
@@ -98,7 +98,7 @@ const copyButtonBinding = {
   role: "component" as const,
   resolution: {
     kind: "component" as const,
-    module: "@frontend/ui",
+    module: "@frontend/ui" as const,
     exportName: "IconButton",
     props: {
       shape: "square",
@@ -121,6 +121,45 @@ const copyButtonBinding = {
   },
 };
 
+const publicApiCatalogFields = {
+  schemaVersion: "figma-public-api-catalog-v1" as const,
+  packageName: "@frontend/ui" as const,
+  packageVersion: "1.2.3",
+  publicBarrels: [
+    {
+      module: "@frontend/ui" as const,
+      path: "tests/fixtures/case4-figma/ui-consumer/index.js",
+      digest: barrelDigest,
+    },
+    {
+      module: "@frontend/ui/icons/vue" as const,
+      path: "tests/fixtures/case4-figma/ui-consumer/icons/vue.js",
+      digest: barrelDigest,
+    },
+  ],
+  codeConnectManifest: {
+    path: "tests/fixtures/case4-figma/ui-consumer/code-connect.manifest.json",
+    digest: codeConnectDigest,
+  },
+  exports: [spotBinding, circleBinding, closeBinding, copyButtonBinding].map((binding) => ({
+    figmaComponent: binding.figmaComponent,
+    nodeId: binding.nodeId,
+    module: binding.resolution.module,
+    exportName: binding.resolution.exportName,
+    allowedProps: Object.keys(binding.resolution.props),
+  })),
+};
+const publicApiCatalog = {
+  ...publicApiCatalogFields,
+  digest: figmaContract.figmaPublicApiCatalogDigest(publicApiCatalogFields),
+};
+const designSystem = {
+  packageName: "@frontend/ui" as const,
+  packageVersion: "1.2.3",
+  catalogDigest: publicApiCatalog.digest,
+  guidanceSkill: "@frontend/codex-skill-design-system",
+};
+
 function mapping(
   components: FigmaDesignMapping["components"] = [
     spotBinding,
@@ -131,6 +170,7 @@ function mapping(
 ): FigmaDesignMapping {
   return {
     designSystem,
+    publicApiCatalog,
     components,
     fonts: [],
     tokens: [],
@@ -228,6 +268,120 @@ describe("Figma design mapping", () => {
         ]),
       }),
     ).toThrow(/FIGMA_DESIGN_MAPPING_INCOMPLETE|repository-relative/i);
+  });
+
+  it("rejects repository assets and missing icon-role tokens as icon substitutes", () => {
+    for (const binding of [
+      {
+        ...spotBinding,
+        resolution: {
+          kind: "asset" as const,
+          path: "assets/spot.svg",
+          digest,
+        },
+      },
+      {
+        ...spotBinding,
+        semanticTokens: [
+          {
+            role: "text" as const,
+            figmaVariable: "semantic/text/tertiary",
+            codeToken: "var(--semantic-text-tertiary)",
+          },
+        ],
+      },
+    ]) {
+      expect(() =>
+        assertCompleteDesignMapping({
+          capturedComponents: [{ name: binding.figmaComponent, nodeId: binding.nodeId }],
+          mapping: mapping([binding]),
+        }),
+      ).toThrow(/FIGMA_DESIGN_MAPPING_INCOMPLETE.*icon|component|semantic token/i);
+    }
+  });
+
+  it("requires a digest-bound @frontend/ui public API and Code Connect catalog", () => {
+    const digestFunction = Reflect.get(figmaContract, "figmaPublicApiCatalogDigest");
+    expect(typeof digestFunction).toBe("function");
+    if (typeof digestFunction !== "function") return;
+
+    const catalogFields = {
+      schemaVersion: "figma-public-api-catalog-v1" as const,
+      packageName: "@frontend/ui" as const,
+      packageVersion: "1.2.3",
+      publicBarrels: [
+        {
+          module: "@frontend/ui/icons/vue" as const,
+          path: "tests/fixtures/case4-figma/ui-consumer/icons/vue.js",
+          digest: barrelDigest,
+        },
+      ],
+      codeConnectManifest: {
+        path: "tests/fixtures/case4-figma/ui-consumer/code-connect.manifest.json",
+        digest: codeConnectDigest,
+      },
+      exports: [
+        {
+          figmaComponent: spotBinding.figmaComponent,
+          nodeId: spotBinding.nodeId,
+          module: spotBinding.resolution.module,
+          exportName: spotBinding.resolution.exportName,
+          allowedProps: ["color", "size", "state"],
+        },
+      ],
+    };
+    const publicApiCatalog = {
+      ...catalogFields,
+      digest: digestFunction(catalogFields),
+    };
+    const exactMapping = {
+      ...mapping([spotBinding]),
+      designSystem: {
+        ...designSystem,
+        catalogDigest: publicApiCatalog.digest,
+      },
+      publicApiCatalog,
+    };
+
+    expect(() =>
+      assertCompleteDesignMapping({
+        capturedComponents: [{ name: spotBinding.figmaComponent, nodeId: spotBinding.nodeId }],
+        mapping: exactMapping,
+      }),
+    ).not.toThrow();
+
+    for (const invalidMapping of [
+      {
+        ...exactMapping,
+        designSystem: { ...exactMapping.designSystem, packageName: "@similar/ui" },
+      },
+      {
+        ...exactMapping,
+        components: [
+          {
+            ...spotBinding,
+            resolution: {
+              ...spotBinding.resolution,
+              props: { ...spotBinding.resolution.props, invented: true },
+            },
+          },
+        ],
+      },
+      {
+        ...exactMapping,
+        publicApiCatalog: {
+          ...publicApiCatalog,
+          digest: `sha256:${createHash("sha256").update("tampered").digest("hex")}`,
+        },
+      },
+    ]) {
+      expect(() =>
+        assertCompleteDesignMapping({
+          capturedComponents: [{ name: spotBinding.figmaComponent, nodeId: spotBinding.nodeId }],
+          mapping: invalidMapping as FigmaDesignMapping,
+        }),
+      ).toThrow(/FIGMA_DESIGN_MAPPING_INCOMPLETE|catalog|frontend\/ui|prop/i);
+    }
   });
 
   it("rejects raw colors and swapped CSS/icon semantic-token formats", () => {
@@ -351,8 +505,31 @@ describe("Figma design mapping", () => {
       resolution: {
         kind: "exception" as const,
         reason: "The internal icon package does not publish this verified glyph.",
+        unavailableExport: {
+          requestedModule: "@frontend/ui/icons/vue" as const,
+          requestedExport: "UnpublishedStatusGlyph",
+          catalogDigest: publicApiCatalog.digest,
+        },
+        substitute: {
+          path: "assets/unpublished-status.svg",
+          digest,
+          size: 16,
+          color: "--semantic-status-negative",
+        },
       },
-      semanticTokens: [],
+      semanticTokens: [
+        {
+          role: "icon" as const,
+          figmaVariable: "semantic/status/negative",
+          codeToken: "--semantic-status-negative",
+        },
+      ],
+      expectedGeometry: {
+        width: 16,
+        height: 16,
+        alignment: "center",
+        flexShrink: 0,
+      },
     };
     expect(() =>
       assertExactFigmaImplementationBindings({
@@ -373,6 +550,8 @@ describe("Figma design mapping", () => {
             resolution: {
               kind: "exception",
               reason: "Used a similar external icon.",
+              unavailableExport: exception.resolution.unavailableExport,
+              substitute: exception.resolution.substitute,
             },
           },
         ],
@@ -406,7 +585,21 @@ describe("Figma design mapping", () => {
               figmaComponent: logo.name,
               nodeId: logo.nodeId,
               role: "component",
-              resolution: { kind: "exception", reason: " " },
+              resolution: {
+                kind: "exception",
+                reason: " ",
+                unavailableExport: {
+                  requestedModule: "@frontend/ui",
+                  requestedExport: "MissingLogo",
+                  catalogDigest: publicApiCatalog.digest,
+                },
+                substitute: {
+                  path: "assets/missing-logo.svg",
+                  digest,
+                  size: 16,
+                  color: "--semantic-text-tertiary",
+                },
+              },
               semanticTokens: [],
             },
           ]),

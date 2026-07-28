@@ -90,8 +90,15 @@ export const VisualCaptureSchema = z
     assertionReportPath: z
       .string()
       .trim()
-      .regex(/\.json$/i),
-    assertionReportDigest: Sha256DigestSchema,
+      .regex(/\.json$/i)
+      .optional(),
+    assertionReportDigest: Sha256DigestSchema.optional(),
+    assertionResultPath: z
+      .string()
+      .trim()
+      .regex(/\.json$/i)
+      .optional(),
+    assertionResultDigest: Sha256DigestSchema.optional(),
     receiptPath: z
       .string()
       .trim()
@@ -106,6 +113,23 @@ export const VisualCaptureSchema = z
         code: "custom",
         path: ["receiptPath"],
         message: "Visual receipt path and digest must be supplied together",
+      });
+    }
+    const assertionFields = [
+      capture.assertionReportPath,
+      capture.assertionReportDigest,
+      capture.assertionResultPath,
+      capture.assertionResultDigest,
+    ];
+    if (
+      assertionFields.some((value) => value === undefined) &&
+      assertionFields.some((value) => value !== undefined)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["assertionReportPath"],
+        message:
+          "UI assertion report and Playwright CLI result paths and digests must be supplied together",
       });
     }
   });

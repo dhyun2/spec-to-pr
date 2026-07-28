@@ -123,6 +123,7 @@ export const VisualCaptureReceiptV2Schema = z
   .object({
     schemaVersion: z.literal("visual-capture-receipt-v2"),
     ...ReceiptBindingFields,
+    stateContractDigest: Sha256DigestSchema,
     environment: CaptureEnvironmentV2Schema,
   })
   .strict()
@@ -237,6 +238,7 @@ export function assertCaptureReceipt(rawInput: {
   actualPath?: string;
   expectedFonts?: Array<{ family: string; digest: string }>;
   expectedAssets?: Array<{ path: string; digest: string }>;
+  stateContractDigest: string;
 }): VisualCaptureReceiptV2 {
   const compatible = VisualCaptureReceiptSchema.safeParse(rawInput.receipt);
   if (!compatible.success) {
@@ -248,6 +250,10 @@ export function assertCaptureReceipt(rawInput: {
     );
   }
   const receipt = compatible.data;
+  const stateContractDigest = Sha256DigestSchema.parse(rawInput.stateContractDigest);
+  if (receipt.stateContractDigest !== stateContractDigest) {
+    throw provenanceError("receipt does not match the immutable state contract digest");
+  }
   const geometry = rawInput.target.figmaCapture;
   if (geometry === undefined) {
     throw provenanceError("strict receipt target is missing Figma geometry");

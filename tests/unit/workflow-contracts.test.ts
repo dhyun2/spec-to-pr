@@ -6,6 +6,10 @@ import {
   WorkflowStartInputSchema,
   buildParserSafeChunks,
 } from "../../src/application/workflow-service.js";
+import {
+  figmaPublicApiCatalogDigest,
+  figmaStateFactsDigest,
+} from "../../src/figma/figma-capture-contract.js";
 import { RUN_STAGE_NAMES } from "../../src/run/stages.js";
 import {
   AGENT_ROLES,
@@ -27,6 +31,53 @@ import {
   WorkflowResumeContextSchema,
   WorkflowSubmissionSchema,
 } from "../../src/workflow/index.js";
+
+function figmaDesignMappingFixture() {
+  const catalogFields = {
+    schemaVersion: "figma-public-api-catalog-v1" as const,
+    packageName: "@frontend/ui" as const,
+    packageVersion: "1.2.3",
+    publicBarrels: [
+      {
+        module: "@frontend/ui" as const,
+        path: "test-ui-package/index.js",
+        digest: `sha256:${"a".repeat(64)}` as const,
+      },
+    ],
+    codeConnectManifest: {
+      path: "test-ui-package/code-connect.manifest.json",
+      digest: `sha256:${"b".repeat(64)}` as const,
+    },
+    exports: [],
+  };
+  const publicApiCatalog = {
+    ...catalogFields,
+    digest: figmaPublicApiCatalogDigest(catalogFields),
+  };
+  return {
+    designSystem: {
+      packageName: "@frontend/ui" as const,
+      packageVersion: "1.2.3",
+      catalogDigest: publicApiCatalog.digest,
+      guidanceSkill: "design-system",
+    },
+    publicApiCatalog,
+    components: [],
+    fonts: [],
+    tokens: [],
+  };
+}
+
+function requiredInteractionAssertion(id: string) {
+  return {
+    id,
+    kind: "interaction" as const,
+    selector: "[data-ui=checkout]",
+    subject: "checkout state rendered",
+    action: "click" as const,
+    expected: "rendered",
+  };
+}
 
 describe("workflow v2 contracts", () => {
   it("versions rich visual repair actions without fabricating legacy artifact evidence", () => {
@@ -1066,24 +1117,17 @@ describe("workflow v2 contracts", () => {
         state: "default",
         fixtureId: "mock:checkout",
         facts: [
-          { id: "cinema", kind: "variant", subject: "CINEMA 4K", value: "available" },
-          { id: "money", kind: "visibility", subject: "G패스 머니", value: true },
-          { id: "parking", kind: "text", subject: "주차", value: "가능" },
+          { id: "cinema", kind: "variant" as const, subject: "CINEMA 4K", value: "available" },
+          { id: "money", kind: "visibility" as const, subject: "G패스 머니", value: true },
+          { id: "parking", kind: "text" as const, subject: "주차", value: "가능" },
         ],
-        requiredAssertionIds: ["assert-checkout-state"],
+        requiredAssertions: [requiredInteractionAssertion("assert-checkout-state")],
+        designBindingIds: [],
         ...overrides,
       };
       return {
         ...fields,
-        digest: `sha256:${createHash("sha256")
-          .update(
-            JSON.stringify({
-              ...fields,
-              facts: [...fields.facts].sort((left, right) => left.id.localeCompare(right.id)),
-              requiredAssertionIds: [...fields.requiredAssertionIds].sort(),
-            }),
-          )
-          .digest("hex")}`,
+        digest: figmaStateFactsDigest(fields),
       };
     };
     const base = {
@@ -1094,16 +1138,7 @@ describe("workflow v2 contracts", () => {
       fileUrls: ["https://www.figma.com/design/abc/file?node-id=1-2"],
       nodeIds: ["1:2"],
       capturedComponents: [],
-      designMapping: {
-        designSystem: {
-          packageName: "@frontend/ui",
-          packageVersion: "1.2.3",
-          guidanceSkill: "design-system",
-        },
-        components: [],
-        fonts: [],
-        tokens: [],
-      },
+      designMapping: figmaDesignMappingFixture(),
       manifestPath: "figma/design-context.json",
       stateContracts: [stateContract()],
       visualTargets: [
@@ -1174,16 +1209,21 @@ describe("workflow v2 contracts", () => {
 
   it("rejects fixture reuse, prose authority, and identical facts for different states", () => {
     const facts = [
-      { id: "cinema", kind: "variant", subject: "CINEMA 4K", value: "available" },
-      { id: "money", kind: "visibility", subject: "G패스 머니", value: true },
-      { id: "parking", kind: "text", subject: "주차", value: "가능" },
+      { id: "cinema", kind: "variant" as const, subject: "CINEMA 4K", value: "available" },
+      { id: "money", kind: "visibility" as const, subject: "G패스 머니", value: true },
+      { id: "parking", kind: "text" as const, subject: "주차", value: "가능" },
     ];
     const contract = (
       targetId: string,
       nodeId: string,
       state: string,
       fixtureId: string,
-      stateFacts: typeof facts,
+      stateFacts: Array<{
+        id: string;
+        kind: "variant" | "visibility" | "text";
+        subject: string;
+        value: string | boolean;
+      }>,
     ) => {
       const fields = {
         targetId,
@@ -1191,19 +1231,12 @@ describe("workflow v2 contracts", () => {
         state,
         fixtureId,
         facts: stateFacts,
-        requiredAssertionIds: [`assert-${state}`],
+        requiredAssertions: [requiredInteractionAssertion(`assert-${state}`)],
+        designBindingIds: [],
       };
       return {
         ...fields,
-        digest: `sha256:${createHash("sha256")
-          .update(
-            JSON.stringify({
-              ...fields,
-              facts: [...stateFacts].sort((left, right) => left.id.localeCompare(right.id)),
-              requiredAssertionIds: [...fields.requiredAssertionIds].sort(),
-            }),
-          )
-          .digest("hex")}`,
+        digest: figmaStateFactsDigest(fields),
       };
     };
     const target = (targetId: string, nodeId: string, state: string, fixture: string) => ({
@@ -1255,12 +1288,7 @@ describe("workflow v2 contracts", () => {
       ],
       nodeIds: ["1:2", "1:3"],
       capturedComponents: [],
-      designMapping: {
-        designSystem: { packageName: "@frontend/ui", packageVersion: "1.2.3" },
-        components: [],
-        fonts: [],
-        tokens: [],
-      },
+      designMapping: figmaDesignMappingFixture(),
       manifestPath: "figma/design-context.json",
       stateContracts: [available, unavailable],
       visualTargets: [
@@ -1315,6 +1343,7 @@ describe("workflow v2 contracts", () => {
     const reviewPacketId = `packet_${"a".repeat(64)}`;
     const baselineIsolationPath = `visual/actual/${reviewPacketId}/baseline-isolation.json`;
     const assertionReportPath = `visual/actual/${reviewPacketId}/checkout.assertions.json`;
+    const assertionResultPath = `visual/actual/${reviewPacketId}/checkout.playwright.json`;
     const submission = {
       kind: "visual-comparison",
       reviewPacketId,
@@ -1332,6 +1361,8 @@ describe("workflow v2 contracts", () => {
           actualDigest: `sha256:${"1".repeat(64)}`,
           assertionReportPath,
           assertionReportDigest: `sha256:${"4".repeat(64)}`,
+          assertionResultPath,
+          assertionResultDigest: `sha256:${"5".repeat(64)}`,
         },
       ],
       baselineIsolationPath,
@@ -1339,6 +1370,7 @@ describe("workflow v2 contracts", () => {
       artifactPaths: [
         `visual/actual/${reviewPacketId}/checkout.png`,
         assertionReportPath,
+        assertionResultPath,
         baselineIsolationPath,
       ],
     };
@@ -1373,11 +1405,25 @@ describe("workflow v2 contracts", () => {
             ...submission.captures[0],
             assertionReportPath: undefined,
             assertionReportDigest: undefined,
+            assertionResultPath: undefined,
+            assertionResultDigest: undefined,
           },
         ],
         artifactPaths: submission.artifactPaths.filter(
-          (artifactPath) => artifactPath !== assertionReportPath,
+          (artifactPath) =>
+            artifactPath !== assertionReportPath && artifactPath !== assertionResultPath,
         ),
+      }).success,
+    ).toBe(true);
+    expect(
+      WorkflowSubmissionSchema.safeParse({
+        ...submission,
+        captures: [
+          {
+            ...submission.captures[0],
+            assertionReportDigest: undefined,
+          },
+        ],
       }).success,
     ).toBe(false);
     expect(
@@ -1386,7 +1432,7 @@ describe("workflow v2 contracts", () => {
         captures: [
           {
             ...submission.captures[0],
-            assertionReportDigest: undefined,
+            assertionResultDigest: undefined,
           },
         ],
       }).success,

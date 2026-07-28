@@ -1424,6 +1424,7 @@ export const FigmaBundleSubmissionSchema = z
         nodeIds: submission.nodeIds,
         targets: submission.visualTargets,
         stateContracts: submission.stateContracts,
+        mapping: submission.designMapping,
       });
     } catch (error: unknown) {
       context.addIssue({
@@ -1446,8 +1447,28 @@ export const FigmaBundleSubmissionSchema = z
         message: "Figma bundle artifact paths must be unique",
       });
     }
+    const catalogEvidencePaths = [
+      ...submission.designMapping.publicApiCatalog.publicBarrels.map((barrel) => barrel.path),
+      submission.designMapping.publicApiCatalog.codeConnectManifest.path,
+    ];
+    if (
+      new Set(catalogEvidencePaths).size !== catalogEvidencePaths.length ||
+      catalogEvidencePaths.some(
+        (evidencePath) =>
+          evidencePath === submission.manifestPath ||
+          submission.visualTargets.some((target) => target.baselinePath === evidencePath),
+      )
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["designMapping", "publicApiCatalog"],
+        message:
+          "Digest-bound public barrels and Code Connect manifest must use distinct non-baseline paths",
+      });
+    }
     const visualPaths = submission.artifactPaths.filter(
-      (artifactPath) => artifactPath !== submission.manifestPath,
+      (artifactPath) =>
+        artifactPath !== submission.manifestPath && !catalogEvidencePaths.includes(artifactPath),
     );
     if (
       visualPaths.length === 0 ||
@@ -1489,6 +1510,21 @@ export const FigmaBundleSubmissionSchema = z
         });
       }
     });
+    const expectedArtifactPaths = new Set([
+      submission.manifestPath,
+      ...submission.visualTargets.map((target) => target.baselinePath),
+    ]);
+    if (
+      submission.artifactPaths.length !== expectedArtifactPaths.size ||
+      submission.artifactPaths.some((artifactPath) => !expectedArtifactPaths.has(artifactPath))
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["artifactPaths"],
+        message:
+          "Figma bundle artifacts must exactly cover the manifest, public API/Code Connect evidence, and target baselines",
+      });
+    }
   });
 
 export const VisualComparisonSubmissionSchema = z
@@ -1551,20 +1587,27 @@ export const VisualComparisonSubmissionSchema = z
       targetIds.add(capture.targetId);
       actualPaths.add(capture.actualPath);
       expectedArtifactPaths.add(capture.actualPath);
-      const assertionReportFileName = capture.assertionReportPath.slice(expectedDirectory.length);
-      if (
-        !capture.assertionReportPath.startsWith(expectedDirectory) ||
-        assertionReportFileName.includes("/") ||
-        !/^[a-z0-9][a-z0-9._:-]*\.json$/i.test(assertionReportFileName) ||
-        expectedArtifactPaths.has(capture.assertionReportPath)
-      ) {
-        context.addIssue({
-          code: "custom",
-          path: ["captures", index, "assertionReportPath"],
-          message: `UI assertion report must use a distinct file in ${expectedDirectory}`,
-        });
+      if (capture.assertionReportPath !== undefined && capture.assertionResultPath !== undefined) {
+        for (const [field, evidencePath] of [
+          ["assertionReportPath", capture.assertionReportPath],
+          ["assertionResultPath", capture.assertionResultPath],
+        ] as const) {
+          const evidenceFileName = evidencePath.slice(expectedDirectory.length);
+          if (
+            !evidencePath.startsWith(expectedDirectory) ||
+            evidenceFileName.includes("/") ||
+            !/^[a-z0-9][a-z0-9._:-]*\.json$/i.test(evidenceFileName) ||
+            expectedArtifactPaths.has(evidencePath)
+          ) {
+            context.addIssue({
+              code: "custom",
+              path: ["captures", index, field],
+              message: `UI assertion evidence must use a distinct file in ${expectedDirectory}`,
+            });
+          }
+          expectedArtifactPaths.add(evidencePath);
+        }
       }
-      expectedArtifactPaths.add(capture.assertionReportPath);
       if (capture.receiptPath !== undefined) {
         const receiptFileName = capture.receiptPath.slice(expectedDirectory.length);
         if (
@@ -1590,7 +1633,7 @@ export const VisualComparisonSubmissionSchema = z
         code: "custom",
         path: ["artifactPaths"],
         message:
-          "Visual comparison artifactPaths must exactly match submitted actual PNGs, receipts, UI assertion reports, and baseline-isolation evidence",
+          "Visual comparison artifactPaths must exactly match submitted actual PNGs, receipts, UI assertion reports/results, and baseline-isolation evidence",
       });
     }
   });

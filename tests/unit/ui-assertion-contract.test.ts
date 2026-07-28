@@ -9,6 +9,20 @@ import {
 const reviewPacketId = `packet_${"a".repeat(64)}` as const;
 const headSha = "b".repeat(40);
 const captureReceiptDigest = `sha256:${"c".repeat(64)}` as const;
+const producerResultPath = "visual/actual/packet/assert-checkout.playwright.json";
+const producerResultDigest = `sha256:${"d".repeat(64)}` as const;
+const producerTestId = "checkout focused UI assertions";
+const producerResult = {
+  config: { version: "1.61.1" },
+  suites: [
+    {
+      title: "checkout.spec.ts",
+      specs: [{ title: producerTestId, ok: true, tests: [] }],
+    },
+  ],
+  errors: [],
+  stats: { expected: 1, unexpected: 0, flaky: 0, skipped: 0 },
+};
 const target = {
   targetId: "checkout-default",
   name: "Checkout",
@@ -31,7 +45,7 @@ const assertions = [
     subject: "right image matches left image geometry",
     expected: { x: 72, y: 180, width: 320, height: 180 },
     observed: { x: 72, y: 180, width: 320, height: 180 },
-    tolerance: 0.5,
+    maxTolerance: 0.5,
     status: "passed" as const,
   },
   ...[
@@ -56,7 +70,7 @@ const assertions = [
     subject: "copy button size and placement",
     expected: { x: 1184, y: 32, width: 32, height: 32 },
     observed: { x: 1184, y: 32, width: 32, height: 32 },
-    tolerance: 0.5,
+    maxTolerance: 0.5,
     status: "passed" as const,
   },
   ...[
@@ -140,7 +154,10 @@ const stateFields = {
       value: "copies comparison link",
     },
   ],
-  requiredAssertionIds: assertions.map((assertion) => assertion.id),
+  requiredAssertions: assertions.map(
+    ({ observed: _observed, status: _status, ...definition }) => definition,
+  ),
+  designBindingIds: [],
 };
 const stateContract = {
   ...stateFields,
@@ -154,7 +171,14 @@ function report(overrides: Record<string, unknown> = {}) {
     headSha,
     targetId: target.targetId,
     fixtureId: target.fixture,
+    stateContractDigest: stateContract.digest,
     captureReceiptDigest,
+    producer: {
+      kind: "playwright-test-cli",
+      testId: producerTestId,
+      resultPath: producerResultPath,
+      resultDigest: producerResultDigest,
+    },
     assertions,
     status: "passed",
     ...overrides,
@@ -170,6 +194,9 @@ describe("focused UI assertion report", () => {
         target,
         stateContract,
         captureReceiptDigest,
+        producerResultPath,
+        producerResultDigest,
+        producerResult,
       }),
     ).not.toThrow();
   });
@@ -188,6 +215,9 @@ describe("focused UI assertion report", () => {
         target,
         stateContract,
         captureReceiptDigest,
+        producerResultPath,
+        producerResultDigest,
+        producerResult,
       }),
     ).toThrow(/UI_ASSERTION_REPORT_INVALID/);
   });
@@ -205,9 +235,39 @@ describe("focused UI assertion report", () => {
           target,
           stateContract,
           captureReceiptDigest,
+          producerResultPath,
+          producerResultDigest,
+          producerResult,
         }),
       ).toThrow(/UI_ASSERTION_REPORT_INVALID.*assertion IDs/i);
     }
+  });
+
+  it("rejects semantic substitution behind an otherwise required assertion ID", () => {
+    const substitutedAssertions = assertions.map((assertion) =>
+      assertion.id === "copy-click"
+        ? {
+            ...assertion,
+            selector: "[data-ui=unrelated-button]",
+            subject: "unrelated button click outcome",
+            expected: "opened",
+            observed: "opened",
+          }
+        : assertion,
+    );
+
+    expect(() =>
+      assertUiAssertionReport({
+        report: report({ assertions: substitutedAssertions }),
+        packet: { id: reviewPacketId, headSha },
+        target,
+        stateContract,
+        captureReceiptDigest,
+        producerResultPath,
+        producerResultDigest,
+        producerResult,
+      }),
+    ).toThrow(/UI_ASSERTION_REPORT_INVALID.*definition|immutable|semantic/i);
   });
 
   it.each([
@@ -245,6 +305,9 @@ describe("focused UI assertion report", () => {
         target,
         stateContract,
         captureReceiptDigest,
+        producerResultPath,
+        producerResultDigest,
+        producerResult,
       }),
     ).toThrow(/UI_ASSERTION_REPORT_INVALID/);
   });
@@ -268,6 +331,9 @@ describe("focused UI assertion report", () => {
         target,
         stateContract,
         captureReceiptDigest,
+        producerResultPath,
+        producerResultDigest,
+        producerResult,
       }),
     ).toThrow(/UI_ASSERTION_REPORT_INVALID/);
   });

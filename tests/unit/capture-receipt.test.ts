@@ -20,6 +20,7 @@ const packet = {
 };
 const actualDigest = `sha256:${"5".repeat(64)}` as const;
 const fixtureDigest = `sha256:${"6".repeat(64)}` as const;
+const stateContractDigest = `sha256:${"a".repeat(64)}` as const;
 const expectedFonts = [{ family: "Pretendard", digest: `sha256:${"7".repeat(64)}` as const }];
 const expectedAssets = [
   { path: "assets/nxplus_park.webp", digest: `sha256:${"8".repeat(64)}` as const },
@@ -76,6 +77,7 @@ const validReceipt = {
   schemaVersion: "visual-capture-receipt-v2" as const,
   reviewPacketId: packet.id,
   headSha: packet.headSha,
+  stateContractDigest,
   targetId: target.targetId,
   route: "http://127.0.0.1:4173/shop?state=available",
   state: target.state,
@@ -130,6 +132,7 @@ function assertReceipt(receipt: unknown): void {
     actualPath: validReceipt.actual.path,
     expectedFonts,
     expectedAssets,
+    stateContractDigest,
   });
 }
 
@@ -148,6 +151,15 @@ describe("visual capture receipts", () => {
     ]) {
       expect(() => assertReceipt(receipt)).toThrow(/VISUAL_CAPTURE_PROVENANCE_INVALID/);
     }
+  });
+
+  it("rejects a receipt bound to another immutable state contract", () => {
+    expect(() =>
+      assertReceipt({
+        ...validReceipt,
+        stateContractDigest: `sha256:${"f".repeat(64)}`,
+      }),
+    ).toThrow(/VISUAL_CAPTURE_PROVENANCE_INVALID.*state contract/i);
   });
 
   it("rejects a declared fixture that was not consumed", () => {
