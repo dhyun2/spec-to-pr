@@ -1791,7 +1791,7 @@ describe("PublisherService", () => {
     expect(loadedRun.agentResults.some((result) => result.kind === "publishing")).toBe(false);
   });
 
-  it("publishes a Korean legacy side-by-side preview from immutable GitLab raw evidence when uploads fail", async () => {
+  it("keeps a ready GitLab publication partial when required generated diff upload fails", async () => {
     const originalGitLabToken = process.env["GITLAB_TOKEN"];
     process.env["GITLAB_TOKEN"] = "glpat_test_token";
 
@@ -1819,23 +1819,20 @@ describe("PublisherService", () => {
       });
 
       expect(published.result).toMatchObject({
-        status: "passed",
-        requestSynced: true,
+        status: "blocked",
+        errorCode: "PUBLISH_PARTIAL_SYNC",
+        requestSynced: false,
         visualPreviewExpected: true,
-        visualPreviewSynced: true,
-        fallbackMode: "gitlab-raw-evidence",
-        partialReasons: [],
+        visualPreviewSynced: false,
+        fallbackMode: "none",
       });
-      expect(published.result.fallbackReason).toContain("GitLab review-asset upload failed");
-      expect(published.agentResultId).toMatch(/^ar_/);
-      expect(gitlabPublisher.createdPayloads[0]?.body).toContain("### 레거시와 이관 결과");
-      expect(gitlabPublisher.createdPayloads[0]?.body).toContain(
-        `https://gitlab.com/acme/spec-to-pr/-/raw/${gitHead}/.spec-to-pr/shop/visual/legacy.png`,
+      expect(published.result.partialReasons.join("\n")).toContain(
+        "visual evidence upload incomplete",
       );
-      expect(gitlabPublisher.createdPayloads[0]?.body).toContain(
-        `https://gitlab.com/acme/spec-to-pr/-/raw/${gitHead}/.spec-to-pr/shop/visual/current.png`,
-      );
-      expect(gitlabPublisher.createdPayloads[0]?.body).not.toContain("diff.png");
+      expect(gitlabPublisher.createdPayloads).toHaveLength(1);
+      expect(gitlabPublisher.createdPayloads[0]?.body).not.toContain("/-/raw/");
+      const loadedRun = await store.get(run.id);
+      expect(loadedRun.agentResults.some((result) => result.kind === "publishing")).toBe(false);
     } finally {
       if (originalGitLabToken === undefined) delete process.env["GITLAB_TOKEN"];
       else process.env["GITLAB_TOKEN"] = originalGitLabToken;
@@ -1850,6 +1847,7 @@ describe("PublisherService", () => {
       const run = await runService.createRun({ projectRoot });
       await markRunReadyForPublish(run.id);
       await addVisualEvidence(run.id, { visualBaseline: "legacy-screenshot" });
+      await addParsedIntakePolicy(run.id, { includeDiff: false });
       await bindVisualEvidenceToCommittedFiles(run.id);
       const report = await prReportService.generatePrReport({ runId: run.id });
       gitlabPublisher.assetUploadError = new GitLabAssetUploadError(
@@ -1975,6 +1973,7 @@ describe("PublisherService", () => {
       const run = await runService.createRun({ projectRoot });
       await markRunReadyForPublish(run.id);
       await addVisualEvidence(run.id, { visualBaseline: "legacy-screenshot" });
+      await addParsedIntakePolicy(run.id, { includeDiff: false });
       await bindVisualEvidenceToCommittedFiles(run.id);
       await writeFile(
         path.join(projectRoot, ".spec-to-pr", "shop", "visual", "current.png"),
@@ -2020,6 +2019,7 @@ describe("PublisherService", () => {
       const run = await runService.createRun({ projectRoot });
       await markRunReadyForPublish(run.id);
       await addVisualEvidence(run.id, { visualBaseline: "legacy-screenshot" });
+      await addParsedIntakePolicy(run.id, { includeDiff: false });
       await bindVisualEvidenceToCommittedFiles(run.id);
       const report = await prReportService.generatePrReport({ runId: run.id });
       gitlabPublisher.assetUploadError = new GitLabAssetUploadError(

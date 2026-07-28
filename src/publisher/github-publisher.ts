@@ -208,7 +208,10 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
       }));
     }
 
-    return mapWithBoundedConcurrency(input.assets, input.maxConcurrency, async (asset) => {
+    // Every Contents API PUT commits against the same managed branch. Keep the
+    // read/modify/write transaction serial so concurrent assets cannot repeatedly
+    // invalidate one another's parent ref and exhaust the bounded 409 retries.
+    return mapWithBoundedConcurrency(input.assets, 1, async (asset) => {
       const assetPath = [
         ".spec-to-pr",
         asset.role === "e2e-video" ? "feature-evidence" : "visual-assets",

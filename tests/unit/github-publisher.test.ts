@@ -699,9 +699,12 @@ describe("GitHubPublisherAdapter", () => {
     ).resolves.toBe("# synced");
   });
 
-  it("never runs more than three GitHub asset uploads concurrently", async () => {
-    let activeUploads = 0;
-    let maxActiveUploads = 0;
+  it("serializes shared-branch mutations so six conflicting assets all publish", async () => {
+    let nextMutationId = 0;
+    const activeMutations = new Set<number>();
+    const contendedMutations = new Set<number>();
+    let maxActiveMutations = 0;
+    const attemptsByUrl = new Map<string, number>();
     const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
       if (url === "https://api.github.com/repos/acme/spec-to-pr") {
         return jsonResponse({ private: false });
@@ -710,14 +713,26 @@ describe("GitHubPublisherAdapter", () => {
         return jsonResponse(evidenceRef());
       }
       if (init.method === "GET") return new Response("missing asset", { status: 404 });
-      activeUploads += 1;
-      maxActiveUploads = Math.max(maxActiveUploads, activeUploads);
+
+      const attempt = (attemptsByUrl.get(url) ?? 0) + 1;
+      attemptsByUrl.set(url, attempt);
+      const mutationId = nextMutationId++;
+      activeMutations.add(mutationId);
+      if (activeMutations.size > 1) {
+        for (const activeMutationId of activeMutations) {
+          contendedMutations.add(activeMutationId);
+        }
+      }
+      maxActiveMutations = Math.max(maxActiveMutations, activeMutations.size);
       await new Promise((resolve) => setTimeout(resolve, 5));
-      activeUploads -= 1;
+      activeMutations.delete(mutationId);
+      if (attempt === 1 || contendedMutations.has(mutationId)) {
+        return new Response("ref moved", { status: 409 });
+      }
       return jsonResponse({ content: uploadedContent(), commit: { sha: EVIDENCE_COMMIT } });
     });
     const adapter = new GitHubPublisherAdapter(fetchMock);
-    const assets = ["2", "3", "4", "5", "6"].map((digit, index) => ({
+    const assets = ["2", "3", "4", "5", "6", "7"].map((digit, index) => ({
       ...asset(),
       artifactId: `art_${digit.repeat(32)}`,
       artifactDigest: `sha256:${digit.repeat(64)}` as const,
@@ -732,9 +747,10 @@ describe("GitHubPublisherAdapter", () => {
       assets,
     });
 
-    expect(outcomes).toHaveLength(5);
+    expect(outcomes).toHaveLength(6);
     expect(outcomes.every((outcome) => outcome.status === "published")).toBe(true);
-    expect(maxActiveUploads).toBe(3);
+    expect(maxActiveMutations).toBe(1);
+    expect([...attemptsByUrl.values()]).toEqual([2, 2, 2, 2, 2, 2]);
   });
 });
 

@@ -1501,6 +1501,9 @@ export class PublisherService {
       input.visualPreview.report === undefined ||
       input.featureVideo !== undefined ||
       input.visualPreview.requiresGeneratedDiagnostics ||
+      input.visualPreview.assets.some(
+        (asset) => asset.role !== "figma" && asset.role !== "browser",
+      ) ||
       !canUseGitLabRawEvidenceFallback(input.error)
     ) {
       return undefined;
