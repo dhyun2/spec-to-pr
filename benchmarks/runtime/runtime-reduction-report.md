@@ -79,16 +79,28 @@ The current measured outcomes are:
 | Packet-bound Git recapture           | Real path `implementation → functional-review → report`, two reuse hits, six Git commands, and zero binary-diff recaptures.                                                                                                                           | `latest.json` packet-evidence fixture; commits `7e41281`, `fa45060`, and `03f06c9`. |
 | Reviewer scheduling                  | Retained current parallel scheduling. Controlled sample: 30 deliveries, 35 packet/fixture samples, five first failures, 100 ms invalidated of 1,390 ms reviewer wall (7.19%), below the 15% change gate. No scheduling speedup claim is made.         | `benchmarks/runtime/reviewer-scheduling-decision.json`; commit `b18c8c7`.           |
 
-The only changing measured counters between immediate receipts are timing-derived throughput and
-host/allocation observations:
+The following table is the complete mechanical diff of every per-fixture `metricCounters` pair
+between `git show 9e392cb:benchmarks/runtime/latest.json` and the refreshed compatible receipt.
+Exactly 15 pairs changed; every other per-fixture counter is unchanged. Positive allocation
+deltas are labeled **regression** even though they remain far below the enforced memory budgets.
 
-- Serial throughput: 15.340 → 15.430 comparisons/s.
-- Pool throughput: 27.408 → 28.251 comparisons/s.
-- Visual cold peak managed bytes: 35,655,306 → 35,663,745; RSS delta:
-  62,521,344 → 41,189,376.
-- Visual warm RSS delta: 47,824,896 → 31,637,504.
-- Visual total peak managed bytes: 35,655,306 → 35,663,745; RSS delta:
-  69,304,320 → 66,945,024.
+| Fixture              | Counter                          |      Before |       After | Absolute delta | Relative delta | Assessment                         |
+| -------------------- | -------------------------------- | ----------: | ----------: | -------------: | -------------: | ---------------------------------- |
+| visual-paired-serial | `throughputComparisonsPerSecond` |   15.340111 |   15.429774 |      +0.089663 |       +0.5845% | throughput improvement             |
+| visual-paired-pool   | `throughputComparisonsPerSecond` |   27.407924 |   28.251231 |      +0.843307 |       +3.0769% | throughput improvement             |
+| visual-cold          | `inFlightPeakRssBytes`           | 954,171,392 | 927,711,232 |    -26,460,160 |       -2.7731% | lower host RSS                     |
+| visual-cold          | `inFlightRssDeltaBytes`          |  62,521,344 |  41,189,376 |    -21,331,968 |      -34.1195% | lower same-iteration RSS delta     |
+| visual-cold          | `peakComparisonManagedBytes`     |  33,012,863 |  33,021,302 |         +8,439 |       +0.0256% | **positive allocation regression** |
+| visual-cold          | `peakManagedBytes`               |  35,655,306 |  35,663,745 |         +8,439 |       +0.0237% | **positive allocation regression** |
+| visual-cold          | `rssBaselineBytes`               | 891,650,048 | 886,521,856 |     -5,128,192 |       -0.5751% | lower host RSS baseline            |
+| visual-warm          | `inFlightPeakRssBytes`           | 929,923,072 | 874,872,832 |    -55,050,240 |       -5.9199% | lower host RSS                     |
+| visual-warm          | `inFlightRssDeltaBytes`          |  47,824,896 |  31,637,504 |    -16,187,392 |      -33.8472% | lower same-iteration RSS delta     |
+| visual-warm          | `rssBaselineBytes`               | 882,098,176 | 843,235,328 |    -38,862,848 |       -4.4057% | lower host RSS baseline            |
+| visual total         | `inFlightPeakRssBytes`           | 929,923,072 | 874,872,832 |    -55,050,240 |       -5.9199% | lower host RSS                     |
+| visual total         | `inFlightRssDeltaBytes`          |  69,304,320 |  66,945,024 |     -2,359,296 |       -3.4043% | lower same-iteration RSS delta     |
+| visual total         | `peakComparisonManagedBytes`     |  33,012,863 |  33,021,302 |         +8,439 |       +0.0256% | **positive allocation regression** |
+| visual total         | `peakManagedBytes`               |  35,655,306 |  35,663,745 |         +8,439 |       +0.0237% | **positive allocation regression** |
+| visual total         | `rssBaselineBytes`               | 860,618,752 | 807,927,808 |    -52,690,944 |       -6.1224% | lower host RSS baseline            |
 
 ## Evidence-surface preservation
 
