@@ -15,14 +15,29 @@ const require = createRequire(import.meta.url);
 const playwrightVersion = require("playwright/package.json").version;
 const fixtureRoot = path.join(root, "tests/fixtures/case4-figma");
 const outputRoot = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-case4-"));
+const baselineImage = new PNG({ width: 1, height: 1 });
+baselineImage.data.set([29, 78, 216, 255]);
+const baselineBytes = PNG.sync.write(baselineImage);
+const baselineDigest = `sha256:${createHash("sha256").update(baselineBytes).digest("hex")}`;
+const validSourceBytes = await readFile(path.join(fixtureRoot, "index.html"));
+const maliciousSourceBytes = await readFile(path.join(fixtureRoot, "baseline-overlay.html"));
 const contentTypes = new Map([
   [".html", "text/html; charset=utf-8"],
   [".json", "application/json; charset=utf-8"],
+  [".png", "image/png"],
 ]);
 
 const server = createServer(async (request, response) => {
   try {
     const requested = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
+    if (requested === "/baseline.png") {
+      response.writeHead(200, {
+        "content-type": "image/png",
+        "cache-control": "no-store",
+      });
+      response.end(baselineBytes);
+      return;
+    }
     const relative = requested === "/" ? "index.html" : requested.replace(/^\/+/, "");
     assert.equal(relative.includes(".."), false);
     const filePath = path.join(fixtureRoot, relative);
@@ -186,10 +201,112 @@ try {
         height: decoded.height,
         receiptDigest: `sha256:${createHash("sha256").update(receiptBytes).digest("hex")}`,
         receipt,
+        baselineIsolation: {
+          schemaVersion: "baseline-isolation-v1",
+          reviewPacketId: receipt.reviewPacketId,
+          headSha: receipt.headSha,
+          baselineArtifacts: [
+            {
+              artifactId: `art_${"c".repeat(32)}`,
+              path: "visual/case4-baseline.png",
+              digest: baselineDigest,
+            },
+          ],
+          checkedSourceFiles: [
+            {
+              path: "tests/fixtures/case4-figma/index.html",
+              digest: `sha256:${createHash("sha256").update(validSourceBytes).digest("hex")}`,
+            },
+          ],
+          requestedResources: [],
+          renderedMedia: [],
+          violations: [],
+          status: "passed",
+        },
       });
     } finally {
       await context.close();
     }
+  }
+
+  assert.equal(validSourceBytes.includes(Buffer.from("/baseline.png")), false);
+  assert.equal(maliciousSourceBytes.includes(Buffer.from("/baseline.png")), true);
+  const maliciousContext = await browser.newContext({
+    viewport: { width: 360, height: 800 },
+    deviceScaleFactor: 1,
+    locale: "ko-KR",
+    colorScheme: "light",
+    reducedMotion: "reduce",
+    timezoneId: "Asia/Seoul",
+  });
+  const maliciousPage = await maliciousContext.newPage();
+  const baselineRequests = [];
+  maliciousPage.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/baseline.png") {
+      baselineRequests.push(request.url());
+    }
+  });
+  let maliciousObservation;
+  try {
+    const baselineResponse = maliciousPage.waitForResponse(
+      (response) => new URL(response.url()).pathname === "/baseline.png",
+    );
+    await maliciousPage.goto(`${origin}/baseline-overlay.html`);
+    const response = await baselineResponse;
+    await maliciousPage.waitForFunction(() => window.__BASELINE_OVERLAY_READY__ === true);
+    const requestedBytes = await response.body();
+    assert.equal(
+      `sha256:${createHash("sha256").update(requestedBytes).digest("hex")}`,
+      baselineDigest,
+    );
+    assert.ok(baselineRequests.length >= 1);
+    const renderedMedia = await maliciousPage.evaluate(() => {
+      const overlay = document.querySelector("#baseline-overlay");
+      const svgImage = document.querySelector("#baseline-svg");
+      const canvas = document.querySelector("#baseline-canvas");
+      const overlayStyle = getComputedStyle(overlay);
+      return [
+        {
+          selector: "#baseline-overlay",
+          sourceUrl: overlay.currentSrc,
+          fullFrame:
+            overlayStyle.position === "fixed" &&
+            overlayStyle.inset === "0px" &&
+            overlay.getBoundingClientRect().width === innerWidth &&
+            overlay.getBoundingClientRect().height === innerHeight,
+        },
+        {
+          selector: "#baseline-svg",
+          sourceUrl: new URL(svgImage.getAttribute("href"), location.href).href,
+        },
+        {
+          selector: "#baseline-canvas",
+          sourceUrl: canvas.dataset.sourceUrl,
+          digest: canvas.dataset.digest,
+        },
+      ];
+    });
+    assert.equal(renderedMedia[0].fullFrame, true);
+    assert.ok(
+      renderedMedia.every((media) => new URL(media.sourceUrl).pathname === "/baseline.png"),
+    );
+    assert.equal(renderedMedia[2].digest, baselineDigest);
+    maliciousObservation = {
+      checkedSourcePath: "tests/fixtures/case4-figma/baseline-overlay.html",
+      checkedSourceDigest: `sha256:${createHash("sha256")
+        .update(maliciousSourceBytes)
+        .digest("hex")}`,
+      requestedResources: [
+        {
+          url: baselineRequests[0],
+          digest: baselineDigest,
+        },
+      ],
+      renderedMedia,
+      violationKinds: ["source-reference", "network-request", "rendered-baseline"],
+    };
+  } finally {
+    await maliciousContext.close();
   }
 
   execFileSync(
@@ -200,6 +317,7 @@ try {
       "tests/unit/figma-capture-contract.test.ts",
       "tests/unit/visual-normalizer.test.ts",
       "tests/unit/capture-receipt.test.ts",
+      "tests/unit/baseline-isolation.test.ts",
       "tests/unit/remote-detector.test.ts",
       "tests/unit/workspace-binding.test.ts",
     ],
@@ -213,13 +331,17 @@ try {
       "tests/integration/publisher-service.test.ts",
       "tests/integration/workflow-service.test.ts",
       "-t",
-      "persisted Figma target|repairs implementation across visual packets|pinned publication|workspace binding",
+      "persisted Figma target|baseline isolation|pinned publication|workspace binding",
     ],
     { cwd: root, env: process.env, stdio: "inherit" },
   );
 
   process.stdout.write(
-    `${JSON.stringify({ status: "passed", mode: "figma", captures }, null, 2)}\n`,
+    `${JSON.stringify(
+      { status: "passed", mode: "figma", captures, maliciousObservation },
+      null,
+      2,
+    )}\n`,
   );
 } finally {
   await browser.close();

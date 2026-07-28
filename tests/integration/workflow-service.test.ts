@@ -32,12 +32,125 @@ import type {
 } from "../../src/publisher/index.js";
 import { ArtifactRefSchema } from "../../src/runtime/artifact.js";
 import { createArtifactId } from "../../src/runtime/id-factory.js";
+import type { RunManifest } from "../../src/run/index.js";
 import { createDraftEvidenceBundle } from "../../src/workflow/draft-evidence-bundle.js";
 
 const FIGMA_URL = "https://www.figma.com/design/abc/file?node-id=1-2";
 const FIGMA_URL_SECOND_STATE = "https://www.figma.com/design/abc/file?node-id=3-4";
 const FEATURE_CONTEXT_ID = `ctx_${"x".repeat(124)}`;
 const execFileAsync = promisify(execFile);
+
+async function writeBaselineIsolationEvidence(input: {
+  directory: string;
+  run: RunManifest;
+  reviewPacketId: string;
+  mutate?: (evidence: Record<string, unknown>) => void;
+}) {
+  const implementationReport = [...input.run.artifacts].reverse().find((artifact) => {
+    const packet = artifact.metadata["reviewPacket"];
+    return (
+      artifact.metadata["workflowSubmissionKind"] === "implementation" &&
+      typeof packet === "object" &&
+      packet !== null &&
+      "id" in packet &&
+      packet.id === input.reviewPacketId
+    );
+  });
+  const packet = implementationReport?.metadata["reviewPacket"] as
+    { id?: unknown; headSha?: unknown; changedFiles?: unknown } | undefined;
+  if (
+    implementationReport === undefined ||
+    packet?.id !== input.reviewPacketId ||
+    typeof packet.headSha !== "string" ||
+    !Array.isArray(packet.changedFiles) ||
+    packet.changedFiles.some((value) => typeof value !== "string")
+  ) {
+    throw new Error("Missing implementation packet for baseline isolation");
+  }
+  const visualTargets = [...input.run.artifacts]
+    .reverse()
+    .find(
+      (artifact) =>
+        (artifact.metadata["workflowSubmissionKind"] === "figma-bundle" ||
+          artifact.metadata["workflowSubmissionKind"] === "contracts") &&
+        Array.isArray(artifact.metadata["visualTargets"]) &&
+        artifact.metadata["visualTargets"].length > 0,
+    )?.metadata["visualTargets"] as Array<{ baselinePath?: unknown }> | undefined;
+  if (visualTargets === undefined) throw new Error("Missing visual targets");
+  const baselineArtifacts = visualTargets.map((target) => {
+    if (typeof target.baselinePath !== "string") throw new Error("Missing baseline path");
+    const artifact = [...input.run.artifacts]
+      .reverse()
+      .find((candidate) => candidate.metadata["projectRelativePath"] === target.baselinePath);
+    if (artifact === undefined) throw new Error(`Missing baseline ${target.baselinePath}`);
+    return {
+      artifactId: artifact.id,
+      path: target.baselinePath,
+      digest: artifact.digest,
+    };
+  });
+  const declaredFiles = implementationReport.metadata["changedFiles"] as string[];
+  const designSystemEvidence = implementationReport.metadata["designSystemEvidence"] as
+    { usages?: Array<{ sourceFile?: unknown }> } | undefined;
+  const evidenceArtifactIds = new Set(
+    Array.isArray(implementationReport.metadata["evidenceArtifactIds"])
+      ? (implementationReport.metadata["evidenceArtifactIds"] as string[])
+      : [],
+  );
+  const browserBundles = input.run.artifacts.flatMap((artifact) => {
+    const projectRelativePath = artifact.metadata["projectRelativePath"];
+    return evidenceArtifactIds.has(artifact.id) &&
+      typeof projectRelativePath === "string" &&
+      /\.(?:js|mjs|cjs|css)$/i.test(projectRelativePath)
+      ? [projectRelativePath]
+      : [];
+  });
+  const sourcePaths = [
+    ...(packet.changedFiles as string[]),
+    ...declaredFiles,
+    ...(designSystemEvidence?.usages?.flatMap((usage) =>
+      typeof usage.sourceFile === "string" ? [usage.sourceFile] : [],
+    ) ?? []),
+    ...browserBundles,
+  ]
+    .filter((sourcePath) => /\.(?:js|jsx|ts|tsx|vue|svelte|css|scss|mjs|cjs)$/i.test(sourcePath))
+    .filter(
+      (sourcePath) =>
+        !/(?:^|\/)(?:tests?|__tests__|fixtures?|e2e|specs?)(?:\/|$)/i.test(sourcePath),
+    );
+  const checkedSourceFiles = await Promise.all(
+    [...new Set(sourcePaths)].sort().map(async (sourcePath) => {
+      const content = await readFile(path.join(input.directory, sourcePath));
+      return {
+        path: sourcePath,
+        digest: `sha256:${createHash("sha256").update(content).digest("hex")}`,
+      };
+    }),
+  );
+  const evidence: Record<string, unknown> = {
+    schemaVersion: "baseline-isolation-v1",
+    reviewPacketId: input.reviewPacketId,
+    headSha: packet.headSha,
+    baselineArtifacts: [...new Map(baselineArtifacts.map((item) => [item.path, item])).values()],
+    checkedSourceFiles,
+    requestedResources: [],
+    renderedMedia: [],
+    violations: [],
+    status: "passed",
+  };
+  input.mutate?.(evidence);
+  const baselineIsolationPath =
+    `visual/actual/${input.reviewPacketId}/baseline-isolation.json` as const;
+  const bytes = Buffer.from(JSON.stringify(evidence), "utf8");
+  await mkdir(path.dirname(path.join(input.directory, baselineIsolationPath)), {
+    recursive: true,
+  });
+  await writeFile(path.join(input.directory, baselineIsolationPath), bytes);
+  return {
+    baselineIsolationPath,
+    baselineIsolationDigest: `sha256:${createHash("sha256").update(bytes).digest("hex")}` as const,
+  };
+}
 
 describe("WorkflowService", () => {
   let directory: string;
@@ -4892,6 +5005,11 @@ describe("WorkflowService", () => {
     if (typeof featurePacket?.headSha !== "string") {
       throw new Error("Missing feature implementation packet head");
     }
+    const featureIsolation = await writeBaselineIsolationEvidence({
+      directory,
+      run: featureRun,
+      reviewPacketId: visualAction.reviewPacketId,
+    });
     const featureActualDigest =
       `sha256:${createHash("sha256").update(featureActualBytes).digest("hex")}` as const;
     const featureReceiptPath =
@@ -4972,7 +5090,12 @@ describe("WorkflowService", () => {
           kind: "visual-comparison",
           reviewPacketId: visualAction.reviewPacketId,
           captures: [{ ...featureCapture, route: "/wrong" }],
-          artifactPaths: [featureActualPath, featureReceiptPath],
+          ...featureIsolation,
+          artifactPaths: [
+            featureActualPath,
+            featureReceiptPath,
+            featureIsolation.baselineIsolationPath,
+          ],
         },
       }),
     ).rejects.toThrow(/capture manifest.*target/i);
@@ -4983,7 +5106,12 @@ describe("WorkflowService", () => {
           kind: "visual-comparison",
           reviewPacketId: visualAction.reviewPacketId,
           captures: [{ ...featureCapture, actualDigest: `sha256:${"0".repeat(64)}` }],
-          artifactPaths: [featureActualPath, featureReceiptPath],
+          ...featureIsolation,
+          artifactPaths: [
+            featureActualPath,
+            featureReceiptPath,
+            featureIsolation.baselineIsolationPath,
+          ],
         },
       }),
     ).rejects.toThrow(/VISUAL_CAPTURE_DIGEST_MISMATCH/);
@@ -4993,7 +5121,12 @@ describe("WorkflowService", () => {
         kind: "visual-comparison",
         reviewPacketId: visualAction.reviewPacketId,
         captures: [featureCapture],
-        artifactPaths: [featureActualPath, featureReceiptPath],
+        ...featureIsolation,
+        artifactPaths: [
+          featureActualPath,
+          featureReceiptPath,
+          featureIsolation.baselineIsolationPath,
+        ],
       },
     });
     expect(visuallyCompared.nextActions.map((action) => action.kind).sort()).toEqual([
@@ -5010,7 +5143,12 @@ describe("WorkflowService", () => {
         kind: "visual-comparison",
         reviewPacketId: visualAction.reviewPacketId,
         captures: [featureCapture],
-        artifactPaths: [featureActualPath, featureReceiptPath],
+        ...featureIsolation,
+        artifactPaths: [
+          featureActualPath,
+          featureReceiptPath,
+          featureIsolation.baselineIsolationPath,
+        ],
       },
     });
     const afterPassingReplay = await store.get(started.runId);
@@ -5409,7 +5547,12 @@ describe("WorkflowService", () => {
                 actualDigest: `sha256:${"a".repeat(64)}`,
               },
             ],
-            artifactPaths: [actualPath],
+            baselineIsolationPath: `visual/actual/${compareAction.reviewPacketId}/baseline-isolation.json`,
+            baselineIsolationDigest: `sha256:${"b".repeat(64)}`,
+            artifactPaths: [
+              actualPath,
+              `visual/actual/${compareAction.reviewPacketId}/baseline-isolation.json`,
+            ],
           },
         }),
       ).rejects.toThrow(/FIGMA_CAPTURE_GEOMETRY_REACQUISITION_REQUIRED/);
@@ -5774,7 +5917,7 @@ describe("WorkflowService", () => {
     );
   });
 
-  it("repairs implementation across packets with capture receipt renderer lineage and blocks after three visual comparison failures", async () => {
+  it("enforces baseline isolation and renderer lineage before reservations while blocking after three visual comparison failures", async () => {
     const baseline = new PNG({ width: 1, height: 1 });
     baseline.data.set([0, 0, 0, 255]);
     await writeFile(path.join(directory, "visual/diff.png"), PNG.sync.write(baseline));
@@ -6139,14 +6282,22 @@ describe("WorkflowService", () => {
         await captureFor("checkout-default", "default", rgba),
         await captureFor("checkout-summary", "summary", secondRgba),
       ];
+      const baselineIsolation = await writeBaselineIsolationEvidence({
+        directory,
+        run: await store.get(started.runId),
+        reviewPacketId: action.reviewPacketId,
+      });
       return {
         kind: "visual-comparison" as const,
         reviewPacketId: action.reviewPacketId,
         captures,
-        artifactPaths: captures.flatMap((capture) => [
-          capture.actualPath,
-          ...(capture.receiptPath === undefined ? [] : [capture.receiptPath]),
-        ]),
+        ...baselineIsolation,
+        artifactPaths: captures
+          .flatMap((capture) => [
+            capture.actualPath,
+            ...(capture.receiptPath === undefined ? [] : [capture.receiptPath]),
+          ])
+          .concat(baselineIsolation.baselineIsolationPath),
       };
     };
     const mutateReceiptAt = async (
@@ -6175,6 +6326,22 @@ describe("WorkflowService", () => {
         ),
       };
     };
+    const mutateBaselineIsolation = async (
+      submission: Awaited<ReturnType<typeof visualSubmission>>,
+      mutate: (evidence: Record<string, unknown>) => void,
+    ) => {
+      const evidence = JSON.parse(
+        await readFile(path.join(directory, submission.baselineIsolationPath), "utf8"),
+      ) as Record<string, unknown>;
+      mutate(evidence);
+      const bytes = Buffer.from(JSON.stringify(evidence), "utf8");
+      await writeFile(path.join(directory, submission.baselineIsolationPath), bytes);
+      return {
+        ...submission,
+        baselineIsolationDigest:
+          `sha256:${createHash("sha256").update(bytes).digest("hex")}` as const,
+      };
+    };
     const visualReservationCount = async () =>
       (await store.get(started.runId)).artifacts.filter(
         (artifact) => artifact.metadata["adapter"] === "visual-attempt-reservation-v3",
@@ -6198,6 +6365,97 @@ describe("WorkflowService", () => {
       current.updatedAt = new Date().toISOString();
       await store.save(current, current.revision - 1);
     };
+
+    const originalCheckoutSource = await readFile(path.join(directory, "src/checkout.tsx"), "utf8");
+    const sourceReferenceCases = [
+      "import baseline from '../visual/diff.png'; export { baseline };\n",
+      "export const css = `background-image:url('../visual/diff.png')`;\n",
+      "export const image = <img src='/visual/diff.png' alt='' />;\n",
+      "export const vector = <svg><image href='/visual/diff.png' /></svg>;\n",
+      "const image = new Image(); image.src='/visual/diff.png'; context.drawImage(image,0,0);\n",
+      "export const Overlay = <img style={{position:'fixed',inset:0,width:'100vw',height:'100vh'}} src='/visual/diff.png' />;\n",
+    ];
+    for (const [index, source] of sourceReferenceCases.entries()) {
+      const candidate = await visualSubmission(
+        compareAction,
+        implementationPacket.headSha,
+        `baseline-source-${String(index)}`,
+        [255, 255, 255, 255],
+      );
+      await writeFile(path.join(directory, "src/checkout.tsx"), source, "utf8");
+      const invalid = await mutateBaselineIsolation(candidate, (evidence) => {
+        const checked = evidence["checkedSourceFiles"] as Array<Record<string, unknown>>;
+        const checkout = checked.find((item) => item["path"] === "src/checkout.tsx");
+        if (checkout === undefined) throw new Error("Missing checked checkout source");
+        checkout["digest"] = `sha256:${createHash("sha256").update(source).digest("hex")}`;
+      });
+      const reservationsBefore = await visualReservationCount();
+      try {
+        await expect(service.submit({ runId: started.runId, submission: invalid })).rejects.toThrow(
+          /VISUAL_BASELINE_ISOLATION_INVALID/,
+        );
+        expect(await visualReservationCount()).toBe(reservationsBefore);
+      } finally {
+        await writeFile(path.join(directory, "src/checkout.tsx"), originalCheckoutSource, "utf8");
+      }
+    }
+
+    const baselineArtifact = (await store.get(started.runId)).artifacts.find(
+      (artifact) => artifact.metadata["projectRelativePath"] === "visual/diff.png",
+    );
+    if (baselineArtifact === undefined) throw new Error("Missing immutable visual baseline");
+    const evidenceCases: Array<(evidence: Record<string, unknown>) => void> = [
+      (evidence) => {
+        evidence["requestedResources"] = [{ url: "https://app.example/visual/diff.png" }];
+      },
+      (evidence) => {
+        evidence["requestedResources"] = [{ url: baselineArtifact.uri }];
+      },
+      (evidence) => {
+        evidence["requestedResources"] = [
+          {
+            url: "https://app.example/assets/renamed-reference.png",
+            digest: baselineArtifact.digest,
+          },
+        ];
+      },
+      (evidence) => {
+        evidence["renderedMedia"] = [
+          {
+            selector: "img#baseline-overlay",
+            sourceUrl: "https://app.example/visual/diff.png",
+          },
+        ];
+      },
+      (evidence) => {
+        evidence["renderedMedia"] = [
+          {
+            selector: "canvas#comparison",
+            sourceUrl: "https://app.example/assets/renamed-reference.png",
+            digest: baselineArtifact.digest,
+          },
+        ];
+      },
+      (evidence) => {
+        evidence["violations"] = [
+          { kind: "rendered-baseline", evidence: "full-frame overlay detected" },
+        ];
+      },
+    ];
+    for (const [index, mutate] of evidenceCases.entries()) {
+      const candidate = await visualSubmission(
+        compareAction,
+        implementationPacket.headSha,
+        `baseline-evidence-${String(index)}`,
+        [255, 255, 255, 255],
+      );
+      const invalid = await mutateBaselineIsolation(candidate, mutate);
+      const reservationsBefore = await visualReservationCount();
+      await expect(service.submit({ runId: started.runId, submission: invalid })).rejects.toThrow(
+        /VISUAL_BASELINE_ISOLATION_INVALID/,
+      );
+      expect(await visualReservationCount()).toBe(reservationsBefore);
+    }
 
     const appendVisualReservation = async (input: {
       submissionIdentity: string;
@@ -6941,7 +7199,11 @@ describe("WorkflowService", () => {
         submission: {
           ...secondAttempt,
           captures: secondAttempt.captures.slice(0, 1),
-          artifactPaths: secondAttempt.artifactPaths.slice(0, 2),
+          artifactPaths: [
+            secondAttempt.captures[0]!.actualPath,
+            secondAttempt.captures[0]!.receiptPath!,
+            secondAttempt.baselineIsolationPath,
+          ],
         },
       }),
     ).rejects.toThrow(/missing: checkout-summary/);

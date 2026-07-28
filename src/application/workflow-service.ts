@@ -117,6 +117,10 @@ import {
   captureRendererLineageId,
 } from "../visual/capture-receipt.js";
 import {
+  BaselineIsolationEvidenceSchema,
+  assertBaselineIsolation,
+} from "../visual/baseline-isolation.js";
+import {
   CapturedFigmaComponentSchema,
   FigmaDesignMappingSchema,
   FigmaStateContractSchema,
@@ -2340,8 +2344,26 @@ export class WorkflowService {
         submission.kind === "visual-comparison"
           ? submission.captures.find((capture) => capture.receiptPath === evidencePath)
           : undefined;
+      const baselineIsolationEvidence =
+        submission.kind === "visual-comparison" &&
+        submission.baselineIsolationPath === evidencePath;
       if (submission.kind === "visual-comparison") {
-        if (visualReceipt !== undefined) {
+        if (baselineIsolationEvidence) {
+          let rawEvidence: unknown;
+          try {
+            rawEvidence = JSON.parse(content.toString("utf8"));
+          } catch {
+            throw new Error(
+              `VISUAL_BASELINE_ISOLATION_INVALID: evidence must be strict JSON: ${evidencePath}`,
+            );
+          }
+          const parsedIsolation = BaselineIsolationEvidenceSchema.safeParse(rawEvidence);
+          if (!parsedIsolation.success) {
+            throw new Error(
+              `VISUAL_BASELINE_ISOLATION_INVALID: evidence schema is invalid: ${evidencePath}: ${parsedIsolation.error.issues.map((issue) => issue.message).join("; ")}`,
+            );
+          }
+        } else if (visualReceipt !== undefined) {
           let rawReceipt: unknown;
           try {
             rawReceipt = JSON.parse(content.toString("utf8"));
@@ -2400,7 +2422,11 @@ export class WorkflowService {
                   reviewPacketId: submission.reviewPacketId,
                   headSha: reviewPacketFromRun(run)?.headSha,
                   diffDigest: reviewPacketFromRun(run)?.diffDigest,
-                  visualRole: visualCapture === undefined ? "capture-receipt" : "actual",
+                  visualRole: baselineIsolationEvidence
+                    ? "baseline-isolation"
+                    : visualCapture === undefined
+                      ? "capture-receipt"
+                      : "actual",
                   ...(visualCapture === undefined ? {} : { targetId: visualCapture.targetId }),
                   ...(visualReceipt === undefined ? {} : { targetId: visualReceipt.targetId }),
                 }),
@@ -2478,7 +2504,23 @@ export class WorkflowService {
       const visualReceipt = submission.captures.find(
         (capture) => capture.receiptPath === evidencePath,
       );
-      if (visualReceipt !== undefined) {
+      const baselineIsolationEvidence = submission.baselineIsolationPath === evidencePath;
+      if (baselineIsolationEvidence) {
+        let rawEvidence: unknown;
+        try {
+          rawEvidence = JSON.parse(content.toString("utf8"));
+        } catch {
+          throw new Error(
+            `VISUAL_BASELINE_ISOLATION_INVALID: evidence must be strict JSON: ${evidencePath}`,
+          );
+        }
+        const parsedIsolation = BaselineIsolationEvidenceSchema.safeParse(rawEvidence);
+        if (!parsedIsolation.success) {
+          throw new Error(
+            `VISUAL_BASELINE_ISOLATION_INVALID: evidence schema is invalid: ${evidencePath}: ${parsedIsolation.error.issues.map((issue) => issue.message).join("; ")}`,
+          );
+        }
+      } else if (visualReceipt !== undefined) {
         let rawReceipt: unknown;
         try {
           rawReceipt = JSON.parse(content.toString("utf8"));
@@ -2522,7 +2564,11 @@ export class WorkflowService {
             reviewPacketId: submission.reviewPacketId,
             headSha: reviewPacketFromRun(run)?.headSha,
             diffDigest: reviewPacketFromRun(run)?.diffDigest,
-            visualRole: visualCapture === undefined ? "capture-receipt" : "actual",
+            visualRole: baselineIsolationEvidence
+              ? "baseline-isolation"
+              : visualCapture === undefined
+                ? "capture-receipt"
+                : "actual",
             ...(visualCapture === undefined ? {} : { targetId: visualCapture.targetId }),
             ...(visualReceipt === undefined ? {} : { targetId: visualReceipt.targetId }),
           },
@@ -2685,6 +2731,45 @@ export class WorkflowService {
     return rendererLineageId;
   }
 
+  private async assertVisualBaselineIsolation(
+    run: RunManifest,
+    packet: ImplementationReviewPacket,
+    submission: Extract<WorkflowSubmission, { kind: "visual-comparison" }>,
+    targets: VisualTargetManifest[],
+    evidenceArtifacts: ArtifactRef[],
+    preparedContent: ReadonlyMap<string, Buffer>,
+  ): Promise<void> {
+    const isolationArtifact = evidenceArtifacts.find(
+      (artifact) =>
+        artifact.metadata["projectRelativePath"] === submission.baselineIsolationPath &&
+        artifact.metadata["visualRole"] === "baseline-isolation",
+    );
+    if (isolationArtifact === undefined) {
+      throw new Error(
+        `VISUAL_BASELINE_ISOLATION_INVALID: missing evidence ${submission.baselineIsolationPath}`,
+      );
+    }
+    const content =
+      preparedContent.get(isolationArtifact.digest) ??
+      (await this.dependencies.artifactStore.readContent(isolationArtifact.digest));
+    let evidence: unknown;
+    try {
+      evidence = JSON.parse(content.toString("utf8"));
+    } catch {
+      throw new Error("VISUAL_BASELINE_ISOLATION_INVALID: evidence must be strict JSON");
+    }
+    const baselineArtifacts = visualBaselineArtifacts(run, targets);
+    const sourceInputs = baselineIsolationSourceInputsFromRun(run, packet);
+    await assertBaselineIsolation({
+      projectRoot: run.projectRoot,
+      packet,
+      baselineArtifacts,
+      evidence,
+      ...sourceInputs,
+      excludedPaths: [...submission.artifactPaths, ...targets.map((target) => target.baselinePath)],
+    });
+  }
+
   private async recordVisualComparison(
     run: RunManifest,
     submission: Extract<WorkflowSubmission, { kind: "visual-comparison" }>,
@@ -2765,6 +2850,8 @@ export class WorkflowService {
       const receiptCapture = submission.captures.find(
         (capture) => capture.receiptPath === artifact.metadata["projectRelativePath"],
       );
+      const baselineIsolationArtifact =
+        submission.baselineIsolationPath === artifact.metadata["projectRelativePath"];
       if (capture !== undefined && capture.actualDigest !== artifact.digest) {
         throw new Error(
           `VISUAL_CAPTURE_DIGEST_MISMATCH: ${capture.actualPath} does not match its declared digest`,
@@ -2773,6 +2860,11 @@ export class WorkflowService {
       if (receiptCapture !== undefined && receiptCapture.receiptDigest !== artifact.digest) {
         throw new Error(
           `VISUAL_CAPTURE_PROVENANCE_INVALID: ${receiptCapture.receiptPath} does not match its declared digest`,
+        );
+      }
+      if (baselineIsolationArtifact && submission.baselineIsolationDigest !== artifact.digest) {
+        throw new Error(
+          `VISUAL_BASELINE_ISOLATION_INVALID: ${submission.baselineIsolationPath} does not match its declared digest`,
         );
       }
       return ArtifactRefSchema.parse({
@@ -2795,6 +2887,14 @@ export class WorkflowService {
     const preparedContent = new Map(
       preparedEvidence.map((item) => [item.artifact.digest, item.content] as const),
     );
+    await this.assertVisualBaselineIsolation(
+      run,
+      packet,
+      submission,
+      targets,
+      boundEvidenceArtifacts,
+      preparedContent,
+    );
     const rendererLineageId = await this.assertVisualCaptureAcquisition(
       run,
       packet,
@@ -2808,6 +2908,15 @@ export class WorkflowService {
       packet,
       submissionIdentity,
       rendererLineageId,
+      async (current) =>
+        this.assertVisualBaselineIsolation(
+          current,
+          packet,
+          submission,
+          targets,
+          boundEvidenceArtifacts,
+          preparedContent,
+        ),
     );
     if (reservationResult.kind === "busy") {
       throw new Error(
@@ -3414,6 +3523,7 @@ export class WorkflowService {
     packet: ImplementationReviewPacket,
     submissionIdentity: string,
     rendererLineageId: `sha256:${string}` | undefined,
+    validateBeforeReservation?: (current: RunManifest) => Promise<void>,
   ): Promise<VisualAttemptReservationResult> {
     for (let retry = 0; retry < 12; retry += 1) {
       const current = await this.dependencies.runStore.get(runId);
@@ -3426,6 +3536,7 @@ export class WorkflowService {
       if (rendererLineageId !== undefined) {
         assertRendererLineageMatchesCommittedAttempts(current, packet, rendererLineageId);
       }
+      await validateBeforeReservation?.(current);
       const events = visualAttemptReservations(current, visualLineageId(packet));
       const summary = reduceVisualReservations(events, this.now());
       const committedReplay = summary.committed.find(
@@ -6046,6 +6157,85 @@ function visualTargetsFromRun(run: RunManifest): VisualTargetManifest[] {
     }
   }
   return [];
+}
+
+function visualBaselineArtifacts(run: RunManifest, targets: VisualTargetManifest[]): ArtifactRef[] {
+  const byPath = new Map<string, ArtifactRef>();
+  for (const target of targets) {
+    const expectedSubmissionKind = target.baselineKind === "figma" ? "figma-bundle" : "contracts";
+    const artifact = [...run.artifacts]
+      .reverse()
+      .find(
+        (candidate) =>
+          candidate.metadata["projectRelativePath"] === target.baselinePath &&
+          candidate.metadata["workflowSubmissionKind"] === expectedSubmissionKind,
+      );
+    if (artifact === undefined) {
+      throw new Error(
+        `VISUAL_BASELINE_ISOLATION_INVALID: missing immutable baseline ${target.baselinePath}`,
+      );
+    }
+    byPath.set(target.baselinePath, artifact);
+  }
+  return [...byPath.values()];
+}
+
+function baselineIsolationSourceInputsFromRun(
+  run: RunManifest,
+  packet: ImplementationReviewPacket,
+): {
+  implementationSourceFiles: string[];
+  designSystemSourceFiles: string[];
+  browserBundlePaths: string[];
+} {
+  const implementationReport = [...run.artifacts].reverse().find((artifact) => {
+    if (
+      artifact.kind !== "agent-result-report" ||
+      artifact.metadata["workflowSubmissionKind"] !== "implementation"
+    ) {
+      return false;
+    }
+    const parsed = ImplementationReviewPacketSchema.safeParse(artifact.metadata["reviewPacket"]);
+    return parsed.success && parsed.data.id === packet.id;
+  });
+  if (implementationReport === undefined) {
+    throw new Error(
+      "VISUAL_BASELINE_ISOLATION_INVALID: current implementation declaration is missing",
+    );
+  }
+  const implementationSourceFiles = z
+    .array(z.string())
+    .safeParse(implementationReport.metadata["changedFiles"]);
+  if (!implementationSourceFiles.success) {
+    throw new Error(
+      "VISUAL_BASELINE_ISOLATION_INVALID: implementation source declaration is invalid",
+    );
+  }
+  const designSystemEvidence = z
+    .object({
+      usages: z.array(z.object({ sourceFile: z.string() }).passthrough()),
+    })
+    .passthrough()
+    .safeParse(implementationReport.metadata["designSystemEvidence"]);
+  const designSystemSourceFiles = designSystemEvidence.success
+    ? designSystemEvidence.data.usages.map((usage) => usage.sourceFile)
+    : [];
+  const evidenceArtifactIds = new Set(
+    z.array(z.string()).catch([]).parse(implementationReport.metadata["evidenceArtifactIds"]),
+  );
+  const browserBundlePaths = run.artifacts.flatMap((artifact) => {
+    const projectRelativePath = artifact.metadata["projectRelativePath"];
+    return evidenceArtifactIds.has(artifact.id) &&
+      typeof projectRelativePath === "string" &&
+      /\.(?:js|mjs|cjs|css)$/i.test(projectRelativePath)
+      ? [projectRelativePath]
+      : [];
+  });
+  return {
+    implementationSourceFiles: implementationSourceFiles.data,
+    designSystemSourceFiles,
+    browserBundlePaths,
+  };
 }
 
 function figmaDesignMappingFromRun(run: RunManifest): FigmaDesignMapping | undefined {

@@ -1313,6 +1313,7 @@ describe("workflow v2 contracts", () => {
 
   it("accepts only visual captures and never caller-supplied scores or decisions", () => {
     const reviewPacketId = `packet_${"a".repeat(64)}`;
+    const baselineIsolationPath = `visual/actual/${reviewPacketId}/baseline-isolation.json`;
     const submission = {
       kind: "visual-comparison",
       reviewPacketId,
@@ -1330,7 +1331,9 @@ describe("workflow v2 contracts", () => {
           actualDigest: `sha256:${"1".repeat(64)}`,
         },
       ],
-      artifactPaths: [`visual/actual/${reviewPacketId}/checkout.png`],
+      baselineIsolationPath,
+      baselineIsolationDigest: `sha256:${"3".repeat(64)}`,
+      artifactPaths: [`visual/actual/${reviewPacketId}/checkout.png`, baselineIsolationPath],
     };
 
     expect(WorkflowSubmissionSchema.safeParse(submission).success).toBe(true);

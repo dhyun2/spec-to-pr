@@ -20,6 +20,7 @@ import {
   assertCompleteDesignMapping,
   assertFigmaStateContracts,
 } from "../figma/figma-capture-contract.js";
+export { BaselineIsolationEvidenceSchema } from "../visual/baseline-isolation.js";
 
 export const WorkflowScopeSchema = z
   .object({
@@ -1518,13 +1519,31 @@ export const VisualComparisonSubmissionSchema = z
     kind: z.literal("visual-comparison"),
     reviewPacketId: ReviewPacketIdSchema,
     captures: z.array(VisualCaptureSchema).min(1).max(50),
+    baselineIsolationPath: z
+      .string()
+      .trim()
+      .regex(/\.json$/i, "Baseline-isolation evidence must be a JSON file"),
+    baselineIsolationDigest: Sha256DigestSchema,
     artifactPaths: z.array(z.string().trim().min(1)).min(1).max(100),
   })
   .strict()
   .superRefine((submission, context) => {
     const targetIds = new Set<string>();
     const actualPaths = new Set<string>();
-    const expectedArtifactPaths = new Set<string>();
+    const expectedArtifactPaths = new Set<string>([submission.baselineIsolationPath]);
+    const expectedDirectory = `visual/actual/${submission.reviewPacketId}/`;
+    const isolationFileName = submission.baselineIsolationPath.slice(expectedDirectory.length);
+    if (
+      !submission.baselineIsolationPath.startsWith(expectedDirectory) ||
+      isolationFileName.includes("/") ||
+      !/^[a-z0-9][a-z0-9._:-]*\.json$/i.test(isolationFileName)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["baselineIsolationPath"],
+        message: `Baseline-isolation evidence must use a distinct file in ${expectedDirectory}`,
+      });
+    }
     submission.captures.forEach((capture, index) => {
       if (targetIds.has(capture.targetId)) {
         context.addIssue({
@@ -1540,7 +1559,6 @@ export const VisualComparisonSubmissionSchema = z
           message: "Each visual target requires a distinct actual PNG",
         });
       }
-      const expectedDirectory = `visual/actual/${submission.reviewPacketId}/`;
       const fileName = capture.actualPath.slice(expectedDirectory.length);
       if (
         !capture.actualPath.startsWith(expectedDirectory) ||
@@ -1581,7 +1599,7 @@ export const VisualComparisonSubmissionSchema = z
         code: "custom",
         path: ["artifactPaths"],
         message:
-          "Visual comparison artifactPaths must exactly match submitted actual PNGs and receipts",
+          "Visual comparison artifactPaths must exactly match submitted actual PNGs, receipts, and baseline-isolation evidence",
       });
     }
   });
