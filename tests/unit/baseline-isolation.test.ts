@@ -386,17 +386,125 @@ describe("visual baseline isolation", () => {
     }
   });
 
+  it.each([
+    [
+      "requested proxy path",
+      {
+        requestedResources: [{ url: "https://app.example/proxy/visual%2Fshop-baseline%2Epng" }],
+      },
+    ],
+    [
+      "rendered proxy path",
+      {
+        renderedMedia: [
+          {
+            selector: "img#proxy-overlay",
+            sourceUrl: "https://app.example/proxy/visual%2Fshop-baseline%2Epng",
+          },
+        ],
+      },
+    ],
+    [
+      "requested proxy query value",
+      {
+        requestedResources: [
+          {
+            url: "https://app.example/proxy?asset=%2Fproxy%2Fvisual%2Fshop-baseline%2Epng",
+          },
+        ],
+      },
+    ],
+    [
+      "rendered proxy query value",
+      {
+        renderedMedia: [
+          {
+            selector: "img#query-overlay",
+            sourceUrl: "https://app.example/proxy?asset=visual%2Fshop-baseline%2Epng",
+          },
+        ],
+      },
+    ],
+  ])("rejects a canonical full baseline path in a %s", async (_name, override) => {
+    const source = await writeProductFile("src/shop.tsx", "export const Shop = 'semantic';\n");
+
+    await expect(
+      assertBaselineIsolation({
+        projectRoot,
+        packet,
+        baselineArtifacts: [baseline],
+        evidence: evidence([source], override),
+        excludedPaths: registeredExcludedPaths,
+      }),
+    ).rejects.toThrow(/VISUAL_BASELINE_ISOLATION_INVALID/);
+  });
+
+  it("rejects production source that remains percent-decodable after the bounded limit", async () => {
+    await assertInvalid(
+      "export const hiddenBaseline = '%252525252Fvisual%252525252Fshop-baseline.png';\n",
+    );
+  });
+
+  it.each([
+    [
+      "requested resource",
+      {
+        requestedResources: [
+          {
+            url: "https://app.example/assets/shop-baseline.png?probe=%252525252Fstill-encoded",
+          },
+        ],
+      },
+    ],
+    [
+      "rendered media",
+      {
+        renderedMedia: [
+          {
+            selector: "img#deeply-encoded",
+            sourceUrl:
+              "https://app.example/assets/shop-baseline.png?probe=%252525252Fstill-encoded",
+          },
+        ],
+      },
+    ],
+  ])(
+    "rejects a %s that remains percent-decodable after the bounded limit",
+    async (_name, override) => {
+      const source = await writeProductFile("src/shop.tsx", "export const Shop = 'semantic';\n");
+
+      await expect(
+        assertBaselineIsolation({
+          projectRoot,
+          packet,
+          baselineArtifacts: [baseline],
+          evidence: evidence([source], override),
+          excludedPaths: registeredExcludedPaths,
+        }),
+      ).rejects.toThrow(/VISUAL_BASELINE_ISOLATION_INVALID/);
+    },
+  );
+
   it("allows unrelated resources that share only the baseline basename", async () => {
     const source = await writeProductFile(
       "src/shop.tsx",
       "export const unrelatedAsset = '/assets/shop-baseline.png';\n",
     );
     const valid = evidence([source], {
-      requestedResources: [{ url: "https://app.example/assets/shop-baseline.png" }],
+      requestedResources: [
+        { url: "https://app.example/assets/shop-baseline.png" },
+        {
+          url: "https://app.example/proxy?asset=assets%2Fshop-baseline.png",
+        },
+      ],
       renderedMedia: [
         {
           selector: "img#unrelated",
           sourceUrl: "https://app.example/assets/shop-baseline.png",
+        },
+        {
+          selector: "img#unrelated-query",
+          sourceUrl: "https://app.example/proxy?asset=assets%2Fshop-baseline.png",
         },
       ],
     });

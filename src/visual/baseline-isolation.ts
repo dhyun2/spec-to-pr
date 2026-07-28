@@ -323,14 +323,20 @@ function matchesBaselineUrl(url: string, baselines: CanonicalBaseline[]): boolea
     return false;
   }
   const requestedPath = canonicalUrlPath(parsed.pathname);
+  const queryValues = [...parsed.searchParams.values()].map(canonicalUrlPath);
   return baselines.some((baseline) => {
     const baselinePath = canonicalUrlPath(baseline.path);
     return (
       decoded === canonicalReferenceText(baseline.uri) ||
       decoded.includes(baseline.digest.toLowerCase()) ||
-      requestedPath === baselinePath
+      hasSegmentBoundSuffix(requestedPath, baselinePath) ||
+      queryValues.some((value) => hasSegmentBoundSuffix(value, baselinePath))
     );
   });
+}
+
+function hasSegmentBoundSuffix(value: string, suffix: string): boolean {
+  return value === suffix || value.endsWith(`/${suffix}`);
 }
 
 function canonicalReferenceText(value: string): string {
@@ -345,17 +351,24 @@ function canonicalUrlPath(value: string): string {
 function decodePercentEncoding(value: string): string {
   let decoded = value;
   for (let round = 0; round < MAX_PERCENT_DECODE_ROUNDS; round += 1) {
-    const next = decoded.replace(/(?:%[a-f0-9]{2})+/gi, (encoded) => {
-      try {
-        return decodeURIComponent(encoded);
-      } catch {
-        return encoded;
-      }
-    });
+    const next = decodePercentEncodingOnce(decoded);
     if (next === decoded) break;
     decoded = next;
   }
+  if (decodePercentEncodingOnce(decoded) !== decoded) {
+    invalid(`percent encoding exceeds ${String(MAX_PERCENT_DECODE_ROUNDS)} decoding rounds`);
+  }
   return decoded;
+}
+
+function decodePercentEncodingOnce(value: string): string {
+  return value.replace(/(?:%[a-f0-9]{2})+/gi, (encoded) => {
+    try {
+      return decodeURIComponent(encoded);
+    } catch {
+      return encoded;
+    }
+  });
 }
 
 function normalizeRelativePath(value: string): string {

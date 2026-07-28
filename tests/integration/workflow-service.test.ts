@@ -6380,6 +6380,7 @@ describe("WorkflowService", () => {
       "export const vector = <svg><image href='/visual/diff.png' /></svg>;\n",
       "const image = new Image(); image.src='/visual/diff.png'; context.drawImage(image,0,0);\n",
       "export const Overlay = <img style={{position:'fixed',inset:0,width:'100vw',height:'100vh'}} src='/visual/diff.png' />;\n",
+      "export const deeplyEncoded = '%252525252Fvisual%252525252Fdiff.png';\n",
     ];
     for (const [index, source] of sourceReferenceCases.entries()) {
       const candidate = await visualSubmission(
@@ -6459,6 +6460,31 @@ describe("WorkflowService", () => {
           {
             selector: "img#encoded-overlay",
             sourceUrl: "https://app.example/%252E%252Fvisual%252Fdiff.png",
+          },
+        ];
+      },
+      (evidence) => {
+        evidence["requestedResources"] = [{ url: "https://app.example/proxy/visual%2Fdiff%2Epng" }];
+      },
+      (evidence) => {
+        evidence["requestedResources"] = [
+          {
+            url: "https://app.example/proxy?asset=%2Fproxy%2Fvisual%2Fdiff%2Epng",
+          },
+        ];
+      },
+      (evidence) => {
+        evidence["renderedMedia"] = [
+          {
+            selector: "img#proxy-query-overlay",
+            sourceUrl: "https://app.example/proxy?asset=visual%2Fdiff%2Epng",
+          },
+        ];
+      },
+      (evidence) => {
+        evidence["requestedResources"] = [
+          {
+            url: "https://app.example/assets/diff.png?probe=%252525252Fstill-encoded",
           },
         ];
       },
@@ -6584,11 +6610,20 @@ describe("WorkflowService", () => {
       runtime["digest"] = `sha256:${createHash("sha256")
         .update(unrelatedBasenameSource)
         .digest("hex")}`;
-      evidence["requestedResources"] = [{ url: "https://app.example/assets/diff.png" }];
+      evidence["requestedResources"] = [
+        { url: "https://app.example/assets/diff.png" },
+        {
+          url: "https://app.example/proxy?asset=assets%2Fdiff.png",
+        },
+      ];
       evidence["renderedMedia"] = [
         {
           selector: "img#unrelated",
           sourceUrl: "https://app.example/assets/diff.png",
+        },
+        {
+          selector: "img#unrelated-query",
+          sourceUrl: "https://app.example/proxy?asset=assets%2Fdiff.png",
         },
       ];
     });
