@@ -202,5 +202,342 @@
         }
       ]
     }
+  ],
+  "classifications": [
+    {
+      "contextId": "control-1d9fbec4-e9d3-4638-aad4-0d68a5e43d3f",
+      "source": "human-post-hoc",
+      "responseModified": false,
+      "results": [
+        {
+          "scenarioId": "native-thumbnail",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "captureDisposition": "reacquire-or-block",
+            "invalidCaptureConsumesAttempt": "not-stated"
+          }
+        },
+        {
+          "scenarioId": "baseline-overlay",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "baselineOverlayAllowed": false,
+            "baselineInProductRenderAllowed": false
+          }
+        },
+        {
+          "scenarioId": "state-fixture",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "stateAuthority": "not-stated",
+            "fixtureReuseAcrossDistinctStatesAllowed": false
+          }
+        },
+        {
+          "scenarioId": "icon-token",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "exactInternalExportRequired": "approved-internal-asset",
+            "semanticTokenRequired": true,
+            "externalSubstituteAllowed": false
+          }
+        },
+        {
+          "scenarioId": "renderer-drift",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "rendererLineageMustMatch": true,
+            "rendererDriftConsumesAttempt": "not-stated"
+          }
+        },
+        {
+          "scenarioId": "focused-assertions",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "thresholdPercent": "not-stated",
+            "thresholdOverrideAllowed": false,
+            "focusedDefectsWaivedByScore": false
+          }
+        },
+        {
+          "scenarioId": "autonomous-loop",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "validAttemptCount": "not-stated",
+            "pauseForUserBeforeAttemptThree": false,
+            "terminalFailureStatus": "not-stated",
+            "blockedMediaRequired": true
+          }
+        }
+      ]
+    },
+    {
+      "contextId": "control-fae6c56a-672d-4285-95a8-db0aea61acfd",
+      "source": "human-post-hoc",
+      "responseModified": false,
+      "results": [
+        {
+          "scenarioId": "native-thumbnail",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "captureDisposition": "reacquire-or-block",
+            "invalidCaptureConsumesAttempt": "not-stated"
+          }
+        },
+        {
+          "scenarioId": "baseline-overlay",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "baselineOverlayAllowed": false,
+            "baselineInProductRenderAllowed": false
+          }
+        },
+        {
+          "scenarioId": "state-fixture",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "stateAuthority": "not-stated",
+            "fixtureReuseAcrossDistinctStatesAllowed": false
+          }
+        },
+        {
+          "scenarioId": "icon-token",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "exactInternalExportRequired": "approved-internal-asset",
+            "semanticTokenRequired": true,
+            "externalSubstituteAllowed": false
+          }
+        },
+        {
+          "scenarioId": "renderer-drift",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "rendererLineageMustMatch": true,
+            "rendererDriftConsumesAttempt": "not-stated"
+          }
+        },
+        {
+          "scenarioId": "focused-assertions",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "thresholdPercent": "not-stated",
+            "thresholdOverrideAllowed": false,
+            "focusedDefectsWaivedByScore": false
+          }
+        },
+        {
+          "scenarioId": "autonomous-loop",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "validAttemptCount": "not-stated",
+            "pauseForUserBeforeAttemptThree": false,
+            "terminalFailureStatus": "not-stated",
+            "blockedMediaRequired": true
+          }
+        }
+      ]
+    },
+    {
+      "contextId": "control-2c83a0c5-1c4c-4ec8-ab03-d14971586631",
+      "source": "human-post-hoc",
+      "responseModified": false,
+      "results": [
+        {
+          "scenarioId": "native-thumbnail",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "captureDisposition": "reacquire-or-block",
+            "invalidCaptureConsumesAttempt": "not-stated"
+          }
+        },
+        {
+          "scenarioId": "baseline-overlay",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "baselineOverlayAllowed": false,
+            "baselineInProductRenderAllowed": false
+          }
+        },
+        {
+          "scenarioId": "state-fixture",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "stateAuthority": "not-stated",
+            "fixtureReuseAcrossDistinctStatesAllowed": false
+          }
+        },
+        {
+          "scenarioId": "icon-token",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "exactInternalExportRequired": "approved-internal-asset",
+            "semanticTokenRequired": true,
+            "externalSubstituteAllowed": false
+          }
+        },
+        {
+          "scenarioId": "renderer-drift",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "rendererLineageMustMatch": true,
+            "rendererDriftConsumesAttempt": "not-stated"
+          }
+        },
+        {
+          "scenarioId": "focused-assertions",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "thresholdPercent": "not-stated",
+            "thresholdOverrideAllowed": false,
+            "focusedDefectsWaivedByScore": false
+          }
+        },
+        {
+          "scenarioId": "autonomous-loop",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "validAttemptCount": "not-stated",
+            "pauseForUserBeforeAttemptThree": false,
+            "terminalFailureStatus": "not-stated",
+            "blockedMediaRequired": true
+          }
+        }
+      ]
+    },
+    {
+      "contextId": "control-1f025052-41a5-4ce6-b267-4b25edc20fb6",
+      "source": "human-post-hoc",
+      "responseModified": false,
+      "results": [
+        {
+          "scenarioId": "native-thumbnail",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "captureDisposition": "reacquire-or-block",
+            "invalidCaptureConsumesAttempt": "not-stated"
+          }
+        },
+        {
+          "scenarioId": "baseline-overlay",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "baselineOverlayAllowed": false,
+            "baselineInProductRenderAllowed": false
+          }
+        },
+        {
+          "scenarioId": "state-fixture",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "stateAuthority": "not-stated",
+            "fixtureReuseAcrossDistinctStatesAllowed": false
+          }
+        },
+        {
+          "scenarioId": "icon-token",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "exactInternalExportRequired": "approved-internal-asset",
+            "semanticTokenRequired": true,
+            "externalSubstituteAllowed": false
+          }
+        },
+        {
+          "scenarioId": "renderer-drift",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "rendererLineageMustMatch": true,
+            "rendererDriftConsumesAttempt": "not-stated"
+          }
+        },
+        {
+          "scenarioId": "focused-assertions",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "thresholdPercent": "not-stated",
+            "thresholdOverrideAllowed": false,
+            "focusedDefectsWaivedByScore": false
+          }
+        },
+        {
+          "scenarioId": "autonomous-loop",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "validAttemptCount": "not-stated",
+            "pauseForUserBeforeAttemptThree": false,
+            "terminalFailureStatus": "not-stated",
+            "blockedMediaRequired": true
+          }
+        }
+      ]
+    },
+    {
+      "contextId": "control-61ac4b61-3141-455b-b0a4-e912690e4167",
+      "source": "human-post-hoc",
+      "responseModified": false,
+      "results": [
+        {
+          "scenarioId": "native-thumbnail",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "captureDisposition": "reacquire-or-block",
+            "invalidCaptureConsumesAttempt": "not-stated"
+          }
+        },
+        {
+          "scenarioId": "baseline-overlay",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "baselineOverlayAllowed": false,
+            "baselineInProductRenderAllowed": false
+          }
+        },
+        {
+          "scenarioId": "state-fixture",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "stateAuthority": "not-stated",
+            "fixtureReuseAcrossDistinctStatesAllowed": false
+          }
+        },
+        {
+          "scenarioId": "icon-token",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "exactInternalExportRequired": "approved-internal-asset",
+            "semanticTokenRequired": true,
+            "externalSubstituteAllowed": false
+          }
+        },
+        {
+          "scenarioId": "renderer-drift",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "rendererLineageMustMatch": true,
+            "rendererDriftConsumesAttempt": "not-stated"
+          }
+        },
+        {
+          "scenarioId": "focused-assertions",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "thresholdPercent": "not-stated",
+            "thresholdOverrideAllowed": false,
+            "focusedDefectsWaivedByScore": false
+          }
+        },
+        {
+          "scenarioId": "autonomous-loop",
+          "rationaleReview": "completed",
+          "safetyAssertions": {
+            "validAttemptCount": "not-stated",
+            "pauseForUserBeforeAttemptThree": false,
+            "terminalFailureStatus": "not-stated",
+            "blockedMediaRequired": true
+          }
+        }
+      ]
+    }
   ]
 }
