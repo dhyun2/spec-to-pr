@@ -1042,6 +1042,23 @@ describe("v2 documentation", () => {
     }
   });
 
+  it("requires the orchestrator to run and terminalize the fixed visual loop", () => {
+    const orchestrator = readFileSync(path.join(root, "skills", "spec-to-pr", "SKILL.md"), "utf8");
+
+    for (const marker of [
+      "92%",
+      "three valid numeric comparisons",
+      "without pausing",
+      "invalid acquisition consumes no attempt",
+      "third valid failure",
+      "blocked",
+      "blocked-diagnostic",
+      "Do not start design review",
+    ]) {
+      expect(orchestrator, `spec-to-pr:${marker}`).toContain(marker);
+    }
+  });
+
   it("documents composable sources, guidance precedence, and the zero-to-100 feature recipe", () => {
     const readmes = ["README.md", "README.ko.md", "packages/codex-sdk/README.md"].map((file) =>
       readFileSync(path.join(root, file), "utf8"),
