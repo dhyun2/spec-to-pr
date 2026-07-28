@@ -6179,6 +6179,25 @@ describe("WorkflowService", () => {
       (await store.get(started.runId)).artifacts.filter(
         (artifact) => artifact.metadata["adapter"] === "visual-attempt-reservation-v3",
       ).length;
+    const replacePersistedDesignMapping = async (designMapping: unknown) => {
+      const current = await store.get(started.runId);
+      let bundleIndex = -1;
+      for (let index = current.artifacts.length - 1; index >= 0; index -= 1) {
+        if (current.artifacts[index]?.metadata["workflowSubmissionKind"] === "figma-bundle") {
+          bundleIndex = index;
+          break;
+        }
+      }
+      if (bundleIndex < 0) throw new Error("Missing persisted Figma design mapping");
+      const bundle = current.artifacts[bundleIndex]!;
+      current.artifacts[bundleIndex] = ArtifactRefSchema.parse({
+        ...bundle,
+        metadata: { ...bundle.metadata, designMapping },
+      });
+      current.revision += 1;
+      current.updatedAt = new Date().toISOString();
+      await store.save(current, current.revision - 1);
+    };
 
     const appendVisualReservation = async (input: {
       submissionIdentity: string;
@@ -6493,7 +6512,52 @@ describe("WorkflowService", () => {
     persistedTargets.updatedAt = new Date().toISOString();
     await store.save(persistedTargets, persistedTargets.revision - 1);
 
-    const firstAttempt = await visualSubmission(
+    const sharedAsset = {
+      path: "assets/shared.svg",
+      digest: `sha256:${"8".repeat(64)}` as const,
+    };
+    const sharedAssetComponents = [
+      {
+        figmaComponent: "Shared asset A",
+        nodeId: "1:10",
+        resolution: { kind: "asset" as const, ...sharedAsset },
+      },
+      {
+        figmaComponent: "Shared asset B",
+        nodeId: "1:11",
+        resolution: { kind: "asset" as const, ...sharedAsset },
+      },
+    ];
+    await replacePersistedDesignMapping({
+      ...figmaDesignMapping(),
+      components: [
+        sharedAssetComponents[0],
+        {
+          ...sharedAssetComponents[1],
+          resolution: {
+            ...sharedAssetComponents[1]!.resolution,
+            digest: `sha256:${"9".repeat(64)}`,
+          },
+        },
+      ],
+    });
+    const conflictingAssetSubmission = await visualSubmission(
+      compareAction,
+      implementationPacket.headSha,
+      "conflicting-shared-asset",
+      [255, 255, 255, 255],
+    );
+    const reservationsBeforeAssetConflict = await visualReservationCount();
+    await expect(
+      service.submit({ runId: started.runId, submission: conflictingAssetSubmission }),
+    ).rejects.toThrow(/VISUAL_CAPTURE_PROVENANCE_INVALID.*assets\/shared\.svg.*conflicting/i);
+    expect(await visualReservationCount()).toBe(reservationsBeforeAssetConflict);
+
+    await replacePersistedDesignMapping({
+      ...figmaDesignMapping(),
+      components: sharedAssetComponents,
+    });
+    let firstAttempt = await visualSubmission(
       compareAction,
       implementationPacket.headSha,
       "attempt-1",
@@ -6502,6 +6566,12 @@ describe("WorkflowService", () => {
       undefined,
       [0, 0, 0, 255],
     );
+    firstAttempt = await mutateReceiptAt(firstAttempt, 0, (receipt) => {
+      receipt["assets"] = [sharedAsset];
+    });
+    firstAttempt = await mutateReceiptAt(firstAttempt, 1, (receipt) => {
+      receipt["assets"] = [sharedAsset];
+    });
     const originalWriteBlob = artifactStore.writeBlob.bind(artifactStore);
     let failVisualDiffWrite = true;
     const writeBlobSpy = vi.spyOn(artifactStore, "writeBlob").mockImplementation(async (input) => {
@@ -6571,6 +6641,7 @@ describe("WorkflowService", () => {
     expect(
       afterReplay.artifacts.filter((artifact) => artifact.kind === "visual-report"),
     ).toHaveLength(reportCountBeforeReplay);
+    await replacePersistedDesignMapping(figmaDesignMapping());
     const firstRepair = afterFirstFailure.nextActions.find(
       (action) => action.kind === "implementation-repair",
     );
@@ -6746,6 +6817,16 @@ describe("WorkflowService", () => {
       "attempt-2",
       [192, 192, 192, 255],
     );
+    await replacePersistedDesignMapping({
+      ...figmaDesignMapping(),
+      fonts: [{ family: "Pretendard", source: "assets/fonts/pretendard.woff2" }],
+    });
+    const reservationsBeforeMissingFontDigest = await visualReservationCount();
+    await expect(
+      service.submit({ runId: started.runId, submission: secondAttempt }),
+    ).rejects.toThrow(/VISUAL_CAPTURE_PROVENANCE_INVALID.*Pretendard.*digest/i);
+    expect(await visualReservationCount()).toBe(reservationsBeforeMissingFontDigest);
+    await replacePersistedDesignMapping(figmaDesignMapping());
     const rendererDrifts: Array<{
       name: string;
       mutate: (receipt: Record<string, unknown>) => void;

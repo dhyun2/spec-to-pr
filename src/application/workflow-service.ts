@@ -112,6 +112,8 @@ import {
   VisualCaptureReceiptSchema,
   VisualCaptureReceiptV2Schema,
   assertCaptureReceipt,
+  canonicalCaptureAssetDigests,
+  canonicalCaptureFontDigests,
   captureRendererLineageId,
 } from "../visual/capture-receipt.js";
 import {
@@ -2554,17 +2556,15 @@ export class WorkflowService {
     preparedContent: ReadonlyMap<string, Buffer>,
   ): Promise<`sha256:${string}` | undefined> {
     const mapping = figmaDesignMappingFromRun(run);
-    const expectedFonts =
-      mapping?.fonts.flatMap((font) =>
-        font.digest === undefined ? [] : [{ family: font.family, digest: font.digest }],
-      ) ?? [];
+    const expectedFonts = canonicalCaptureFontDigests(mapping?.fonts ?? []);
     let rendererLineageId: `sha256:${string}` | undefined;
-    const expectedAssets =
+    const expectedAssets = canonicalCaptureAssetDigests(
       mapping?.components.flatMap((component) =>
         component.resolution.kind === "asset"
           ? [{ path: component.resolution.path, digest: component.resolution.digest }]
           : [],
-      ) ?? [];
+      ) ?? [],
+    );
 
     for (const target of targets) {
       const capture = submission.captures.find(

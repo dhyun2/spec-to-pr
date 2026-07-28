@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   VisualCaptureReceiptSchema,
   assertCaptureReceipt,
+  canonicalCaptureAssetDigests,
+  canonicalCaptureFontDigests,
   captureRendererLineageId,
 } from "../../src/visual/capture-receipt.js";
 
@@ -231,6 +233,34 @@ describe("visual capture receipts", () => {
     ],
   ])("rejects a drifted %s digest", (_label, receipt) => {
     expect(() => assertReceipt(receipt)).toThrow(/VISUAL_CAPTURE_PROVENANCE_INVALID/);
+  });
+
+  it("rejects mapped fonts without immutable digests", () => {
+    expect(() =>
+      canonicalCaptureFontDigests([
+        {
+          family: "Pretendard",
+          source: "assets/fonts/pretendard.woff2",
+        },
+      ]),
+    ).toThrow(/VISUAL_CAPTURE_PROVENANCE_INVALID.*Pretendard.*digest/i);
+  });
+
+  it("canonicalizes shared assets by path and rejects conflicting digests", () => {
+    const shared = {
+      path: "assets/shared.svg",
+      digest: `sha256:${"8".repeat(64)}` as const,
+    };
+    expect(
+      canonicalCaptureAssetDigests([
+        { path: "assets/z.svg", digest: `sha256:${"9".repeat(64)}` },
+        shared,
+        shared,
+      ]),
+    ).toEqual([shared, { path: "assets/z.svg", digest: `sha256:${"9".repeat(64)}` }]);
+    expect(() =>
+      canonicalCaptureAssetDigests([shared, { ...shared, digest: `sha256:${"7".repeat(64)}` }]),
+    ).toThrow(/VISUAL_CAPTURE_PROVENANCE_INVALID.*assets\/shared\.svg.*conflicting/i);
   });
 
   it("computes a canonical renderer lineage over every renderer-defining field", () => {

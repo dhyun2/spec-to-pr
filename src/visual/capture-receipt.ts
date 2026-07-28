@@ -178,6 +178,56 @@ export function captureRendererLineageId(rawEnvironment: CaptureEnvironmentV2): 
   return `sha256:${createHash("sha256").update(JSON.stringify(canonical)).digest("hex")}`;
 }
 
+export function canonicalCaptureFontDigests(
+  fonts: ReadonlyArray<{
+    family: string;
+    digest?: string | undefined;
+    source?: string | undefined;
+  }>,
+): Array<{ family: string; digest: `sha256:${string}` }> {
+  const canonical = new Map<string, `sha256:${string}`>();
+  for (const font of fonts) {
+    if (font.digest === undefined) {
+      throw provenanceError(`mapped font ${font.family} is missing its required digest`);
+    }
+    const digest = Sha256DigestSchema.safeParse(font.digest);
+    if (!digest.success) {
+      throw provenanceError(`mapped font ${font.family} has an invalid digest`);
+    }
+    const digestValue = digest.data as `sha256:${string}`;
+    const existing = canonical.get(font.family);
+    if (existing !== undefined && existing !== digestValue) {
+      throw provenanceError(`mapped font ${font.family} has conflicting digests`);
+    }
+    canonical.set(font.family, digestValue);
+  }
+  return [...canonical]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([family, digest]) => ({ family, digest }));
+}
+
+export function canonicalCaptureAssetDigests(
+  assets: ReadonlyArray<{ path: string; digest: string }>,
+): Array<{ path: string; digest: `sha256:${string}` }> {
+  const canonical = new Map<string, `sha256:${string}`>();
+  for (const asset of assets) {
+    const parsedPath = RelativePathSchema.safeParse(asset.path);
+    const parsedDigest = Sha256DigestSchema.safeParse(asset.digest);
+    if (!parsedPath.success || !parsedDigest.success) {
+      throw provenanceError(`mapped asset ${asset.path} has an invalid path or digest`);
+    }
+    const digestValue = parsedDigest.data as `sha256:${string}`;
+    const existing = canonical.get(parsedPath.data);
+    if (existing !== undefined && existing !== digestValue) {
+      throw provenanceError(`mapped asset ${parsedPath.data} has conflicting digests`);
+    }
+    canonical.set(parsedPath.data, digestValue);
+  }
+  return [...canonical]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([assetPath, digest]) => ({ path: assetPath, digest }));
+}
+
 export function assertCaptureReceipt(rawInput: {
   receipt: unknown;
   packet: ReceiptPacket;
