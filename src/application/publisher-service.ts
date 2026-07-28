@@ -8,8 +8,16 @@ import { z } from "zod";
 
 import type { ArtifactBlobStore } from "../artifact-registry/artifact-blob-store.js";
 import {
+  ReviewAssetUploadReceiptSchema,
+  reviewAssetUploadReceiptArtifactId,
+  reviewAssetUploadReceiptIdentity,
+  reviewAssetUploadTargetKey,
+  type ReviewAssetUploadReceipt,
+} from "../publisher/asset-upload-receipt.js";
+import {
   detectPublishTargetFromRemote,
   canUseGitLabRawEvidenceFallback,
+  GitLabAssetUploadError,
   GitHubPublisherAdapter,
   GitLabPublisherAdapter,
   PublishedReviewRequestSchema,
@@ -21,6 +29,7 @@ import {
   redactSecrets,
   ReviewHostSchema,
   type ReviewRequestAsset,
+  type ReviewAssetPublishOutcome,
   ReviewRequestSynchronizationError,
   ReviewRequestPayloadSchema,
 } from "../publisher/index.js";
@@ -114,6 +123,11 @@ type PublicationReportBinding = {
   headSha?: string;
   diffDigest?: string;
   visualReportArtifact?: ArtifactRef;
+};
+
+type ReceiptPublishedAsset = {
+  asset: PublishedReviewAsset;
+  receiptArtifactId: string;
 };
 
 const VisualPreviewContextSchema = z
@@ -866,6 +880,7 @@ export class PublisherService {
         plan: input.plan,
         publisher,
         token: token.token,
+        timestamp: input.timestamp,
         signal: input.signal,
       });
       const existing = await publisher.findExisting({
@@ -895,6 +910,46 @@ export class PublisherService {
       if (!request.draft) {
         throw new Error(`Review request ${request.number} is not a draft after publication`);
       }
+      if (prepared.publishedAssets.length > 0) {
+        try {
+          if (publisher.readBody === undefined) {
+            throw new Error("PUBLISH_ASSET_BODY_SYNC_UNVERIFIED");
+          }
+          const remoteBody = await publisher.readBody({
+            target: input.plan.target,
+            requestNumber: request.number,
+            token: token.token,
+            ...(input.signal === undefined ? {} : { signal: input.signal }),
+          });
+          assertPublishedAssetUrlsInBody(remoteBody, prepared.publishedAssets);
+        } catch (error: unknown) {
+          return partialAssetPublishResult({
+            runId: input.plan.runId,
+            target: input.plan.target,
+            request,
+            reportArtifactId: input.plan.payload.reportArtifactId,
+            prepared,
+            partialReasons: [
+              ...prepared.partialReasons,
+              error instanceof Error ? error.message : "PUBLISH_ASSET_BODY_SYNC_UNVERIFIED",
+            ],
+            retryable: true,
+            publishedAt: input.timestamp,
+          });
+        }
+      }
+      if (!prepared.assetUploadComplete) {
+        return partialAssetPublishResult({
+          runId: input.plan.runId,
+          target: input.plan.target,
+          request,
+          reportArtifactId: input.plan.payload.reportArtifactId,
+          prepared,
+          partialReasons: prepared.partialReasons,
+          retryable: prepared.assetUploadRetryable,
+          publishedAt: input.timestamp,
+        });
+      }
 
       return PublishResultSchema.parse({
         runId: input.plan.runId,
@@ -903,6 +958,7 @@ export class PublisherService {
         request,
         reportArtifactId: input.plan.payload.reportArtifactId,
         publishedAssets: prepared.publishedAssets,
+        uploadReceiptArtifactIds: prepared.uploadReceiptArtifactIds,
         requestSynced: true,
         visualPreviewExpected: prepared.visualPreviewExpected,
         visualPreviewSynced: prepared.visualPreviewSynced,
@@ -947,6 +1003,7 @@ export class PublisherService {
         plan: input.plan,
         publisher,
         token: token.token,
+        timestamp: input.timestamp,
         signal: input.signal,
       });
       const existing = await publisher.findExisting({
@@ -971,6 +1028,46 @@ export class PublisherService {
       if (!request.draft) {
         throw new Error(`Review request ${request.number} is not a draft after body update`);
       }
+      if (prepared.publishedAssets.length > 0) {
+        try {
+          if (publisher.readBody === undefined) {
+            throw new Error("PUBLISH_ASSET_BODY_SYNC_UNVERIFIED");
+          }
+          const remoteBody = await publisher.readBody({
+            target: input.plan.target,
+            requestNumber: request.number,
+            token: token.token,
+            ...(input.signal === undefined ? {} : { signal: input.signal }),
+          });
+          assertPublishedAssetUrlsInBody(remoteBody, prepared.publishedAssets);
+        } catch (error: unknown) {
+          return partialAssetPublishResult({
+            runId: input.plan.runId,
+            target: input.plan.target,
+            request,
+            reportArtifactId: input.plan.payload.reportArtifactId,
+            prepared,
+            partialReasons: [
+              ...prepared.partialReasons,
+              error instanceof Error ? error.message : "PUBLISH_ASSET_BODY_SYNC_UNVERIFIED",
+            ],
+            retryable: true,
+            publishedAt: input.timestamp,
+          });
+        }
+      }
+      if (!prepared.assetUploadComplete) {
+        return partialAssetPublishResult({
+          runId: input.plan.runId,
+          target: input.plan.target,
+          request,
+          reportArtifactId: input.plan.payload.reportArtifactId,
+          prepared,
+          partialReasons: prepared.partialReasons,
+          retryable: prepared.assetUploadRetryable,
+          publishedAt: input.timestamp,
+        });
+      }
 
       return PublishResultSchema.parse({
         runId: input.plan.runId,
@@ -979,6 +1076,7 @@ export class PublisherService {
         request,
         reportArtifactId: input.plan.payload.reportArtifactId,
         publishedAssets: prepared.publishedAssets,
+        uploadReceiptArtifactIds: prepared.uploadReceiptArtifactIds,
         requestSynced: true,
         visualPreviewExpected: prepared.visualPreviewExpected,
         visualPreviewSynced: prepared.visualPreviewSynced,
@@ -1009,10 +1107,14 @@ export class PublisherService {
     plan: z.infer<typeof PublishPlanSchema>;
     publisher: ReviewRequestPublisher;
     token: string;
+    timestamp: string;
     signal: AbortSignal | undefined;
   }): Promise<{
     payload: ReviewRequestPayload;
     publishedAssets: PublishedReviewAsset[];
+    uploadReceiptArtifactIds: string[];
+    assetUploadComplete: boolean;
+    assetUploadRetryable: boolean;
     visualPreviewExpected: boolean;
     visualPreviewSynced: boolean;
     featureVideoExpected: boolean;
@@ -1036,6 +1138,9 @@ export class PublisherService {
       return {
         payload: input.plan.payload,
         publishedAssets: [],
+        uploadReceiptArtifactIds: [],
+        assetUploadComplete: true,
+        assetUploadRetryable: false,
         visualPreviewExpected: false,
         visualPreviewSynced: false,
         featureVideoExpected: false,
@@ -1045,53 +1150,117 @@ export class PublisherService {
       };
     }
 
-    let publishedAssets: PublishedReviewAsset[];
+    const receiptAssets = await this.loadPublishedAssetsFromReceipts({
+      run: input.run,
+      target: input.plan.target,
+      payload: input.plan.payload,
+      assets,
+      timestamp: input.timestamp,
+    });
+    const publishedByKey = new Map(
+      receiptAssets.map((entry) => [reviewAssetKey(entry.asset), entry]),
+    );
+    let missingAssets = assets.filter((asset) => !publishedByKey.has(reviewAssetKey(asset)));
     let fallbackMode: "none" | "gitlab-raw-evidence" = "none";
     let fallbackReason: string | undefined;
     const partialReasons: string[] = [];
-    try {
-      publishedAssets = await input.publisher.publishAssets({
+    let terminalFailure: Extract<ReviewAssetPublishOutcome, { status: "failed" }> | undefined;
+    let lastTransientFailures: Array<Extract<ReviewAssetPublishOutcome, { status: "failed" }>> = [];
+    let thrownUploadError: unknown;
+
+    for (let attempt = 1; attempt <= 3 && missingAssets.length > 0; attempt += 1) {
+      let outcomes: ReviewAssetPublishOutcome[];
+      try {
+        outcomes = await input.publisher.publishAssets({
+          target: input.plan.target,
+          payload: input.plan.payload,
+          token: input.token,
+          assets: missingAssets,
+          maxConcurrency: 3,
+          ...(input.signal === undefined ? {} : { signal: input.signal }),
+        });
+      } catch (error: unknown) {
+        thrownUploadError = error;
+        break;
+      }
+      const settled = settleAssetPublishOutcomes(missingAssets, outcomes);
+      const newlyPublished = settled
+        .filter(
+          (outcome): outcome is Extract<ReviewAssetPublishOutcome, { status: "published" }> =>
+            outcome.status === "published",
+        )
+        .map((outcome) => outcome.asset);
+      const newReceipts = await this.persistAssetUploadReceipts({
+        runId: input.plan.runId,
         target: input.plan.target,
         payload: input.plan.payload,
-        token: input.token,
-        assets,
-        ...(input.signal === undefined ? {} : { signal: input.signal }),
+        assets: missingAssets,
+        publishedAssets: newlyPublished,
+        timestamp: input.timestamp,
       });
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
+      for (const receiptAsset of newReceipts) {
+        publishedByKey.set(reviewAssetKey(receiptAsset.asset), receiptAsset);
+      }
+
+      const failures = settled.filter(
+        (outcome): outcome is Extract<ReviewAssetPublishOutcome, { status: "failed" }> =>
+          outcome.status === "failed",
+      );
+      terminalFailure = failures.find(
+        (outcome) => outcome.failure === "permanent" || outcome.failure === "uncertain",
+      );
+      lastTransientFailures = failures.filter((outcome) => outcome.failure === "transient");
+      if (terminalFailure !== undefined) break;
+      missingAssets = missingAssets.filter((asset) =>
+        lastTransientFailures.some((failure) => failure.artifactId === asset.artifactId),
+      );
+    }
+
+    let publishedAssets = assets.flatMap((asset) => {
+      const entry = publishedByKey.get(reviewAssetKey(asset));
+      return entry === undefined ? [] : [entry.asset];
+    });
+    let assetUploadComplete = publishedAssets.length === assets.length;
+    let assetUploadRetryable =
+      !assetUploadComplete && terminalFailure === undefined && thrownUploadError === undefined;
+
+    if (!assetUploadComplete) {
+      const fallbackError =
+        thrownUploadError ??
+        (terminalFailure?.status === "failed" && terminalFailure.failure !== "permanent"
+          ? new GitLabAssetUploadError(terminalFailure.message)
+          : lastTransientFailures[0]?.status === "failed"
+            ? new GitLabAssetUploadError(lastTransientFailures[0].message, 503)
+            : undefined);
       const rawFallback = await this.tryGitLabRawVisualFallback({
         run: input.run,
         target: input.plan.target,
         payload: input.plan.payload,
         visualPreview,
         featureVideo,
-        error,
+        error: fallbackError,
       });
       if (rawFallback !== undefined) {
         publishedAssets = rawFallback;
         fallbackMode = "gitlab-raw-evidence";
-        fallbackReason = `GitLab review-asset upload failed; used immutable raw visual evidence instead: ${redactSecrets(message)}`;
+        fallbackReason =
+          "GitLab review-asset upload failed; used immutable raw visual evidence instead";
+        assetUploadComplete = true;
+        assetUploadRetryable = false;
       } else {
         const label = visualPreviewExpected ? "visual evidence" : "feature video";
-        throw new PublishPreparationError(`${label} upload failed: ${message}`, {
-          visualPreviewExpected,
-          featureVideoExpected,
-          partialReasons: [`${label} upload failed: ${redactSecrets(message)}`],
-        });
+        const failureMessage =
+          terminalFailure?.status === "failed"
+            ? terminalFailure.message
+            : lastTransientFailures[0]?.status === "failed"
+              ? lastTransientFailures[0].message
+              : thrownUploadError instanceof Error
+                ? redactSecrets(thrownUploadError.message)
+                : "upload outcome was uncertain";
+        partialReasons.push(
+          `${label} upload incomplete: ${publishedAssets.length}/${assets.length} asset(s) confirmed; ${failureMessage}`,
+        );
       }
-    }
-
-    if (fallbackMode === "none" && publishedAssets.length !== assets.length) {
-      throw new PublishPreparationError(
-        `review evidence upload incomplete: ${publishedAssets.length}/${assets.length} asset(s) uploaded`,
-        {
-          visualPreviewExpected,
-          featureVideoExpected,
-          partialReasons: [
-            `review evidence upload incomplete: ${publishedAssets.length}/${assets.length} asset(s) uploaded`,
-          ],
-        },
-      );
     }
 
     const visualAssets = publishedAssets.filter((asset) => asset.role !== "e2e-video");
@@ -1108,6 +1277,7 @@ export class PublisherService {
     if (videoAsset !== undefined) {
       body = injectFeatureVideoEvidence(body, videoAsset);
     }
+    assertPublishedAssetUrlsInBody(body, publishedAssets);
 
     return {
       payload: ReviewRequestPayloadSchema.parse({
@@ -1115,14 +1285,171 @@ export class PublisherService {
         body,
       }),
       publishedAssets,
+      uploadReceiptArtifactIds: assets.flatMap((asset) => {
+        const entry = publishedByKey.get(reviewAssetKey(asset));
+        return entry === undefined ? [] : [entry.receiptArtifactId];
+      }),
+      assetUploadComplete,
+      assetUploadRetryable,
       visualPreviewExpected,
-      visualPreviewSynced: visualPreviewExpected,
+      visualPreviewSynced:
+        visualPreviewExpected &&
+        (fallbackMode === "gitlab-raw-evidence" ||
+          visualPreview.assets.every((asset) => publishedByKey.has(reviewAssetKey(asset)))),
       featureVideoExpected,
-      featureVideoSynced: featureVideoExpected,
+      featureVideoSynced:
+        featureVideoExpected &&
+        featureVideo !== undefined &&
+        publishedByKey.has(reviewAssetKey(featureVideo)),
       fallbackMode,
       ...(fallbackReason === undefined ? {} : { fallbackReason }),
       partialReasons,
     };
+  }
+
+  private async loadPublishedAssetsFromReceipts(input: {
+    run: Awaited<ReturnType<RunStore["get"]>>;
+    target: PublishTarget;
+    payload: ReviewRequestPayload;
+    assets: ReviewRequestAsset[];
+    timestamp: string;
+  }): Promise<ReceiptPublishedAsset[]> {
+    const results: ReceiptPublishedAsset[] = [];
+    for (const asset of input.assets) {
+      const expected = assetUploadReceipt({
+        target: input.target,
+        payload: input.payload,
+        asset,
+        url: "receipt-identity-placeholder",
+        embeddable: false,
+        confirmedAt: input.timestamp,
+      });
+      const receiptArtifactId = reviewAssetUploadReceiptArtifactId(expected);
+      const artifact = input.run.artifacts.find(
+        (candidate) =>
+          candidate.id === receiptArtifactId &&
+          candidate.metadata["reportKind"] === "review-asset-upload-receipt",
+      );
+      if (artifact === undefined) continue;
+
+      let receipt: ReviewAssetUploadReceipt;
+      try {
+        receipt = ReviewAssetUploadReceiptSchema.parse(
+          JSON.parse((await this.artifactStore.readContent(artifact.digest)).toString("utf8")),
+        );
+      } catch {
+        continue;
+      }
+      if (reviewAssetUploadReceiptArtifactId(receipt) !== receiptArtifactId) continue;
+      results.push({
+        receiptArtifactId,
+        asset: {
+          artifactId: receipt.artifactId,
+          artifactDigest: receipt.artifactDigest,
+          targetId: receipt.targetId,
+          role: receipt.role,
+          label: asset.label,
+          url: receipt.url,
+          embeddable: receipt.embeddable,
+        },
+      });
+    }
+    return results;
+  }
+
+  private async persistAssetUploadReceipts(input: {
+    runId: string;
+    target: PublishTarget;
+    payload: ReviewRequestPayload;
+    assets: ReviewRequestAsset[];
+    publishedAssets: PublishedReviewAsset[];
+    timestamp: string;
+  }): Promise<ReceiptPublishedAsset[]> {
+    if (input.publishedAssets.length === 0) return [];
+    const sourceAssets = new Map(input.assets.map((asset) => [reviewAssetKey(asset), asset]));
+    const receipts = input.publishedAssets.map((published) => {
+      const source = sourceAssets.get(reviewAssetKey(published));
+      if (source === undefined || source.artifactDigest !== published.artifactDigest) {
+        throw new Error("PUBLISH_ASSET_OUTCOME_IDENTITY_MISMATCH");
+      }
+      const receipt = assetUploadReceipt({
+        target: input.target,
+        payload: input.payload,
+        asset: source,
+        url: published.url,
+        embeddable: published.embeddable,
+        confirmedAt: input.timestamp,
+      });
+      return {
+        receipt,
+        receiptArtifactId: reviewAssetUploadReceiptArtifactId(receipt),
+        asset: published,
+      };
+    });
+    const artifactRefs: ArtifactRef[] = [];
+    for (const entry of receipts) {
+      const content = Buffer.from(`${JSON.stringify(entry.receipt, null, 2)}\n`, "utf8");
+      const blob = await this.artifactStore.writeBlob({
+        content,
+        mediaType: "application/json",
+        storedAt: input.timestamp,
+        label: "review-asset-upload-receipt",
+      });
+      artifactRefs.push(
+        ArtifactRefSchema.parse({
+          id: entry.receiptArtifactId,
+          kind: "agent-result-report",
+          uri: blob.uri,
+          mediaType: "application/json",
+          digest: blob.digest,
+          producedBy: "pr-publisher",
+          evidenceIds: [],
+          createdAt: input.timestamp,
+          metadata: {
+            adapter: PUBLISHER_ADAPTER,
+            reportKind: "review-asset-upload-receipt",
+            receiptIdentity: reviewAssetUploadReceiptIdentity(entry.receipt),
+            targetKey: entry.receipt.targetKey,
+            reportArtifactId: entry.receipt.reportArtifactId,
+            artifactId: entry.receipt.artifactId,
+            artifactDigest: entry.receipt.artifactDigest,
+            targetId: entry.receipt.targetId,
+            role: entry.receipt.role,
+          },
+        }),
+      );
+    }
+
+    let run = await this.runStore.get(RunIdSchema.parse(input.runId));
+    for (let attempt = 0; attempt < MAX_PUBLISH_RESULT_SAVE_ATTEMPTS; attempt += 1) {
+      const missing = artifactRefs.filter(
+        (artifact) => !run.artifacts.some((existing) => existing.id === artifact.id),
+      );
+      if (missing.length === 0) break;
+      const nextRun = RunManifestSchema.parse({
+        ...run,
+        revision: run.revision + 1,
+        updatedAt:
+          Date.parse(input.timestamp) >= Date.parse(run.updatedAt)
+            ? input.timestamp
+            : run.updatedAt,
+        artifacts: [...run.artifacts, ...missing],
+      });
+      try {
+        await this.runStore.save(nextRun, run.revision);
+        run = nextRun;
+        break;
+      } catch (error: unknown) {
+        if (!(error instanceof RevisionConflictError)) throw error;
+        run = await this.runStore.get(RunIdSchema.parse(input.runId));
+      }
+    }
+    for (const entry of receipts) {
+      if (!run.artifacts.some((artifact) => artifact.id === entry.receiptArtifactId)) {
+        throw new Error("Could not persist review asset upload receipts");
+      }
+    }
+    return receipts.map(({ asset, receiptArtifactId }) => ({ asset, receiptArtifactId }));
   }
 
   private async tryGitLabRawVisualFallback(input: {
@@ -1229,6 +1556,7 @@ export class PublisherService {
       if (url === undefined) return undefined;
       rawAssets.push({
         artifactId: asset.artifactId,
+        artifactDigest: asset.artifactDigest,
         targetId: asset.targetId,
         role: asset.role,
         label: asset.label,
@@ -1265,6 +1593,7 @@ export class PublisherService {
     const extension = artifact.mediaType === "video/mp4" ? ".mp4" : ".webm";
     return {
       artifactId: artifact.id,
+      artifactDigest: artifact.digest as ReviewRequestAsset["artifactDigest"],
       targetId: "feature-e2e",
       role: "e2e-video",
       label: "Feature E2E video",
@@ -1425,6 +1754,7 @@ export class PublisherService {
 
     return {
       artifactId: artifact.id,
+      artifactDigest: artifact.digest as ReviewRequestAsset["artifactDigest"],
       targetId: input.targetId,
       role: input.role,
       label: input.label,
@@ -2193,6 +2523,145 @@ function failedPublishResult(input: {
     retryable: synchronizationDetails?.phase !== "reviewers",
     publishedAt: input.publishedAt,
   });
+}
+
+function partialAssetPublishResult(input: {
+  runId: string;
+  target: PublishTarget;
+  request: PublishedReviewRequest;
+  reportArtifactId: string;
+  prepared: {
+    publishedAssets: PublishedReviewAsset[];
+    uploadReceiptArtifactIds: string[];
+    visualPreviewExpected: boolean;
+    featureVideoExpected: boolean;
+    fallbackMode: "none" | "gitlab-raw-evidence";
+    fallbackReason?: string;
+  };
+  partialReasons: string[];
+  retryable: boolean;
+  publishedAt: string;
+}): PublishResult {
+  const partialReasons =
+    input.partialReasons.length > 0
+      ? input.partialReasons.map((reason) => redactSecrets(reason))
+      : ["review asset publication is incomplete"];
+  return PublishResultSchema.parse({
+    runId: input.runId,
+    status: "blocked",
+    target: input.target,
+    request: input.request,
+    reportArtifactId: input.reportArtifactId,
+    publishedAssets: input.prepared.publishedAssets,
+    uploadReceiptArtifactIds: input.prepared.uploadReceiptArtifactIds,
+    requestSynced: false,
+    visualPreviewExpected: input.prepared.visualPreviewExpected,
+    visualPreviewSynced: false,
+    featureVideoExpected: input.prepared.featureVideoExpected,
+    featureVideoSynced: false,
+    fallbackMode: input.prepared.fallbackMode,
+    ...(input.prepared.fallbackReason === undefined
+      ? {}
+      : { fallbackReason: input.prepared.fallbackReason }),
+    partialReasons,
+    errorCode: "PUBLISH_PARTIAL_SYNC",
+    errorMessage: partialReasons.join("; "),
+    retryable: input.retryable,
+    publishedAt: input.publishedAt,
+  });
+}
+
+function assetUploadReceipt(input: {
+  target: PublishTarget;
+  payload: ReviewRequestPayload;
+  asset: ReviewRequestAsset;
+  url: string;
+  embeddable: boolean;
+  confirmedAt: string;
+}): ReviewAssetUploadReceipt {
+  return ReviewAssetUploadReceiptSchema.parse({
+    schemaVersion: "review-asset-upload-v1",
+    runId: input.payload.runId,
+    host: input.target.host,
+    targetKey: reviewAssetUploadTargetKey(input.target),
+    reportArtifactId: input.payload.reportArtifactId,
+    ...(input.payload.reviewPacketId === undefined
+      ? {}
+      : { reviewPacketId: input.payload.reviewPacketId }),
+    ...(input.payload.headSha === undefined ? {} : { headSha: input.payload.headSha }),
+    artifactId: input.asset.artifactId,
+    artifactDigest: input.asset.artifactDigest,
+    targetId: input.asset.targetId,
+    role: input.asset.role,
+    url: input.url,
+    embeddable: input.embeddable,
+    confirmedAt: input.confirmedAt,
+  });
+}
+
+function reviewAssetKey(asset: {
+  artifactId: string;
+  artifactDigest: string;
+  targetId: string;
+  role: string;
+}): string {
+  return [asset.artifactId, asset.artifactDigest, asset.targetId, asset.role].join("\u0000");
+}
+
+function settleAssetPublishOutcomes(
+  assets: ReviewRequestAsset[],
+  outcomes: ReviewAssetPublishOutcome[],
+): ReviewAssetPublishOutcome[] {
+  if (outcomes.length !== assets.length) {
+    return assets.map((asset) => ({
+      status: "failed",
+      artifactId: asset.artifactId,
+      failure: "uncertain",
+      message: "Publisher returned an incomplete asset outcome set",
+    }));
+  }
+  const remaining = [...outcomes];
+  return assets.map((asset) => {
+    const index = remaining.findIndex((outcome) =>
+      outcome.status === "published"
+        ? outcome.asset.artifactId === asset.artifactId
+        : outcome.artifactId === asset.artifactId,
+    );
+    if (index < 0) {
+      return {
+        status: "failed",
+        artifactId: asset.artifactId,
+        failure: "uncertain",
+        message: "Publisher returned a mismatched asset outcome",
+      };
+    }
+    const [outcome] = remaining.splice(index, 1);
+    if (
+      outcome === undefined ||
+      (outcome.status === "published" &&
+        (outcome.asset.artifactDigest !== asset.artifactDigest ||
+          outcome.asset.targetId !== asset.targetId ||
+          outcome.asset.role !== asset.role))
+    ) {
+      return {
+        status: "failed",
+        artifactId: asset.artifactId,
+        failure: "uncertain",
+        message: "Publisher returned a mismatched asset outcome",
+      };
+    }
+    return outcome;
+  });
+}
+
+function assertPublishedAssetUrlsInBody(
+  body: string,
+  requiredAssets: PublishedReviewAsset[],
+): void {
+  const missing = requiredAssets.filter((asset) => !body.includes(asset.url));
+  if (missing.length > 0) {
+    throw new Error("PUBLISH_ASSET_BODY_SYNC_INCOMPLETE");
+  }
 }
 
 function defaultTitle(runId: string): string {

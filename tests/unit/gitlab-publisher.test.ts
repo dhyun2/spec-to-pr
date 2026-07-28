@@ -131,9 +131,11 @@ describe("GitLabPublisherAdapter", () => {
       target: gitlabTarget(),
       payload: payload(),
       token: "glpat-example",
+      maxConcurrency: 3,
       assets: [
         {
           artifactId: "art_22222222222222222222222222222222",
+          artifactDigest: `sha256:${"a".repeat(64)}`,
           targetId: "home",
           role: "figma",
           label: "Figma",
@@ -158,19 +160,28 @@ describe("GitLabPublisherAdapter", () => {
     // (which would drop the project path and 404).
     expect(result).toEqual([
       {
-        artifactId: "art_22222222222222222222222222222222",
-        targetId: "home",
-        role: "figma",
-        label: "Figma",
-        url: "/acme/platform/spec-to-pr/uploads/abc123/figma.png",
-        embeddable: true,
+        status: "published",
+        asset: {
+          artifactId: "art_22222222222222222222222222222222",
+          artifactDigest: `sha256:${"a".repeat(64)}`,
+          targetId: "home",
+          role: "figma",
+          label: "Figma",
+          url: "/acme/platform/spec-to-pr/uploads/abc123/figma.png",
+          embeddable: true,
+        },
       },
     ]);
   });
 
-  it.each([401, 403, 503])(
-    "classifies an upload HTTP %i failure so the workflow can safely consider a raw-evidence fallback",
-    async (status) => {
+  it.each([
+    [400, "permanent"],
+    [408, "transient"],
+    [429, "transient"],
+    [503, "transient"],
+  ] as const)(
+    "settles an upload HTTP %i failure as %s without leaking its body",
+    async (status, failure) => {
       const fetchMock = vi
         .fn()
         .mockResolvedValueOnce(new Response("uploads unavailable", { status }));
@@ -181,9 +192,11 @@ describe("GitLabPublisherAdapter", () => {
           target: gitlabTarget(),
           payload: payload(),
           token: "glpat-example",
+          maxConcurrency: 3,
           assets: [
             {
               artifactId: "art_22222222222222222222222222222222",
+              artifactDigest: `sha256:${"a".repeat(64)}`,
               targetId: "home",
               role: "figma",
               label: "Figma",
@@ -193,14 +206,18 @@ describe("GitLabPublisherAdapter", () => {
             },
           ],
         }),
-      ).rejects.toMatchObject({
-        name: "GitLabAssetUploadError",
-        status,
-      } satisfies Partial<GitLabAssetUploadError>);
+      ).resolves.toEqual([
+        {
+          status: "failed",
+          artifactId: "art_22222222222222222222222222222222",
+          failure,
+          message: `GitLab upload review asset failed with HTTP ${status}`,
+        },
+      ]);
     },
   );
 
-  it("classifies an upload network failure so the workflow can safely consider a raw-evidence fallback", async () => {
+  it("settles network and malformed successful responses as uncertain", async () => {
     const fetchMock = vi.fn().mockRejectedValueOnce(new TypeError("connection reset"));
     const adapter = new GitLabPublisherAdapter(fetchMock);
 
@@ -209,9 +226,11 @@ describe("GitLabPublisherAdapter", () => {
         target: gitlabTarget(),
         payload: payload(),
         token: "glpat-example",
+        maxConcurrency: 3,
         assets: [
           {
             artifactId: "art_22222222222222222222222222222222",
+            artifactDigest: `sha256:${"a".repeat(64)}`,
             targetId: "home",
             role: "figma",
             label: "Figma",
@@ -221,10 +240,48 @@ describe("GitLabPublisherAdapter", () => {
           },
         ],
       }),
-    ).rejects.toMatchObject({
-      name: "GitLabAssetUploadError",
-      status: undefined,
-    } satisfies Partial<GitLabAssetUploadError>);
+    ).resolves.toMatchObject([
+      {
+        status: "failed",
+        artifactId: "art_22222222222222222222222222222222",
+        failure: "uncertain",
+      },
+    ]);
+
+    const malformed = new GitLabPublisherAdapter(vi.fn().mockResolvedValueOnce(jsonResponse({})));
+    await expect(
+      malformed.publishAssets({
+        target: gitlabTarget(),
+        payload: payload(),
+        token: "glpat-example",
+        maxConcurrency: 3,
+        assets: [
+          {
+            artifactId: "art_22222222222222222222222222222222",
+            artifactDigest: `sha256:${"a".repeat(64)}`,
+            targetId: "home",
+            role: "figma",
+            label: "Figma",
+            filename: "figma.png",
+            mediaType: "image/png",
+            content: Buffer.from("png"),
+          },
+        ],
+      }),
+    ).resolves.toMatchObject([{ status: "failed", failure: "uncertain" }]);
+  });
+
+  it("reads the current merge request body", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ description: "# synced" }));
+    const adapter = new GitLabPublisherAdapter(fetchMock);
+
+    await expect(
+      adapter.readBody({
+        target: gitlabTarget(),
+        requestNumber: "7",
+        token: "glpat-example",
+      }),
+    ).resolves.toBe("# synced");
   });
 });
 

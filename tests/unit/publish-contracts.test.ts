@@ -92,6 +92,7 @@ describe("publish contracts", () => {
   it("records uploaded visual evidence assets on publish results", () => {
     const asset = PublishedReviewAssetSchema.parse({
       artifactId: "art_22222222222222222222222222222222",
+      artifactDigest: `sha256:${"a".repeat(64)}`,
       targetId: "home",
       role: "figma",
       label: "Figma",
@@ -102,11 +103,13 @@ describe("publish contracts", () => {
       status: "passed",
       reportArtifactId: "art_11111111111111111111111111111111",
       publishedAssets: [asset],
+      uploadReceiptArtifactIds: ["art_33333333333333333333333333333333"],
       publishedAt: "2026-06-23T00:00:00.000Z",
     });
 
     expect(result.publishedAssets).toHaveLength(1);
     expect(result.publishedAssets[0]?.url).toContain("figma.png");
+    expect(result.uploadReceiptArtifactIds).toEqual(["art_33333333333333333333333333333333"]);
     expect(result.requestSynced).toBe(false);
     expect(result.visualPreviewExpected).toBe(false);
     expect(result.visualPreviewSynced).toBe(false);
@@ -117,6 +120,7 @@ describe("publish contracts", () => {
   it("tracks feature E2E video synchronization separately from visual previews", () => {
     const asset = PublishedReviewAssetSchema.parse({
       artifactId: "art_33333333333333333333333333333333",
+      artifactDigest: `sha256:${"b".repeat(64)}`,
       targetId: "feature-e2e",
       role: "e2e-video",
       label: "Feature E2E video",

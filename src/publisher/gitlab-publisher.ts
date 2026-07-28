@@ -2,13 +2,18 @@ import {
   PublishedReviewAssetSchema,
   PublishedReviewRequestSchema,
   ReviewRequestUpdateSchema,
-  type PublishedReviewAsset,
   type PublishedReviewRequest,
   type PublishTarget,
   type ReviewRequestPayload,
   type ReviewRequestUpdate,
 } from "./publish-contracts.js";
-import type { ReviewRequestAsset, ReviewRequestPublisher } from "./publisher-port.js";
+import {
+  classifyAssetUploadFailure,
+  mapWithBoundedConcurrency,
+  type ReviewAssetPublishOutcome,
+  type ReviewRequestAsset,
+  type ReviewRequestPublisher,
+} from "./publisher-port.js";
 import { encodeGitLabProjectId } from "./review-host.js";
 
 type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
@@ -160,14 +165,13 @@ export class GitLabPublisherAdapter implements ReviewRequestPublisher {
     payload: ReviewRequestPayload;
     token: string;
     assets: ReviewRequestAsset[];
+    maxConcurrency: number;
     signal?: AbortSignal | undefined;
-  }): Promise<PublishedReviewAsset[]> {
+  }): Promise<ReviewAssetPublishOutcome[]> {
     assertGitLab(input.target);
 
     const project = encodeGitLabProjectId(input.target.projectId ?? input.target.projectPath);
-    const published: PublishedReviewAsset[] = [];
-
-    for (const asset of input.assets) {
+    return mapWithBoundedConcurrency(input.assets, input.maxConcurrency, async (asset) => {
       const form = new FormData();
 
       form.append("file", new Blob([asset.content], { type: asset.mediaType }), asset.filename);
@@ -183,39 +187,88 @@ export class GitLabPublisherAdapter implements ReviewRequestPublisher {
             body: form,
           },
         );
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        throw new GitLabAssetUploadError(`GitLab upload review asset network failure: ${message}`);
+      } catch {
+        return {
+          status: "failed",
+          artifactId: asset.artifactId,
+          failure: classifyAssetUploadFailure({ networkError: true }),
+          message: "GitLab upload review asset network failure",
+        };
       }
 
       if (!response.ok) {
-        throw new GitLabAssetUploadError(
-          `GitLab upload review asset failed: ${response.status} ${await response.text()}`,
-          response.status,
-        );
+        return {
+          status: "failed",
+          artifactId: asset.artifactId,
+          failure: classifyAssetUploadFailure({ status: response.status }),
+          message: `GitLab upload review asset failed with HTTP ${response.status}`,
+        };
       }
 
-      const uploaded = (await response.json()) as Record<string, unknown>;
+      let uploaded: Record<string, unknown>;
+      try {
+        const body = await response.json();
+        if (typeof body !== "object" || body === null) throw new Error("malformed");
+        uploaded = body as Record<string, unknown>;
+      } catch {
+        return {
+          status: "failed",
+          artifactId: asset.artifactId,
+          failure: classifyAssetUploadFailure({ responseMalformed: true }),
+          message: "GitLab upload review asset returned a malformed response",
+        };
+      }
       // GitLab uploads are project-scoped. `full_path` already includes the
       // /{namespace}/{project}/uploads/... prefix; `url` is project-relative
       // (/uploads/...). Both render inside the MR description because GitLab
       // resolves them against the project. We keep the RELATIVE path and never
       // prefix the instance root, which would drop the project path and 404.
       const uploadPath = String(uploaded["full_path"] ?? uploaded["url"] ?? "");
-
-      published.push(
-        PublishedReviewAssetSchema.parse({
+      if (uploadPath.trim().length === 0) {
+        return {
+          status: "failed",
           artifactId: asset.artifactId,
+          failure: classifyAssetUploadFailure({ responseMalformed: true }),
+          message: "GitLab upload review asset returned a malformed response",
+        };
+      }
+
+      return {
+        status: "published",
+        asset: PublishedReviewAssetSchema.parse({
+          artifactId: asset.artifactId,
+          artifactDigest: asset.artifactDigest,
           targetId: asset.targetId,
           role: asset.role,
           label: asset.label,
           url: uploadPath,
           embeddable: asset.role !== "e2e-video",
         }),
-      );
-    }
+      } satisfies ReviewAssetPublishOutcome;
+    });
+  }
 
-    return published;
+  public async readBody(input: {
+    target: PublishTarget;
+    requestNumber: string;
+    token: string;
+    signal?: AbortSignal | undefined;
+  }): Promise<string> {
+    assertGitLab(input.target);
+    const project = encodeGitLabProjectId(input.target.projectId ?? input.target.projectPath);
+    const response = await this.gitlabFetch(
+      `${input.target.apiBaseUrl}/projects/${project}/merge_requests/${input.requestNumber}`,
+      input.token,
+      { method: "GET", signal: input.signal },
+    );
+    if (!response.ok) {
+      throw new Error(`GitLab read MR body failed with HTTP ${response.status}`);
+    }
+    const body = (await response.json()) as Record<string, unknown>;
+    if (typeof body["description"] !== "string") {
+      throw new Error("GitLab read MR body returned a malformed response");
+    }
+    return body["description"];
   }
 
   private async gitlabFetch(

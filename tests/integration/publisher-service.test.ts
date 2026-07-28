@@ -13,6 +13,8 @@ import { createArtifactId } from "../../src/runtime/id-factory.js";
 import type {
   PublishedReviewRequest,
   PublishTarget,
+  ReviewAssetPublishOutcome,
+  ReviewRequestAsset,
   ReviewRequestPayload,
   ReviewRequestPublisher,
   ReviewRequestUpdate,
@@ -901,6 +903,141 @@ describe("PublisherService", () => {
     });
   });
 
+  it("persists digest-bound upload receipts and retries only the missing asset on the same draft", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    await addVisualEvidence(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    const input = {
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      pushBranch: false,
+      confirm: true as const,
+    };
+    const transientId = "art_33333333333333333333333333333333";
+    githubPublisher.assetOutcomePlan = ({ invocation, assets }) =>
+      assets.map((asset) =>
+        asset.artifactId === transientId && invocation <= 3
+          ? {
+              status: "failed" as const,
+              artifactId: asset.artifactId,
+              failure: "transient" as const,
+              message: "GitHub upload review asset failed with HTTP 503",
+            }
+          : githubPublisher.publishedOutcome(asset),
+      );
+
+    const partial = await publisherService.publish(input);
+    expect(partial.result).toMatchObject({
+      status: "blocked",
+      errorCode: "PUBLISH_PARTIAL_SYNC",
+      requestSynced: false,
+      visualPreviewSynced: false,
+      retryable: true,
+      request: { created: true, updated: false },
+    });
+    expect(partial.result.uploadReceiptArtifactIds).toHaveLength(2);
+    expect(githubPublisher.uploadedAssetIds).toEqual([
+      [
+        "art_22222222222222222222222222222222",
+        "art_33333333333333333333333333333333",
+        "art_44444444444444444444444444444444",
+      ],
+      [transientId],
+      [transientId],
+    ]);
+    githubPublisher.existingRequest = {
+      ...partial.result.request!,
+      created: false,
+      updated: false,
+    };
+
+    const recovered = await publisherService.publish(input);
+
+    expect(githubPublisher.uploadedAssetIds.at(-1)).toEqual([transientId]);
+    expect(githubPublisher.createdPayloads).toHaveLength(1);
+    expect(githubPublisher.updatedMetadata).toHaveLength(1);
+    expect(recovered.result).toMatchObject({
+      status: "passed",
+      requestSynced: true,
+      visualPreviewSynced: true,
+    });
+    expect(recovered.result.uploadReceiptArtifactIds).toHaveLength(3);
+    expect(
+      (await store.get(run.id)).artifacts.filter(
+        (artifact) => artifact.metadata["reportKind"] === "review-asset-upload-receipt",
+      ),
+    ).toHaveLength(3);
+  });
+
+  it.each([
+    ["permanent", "GitHub upload review asset failed with HTTP 400"],
+    ["uncertain", "GitHub upload review asset returned a malformed response"],
+  ] as const)("does not retry %s upload failures", async (failure, message) => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    await addVisualEvidence(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    const failedId = "art_33333333333333333333333333333333";
+    githubPublisher.assetOutcomePlan = ({ assets }) =>
+      assets.map((asset) =>
+        asset.artifactId === failedId
+          ? {
+              status: "failed",
+              artifactId: asset.artifactId,
+              failure,
+              message,
+            }
+          : githubPublisher.publishedOutcome(asset),
+      );
+
+    const partial = await publisherService.publish({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      pushBranch: false,
+      confirm: true,
+    });
+
+    expect(githubPublisher.uploadedAssetIds).toHaveLength(1);
+    expect(partial.result).toMatchObject({
+      status: "blocked",
+      errorCode: "PUBLISH_PARTIAL_SYNC",
+      retryable: false,
+      requestSynced: false,
+    });
+    expect(partial.result.uploadReceiptArtifactIds).toHaveLength(2);
+  });
+
+  it("keeps body sync blocked when the remote draft omits a confirmed asset URL", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    await addVisualEvidence(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    githubPublisher.remoteBodyOverride = "# host truncated the visual evidence";
+
+    const result = await publisherService.publish({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      pushBranch: false,
+      confirm: true,
+    });
+
+    expect(result.result).toMatchObject({
+      status: "blocked",
+      errorCode: "PUBLISH_PARTIAL_SYNC",
+      requestSynced: false,
+      visualPreviewSynced: false,
+      retryable: true,
+    });
+    expect(result.result.partialReasons.join("\n")).toContain("PUBLISH_ASSET_BODY_SYNC_INCOMPLETE");
+  });
+
   it("records partial GitHub create and update mutations and completes labels on retry", async () => {
     const run = await runService.createRun({ projectRoot });
     const report = await prReportService.generatePrReport({ runId: run.id });
@@ -1448,7 +1585,7 @@ describe("PublisherService", () => {
     expect(loadedRun.agentResults.some((result) => result.kind === "publishing")).toBe(false);
   });
 
-  it("records failed publish when required visual evidence upload cannot be synchronized", async () => {
+  it("records blocked partial publish when required visual evidence upload cannot be synchronized", async () => {
     const run = await runService.createRun({
       projectRoot,
     });
@@ -1471,13 +1608,16 @@ describe("PublisherService", () => {
     });
 
     expect(published.result).toMatchObject({
-      status: "failed",
+      status: "blocked",
+      errorCode: "PUBLISH_PARTIAL_SYNC",
       requestSynced: false,
       visualPreviewExpected: true,
       visualPreviewSynced: false,
     });
-    expect(published.result.partialReasons.join("\n")).toContain("visual evidence upload failed");
-    expect(githubPublisher.createdPayloads).toHaveLength(0);
+    expect(published.result.partialReasons.join("\n")).toContain(
+      "visual evidence upload incomplete",
+    );
+    expect(githubPublisher.createdPayloads).toHaveLength(1);
 
     const loadedRun = await store.get(run.id);
 
@@ -1566,7 +1706,8 @@ describe("PublisherService", () => {
       });
 
       expect(published.result).toMatchObject({
-        status: "failed",
+        status: "blocked",
+        errorCode: "PUBLISH_PARTIAL_SYNC",
         requestSynced: false,
         visualPreviewExpected: true,
         visualPreviewSynced: false,
@@ -1577,7 +1718,7 @@ describe("PublisherService", () => {
         "blob",
         `${gitHead}:.spec-to-pr/shop/visual/current.png`,
       ]);
-      expect(gitlabPublisher.createdPayloads).toHaveLength(0);
+      expect(gitlabPublisher.createdPayloads).toHaveLength(1);
     } finally {
       if (originalGitLabToken === undefined) delete process.env["GITLAB_TOKEN"];
       else process.env["GITLAB_TOKEN"] = originalGitLabToken;
@@ -1637,13 +1778,14 @@ describe("PublisherService", () => {
       });
 
       expect(published.result).toMatchObject({
-        status: "failed",
+        status: "blocked",
+        errorCode: "PUBLISH_PARTIAL_SYNC",
         requestSynced: false,
         visualPreviewExpected: true,
         visualPreviewSynced: false,
         fallbackMode: "none",
       });
-      expect(gitlabPublisher.createdPayloads).toHaveLength(0);
+      expect(gitlabPublisher.createdPayloads).toHaveLength(1);
     } finally {
       if (originalGitLabToken === undefined) delete process.env["GITLAB_TOKEN"];
       else process.env["GITLAB_TOKEN"] = originalGitLabToken;
@@ -1677,11 +1819,12 @@ describe("PublisherService", () => {
       });
 
       expect(published.result).toMatchObject({
-        status: "failed",
+        status: "blocked",
+        errorCode: "PUBLISH_PARTIAL_SYNC",
         requestSynced: false,
         fallbackMode: "none",
       });
-      expect(gitlabPublisher.createdPayloads).toHaveLength(0);
+      expect(gitlabPublisher.createdPayloads).toHaveLength(1);
     } finally {
       if (originalGitLabToken === undefined) delete process.env["GITLAB_TOKEN"];
       else process.env["GITLAB_TOKEN"] = originalGitLabToken;
@@ -2659,6 +2802,10 @@ class FakePublisher implements ReviewRequestPublisher {
   public visualAssetsEmbeddable = true;
   public existingRequest: PublishedReviewRequest | undefined;
   public forceNonDraftResult = false;
+  public remoteBodyOverride: string | undefined;
+  public assetOutcomePlan:
+    | ((input: { invocation: number; assets: ReviewRequestAsset[] }) => ReviewAssetPublishOutcome[])
+    | undefined;
 
   public constructor(private readonly host: "github" | "gitlab") {}
 
@@ -2670,26 +2817,54 @@ class FakePublisher implements ReviewRequestPublisher {
   }
 
   public async publishAssets(input: {
-    assets: Array<{ role: string; artifactId: string; label: string; targetId: string }>;
-  }) {
+    assets: ReviewRequestAsset[];
+  }): Promise<ReviewAssetPublishOutcome[]> {
     if (this.assetUploadError !== undefined) {
       throw this.assetUploadError;
     }
     if (this.failAssetUpload) {
-      throw new Error("forced visual evidence upload failure");
+      return input.assets.map((asset) => ({
+        status: "failed",
+        artifactId: asset.artifactId,
+        failure: "uncertain",
+        message: "forced visual evidence upload failure",
+      }));
     }
 
     this.uploadedAssets.push(input.assets.map((asset) => ({ role: asset.role })));
     this.uploadedAssetIds.push(input.assets.map((asset) => asset.artifactId));
 
-    return input.assets.map((asset) => ({
-      artifactId: asset.artifactId,
-      role: asset.role as "figma" | "browser" | "diff" | "overlay" | "e2e-video",
-      targetId: asset.targetId,
-      label: asset.label,
-      url: `https://github.example/assets/${asset.role}${asset.role === "e2e-video" ? ".webm" : ".png"}`,
-      embeddable: asset.role !== "e2e-video" && this.visualAssetsEmbeddable,
-    }));
+    const invocation = this.uploadedAssetIds.length;
+    return (
+      this.assetOutcomePlan?.({ invocation, assets: input.assets }) ??
+      input.assets.map((asset) => this.publishedOutcome(asset))
+    );
+  }
+
+  public publishedOutcome(asset: ReviewRequestAsset): ReviewAssetPublishOutcome {
+    return {
+      status: "published",
+      asset: {
+        artifactId: asset.artifactId,
+        artifactDigest: asset.artifactDigest,
+        role: asset.role,
+        targetId: asset.targetId,
+        label: asset.label,
+        url: `https://github.example/assets/${asset.role}${
+          asset.role === "e2e-video" ? ".webm" : ".png"
+        }`,
+        embeddable: asset.role !== "e2e-video" && this.visualAssetsEmbeddable,
+      },
+    };
+  }
+
+  public async readBody(): Promise<string> {
+    return (
+      this.remoteBodyOverride ??
+      this.updatedBodies.at(-1) ??
+      this.createdPayloads.at(-1)?.body ??
+      ""
+    );
   }
 
   public async create(input: {
