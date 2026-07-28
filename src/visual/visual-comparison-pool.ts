@@ -73,15 +73,20 @@ export type VisualComparisonMeasurement = {
 
 type ValidatedJob = {
   targetId: string;
-  baseline: Buffer;
-  actual: Buffer;
-  baselineRgba?: { data: Buffer; width: number; height: number };
-  actualRgba?: { data: Buffer; width: number; height: number };
+  baseline: Buffer<ArrayBuffer>;
+  actual: Buffer<ArrayBuffer>;
+  baselineRgba?: { data: Buffer<ArrayBuffer>; width: number; height: number };
+  actualRgba?: { data: Buffer<ArrayBuffer>; width: number; height: number };
   masks: VisualMask[];
   pixelTolerance?: number;
   pixels: number;
-  sourceManagedBytes: number;
+  ownedManagedBytes: number;
+};
+
+type AdmittedJob = {
+  job: ValidatedJob;
   sourceBuffers: Buffer[];
+  sourceManagedBytes: number;
 };
 
 type PendingJob = {
@@ -91,6 +96,8 @@ type PendingJob = {
   reject: (error: Error) => void;
   tracker: MeasurementTracker;
   managedBytes: number;
+  retainedOwnedBytes: number;
+  settled: boolean;
 };
 
 type MeasurementTracker = {
@@ -180,15 +187,6 @@ export class VisualComparisonPool {
     if (this.closing) {
       throw new Error("VISUAL_COMPARISON_POOL_CLOSED: comparison pool is closed");
     }
-    const jobs = rawJobs.map((job) => validateJob(job));
-    const seenSourceBuffers = new Set<Buffer>();
-    for (const job of jobs) {
-      job.sourceManagedBytes = job.sourceBuffers.reduce((total, buffer) => {
-        if (seenSourceBuffers.has(buffer)) return total;
-        seenSourceBuffers.add(buffer);
-        return total + buffer.byteLength;
-      }, 0);
-    }
     const rssBaselineBytes = process.memoryUsage().rss;
     const tracker: MeasurementTracker = {
       pending: [],
@@ -198,6 +196,16 @@ export class VisualComparisonPool {
       peakManagedStage: "empty",
       checkpoints: [],
     };
+    const admittedJobs = rawJobs.map((job) => admitJob(job));
+    const seenSourceBuffers = new Set<Buffer>();
+    for (const admitted of admittedJobs) {
+      admitted.sourceManagedBytes = admitted.sourceBuffers.reduce((total, buffer) => {
+        if (seenSourceBuffers.has(buffer)) return total;
+        seenSourceBuffers.add(buffer);
+        return total + buffer.byteLength;
+      }, 0);
+    }
+    const jobs = admittedJobs.map((admitted) => admitted.job);
     if (jobs.length === 0) {
       return {
         results: [],
@@ -213,7 +221,7 @@ export class VisualComparisonPool {
     }
     this.ensureWorkerCount(Math.min(this.maximumWorkers, jobs.length));
     const pendingPromises = jobs.map(
-      (job) =>
+      (job, index) =>
         new Promise<VisualComparisonPoolResult>((resolve, reject) => {
           const pending: PendingJob = {
             id: this.nextJobId++,
@@ -221,7 +229,9 @@ export class VisualComparisonPool {
             resolve,
             reject,
             tracker,
-            managedBytes: job.sourceManagedBytes,
+            managedBytes: admittedJobs[index]!.sourceManagedBytes + job.ownedManagedBytes,
+            retainedOwnedBytes: job.ownedManagedBytes,
+            settled: false,
           };
           tracker.pending.push(pending);
           this.queue.push(pending);
@@ -229,7 +239,17 @@ export class VisualComparisonPool {
         }),
     );
     this.observeTracker(tracker, "parent-validated-inputs", {
-      parentValidatedInputs: jobs.reduce((total, job) => total + job.sourceManagedBytes, 0),
+      callerSources: admittedJobs.reduce(
+        (total, admitted) => total + admitted.sourceManagedBytes,
+        0,
+      ),
+      ownedSnapshots: jobs.reduce((total, job) => total + job.ownedManagedBytes, 0),
+    });
+    for (const pending of tracker.pending) {
+      this.setPendingManagedBytes(pending, pending.job.ownedManagedBytes);
+    }
+    this.observeTracker(tracker, "parent-queued-owned-inputs", {
+      ownedSnapshots: jobs.reduce((total, job) => total + job.ownedManagedBytes, 0),
     });
     const sampleRss = () => {
       tracker.inFlightPeakRssBytes = Math.max(
@@ -240,17 +260,23 @@ export class VisualComparisonPool {
     const sampler = setInterval(sampleRss, 1);
     sampler.unref();
     this.schedule();
-    let results: VisualComparisonPoolResult[];
+    let settled: PromiseSettledResult<VisualComparisonPoolResult>[];
     try {
-      results = await Promise.all(pendingPromises);
+      settled = await Promise.allSettled(pendingPromises);
       sampleRss();
     } finally {
       clearInterval(sampler);
       sampleRss();
       for (const pending of tracker.pending) this.setPendingManagedBytes(pending, 0);
     }
+    const firstFailure = settled.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    if (firstFailure !== undefined) throw firstFailure.reason;
     return {
-      results,
+      results: settled.map(
+        (result) => (result as PromiseFulfilledResult<VisualComparisonPoolResult>).value,
+      ),
       measurement: finishMeasurement(tracker),
     };
   }
@@ -277,7 +303,7 @@ export class VisualComparisonPool {
     if (this.closing) return;
     this.closing = true;
     const closed = new Error("VISUAL_COMPARISON_POOL_CLOSED: comparison pool is closed");
-    for (const pending of this.queue.splice(0)) pending.reject(closed);
+    for (const pending of this.queue.splice(0)) this.rejectPending(pending, closed);
     const workers = [...this.workers];
     this.workers.clear();
     await Promise.all(
@@ -285,7 +311,7 @@ export class VisualComparisonPool {
         if (slot.timeout !== undefined) clearTimeout(slot.timeout);
         if (slot.current !== undefined) {
           this.activePixels -= slot.current.job.pixels;
-          slot.current.reject(closed);
+          this.rejectPending(slot.current, closed);
           slot.current = undefined;
         }
         await slot.worker.terminate();
@@ -338,17 +364,14 @@ export class VisualComparisonPool {
     ).length;
     this.peakActiveWorkers = Math.max(this.peakActiveWorkers, activeWorkers);
     this.peakActivePixels = Math.max(this.peakActivePixels, this.activePixels);
-    const baselineData = Uint8Array.from(pending.job.baselineRgba?.data ?? pending.job.baseline);
-    const actualData = Uint8Array.from(pending.job.actualRgba?.data ?? pending.job.actual);
-    this.setPendingManagedBytes(
-      pending,
-      pending.job.sourceManagedBytes + baselineData.byteLength + actualData.byteLength,
-      "parent-transfer-inputs",
-      {
-        parentValidatedInputs: pending.job.sourceManagedBytes,
-        transferableInputs: baselineData.byteLength + actualData.byteLength,
-      },
-    );
+    const baselineData = pending.job.baselineRgba?.data ?? pending.job.baseline;
+    const actualData = pending.job.actualRgba?.data ?? pending.job.actual;
+    const transferableBytes = baselineData.byteLength + actualData.byteLength;
+    pending.retainedOwnedBytes = pending.job.ownedManagedBytes - transferableBytes;
+    this.setPendingManagedBytes(pending, pending.job.ownedManagedBytes, "parent-transfer-inputs", {
+      retainedOwnedInputs: pending.retainedOwnedBytes,
+      transferableInputs: transferableBytes,
+    });
     const request: VisualComparisonWorkerRequest = {
       jobId: pending.id,
       baseline:
@@ -398,10 +421,10 @@ export class VisualComparisonPool {
     if (response.kind === "memory") {
       this.setPendingManagedBytes(
         pending,
-        pending.job.sourceManagedBytes + response.checkpoint.managedBytes,
+        pending.retainedOwnedBytes + response.checkpoint.managedBytes,
         response.checkpoint.stage,
         {
-          parentValidatedInputs: pending.job.sourceManagedBytes,
+          retainedOwnedInputs: pending.retainedOwnedBytes,
           ...response.checkpoint.ownership,
         },
         response.checkpoint.rssBytes,
@@ -411,20 +434,14 @@ export class VisualComparisonPool {
     if (response.ok) {
       const outputBytes =
         response.comparison.diff.byteLength + response.comparison.overlay.byteLength;
-      this.setPendingManagedBytes(
-        pending,
-        pending.job.sourceManagedBytes + outputBytes,
-        "parent-result-outputs",
-        {
-          parentValidatedInputs: pending.job.sourceManagedBytes,
-          resultOutputs: outputBytes,
-        },
-      );
+      this.setPendingManagedBytes(pending, outputBytes, "parent-result-outputs", {
+        resultOutputs: outputBytes,
+      });
     }
     this.releaseSlot(slot);
     if (response.ok) {
       this.completedJobs += 1;
-      pending.resolve({
+      this.resolvePending(pending, {
         targetId: pending.job.targetId,
         comparison: {
           ...response.comparison,
@@ -434,7 +451,8 @@ export class VisualComparisonPool {
       });
     } else {
       this.failedJobs += 1;
-      pending.reject(
+      this.rejectPending(
+        pending,
         new Error(`VISUAL_COMPARISON_FAILED: target ${pending.job.targetId}: ${response.error}`),
       );
     }
@@ -462,7 +480,7 @@ export class VisualComparisonPool {
     void slot.worker.terminate();
     if (pending !== undefined) {
       this.failedJobs += 1;
-      pending.reject(error);
+      this.rejectPending(pending, error);
     }
     this.ensureWorkerCount(Math.min(this.maximumWorkers, this.queue.length));
     this.schedule();
@@ -491,11 +509,26 @@ export class VisualComparisonPool {
     ownership?: Record<string, number>,
     rssBytes: number = process.memoryUsage().rss,
   ): void {
+    if (pending.settled) return;
     this.currentManagedBytes += managedBytes - pending.managedBytes;
     pending.managedBytes = managedBytes;
     if (stage !== undefined && ownership !== undefined) {
       this.observeTracker(pending.tracker, stage, ownership, rssBytes);
     }
+  }
+
+  private resolvePending(pending: PendingJob, result: VisualComparisonPoolResult): void {
+    if (pending.settled) return;
+    this.setPendingManagedBytes(pending, 0);
+    pending.settled = true;
+    pending.resolve(result);
+  }
+
+  private rejectPending(pending: PendingJob, error: Error): void {
+    if (pending.settled) return;
+    this.setPendingManagedBytes(pending, 0);
+    pending.settled = true;
+    pending.reject(error);
   }
 
   private observeTracker(
@@ -540,7 +573,7 @@ function finishMeasurement(tracker: MeasurementTracker): VisualComparisonMeasure
   };
 }
 
-function validateJob(job: VisualComparisonPoolJob): ValidatedJob {
+function admitJob(job: VisualComparisonPoolJob): AdmittedJob {
   const targetId = TargetIdSchema.parse(job.targetId);
   assertBoundedPng(job.baseline, `${targetId} baseline`);
   assertBoundedPng(job.actual, `${targetId} actual`);
@@ -585,22 +618,46 @@ function validateJob(job: VisualComparisonPoolJob): ValidatedJob {
     job.pixelTolerance === undefined
       ? undefined
       : z.number().min(0).max(1).parse(job.pixelTolerance);
+  const baseline = ownTransferableBuffer(job.baseline);
+  const actual = ownTransferableBuffer(job.actual);
+  const ownedBaselineRgba =
+    baselineRgba === undefined
+      ? undefined
+      : {
+          ...baselineRgba,
+          data: ownTransferableBuffer(baselineRgba.data),
+        };
+  const ownedActualRgba =
+    actualRgba === undefined
+      ? undefined
+      : {
+          ...actualRgba,
+          data: ownTransferableBuffer(actualRgba.data),
+        };
+  const ownedManagedBytes =
+    baseline.byteLength +
+    actual.byteLength +
+    (ownedBaselineRgba?.data.byteLength ?? 0) +
+    (ownedActualRgba?.data.byteLength ?? 0);
   return {
-    targetId,
-    baseline: job.baseline,
-    actual: job.actual,
-    ...(baselineRgba === undefined ? {} : { baselineRgba }),
-    ...(actualRgba === undefined ? {} : { actualRgba }),
-    masks,
-    ...(pixelTolerance === undefined ? {} : { pixelTolerance }),
-    pixels,
-    sourceManagedBytes: 0,
+    job: {
+      targetId,
+      baseline,
+      actual,
+      ...(ownedBaselineRgba === undefined ? {} : { baselineRgba: ownedBaselineRgba }),
+      ...(ownedActualRgba === undefined ? {} : { actualRgba: ownedActualRgba }),
+      masks,
+      ...(pixelTolerance === undefined ? {} : { pixelTolerance }),
+      pixels,
+      ownedManagedBytes,
+    },
     sourceBuffers: [
       job.baseline,
       job.actual,
       ...(baselineRgba === undefined ? [] : [baselineRgba.data]),
       ...(actualRgba === undefined ? [] : [actualRgba.data]),
     ],
+    sourceManagedBytes: 0,
   };
 }
 
@@ -630,6 +687,12 @@ function validateRgba(
 
 function zeroCopyBuffer(data: Uint8Array): Buffer {
   return Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+}
+
+function ownTransferableBuffer(source: Buffer): Buffer<ArrayBuffer> {
+  const owned = Buffer.from(new ArrayBuffer(source.byteLength));
+  source.copy(owned);
+  return owned;
 }
 
 function boundedPositiveInteger(value: number, maximum: number, label: string): number {

@@ -77,6 +77,124 @@ describe("visual comparison worker pool", () => {
     );
   });
 
+  it("owns queued image bytes at admission before callers can mutate them", async () => {
+    const pool = new VisualComparisonPool({
+      maximumWorkers: 1,
+      maximumActivePixels: 1,
+      timeoutMs: 5_000,
+    });
+    pools.push(pool);
+    const png = solidPng(1, 1);
+    const queuedActual = Buffer.from([0, 0, 0, 255]);
+    const queuedActualPng = Buffer.from(png);
+    const comparison = pool.compare([
+      {
+        targetId: "active",
+        baseline: png,
+        actual: png,
+        baselineRgba: { data: Buffer.from([0, 0, 0, 255]), width: 1, height: 1 },
+        actualRgba: { data: Buffer.from([0, 0, 0, 255]), width: 1, height: 1 },
+        masks: [],
+      },
+      {
+        targetId: "queued",
+        baseline: png,
+        actual: png,
+        baselineRgba: { data: Buffer.from([0, 0, 0, 255]), width: 1, height: 1 },
+        actualRgba: { data: queuedActual, width: 1, height: 1 },
+        masks: [],
+      },
+      {
+        targetId: "queued-png",
+        baseline: Buffer.from(png),
+        actual: queuedActualPng,
+        masks: [],
+      },
+    ]);
+
+    queuedActual[0] = 255;
+    queuedActualPng[45] = queuedActualPng[45]! ^ 0xff;
+
+    await expect(comparison).resolves.toMatchObject([
+      { targetId: "active", comparison: { status: "passed" } },
+      { targetId: "queued", comparison: { status: "passed" } },
+      { targetId: "queued-png", comparison: { status: "passed" } },
+    ]);
+    expect(pool.snapshotStats()).toMatchObject({
+      activeWorkers: 0,
+      currentManagedBytes: 0,
+    });
+  });
+
+  it("does not reject a failed batch until every sibling has settled and released memory", async () => {
+    const source = encodeURIComponent(`
+      import { parentPort } from "node:worker_threads";
+      parentPort.on("message", (request) => {
+        if (request.jobId >= 3) {
+          parentPort.postMessage({
+            jobId: request.jobId,
+            kind: "result",
+            ok: true,
+            comparison: {
+              status: "passed",
+              metrics: {},
+              maskReasons: [],
+              diff: new Uint8Array(),
+              overlay: new Uint8Array(),
+            },
+          });
+          return;
+        }
+        const delay = request.jobId === 1 ? 0 : 150;
+        setTimeout(() => {
+          parentPort.postMessage({
+            jobId: request.jobId,
+            kind: "memory",
+            checkpoint: {
+              stage: "controlled-failure",
+              managedBytes: 32,
+              rssBytes: process.memoryUsage().rss,
+              ownership: { controlledFailure: 32 },
+            },
+          });
+          parentPort.postMessage({
+            jobId: request.jobId,
+            kind: "result",
+            ok: false,
+            error: request.jobId === 1 ? "first failure" : "late sibling failure",
+          });
+        }, delay);
+      });
+    `);
+    const pool = new VisualComparisonPool({
+      maximumWorkers: 2,
+      maximumActivePixels: 2,
+      workerUrl: new URL(`data:text/javascript,${source}`),
+      timeoutMs: 5_000,
+    });
+    pools.push(pool);
+
+    await expect(
+      pool.compare([job("first-failure", 1, 1), job("late-failure", 1, 1)]),
+    ).rejects.toThrow(/VISUAL_COMPARISON_FAILED.*first-failure.*first failure/);
+
+    expect(pool.snapshotStats()).toMatchObject({
+      activeWorkers: 0,
+      activePixels: 0,
+      currentManagedBytes: 0,
+      failedJobs: 2,
+    });
+    await expect(pool.compare([job("future", 1, 1)])).resolves.toMatchObject([
+      { targetId: "future", comparison: { status: "passed" } },
+    ]);
+    expect(pool.snapshotStats()).toMatchObject({
+      activeWorkers: 0,
+      currentManagedBytes: 0,
+      failedJobs: 2,
+      completedJobs: 1,
+    });
+  });
+
   it("rejects encoded PNG ownership that exceeds the derived per-pixel ledger", async () => {
     const pool = new VisualComparisonPool();
     pools.push(pool);
@@ -154,7 +272,12 @@ describe("visual comparison worker pool", () => {
     expect(measured.measurement.peakManagedBytes).toBeLessThanOrEqual(
       MAX_VISUAL_COMPARISON_LIVE_BYTES,
     );
-    expect(measured.measurement.peakManagedBytes).toBeGreaterThanOrEqual(pixels * 25);
+    expect(measured.measurement.peakManagedBytes).toBeGreaterThanOrEqual(pixels * 16);
+    const admissionOwnership = measured.measurement.checkpoints.find(
+      (checkpoint) => checkpoint.stage === "parent-validated-inputs",
+    )?.ownership;
+    expect(admissionOwnership?.callerSources).toBeGreaterThanOrEqual(pixels * 8);
+    expect(admissionOwnership?.ownedSnapshots).toBeGreaterThanOrEqual(pixels * 8);
     expect(measured.measurement.inFlightRssDeltaBytes).toBeLessThanOrEqual(
       MAX_VISUAL_COMPARISON_LIVE_BYTES,
     );
