@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { buildDelegationPolicy, buildDeliveryProfile } from "../../src/workflow/index.js";
-import {
-  VISUAL_POLICY,
-  resolveDeliveryPolicy,
-} from "../../src/workflow/delivery-mode-policy.js";
+import { VISUAL_POLICY, resolveDeliveryPolicy } from "../../src/workflow/delivery-mode-policy.js";
 
 const uiScope = {
   code: true,

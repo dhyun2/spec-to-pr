@@ -8,7 +8,6 @@ import {
   WorkflowPublishInputSchema,
   WorkflowStartInputSchema,
   WorkflowStatusInputSchema,
-  WorkflowSubmitInputSchema,
 } from "../application/workflow-service.js";
 import type { ServicesProvider } from "./run-service-provider.js";
 
@@ -39,6 +38,25 @@ const REVIEWER_ROLES = ["functional-reviewer", "design-reviewer"] as const;
 const DELIVERY_MODES = ["auto", "brief", "legacy", "feature", "figma"] as const;
 
 const EmptyInputSchema = z.object({}).strict();
+const WorkflowSubmitToolInputSchema = z
+  .object({
+    runId: z.string().trim().min(1),
+    submission: z
+      .object({
+        kind: z.enum([
+          "legacy-network-evidence",
+          "contracts",
+          "api-ready",
+          "implementation",
+          "functional-review",
+          "design-review",
+          "figma-bundle",
+          "visual-comparison",
+        ]),
+      })
+      .passthrough(),
+  })
+  .strict();
 type StructuredResult = Record<string, unknown>;
 
 export function createKernelServer(servicesProvider: ServicesProvider): McpServer {
@@ -110,7 +128,9 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
     {
       title: "Submit workflow result",
       description: "Record contracts, API readiness, implementation, Figma, or review evidence.",
-      inputSchema: WorkflowSubmitInputSchema.shape,
+      // Keep discovery compact. WorkflowService re-parses the complete strict
+      // discriminated submission contract before any state can change.
+      inputSchema: WorkflowSubmitToolInputSchema,
     },
     async (input) => toolResult(await (await servicesProvider()).workflowService.submit(input)),
   );
