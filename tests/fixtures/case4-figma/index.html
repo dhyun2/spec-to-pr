@@ -164,6 +164,16 @@
         color: #9ca3af;
       }
 
+      .facts {
+        display: grid;
+        gap: 8px;
+        margin: 20px 0 0;
+        padding: 0;
+        list-style: none;
+        color: #374151;
+        font-size: 14px;
+      }
+
       button {
         width: 100%;
         height: 54px;
@@ -202,6 +212,7 @@
         <p class="distance" id="distance"></p>
         <span class="status" id="status"></span>
         <div class="chargers" id="chargers"></div>
+        <ul class="facts" id="facts"></ul>
         <button type="button" id="action">길 안내 시작</button>
       </section>
     </main>
@@ -216,6 +227,19 @@
       document.querySelector("#address").textContent = fixture.address;
       document.querySelector("#distance").textContent = fixture.distance;
       document.querySelector("#status").textContent = fixture.status;
+      const stateFactRows = [
+        ["CINEMA 4K", fixture.stateFacts.cinema4k],
+        ["G패스 머니", fixture.stateFacts.gpassMoney ? "표시" : "숨김"],
+        ["주차", fixture.stateFacts.parking],
+      ];
+      document.querySelector("#facts").replaceChildren(
+        ...stateFactRows.map(([subject, value]) => {
+          const row = document.createElement("li");
+          row.dataset.subject = subject;
+          row.textContent = `${subject}: ${value}`;
+          return row;
+        }),
+      );
       document.querySelector("#chargers").replaceChildren(
         ...fixture.chargers.map((charger) => {
           const row = document.createElement("div");
@@ -235,6 +259,7 @@
       window.__CASE4_READY__ = {
         fixtureId: fixture.id,
         assetCount: performance.getEntriesByType("resource").length,
+        stateFacts: fixture.stateFacts,
       };
     </script>
   </body>

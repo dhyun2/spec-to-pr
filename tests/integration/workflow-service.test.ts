@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ArtifactBlobStore } from "../../src/artifact-registry/artifact-blob-store.js";
 import { IntakeRequestService } from "../../src/application/intake-request-service.js";
+import { figmaStateFactsDigest } from "../../src/figma/figma-capture-contract.js";
 import type { OpenSpecArchiveService } from "../../src/application/openspec-archive-service.js";
 import { PublisherService } from "../../src/application/publisher-service.js";
 import { RunService } from "../../src/application/run-service.js";
@@ -125,6 +126,7 @@ describe("WorkflowService", () => {
             id: "mock:checkout",
             path: "mocks/checkout.json",
             sha256: `sha256:${createHash("sha256").update(mockFixture).digest("hex")}`,
+            stateContractDigest: figmaStateContracts()[0]!.digest,
           },
         ],
       }),
@@ -325,6 +327,7 @@ describe("WorkflowService", () => {
           capturedComponents: figmaCapturedComponents(),
           designMapping: figmaDesignMapping(),
           manifestPath: "figma/design-context.json",
+          stateContracts: figmaStateContracts(),
           visualTargets: figmaVisualTargets(),
           artifactPaths: ["figma/design-context.json", "visual/diff.png"],
         },
@@ -2717,6 +2720,7 @@ describe("WorkflowService", () => {
         capturedComponents: figmaCapturedComponents(),
         designMapping: figmaDesignMapping(),
         manifestPath: "figma/design-context.json",
+        stateContracts: figmaStateContracts(),
         visualTargets: figmaVisualTargets(),
         artifactPaths: ["figma/design-context.json", "visual/diff.png"],
       },
@@ -2803,6 +2807,7 @@ describe("WorkflowService", () => {
         capturedComponents: figmaCapturedComponents(),
         designMapping: figmaDesignMapping(),
         manifestPath: "figma/design-context.json",
+        stateContracts: figmaStateContracts(),
         visualTargets: figmaVisualTargets(),
         artifactPaths: ["figma/design-context.json", "visual/diff.png"],
       },
@@ -4409,6 +4414,7 @@ describe("WorkflowService", () => {
         capturedComponents: figmaCapturedComponents(),
         designMapping: figmaDesignMapping(),
         manifestPath: "figma/design-context.json",
+        stateContracts: figmaStateContracts(),
         visualTargets: figmaVisualTargets(),
         artifactPaths: ["figma/design-context.json", "visual/diff.png"],
       },
@@ -4432,6 +4438,7 @@ describe("WorkflowService", () => {
           capturedComponents: figmaCapturedComponents(),
           designMapping: figmaDesignMapping(),
           manifestPath: "figma/design-context.json",
+          stateContracts: figmaStateContracts(),
           visualTargets: figmaVisualTargets(),
           artifactPaths: ["figma/design-context.json", "visual/diff.png"],
         },
@@ -4489,6 +4496,7 @@ describe("WorkflowService", () => {
         capturedComponents,
         designMapping,
         visualPaths: ["visual/diff.png"],
+        stateContracts: figmaStateContracts(),
         visualTargets: figmaVisualTargets(),
       }),
       "utf8",
@@ -4529,6 +4537,7 @@ describe("WorkflowService", () => {
             ],
           },
           manifestPath: "figma/design-context.json",
+          stateContracts: figmaStateContracts(),
           visualTargets: figmaVisualTargets(),
           artifactPaths: ["figma/design-context.json", "visual/diff.png"],
         },
@@ -4546,6 +4555,7 @@ describe("WorkflowService", () => {
         capturedComponents,
         designMapping,
         manifestPath: "figma/design-context.json",
+        stateContracts: figmaStateContracts(),
         visualTargets: figmaVisualTargets(),
         artifactPaths: ["figma/design-context.json", "visual/diff.png"],
       },
@@ -4571,10 +4581,34 @@ describe("WorkflowService", () => {
       artifactPaths: ["test-results/unit.json", "mocks/manifest.json", "mocks/checkout.json"],
       mockDataEvidence: {
         manifestPath: "mocks/manifest.json",
-        fixtures: [{ id: "mock:checkout", path: "mocks/checkout.json" }],
+        fixtures: [
+          {
+            id: "mock:checkout",
+            path: "mocks/checkout.json",
+            stateContractDigest: figmaStateContracts()[0]!.digest,
+          },
+        ],
       },
     } as const;
 
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: {
+          ...implementation,
+          mockDataEvidence: {
+            manifestPath: "mocks/manifest.json",
+            fixtures: [
+              {
+                id: "mock:checkout",
+                path: "mocks/checkout.json",
+                stateContractDigest: `sha256:${"0".repeat(64)}`,
+              },
+            ],
+          },
+        },
+      }),
+    ).rejects.toThrow(/FIGMA_STATE_CONTRACT_INVALID.*digest/i);
     await expect(
       service.submit({ runId: started.runId, submission: implementation }),
     ).rejects.toThrow(/FIGMA_DESIGN_SYSTEM_EVIDENCE_INVALID.*Logo\/Normal\/nxplus_park/);
@@ -4661,6 +4695,7 @@ describe("WorkflowService", () => {
         capturedComponents: figmaCapturedComponents(),
         designMapping: figmaDesignMapping(),
         manifestPath: "figma/design-context.json",
+        stateContracts: figmaStateContracts(),
         visualTargets: figmaVisualTargets(),
         artifactPaths: ["figma/design-context.json", "visual/diff.png"],
       },
@@ -4777,7 +4812,13 @@ describe("WorkflowService", () => {
       },
       mockDataEvidence: {
         manifestPath: "mocks/manifest.json",
-        fixtures: [{ id: "mock:checkout", path: "mocks/checkout.json" }],
+        fixtures: [
+          {
+            id: "mock:checkout",
+            path: "mocks/checkout.json",
+            stateContractDigest: figmaStateContracts()[0]!.digest,
+          },
+        ],
       },
     } as const;
 
@@ -5109,6 +5150,7 @@ describe("WorkflowService", () => {
       capturedComponents: figmaCapturedComponents(),
       designMapping: figmaDesignMapping(),
       manifestPath: "figma/design-context.json",
+      stateContracts: figmaStateContracts(),
       visualTargets: figmaVisualTargets(),
       artifactPaths: ["figma/design-context.json", "visual/diff.png"],
     } as const;
@@ -5129,7 +5171,7 @@ describe("WorkflowService", () => {
     );
   });
 
-  it("rejects a scaled Figma thumbnail declared as the browser viewport", async () => {
+  it("requires reacquisition for historical v1 Figma geometry before attempt reservation", async () => {
     const figmaUrl = "https://www.figma.com/design/abc/file?node-id=2558-4382";
     const target = {
       targetId: "shop-list",
@@ -5164,6 +5206,12 @@ describe("WorkflowService", () => {
         capturedComponents: figmaCapturedComponents(),
         designMapping: figmaDesignMapping(),
         visualPaths: [target.baselinePath],
+        stateContracts: figmaStateContracts({
+          targetId: target.targetId,
+          nodeId: target.figmaCapture.nodeId,
+          state: target.state,
+          fixtureId: target.fixture,
+        }),
         visualTargets: [target],
       }),
       "utf8",
@@ -5190,11 +5238,23 @@ describe("WorkflowService", () => {
           capturedComponents: figmaCapturedComponents(),
           designMapping: figmaDesignMapping(),
           manifestPath: "figma/design-context.json",
+          stateContracts: figmaStateContracts({
+            targetId: target.targetId,
+            nodeId: target.figmaCapture.nodeId,
+            state: target.state,
+            fixtureId: target.fixture,
+          }),
           visualTargets: [target],
           artifactPaths: ["figma/design-context.json", target.baselinePath],
         },
       }),
-    ).rejects.toThrow(/FIGMA_CAPTURE_GEOMETRY_INVALID/);
+    ).rejects.toThrow(/FIGMA_CAPTURE_GEOMETRY_REACQUISITION_REQUIRED/);
+    const afterRejection = await store.get(started.runId);
+    expect(
+      afterRejection.artifacts.filter(
+        (artifact) => artifact.metadata["adapter"] === "visual-attempt-reservation-v3",
+      ),
+    ).toHaveLength(0);
   });
 
   it("records at most one Figma bundle under concurrent submissions", async () => {
@@ -5218,6 +5278,7 @@ describe("WorkflowService", () => {
         capturedComponents: figmaCapturedComponents(),
         designMapping: figmaDesignMapping(),
         manifestPath: "figma/design-context.json",
+        stateContracts: figmaStateContracts(),
         visualTargets: figmaVisualTargets(),
         artifactPaths: ["figma/design-context.json", "visual/diff.png"],
       },
@@ -5569,6 +5630,7 @@ describe("WorkflowService", () => {
         capturedComponents: figmaCapturedComponents(),
         designMapping: figmaDesignMapping(),
         manifestPath: "figma/design-context.json",
+        stateContracts: figmaStateContracts(),
         visualTargets: figmaVisualTargets(),
         artifactPaths: ["figma/design-context.json", "visual/diff.png"],
       },
@@ -5577,6 +5639,13 @@ describe("WorkflowService", () => {
       ...figmaVisualTargets()[0]!,
       targetId: "checkout-summary",
       name: "Checkout summary",
+      state: "summary",
+      fixture: "mock:summary",
+      figmaCapture: {
+        ...figmaVisualTargets()[0]!.figmaCapture,
+        nodeId: "1:3",
+        state: "summary",
+      },
     };
     const runWithTwoTargets = await store.get(started.runId);
     const figmaBundleArtifactIndex = runWithTwoTargets.artifacts.findIndex(
@@ -5588,11 +5657,23 @@ describe("WorkflowService", () => {
     const originalFigmaBundleArtifact = runWithTwoTargets.artifacts[figmaBundleArtifactIndex]!;
     const originalVisualTargets = originalFigmaBundleArtifact.metadata["visualTargets"];
     if (!Array.isArray(originalVisualTargets)) throw new Error("Missing persisted visual targets");
+    const originalStateContracts = originalFigmaBundleArtifact.metadata["stateContracts"];
+    if (!Array.isArray(originalStateContracts))
+      throw new Error("Missing persisted state contracts");
     runWithTwoTargets.artifacts[figmaBundleArtifactIndex] = ArtifactRefSchema.parse({
       ...originalFigmaBundleArtifact,
       metadata: {
         ...originalFigmaBundleArtifact.metadata,
         visualTargets: [...originalVisualTargets, secondTarget],
+        stateContracts: [
+          ...originalStateContracts,
+          ...figmaStateContracts({
+            targetId: secondTarget.targetId,
+            nodeId: secondTarget.figmaCapture.nodeId,
+            state: secondTarget.state,
+            fixtureId: secondTarget.fixture,
+          }),
+        ],
       },
     });
     runWithTwoTargets.revision += 1;
@@ -5609,6 +5690,8 @@ describe("WorkflowService", () => {
       },
     });
     await changeSource(directory, "src/checkout.tsx", "export const checkout = 'visual';\n");
+    const summaryFixture = Buffer.from(JSON.stringify([{ state: "summary" }]), "utf8");
+    await writeFile(path.join(directory, "mocks/summary.json"), summaryFixture);
     await expect(
       service.submit({
         runId: started.runId,
@@ -5629,11 +5712,37 @@ describe("WorkflowService", () => {
       summary: "Rendered the checkout target.",
       apiReady: false,
       uiChanged: true,
-      changedFiles: ["mocks/checkout.json", "mocks/manifest.json", "src/checkout.tsx"],
-      artifactPaths: ["test-results/unit.json", "mocks/manifest.json", "mocks/checkout.json"],
+      changedFiles: [
+        "mocks/checkout.json",
+        "mocks/manifest.json",
+        "mocks/summary.json",
+        "src/checkout.tsx",
+      ],
+      artifactPaths: [
+        "test-results/unit.json",
+        "mocks/manifest.json",
+        "mocks/checkout.json",
+        "mocks/summary.json",
+      ],
       mockDataEvidence: {
         manifestPath: "mocks/manifest.json",
-        fixtures: [{ id: "mock:checkout", path: "mocks/checkout.json" }],
+        fixtures: [
+          {
+            id: "mock:checkout",
+            path: "mocks/checkout.json",
+            stateContractDigest: figmaStateContracts()[0]!.digest,
+          },
+          {
+            id: "mock:summary",
+            path: "mocks/summary.json",
+            stateContractDigest: figmaStateContracts({
+              targetId: secondTarget.targetId,
+              nodeId: secondTarget.figmaCapture.nodeId,
+              state: secondTarget.state,
+              fixtureId: secondTarget.fixture,
+            })[0]!.digest,
+          },
+        ],
       },
     } as const;
     await expect(
@@ -5665,6 +5774,18 @@ describe("WorkflowService", () => {
             id: "mock:checkout",
             path: "mocks/checkout.json",
             sha256: `sha256:${"0".repeat(64)}`,
+            stateContractDigest: figmaStateContracts()[0]!.digest,
+          },
+          {
+            id: "mock:summary",
+            path: "mocks/summary.json",
+            sha256: `sha256:${createHash("sha256").update(summaryFixture).digest("hex")}`,
+            stateContractDigest: figmaStateContracts({
+              targetId: secondTarget.targetId,
+              nodeId: secondTarget.figmaCapture.nodeId,
+              state: secondTarget.state,
+              fixtureId: secondTarget.fixture,
+            })[0]!.digest,
           },
         ],
       }),
@@ -5699,6 +5820,18 @@ describe("WorkflowService", () => {
             id: "mock:checkout",
             path: "mocks/checkout.json",
             sha256: `sha256:${createHash("sha256").update(validFixture).digest("hex")}`,
+            stateContractDigest: figmaStateContracts()[0]!.digest,
+          },
+          {
+            id: "mock:summary",
+            path: "mocks/summary.json",
+            sha256: `sha256:${createHash("sha256").update(summaryFixture).digest("hex")}`,
+            stateContractDigest: figmaStateContracts({
+              targetId: secondTarget.targetId,
+              nodeId: secondTarget.figmaCapture.nodeId,
+              state: secondTarget.state,
+              fixtureId: secondTarget.fixture,
+            })[0]!.digest,
           },
         ],
       }),
@@ -5744,6 +5877,10 @@ describe("WorkflowService", () => {
         suffix: string,
         pixels: [number, number, number, number],
       ) => {
+        const isSummary = targetId === "checkout-summary";
+        const targetState = isSummary ? "summary" : "default";
+        const fixtureId = isSummary ? "mock:summary" : "mock:checkout";
+        const fixtureBytes = isSummary ? summaryFixture : validFixture;
         const image = new PNG({ width: 1, height: 1 });
         image.data.set(pixels);
         const actualPath = `visual/actual/${action.reviewPacketId}/${name}-${suffix}.png`;
@@ -5758,7 +5895,7 @@ describe("WorkflowService", () => {
             headSha: packetHeadSha,
             targetId,
             route: "/checkout",
-            state: "default",
+            state: targetState,
             captureKind: "viewport",
             logicalSize: { width: 1, height: 1 },
             deviceScaleFactor: 1,
@@ -5771,10 +5908,10 @@ describe("WorkflowService", () => {
             userAgent: "Mozilla/5.0 Chromium",
             fonts: [],
             fixture: {
-              id: "mock:checkout",
+              id: fixtureId,
               digest:
                 fixtureDigestOverride ??
-                `sha256:${createHash("sha256").update(validFixture).digest("hex")}`,
+                `sha256:${createHash("sha256").update(fixtureBytes).digest("hex")}`,
             },
             assets: [],
             assetsComplete: true,
@@ -5795,10 +5932,10 @@ describe("WorkflowService", () => {
         return {
           targetId,
           route: "/checkout",
-          state: "default",
+          state: targetState,
           viewport: { width: 1, height: 1 },
           deviceScaleFactor: 1,
-          fixture: "mock:checkout",
+          fixture: fixtureId,
           provider: "playwright",
           capturedAt: "2026-07-20T00:00:00.000Z",
           actualPath,
@@ -7589,6 +7726,7 @@ function figmaManifest() {
     capturedComponents: figmaCapturedComponents(),
     designMapping: figmaDesignMapping(),
     visualPaths: ["visual/diff.png"],
+    stateContracts: figmaStateContracts(),
     visualTargets: figmaVisualTargets(),
   };
 }
@@ -7623,7 +7761,10 @@ function figmaVisualTargets() {
       deviceScaleFactor: 1,
       fixture: "mock:checkout",
       figmaCapture: {
+        schemaVersion: "figma-capture-geometry-v2" as const,
+        provider: "host-connected-figma-native-export" as const,
         nodeId: "1:2",
+        state: "default",
         captureKind: "viewport" as const,
         logicalSize: { width: 1, height: 1 },
         exportScale: 1,
@@ -7633,6 +7774,47 @@ function figmaVisualTargets() {
       masks: [],
     },
   ];
+}
+
+function figmaStateContracts(
+  overrides: Partial<{
+    targetId: string;
+    nodeId: string;
+    state: string;
+    fixtureId: string;
+  }> = {},
+) {
+  const contractState = overrides.state ?? "default";
+  const isAvailable = contractState === "default" || contractState === "available";
+  const fields = {
+    targetId: "checkout-default",
+    nodeId: "1:2",
+    state: contractState,
+    fixtureId: "mock:checkout",
+    facts: [
+      {
+        id: "cinema",
+        kind: "variant" as const,
+        subject: "CINEMA 4K",
+        value: isAvailable ? "available" : contractState,
+      },
+      {
+        id: "money",
+        kind: "visibility" as const,
+        subject: "G패스 머니",
+        value: isAvailable,
+      },
+      {
+        id: "parking",
+        kind: "text" as const,
+        subject: "주차",
+        value: isAvailable ? "가능" : "불가",
+      },
+    ],
+    requiredAssertionIds: [`assert-checkout-${contractState}`],
+    ...overrides,
+  };
+  return [{ ...fields, digest: figmaStateFactsDigest(fields) }];
 }
 
 function requirements(...ids: string[]) {

@@ -111,9 +111,12 @@ import { VisualCaptureReceiptSchema, assertCaptureReceipt } from "../visual/capt
 import {
   CapturedFigmaComponentSchema,
   FigmaDesignMappingSchema,
+  FigmaStateContractSchema,
   assertCompleteDesignMapping,
   assertFigmaCaptureGeometry,
+  assertFigmaStateContracts,
   type FigmaDesignMapping,
+  type FigmaStateContract,
 } from "../figma/figma-capture-contract.js";
 import {
   WorkspaceStartInputSchema,
@@ -183,6 +186,7 @@ const FigmaManifestSchema = z
     nodeIds: z.array(z.string().trim().min(1)).min(1),
     capturedComponents: z.array(CapturedFigmaComponentSchema).max(1_000),
     designMapping: FigmaDesignMappingSchema,
+    stateContracts: z.array(FigmaStateContractSchema).min(1).max(50),
     visualPaths: z
       .array(
         z
@@ -1916,6 +1920,7 @@ export class WorkflowService {
               figmaFileUrls: submission.fileUrls ?? [submission.fileUrl],
               capturedComponents: submission.capturedComponents,
               designMapping: submission.designMapping,
+              stateContracts: submission.stateContracts,
               visualTargets: submission.visualTargets,
             }
           : { summary: persistedSummary }),
@@ -2171,7 +2176,15 @@ export class WorkflowService {
       await assertFigmaDesignAssets(root, submission.designMapping);
     }
 
-    const mockFixtureDigests = new Map<string, { id: string; digest: string; named: boolean }>();
+    const mockFixtureDigests = new Map<
+      string,
+      {
+        id: string;
+        digest: string;
+        named: boolean;
+        stateContractDigest?: string | undefined;
+      }
+    >();
     if (submission.kind === "implementation" && submission.mockDataEvidence !== undefined) {
       const physicalFixtures = new Set<string>();
       for (const fixture of normalizedMockFixtures(submission.mockDataEvidence)) {
@@ -2190,6 +2203,9 @@ export class WorkflowService {
           id: fixture.id,
           digest: `sha256:${createHash("sha256").update(content).digest("hex")}`,
           named: fixture.named,
+          ...(fixture.stateContractDigest === undefined
+            ? {}
+            : { stateContractDigest: fixture.stateContractDigest }),
         });
       }
     }
@@ -2291,6 +2307,10 @@ export class WorkflowService {
           const decoded = await decodeBoundedPng(content, evidencePath);
           assertFigmaCaptureGeometry({
             geometry: target.figmaCapture,
+            target: {
+              nodeId: target.figmaCapture.nodeId,
+              state: target.state,
+            },
             viewport: target.viewport,
             decodedSize: { width: decoded.width, height: decoded.height },
           });
@@ -2376,6 +2396,9 @@ export class WorkflowService {
                   mockFixtureId: mockFixture.id,
                   mockFixtureDigest: mockFixture.digest,
                   mockFixtureNamed: mockFixture.named,
+                  ...(mockFixture.stateContractDigest === undefined
+                    ? {}
+                    : { stateContractDigest: mockFixture.stateContractDigest }),
                 }),
             ...(openSpecChangeName === undefined ? {} : { changeName: openSpecChangeName }),
             ...(submission.kind !== "figma-bundle"
@@ -5969,6 +5992,19 @@ function figmaDesignMappingFromRun(run: RunManifest): FigmaDesignMapping | undef
   return undefined;
 }
 
+function figmaStateContractsFromRun(run: RunManifest): FigmaStateContract[] {
+  for (const artifact of [...run.artifacts].reverse()) {
+    if (artifact.metadata["workflowSubmissionKind"] !== "figma-bundle") continue;
+    const parsed = z
+      .array(FigmaStateContractSchema)
+      .min(1)
+      .max(50)
+      .safeParse(artifact.metadata["stateContracts"]);
+    if (parsed.success) return parsed.data;
+  }
+  return [];
+}
+
 function figmaNodeIdFromUrl(fileUrl: string): string | undefined {
   const nodeId = new URL(fileUrl).searchParams.get("node-id")?.trim();
   return nodeId === undefined || nodeId === "" ? undefined : nodeId.replaceAll("-", ":");
@@ -5989,6 +6025,27 @@ function assertFigmaImplementationBindings(
   if (targetFixtureIds.size === 0 || missingFixtures.length > 0 || unusedFixtures.length > 0) {
     throw new Error(
       `MOCK_FIXTURE_ID_MISMATCH: missing fixture IDs: ${missingFixtures.join(", ") || "none"}; unused fixture IDs: ${unusedFixtures.join(", ") || "none"}`,
+    );
+  }
+  const stateContracts = figmaStateContractsFromRun(run);
+  const stateContractsByTarget = new Map(
+    stateContracts.map((contract) => [contract.targetId, contract]),
+  );
+  const invalidStateBindings = visualTargetsFromRun(run).filter((target) => {
+    const contract = stateContractsByTarget.get(target.targetId);
+    const fixture = namedFixtures.find((candidate) => candidate.id === target.fixture);
+    return (
+      contract === undefined ||
+      target.figmaCapture === undefined ||
+      contract.nodeId !== target.figmaCapture.nodeId ||
+      contract.state !== target.state ||
+      contract.fixtureId !== target.fixture ||
+      fixture?.stateContractDigest !== contract.digest
+    );
+  });
+  if (stateContracts.length !== targetFixtureIds.size || invalidStateBindings.length > 0) {
+    throw new Error(
+      `FIGMA_STATE_CONTRACT_INVALID: implementation fixtures must bind each target's fixture ID and state-contract digest; invalid targets: ${invalidStateBindings.map((target) => target.targetId).join(", ") || "none"}`,
     );
   }
 
@@ -6549,6 +6606,7 @@ function assertDeterministicMockManifest(
     id: string;
     digest: string;
     named: boolean;
+    stateContractDigest?: string | undefined;
   }>,
 ): void {
   let parsed: unknown;
@@ -6573,6 +6631,10 @@ function assertDeterministicMockManifest(
                 .optional(),
               path: z.string().trim().min(1),
               sha256: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+              stateContractDigest: z
+                .string()
+                .regex(/^sha256:[a-f0-9]{64}$/)
+                .optional(),
             })
             .strict(),
         )
@@ -6594,6 +6656,7 @@ function assertDeterministicMockManifest(
       return (
         received === undefined ||
         received.sha256 !== expected.digest ||
+        received.stateContractDigest !== expected.stateContractDigest ||
         (expected.named
           ? received.id !== expected.id
           : received.id !== undefined && received.id !== expected.id)
@@ -6601,15 +6664,21 @@ function assertDeterministicMockManifest(
     })
   ) {
     throw new Error(
-      `Mock data manifest must bind deterministic=true to the exact fixture IDs, paths, and SHA-256 digests: ${evidencePath}`,
+      `Mock data manifest must bind deterministic=true to the exact fixture IDs, paths, and SHA-256 digests plus state-contract digests: ${evidencePath}`,
     );
   }
 }
 
 function normalizedMockFixtures(evidence: {
   fixturePaths?: string[] | undefined;
-  fixtures?: Array<{ id: string; path: string }> | undefined;
-}): Array<{ id: string; path: string; named: boolean }> {
+  fixtures?:
+    Array<{ id: string; path: string; stateContractDigest?: string | undefined }> | undefined;
+}): Array<{
+  id: string;
+  path: string;
+  named: boolean;
+  stateContractDigest?: string | undefined;
+}> {
   if (evidence.fixtures !== undefined) {
     return evidence.fixtures.map((fixture) => ({ ...fixture, named: true }));
   }
@@ -6774,6 +6843,7 @@ function assertFigmaManifest(
     JSON.stringify(parsed.data.capturedComponents) !==
       JSON.stringify(submission.capturedComponents) ||
     JSON.stringify(parsed.data.designMapping) !== JSON.stringify(submission.designMapping) ||
+    JSON.stringify(parsed.data.stateContracts) !== JSON.stringify(submission.stateContracts) ||
     JSON.stringify(parsed.data.visualPaths) !== JSON.stringify(expectedVisualPaths) ||
     JSON.stringify(parsed.data.visualTargets.map(normalizeVisualTargetManifest)) !==
       JSON.stringify(submission.visualTargets)
@@ -6783,6 +6853,10 @@ function assertFigmaManifest(
   assertCompleteDesignMapping({
     capturedComponents: parsed.data.capturedComponents,
     mapping: parsed.data.designMapping,
+  });
+  assertFigmaStateContracts({
+    targets: parsed.data.visualTargets,
+    stateContracts: parsed.data.stateContracts,
   });
 }
 

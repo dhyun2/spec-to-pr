@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
@@ -45,6 +46,37 @@ const browser = await chromium.launch({ headless: true });
 try {
   const captures = [];
   for (const state of ["available", "unavailable"]) {
+    const fixture = JSON.parse(await readFile(path.join(fixtureRoot, `${state}.json`), "utf8"));
+    const stateContractFields = {
+      targetId: `shop-${state}`,
+      nodeId: state === "available" ? "2558:4382" : "2558:4383",
+      state,
+      fixtureId: fixture.id,
+      facts: [
+        {
+          id: "cinema",
+          kind: "variant",
+          subject: "CINEMA 4K",
+          value: fixture.stateFacts.cinema4k,
+        },
+        {
+          id: "money",
+          kind: "visibility",
+          subject: "G패스 머니",
+          value: fixture.stateFacts.gpassMoney,
+        },
+        {
+          id: "parking",
+          kind: "text",
+          subject: "주차",
+          value: fixture.stateFacts.parking,
+        },
+      ],
+      requiredAssertionIds: [`assert-shop-${state}`],
+    };
+    const stateContractDigest = `sha256:${createHash("sha256")
+      .update(JSON.stringify(stateContractFields))
+      .digest("hex")}`;
     const page = await browser.newPage({
       viewport: { width: 360, height: 800 },
       deviceScaleFactor: 1,
@@ -55,6 +87,7 @@ try {
     await page.goto(`${origin}/?state=${state}`, { waitUntil: "networkidle" });
     const ready = await page.evaluate(() => window.__CASE4_READY__);
     assert.equal(ready.fixtureId, `fixture:shop-${state}`);
+    assert.deepEqual(ready.stateFacts, fixture.stateFacts);
     assert.ok(ready.assetCount >= 1);
     assert.equal(await page.locator("main").evaluate((node) => node.scrollHeight), 1824);
     assert.equal(await page.locator("h1").textContent(), "내 주변 충전소");
@@ -70,6 +103,7 @@ try {
     captures.push({
       state,
       fixtureId: ready.fixtureId,
+      stateContractDigest,
       width: decoded.width,
       height: decoded.height,
     });
@@ -97,7 +131,7 @@ try {
       "tests/integration/publisher-service.test.ts",
       "tests/integration/workflow-service.test.ts",
       "-t",
-      "scaled Figma thumbnail|repairs implementation across visual packets|pinned publication|workspace binding",
+      "historical v1 Figma geometry|repairs implementation across visual packets|pinned publication|workspace binding",
     ],
     { cwd: root, env: process.env, stdio: "inherit" },
   );

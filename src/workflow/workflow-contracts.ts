@@ -15,7 +15,9 @@ import { DraftEvidenceBundleSchema } from "./draft-evidence-bundle.js";
 import {
   CapturedFigmaComponentSchema,
   FigmaDesignMappingSchema,
+  FigmaStateContractSchema,
   assertCompleteDesignMapping,
+  assertFigmaStateContracts,
 } from "../figma/figma-capture-contract.js";
 
 export const WorkflowScopeSchema = z
@@ -1114,6 +1116,7 @@ const MockDataEvidenceSchema = z
               .min(1)
               .max(1_000)
               .regex(/\.json$/i, "Mock fixtures must be JSON"),
+            stateContractDigest: Sha256DigestSchema.optional(),
           })
           .strict(),
       )
@@ -1411,6 +1414,7 @@ export const FigmaBundleSubmissionSchema = z
       .string()
       .trim()
       .regex(/\.json$/i, "Figma manifest must be a JSON file"),
+    stateContracts: z.array(FigmaStateContractSchema).min(1).max(50),
     visualTargets: VisualTargetsSchema.min(1),
     artifactPaths: z.array(z.string().trim().min(1)).min(1),
   })
@@ -1434,6 +1438,18 @@ export const FigmaBundleSubmissionSchema = z
         code: "custom",
         path: ["designMapping"],
         message: error instanceof Error ? error.message : "Figma design mapping is incomplete",
+      });
+    }
+    try {
+      assertFigmaStateContracts({
+        targets: submission.visualTargets,
+        stateContracts: submission.stateContracts,
+      });
+    } catch (error: unknown) {
+      context.addIssue({
+        code: "custom",
+        path: ["stateContracts"],
+        message: error instanceof Error ? error.message : "Figma state contracts are invalid",
       });
     }
     if (!submission.artifactPaths.includes(submission.manifestPath)) {
@@ -1476,6 +1492,13 @@ export const FigmaBundleSubmissionSchema = z
           code: "custom",
           path: ["visualTargets", index, "figmaCapture"],
           message: "Figma bundle targets require native capture geometry",
+        });
+      } else if (!("schemaVersion" in target.figmaCapture)) {
+        context.addIssue({
+          code: "custom",
+          path: ["visualTargets", index, "figmaCapture"],
+          message:
+            "FIGMA_CAPTURE_GEOMETRY_REACQUISITION_REQUIRED: historical v1 geometry cannot be used for a new Figma bundle",
         });
       }
       if (!submission.artifactPaths.includes(target.baselinePath)) {

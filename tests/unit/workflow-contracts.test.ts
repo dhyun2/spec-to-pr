@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -1038,7 +1040,34 @@ describe("workflow v2 contracts", () => {
     }
   });
 
-  it("requires one explicit Figma manifest and PNG evidence", () => {
+  it("requires native v2 geometry plus exact target/node/state/fixture contracts", () => {
+    const stateContract = (overrides: Record<string, unknown> = {}) => {
+      const fields = {
+        targetId: "checkout",
+        nodeId: "1:2",
+        state: "default",
+        fixtureId: "mock:checkout",
+        facts: [
+          { id: "cinema", kind: "variant", subject: "CINEMA 4K", value: "available" },
+          { id: "money", kind: "visibility", subject: "G패스 머니", value: true },
+          { id: "parking", kind: "text", subject: "주차", value: "가능" },
+        ],
+        requiredAssertionIds: ["assert-checkout-state"],
+        ...overrides,
+      };
+      return {
+        ...fields,
+        digest: `sha256:${createHash("sha256")
+          .update(
+            JSON.stringify({
+              ...fields,
+              facts: [...fields.facts].sort((left, right) => left.id.localeCompare(right.id)),
+              requiredAssertionIds: [...fields.requiredAssertionIds].sort(),
+            }),
+          )
+          .digest("hex")}`,
+      };
+    };
     const base = {
       kind: "figma-bundle",
       provider: "host-connected-figma",
@@ -1058,6 +1087,7 @@ describe("workflow v2 contracts", () => {
         tokens: [],
       },
       manifestPath: "figma/design-context.json",
+      stateContracts: [stateContract()],
       visualTargets: [
         {
           targetId: "checkout",
@@ -1069,17 +1099,34 @@ describe("workflow v2 contracts", () => {
           viewport: { width: 1440, height: 900 },
           deviceScaleFactor: 1,
           fixture: "mock:checkout",
+          figmaCapture: {
+            schemaVersion: "figma-capture-geometry-v2",
+            provider: "host-connected-figma-native-export",
+            nodeId: "1:2",
+            state: "default",
+            captureKind: "viewport",
+            logicalSize: { width: 1440, height: 900 },
+            exportScale: 1,
+            bitmapSize: { width: 1440, height: 900 },
+            colorSpace: "srgb",
+          },
           masks: [],
         },
       ],
+      artifactPaths: ["figma/design-context.json", "visual/checkout.png"],
     };
 
-    expect(
-      WorkflowSubmissionSchema.safeParse({
-        ...base,
-        artifactPaths: ["figma/design-context.json", "visual/checkout.png"],
-      }).success,
-    ).toBe(false);
+    expect(WorkflowSubmissionSchema.safeParse(base).success).toBe(true);
+    for (const stateContracts of [
+      [],
+      [stateContract(), stateContract()],
+      [stateContract({ targetId: "wrong-target" })],
+      [stateContract({ nodeId: "9:9" })],
+      [stateContract({ state: "selected" })],
+      [stateContract({ fixtureId: "mock:reused" })],
+    ]) {
+      expect(WorkflowSubmissionSchema.safeParse({ ...base, stateContracts }).success).toBe(false);
+    }
     expect(
       WorkflowSubmissionSchema.safeParse({
         ...base,
@@ -1094,20 +1141,151 @@ describe("workflow v2 contracts", () => {
             colorSpace: "srgb",
           },
         })),
-        artifactPaths: ["figma/design-context.json", "visual/checkout.png"],
       }).success,
-    ).toBe(true);
+    ).toBe(false);
     expect(
       WorkflowSubmissionSchema.safeParse({
         ...base,
         artifactPaths: ["figma/design-context.json", "visual/checkout.svg"],
       }).success,
     ).toBe(false);
+  });
+
+  it("rejects fixture reuse, prose authority, and identical facts for different states", () => {
+    const facts = [
+      { id: "cinema", kind: "variant", subject: "CINEMA 4K", value: "available" },
+      { id: "money", kind: "visibility", subject: "G패스 머니", value: true },
+      { id: "parking", kind: "text", subject: "주차", value: "가능" },
+    ];
+    const contract = (
+      targetId: string,
+      nodeId: string,
+      state: string,
+      fixtureId: string,
+      stateFacts: typeof facts,
+    ) => {
+      const fields = {
+        targetId,
+        nodeId,
+        state,
+        fixtureId,
+        facts: stateFacts,
+        requiredAssertionIds: [`assert-${state}`],
+      };
+      return {
+        ...fields,
+        digest: `sha256:${createHash("sha256")
+          .update(
+            JSON.stringify({
+              ...fields,
+              facts: [...stateFacts].sort((left, right) => left.id.localeCompare(right.id)),
+              requiredAssertionIds: [...fields.requiredAssertionIds].sort(),
+            }),
+          )
+          .digest("hex")}`,
+      };
+    };
+    const target = (targetId: string, nodeId: string, state: string, fixture: string) => ({
+      targetId,
+      name: state,
+      state,
+      route: `/shop?state=${state}`,
+      baselineKind: "figma",
+      baselinePath: `visual/${state}.png`,
+      viewport: { width: 360, height: 1831 },
+      deviceScaleFactor: 1,
+      fixture,
+      figmaCapture: {
+        schemaVersion: "figma-capture-geometry-v2",
+        provider: "host-connected-figma-native-export",
+        nodeId,
+        state,
+        captureKind: "full-frame",
+        logicalSize: { width: 360, height: 1831 },
+        exportScale: 1,
+        bitmapSize: { width: 360, height: 1831 },
+        colorSpace: "srgb",
+      },
+      masks: [],
+    });
+    const available = contract("shop-available", "1:2", "available", "fixture:available", facts);
+    const unavailableFacts = facts.map((fact) =>
+      fact.id === "cinema"
+        ? { ...fact, value: "unavailable" }
+        : fact.id === "money"
+          ? { ...fact, value: false }
+          : { ...fact, value: "불가" },
+    );
+    const unavailable = contract(
+      "shop-unavailable",
+      "1:3",
+      "unavailable",
+      "fixture:unavailable",
+      unavailableFacts,
+    );
+    const base = {
+      kind: "figma-bundle",
+      provider: "host-connected-figma",
+      capturedAt: "2026-07-13T00:00:00.000Z",
+      fileUrl: "https://www.figma.com/design/abc/file?node-id=1-2",
+      fileUrls: [
+        "https://www.figma.com/design/abc/file?node-id=1-2",
+        "https://www.figma.com/design/abc/file?node-id=1-3",
+      ],
+      nodeIds: ["1:2", "1:3"],
+      capturedComponents: [],
+      designMapping: {
+        designSystem: { packageName: "@frontend/ui", packageVersion: "1.2.3" },
+        components: [],
+        fonts: [],
+        tokens: [],
+      },
+      manifestPath: "figma/design-context.json",
+      stateContracts: [available, unavailable],
+      visualTargets: [
+        target("shop-available", "1:2", "available", "fixture:available"),
+        target("shop-unavailable", "1:3", "unavailable", "fixture:unavailable"),
+      ],
+      artifactPaths: [
+        "figma/design-context.json",
+        "visual/available.png",
+        "visual/unavailable.png",
+      ],
+    };
+
+    expect(WorkflowSubmissionSchema.safeParse(base).success).toBe(true);
     expect(
       WorkflowSubmissionSchema.safeParse({
         ...base,
-        manifestPath: "figma/missing.json",
-        artifactPaths: ["figma/design-context.json", "visual/checkout.png"],
+        stateContracts: [
+          available,
+          contract("shop-unavailable", "1:3", "unavailable", "fixture:available", unavailableFacts),
+        ],
+        visualTargets: [
+          base.visualTargets[0],
+          target("shop-unavailable", "1:3", "unavailable", "fixture:available"),
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      WorkflowSubmissionSchema.safeParse({
+        ...base,
+        stateContracts: [
+          available,
+          {
+            ...unavailable,
+            prose: "Only CINEMA 4K differs.",
+          },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      WorkflowSubmissionSchema.safeParse({
+        ...base,
+        stateContracts: [
+          available,
+          contract("shop-unavailable", "1:3", "unavailable", "fixture:unavailable", facts),
+        ],
       }).success,
     ).toBe(false);
   });

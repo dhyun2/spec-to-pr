@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { z } from "zod";
 
 import { Sha256DigestSchema } from "../runtime/scalars.js";
@@ -9,7 +11,7 @@ export const VisualSizeSchema = z
   })
   .strict();
 
-export const FigmaCaptureGeometrySchema = z
+export const FigmaCaptureGeometryV1Schema = z
   .object({
     nodeId: z.string().trim().min(1).max(500),
     captureKind: z.enum(["viewport", "full-frame"]),
@@ -20,8 +22,188 @@ export const FigmaCaptureGeometrySchema = z
   })
   .strict();
 
+export const FigmaCaptureGeometryV2Schema = z
+  .object({
+    schemaVersion: z.literal("figma-capture-geometry-v2"),
+    provider: z.literal("host-connected-figma-native-export"),
+    nodeId: z.string().trim().min(1).max(500),
+    state: z.string().trim().min(1).max(200),
+    captureKind: z.enum(["viewport", "full-frame"]),
+    logicalSize: VisualSizeSchema,
+    exportScale: z.number().min(1).max(8),
+    bitmapSize: VisualSizeSchema,
+    colorSpace: z.literal("srgb"),
+  })
+  .strict();
+
+export const FigmaCaptureGeometrySchema = z.union([
+  FigmaCaptureGeometryV2Schema,
+  FigmaCaptureGeometryV1Schema,
+]);
+
 export type VisualSize = z.infer<typeof VisualSizeSchema>;
 export type FigmaCaptureGeometry = z.infer<typeof FigmaCaptureGeometrySchema>;
+export type FigmaCaptureGeometryV2 = z.infer<typeof FigmaCaptureGeometryV2Schema>;
+
+export type ValidatedFigmaGeometry = {
+  scaleX: number;
+  scaleY: number;
+  aspectRatioDelta: number;
+};
+
+export const FigmaStateFactSchema = z
+  .object({
+    id: z.string().trim().min(1),
+    kind: z.enum([
+      "text",
+      "visibility",
+      "variant",
+      "geometry",
+      "component",
+      "icon",
+      "token",
+      "interaction",
+    ]),
+    subject: z.string().trim().min(1),
+    value: z.union([z.string(), z.number(), z.boolean()]),
+  })
+  .strict();
+
+const FigmaStateContractFieldsSchema = z
+  .object({
+    targetId: z.string().trim().min(1),
+    nodeId: z.string().trim().min(1),
+    state: z.string().trim().min(1),
+    fixtureId: z.string().trim().min(1),
+    facts: z.array(FigmaStateFactSchema).min(1).max(2_000),
+    requiredAssertionIds: z.array(z.string().trim().min(1)).min(1).max(500),
+  })
+  .strict();
+
+export type FigmaStateContractFields = z.infer<typeof FigmaStateContractFieldsSchema>;
+
+export function figmaStateFactsDigest(rawFields: FigmaStateContractFields): `sha256:${string}` {
+  const fields = FigmaStateContractFieldsSchema.parse(rawFields);
+  const canonical = {
+    targetId: fields.targetId,
+    nodeId: fields.nodeId,
+    state: fields.state,
+    fixtureId: fields.fixtureId,
+    facts: [...fields.facts]
+      .sort((left, right) => compareCanonicalStrings(left.id, right.id))
+      .map((fact) => ({
+        id: fact.id,
+        kind: fact.kind,
+        subject: fact.subject,
+        value: fact.value,
+      })),
+    requiredAssertionIds: [...fields.requiredAssertionIds].sort(),
+  };
+  return `sha256:${createHash("sha256").update(JSON.stringify(canonical)).digest("hex")}`;
+}
+
+export const FigmaStateContractSchema = FigmaStateContractFieldsSchema.extend({
+  digest: Sha256DigestSchema,
+})
+  .strict()
+  .superRefine((contract, context) => {
+    const duplicateFactIds = duplicates(contract.facts.map((fact) => fact.id));
+    if (duplicateFactIds.length > 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["facts"],
+        message: `Duplicate Figma state fact IDs: ${duplicateFactIds.join(", ")}`,
+      });
+    }
+    const duplicateAssertionIds = duplicates(contract.requiredAssertionIds);
+    if (duplicateAssertionIds.length > 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["requiredAssertionIds"],
+        message: `Duplicate required assertion IDs: ${duplicateAssertionIds.join(", ")}`,
+      });
+    }
+    const { digest: _digest, ...fields } = contract;
+    if (contract.digest !== figmaStateFactsDigest(fields)) {
+      context.addIssue({
+        code: "custom",
+        path: ["digest"],
+        message: "Figma state contract digest does not match its canonical facts",
+      });
+    }
+  });
+
+export type FigmaStateContract = z.infer<typeof FigmaStateContractSchema>;
+
+type FigmaStateTarget = {
+  targetId: string;
+  state: string;
+  fixture: string;
+  figmaCapture?: FigmaCaptureGeometry | undefined;
+};
+
+export function assertFigmaStateContracts(rawInput: {
+  targets: FigmaStateTarget[];
+  stateContracts: FigmaStateContract[];
+}): void {
+  const targets = rawInput.targets;
+  const parsedContracts = z
+    .array(FigmaStateContractSchema)
+    .min(1)
+    .max(50)
+    .safeParse(rawInput.stateContracts);
+  if (!parsedContracts.success) {
+    throw stateContractError(parsedContracts.error.issues.map((issue) => issue.message).join("; "));
+  }
+  const contracts = parsedContracts.data;
+  const targetBindings = targets.map((target) => {
+    const capture = target.figmaCapture;
+    if (capture === undefined) {
+      throw stateContractError(`target ${target.targetId} requires capture geometry`);
+    }
+    return stateBindingKey({
+      targetId: target.targetId,
+      nodeId: capture.nodeId,
+      state: target.state,
+      fixtureId: target.fixture,
+    });
+  });
+  const contractBindings = contracts.map(stateBindingKey);
+  const missing = targetBindings.filter((binding) => !contractBindings.includes(binding));
+  const unbound = contractBindings.filter((binding) => !targetBindings.includes(binding));
+  const duplicateTargets = duplicates(targetBindings);
+  const duplicateContracts = duplicates(contractBindings);
+  const duplicateTargetIds = duplicates(contracts.map((contract) => contract.targetId));
+  const duplicateNodeIds = duplicates(contracts.map((contract) => contract.nodeId));
+  const duplicateFixtureIds = duplicates(contracts.map((contract) => contract.fixtureId));
+  if (
+    targets.length !== contracts.length ||
+    missing.length > 0 ||
+    unbound.length > 0 ||
+    duplicateTargets.length > 0 ||
+    duplicateContracts.length > 0 ||
+    duplicateTargetIds.length > 0 ||
+    duplicateNodeIds.length > 0 ||
+    duplicateFixtureIds.length > 0
+  ) {
+    throw stateContractError(
+      `state contracts must bind exact 1:1 target/node/state/fixture coverage; missing: ${missing.join(", ") || "none"}; unbound: ${unbound.join(", ") || "none"}; duplicate targets: ${duplicateTargetIds.join(", ") || "none"}; duplicate nodes: ${duplicateNodeIds.join(", ") || "none"}; duplicate fixtures: ${duplicateFixtureIds.join(", ") || "none"}`,
+    );
+  }
+
+  for (let leftIndex = 0; leftIndex < contracts.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < contracts.length; rightIndex += 1) {
+      const left = contracts[leftIndex]!;
+      const right = contracts[rightIndex]!;
+      if (left.state === right.state) continue;
+      if (canonicalFacts(left.facts) === canonicalFacts(right.facts)) {
+        throw stateContractError(
+          `different states ${left.state} and ${right.state} must contain at least one captured fact difference`,
+        );
+      }
+    }
+  }
+}
 
 const RepositoryPathSchema = z
   .string()
@@ -178,12 +360,37 @@ export function assertCompleteDesignMapping(rawInput: {
 
 export function assertFigmaCaptureGeometry(rawInput: {
   geometry: FigmaCaptureGeometry;
+  target: { nodeId: string; state: string };
   viewport: VisualSize;
   decodedSize: VisualSize;
-}): void {
-  const geometry = FigmaCaptureGeometrySchema.parse(rawInput.geometry);
+}): ValidatedFigmaGeometry {
+  const compatible = FigmaCaptureGeometrySchema.safeParse(rawInput.geometry);
+  if (!compatible.success) {
+    throw geometryError(
+      `native geometry is invalid: ${compatible.error.issues
+        .map((issue) => issue.message)
+        .join("; ")}`,
+    );
+  }
+  if (!("schemaVersion" in compatible.data)) {
+    throw new Error(
+      "FIGMA_CAPTURE_GEOMETRY_REACQUISITION_REQUIRED: historical v1 geometry is display-only; reacquire a native v2 export",
+    );
+  }
+  const geometry = compatible.data;
   const viewport = VisualSizeSchema.parse(rawInput.viewport);
   const decodedSize = VisualSizeSchema.parse(rawInput.decodedSize);
+
+  if (geometry.nodeId !== rawInput.target.nodeId) {
+    throw geometryError(
+      `capture node ${geometry.nodeId} does not match target node ${rawInput.target.nodeId}`,
+    );
+  }
+  if (geometry.state !== rawInput.target.state) {
+    throw geometryError(
+      `capture state ${geometry.state} does not match target state ${rawInput.target.state}`,
+    );
+  }
 
   if (
     decodedSize.width !== geometry.bitmapSize.width ||
@@ -202,6 +409,24 @@ export function assertFigmaCaptureGeometry(rawInput: {
     );
   }
 
+  const scaleX = geometry.bitmapSize.width / geometry.logicalSize.width;
+  const scaleY = geometry.bitmapSize.height / geometry.logicalSize.height;
+  const aspectRatioDelta = Math.abs(
+    geometry.logicalSize.width / geometry.logicalSize.height -
+      geometry.bitmapSize.width / geometry.bitmapSize.height,
+  );
+  if (scaleX < 1 || scaleY < 1) {
+    throw geometryError(
+      `native export cannot downscale logical geometry; measured ${scaleX}x${scaleY}`,
+    );
+  }
+
+  if (
+    Math.abs(geometry.bitmapSize.width - geometry.logicalSize.width * scaleY) > 1 ||
+    Math.abs(geometry.bitmapSize.height - geometry.logicalSize.height * scaleX) > 1
+  ) {
+    throw geometryError(`native export must use a uniform X/Y scale; measured ${scaleX}x${scaleY}`);
+  }
   const expectedWidth = geometry.logicalSize.width * geometry.exportScale;
   const expectedHeight = geometry.logicalSize.height * geometry.exportScale;
   if (
@@ -212,6 +437,11 @@ export function assertFigmaCaptureGeometry(rawInput: {
       `bitmap ${geometry.bitmapSize.width}x${geometry.bitmapSize.height} does not match export scale ${geometry.exportScale} from logical ${geometry.logicalSize.width}x${geometry.logicalSize.height}`,
     );
   }
+  if (aspectRatioDelta > Number.EPSILON) {
+    throw geometryError(`native export aspect ratio drift ${aspectRatioDelta} must be zero`);
+  }
+
+  return { scaleX, scaleY, aspectRatioDelta };
 }
 
 function geometryError(message: string): Error {
@@ -241,4 +471,34 @@ function assertUniqueMappingValues(values: string[], label: string): void {
 
 function designMappingError(message: string): Error {
   return new Error(`FIGMA_DESIGN_MAPPING_INCOMPLETE: ${message}`);
+}
+
+function stateContractError(message: string): Error {
+  return new Error(`FIGMA_STATE_CONTRACT_INVALID: ${message}`);
+}
+
+function stateBindingKey(binding: {
+  targetId: string;
+  nodeId: string;
+  state: string;
+  fixtureId: string;
+}): string {
+  return `${binding.targetId}\u0000${binding.nodeId}\u0000${binding.state}\u0000${binding.fixtureId}`;
+}
+
+function canonicalFacts(facts: Array<z.infer<typeof FigmaStateFactSchema>>): string {
+  return JSON.stringify(
+    [...facts]
+      .sort((left, right) => compareCanonicalStrings(left.id, right.id))
+      .map((fact) => ({
+        id: fact.id,
+        kind: fact.kind,
+        subject: fact.subject,
+        value: fact.value,
+      })),
+  );
+}
+
+function compareCanonicalStrings(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
