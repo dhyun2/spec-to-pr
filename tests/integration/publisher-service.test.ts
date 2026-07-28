@@ -821,6 +821,49 @@ describe("PublisherService", () => {
     expect(body).not.toContain("unbound-newer-report.png");
   });
 
+  it.each([
+    ["diff", { includeDiff: false }],
+    ["overlay", { includeOverlay: false }],
+  ] as const)(
+    "fails closed before host mutation when blocked visual publication lacks its required %s",
+    async (role, fixture) => {
+      const run = await runService.createRun({ projectRoot });
+      await addVisualEvidence(run.id, { status: "failed", ...fixture });
+      const report = await generatePrReport({
+        runId: run.id,
+        binding: {
+          reviewPacketId: canonicalReviewPacketId,
+          headSha: gitHead,
+          diffDigest: canonicalDiffDigest,
+        },
+        visualReportArtifactId: "art_55555555555555555555555555555555",
+      });
+
+      const published = await publisherService.publish({
+        runId: run.id,
+        reportArtifactId: report.markdownArtifactId,
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        intent: "blocked-diagnostic",
+        pushBranch: false,
+        confirm: true,
+      });
+
+      expect(published.result).toMatchObject({
+        status: "failed",
+        errorCode: "PUBLISH_FAILED",
+        requestSynced: false,
+        visualPreviewExpected: false,
+        visualPreviewSynced: false,
+      });
+      expect(published.result.errorMessage).toMatch(
+        new RegExp(`missing an? ${role} artifact`, "i"),
+      );
+      expect(githubPublisher.createdPayloads).toHaveLength(0);
+      expect(githubPublisher.updatedMetadata).toHaveLength(0);
+    },
+  );
+
   it("starts a separate compact preview block for each visual target", async () => {
     const run = await runService.createRun({ projectRoot });
     await markRunReadyForPublish(run.id);
@@ -1848,6 +1891,59 @@ describe("PublisherService", () => {
     }
   });
 
+  it("refuses GitLab raw fallback for a failed blocked diagnostic that requires all four visual roles", async () => {
+    const originalGitLabToken = process.env["GITLAB_TOKEN"];
+    process.env["GITLAB_TOKEN"] = "glpat_test_token";
+
+    try {
+      const run = await runService.createRun({ projectRoot });
+      await addVisualEvidence(run.id, {
+        visualBaseline: "legacy-screenshot",
+        status: "failed",
+        includeOverlay: true,
+      });
+      await bindVisualEvidenceToCommittedFiles(run.id);
+      const report = await generatePrReport({
+        runId: run.id,
+        binding: {
+          reviewPacketId: canonicalReviewPacketId,
+          headSha: gitHead,
+          diffDigest: canonicalDiffDigest,
+        },
+        visualReportArtifactId: "art_55555555555555555555555555555555",
+      });
+      gitlabPublisher.assetUploadError = new GitLabAssetUploadError(
+        "GitLab upload review asset failed: 503 uploads unavailable",
+        503,
+      );
+
+      const published = await createGitLabRawFallbackService().publish({
+        runId: run.id,
+        reportArtifactId: report.markdownArtifactId,
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        remoteUrl: "https://gitlab.com/acme/spec-to-pr.git",
+        intent: "blocked-diagnostic",
+        pushBranch: false,
+        confirm: true,
+      });
+
+      expect(published.result).toMatchObject({
+        status: "blocked",
+        errorCode: "PUBLISH_PARTIAL_SYNC",
+        requestSynced: false,
+        visualPreviewExpected: true,
+        visualPreviewSynced: false,
+        fallbackMode: "none",
+      });
+      expect(gitlabPublisher.createdPayloads).toHaveLength(1);
+      expect(gitlabPublisher.createdPayloads[0]?.body).not.toContain("/-/raw/");
+    } finally {
+      if (originalGitLabToken === undefined) delete process.env["GITLAB_TOKEN"];
+      else process.env["GITLAB_TOKEN"] = originalGitLabToken;
+    }
+  });
+
   it("names non-embeddable visual links with their screen context", async () => {
     const run = await runService.createRun({ projectRoot });
     await markRunReadyForPublish(run.id);
@@ -2412,6 +2508,7 @@ async function addVisualEvidence(
   options: {
     visualBaseline?: "figma" | "legacy-screenshot";
     status?: "passed" | "failed";
+    includeDiff?: boolean;
     includeOverlay?: boolean;
     metrics?: {
       exactMatchRatio: number;
@@ -2477,15 +2574,19 @@ async function addVisualEvidence(
       mediaType: "image/png",
       timestamp,
     }),
-    await writeArtifact({
-      id: "art_44444444444444444444444444444444",
-      kind: "visual-diff",
-      label: "diff-home.png",
-      reportKind: "visual-diff",
-      content: Buffer.from("diff-png"),
-      mediaType: "image/png",
-      timestamp,
-    }),
+    ...(options.includeDiff === false
+      ? []
+      : [
+          await writeArtifact({
+            id: "art_44444444444444444444444444444444",
+            kind: "visual-diff",
+            label: "diff-home.png",
+            reportKind: "visual-diff",
+            content: Buffer.from("diff-png"),
+            mediaType: "image/png",
+            timestamp,
+          }),
+        ]),
     ...(options.includeOverlay
       ? [
           await writeArtifact({
@@ -2541,7 +2642,9 @@ async function addVisualEvidence(
         },
         baselineArtifactId: "art_22222222222222222222222222222222",
         actualArtifactId: "art_33333333333333333333333333333333",
-        diffArtifactId: "art_44444444444444444444444444444444",
+        ...(options.includeDiff === false
+          ? {}
+          : { diffArtifactId: "art_44444444444444444444444444444444" }),
         ...(options.includeOverlay
           ? { overlayArtifactId: "art_88888888888888888888888888888888" }
           : {}),
