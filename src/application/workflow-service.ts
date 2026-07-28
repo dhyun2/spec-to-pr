@@ -3473,24 +3473,24 @@ export class WorkflowService {
             cacheRead: false,
           });
           this.metrics.increment(
-            normalizedBaseline.cacheStatus === "hit"
-              ? "visual.normalization_cache_hit"
-              : "visual.normalization_cache_miss",
+            normalizedBaseline.cacheStatus === "miss"
+              ? "visual.normalization_cache_miss"
+              : "visual.normalization_cache_hit",
           );
           this.metrics.increment("visual.normalization_cache_miss");
           this.metrics.increment(
             "visual.decode_pixels",
-            (normalizedBaseline.cacheStatus === "hit"
-              ? 0
-              : target.figmaCapture.bitmapSize.width * target.figmaCapture.bitmapSize.height) +
+            (normalizedBaseline.cacheStatus === "miss"
+              ? target.figmaCapture.bitmapSize.width * target.figmaCapture.bitmapSize.height
+              : 0) +
               Math.round(target.viewport.width * target.deviceScaleFactor) *
                 Math.round(target.viewport.height * target.deviceScaleFactor),
           );
           this.metrics.increment(
             "visual.encode_pixels",
-            (normalizedBaseline.cacheStatus === "hit"
-              ? 0
-              : normalizedBaseline.width * normalizedBaseline.height) +
+            (normalizedBaseline.cacheStatus === "miss"
+              ? normalizedBaseline.width * normalizedBaseline.height
+              : 0) +
               normalizedActual.width * normalizedActual.height,
           );
           comparisonBaseline = normalizedBaseline.content;

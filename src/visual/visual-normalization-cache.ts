@@ -1,5 +1,13 @@
+import { createHash } from "node:crypto";
+
+import { decodePng } from "./png-codec.js";
+import { assertBoundedPng } from "./png-decoder.js";
+
 export const VISUAL_NORMALIZATION_CACHE_VERSION = "visual-normalization-cache-v1";
 export const MAX_VISUAL_NORMALIZATION_CACHE_BYTES = 128 * 1024 * 1024;
+export const VISUAL_NORMALIZATION_CACHE_TEST_SEAM: unique symbol = Symbol(
+  "visual-normalization-cache-test-seam",
+);
 
 export type VisualNormalizationCacheKey = {
   sourceDigest: `sha256:${string}`;
@@ -26,14 +34,24 @@ export type VisualNormalizationCacheStats = {
   entryCount: number;
   hits: number;
   misses: number;
+  singleFlights: number;
   bypasses: number;
   evictions: number;
   malformedEntries: number;
 };
 
+export type VisualNormalizationCacheDisposition = "hit" | "miss" | "single-flight";
+
+export type VisualNormalizationCacheResult = {
+  value: VisualNormalizationCacheValue;
+  disposition: VisualNormalizationCacheDisposition;
+};
+
 type CacheEntry = {
   value: VisualNormalizationCacheValue;
   chargedBytes: number;
+  pngDigest: string;
+  rgbaDigest: string;
 };
 
 export class VisualNormalizationCache {
@@ -42,6 +60,7 @@ export class VisualNormalizationCache {
   private residentBytes = 0;
   private hits = 0;
   private misses = 0;
+  private singleFlights = 0;
   private bypasses = 0;
   private evictions = 0;
   private malformedEntries = 0;
@@ -56,9 +75,10 @@ export class VisualNormalizationCache {
     const serialized = serializeVisualNormalizationCacheKey(key);
     const entry = this.entries.get(serialized);
     if (entry === undefined) return undefined;
-    if (!isValidValue(entry.value)) {
+    if (!isValidResidentEntry(key, entry)) {
       this.deleteEntry(serialized, entry);
       this.malformedEntries += 1;
+      this.evictions += 1;
       return undefined;
     }
     this.entries.delete(serialized);
@@ -67,52 +87,40 @@ export class VisualNormalizationCache {
   }
 
   public set(key: VisualNormalizationCacheKey, value: VisualNormalizationCacheValue): void {
-    const serialized = serializeVisualNormalizationCacheKey(key);
-    const existing = this.entries.get(serialized);
-    if (existing !== undefined) this.deleteEntry(serialized, existing);
-    if (!isValidValue(value)) {
-      this.malformedEntries += 1;
-      return;
-    }
-    const owned = cloneValue(value);
-    const chargedBytes = owned.png.byteLength + owned.rgba.byteLength;
-    if (chargedBytes > this.maximumBytes) return;
-    while (this.residentBytes + chargedBytes > this.maximumBytes) {
-      const oldest = this.entries.entries().next().value as [string, CacheEntry] | undefined;
-      if (oldest === undefined) break;
-      this.deleteEntry(oldest[0], oldest[1]);
-      this.evictions += 1;
-    }
-    this.entries.set(serialized, { value: owned, chargedBytes });
-    this.residentBytes += chargedBytes;
+    this.store(key, value);
   }
 
   public async getOrCompute(
     key: VisualNormalizationCacheKey,
     compute: () => Promise<VisualNormalizationCacheValue>,
-  ): Promise<VisualNormalizationCacheValue> {
+  ): Promise<VisualNormalizationCacheResult> {
     const cached = this.get(key);
     if (cached !== undefined) {
       this.hits += 1;
-      return cached;
+      return { value: cached, disposition: "hit" };
     }
     const serialized = serializeVisualNormalizationCacheKey(key);
     const current = this.inFlight.get(serialized);
     if (current !== undefined) {
-      this.hits += 1;
-      return cloneValue(await current);
+      this.singleFlights += 1;
+      return {
+        value: cloneValue(await current),
+        disposition: "single-flight",
+      };
     }
     this.misses += 1;
     const pending = compute().then((value) => {
-      if (!isValidValue(value)) {
+      if (!this.store(key, value)) {
         throw new Error("VISUAL_NORMALIZATION_CACHE_INVALID: computed entry is malformed");
       }
-      this.set(key, value);
       return cloneValue(value);
     });
     this.inFlight.set(serialized, pending);
     try {
-      return cloneValue(await pending);
+      return {
+        value: cloneValue(await pending),
+        disposition: "miss",
+      };
     } finally {
       if (this.inFlight.get(serialized) === pending) this.inFlight.delete(serialized);
     }
@@ -128,6 +136,7 @@ export class VisualNormalizationCache {
     this.residentBytes = 0;
     this.hits = 0;
     this.misses = 0;
+    this.singleFlights = 0;
     this.bypasses = 0;
     this.evictions = 0;
     this.malformedEntries = 0;
@@ -140,10 +149,47 @@ export class VisualNormalizationCache {
       entryCount: this.entries.size,
       hits: this.hits,
       misses: this.misses,
+      singleFlights: this.singleFlights,
       bypasses: this.bypasses,
       evictions: this.evictions,
       malformedEntries: this.malformedEntries,
     };
+  }
+
+  public [VISUAL_NORMALIZATION_CACHE_TEST_SEAM](
+    key: VisualNormalizationCacheKey,
+    mutate: (resident: VisualNormalizationCacheValue) => void,
+  ): void {
+    const entry = this.entries.get(serializeVisualNormalizationCacheKey(key));
+    if (entry === undefined) throw new Error("Visual normalization cache test resident is missing");
+    mutate(entry.value);
+  }
+
+  private store(key: VisualNormalizationCacheKey, value: VisualNormalizationCacheValue): boolean {
+    const serialized = serializeVisualNormalizationCacheKey(key);
+    if (!isCoherentValue(key, value)) {
+      this.malformedEntries += 1;
+      return false;
+    }
+    const owned = cloneValue(value);
+    const chargedBytes = owned.png.byteLength + owned.rgba.byteLength;
+    if (chargedBytes > this.maximumBytes) return true;
+    const existing = this.entries.get(serialized);
+    if (existing !== undefined) this.deleteEntry(serialized, existing);
+    while (this.residentBytes + chargedBytes > this.maximumBytes) {
+      const oldest = this.entries.entries().next().value as [string, CacheEntry] | undefined;
+      if (oldest === undefined) break;
+      this.deleteEntry(oldest[0], oldest[1]);
+      this.evictions += 1;
+    }
+    this.entries.set(serialized, {
+      value: owned,
+      chargedBytes,
+      pngDigest: sha256(owned.png),
+      rgbaDigest: sha256(owned.rgba),
+    });
+    this.residentBytes += chargedBytes;
+    return true;
   }
 
   private deleteEntry(serialized: string, entry: CacheEntry): void {
@@ -167,7 +213,7 @@ export function serializeVisualNormalizationCacheKey(key: VisualNormalizationCac
   ]);
 }
 
-function isValidValue(value: VisualNormalizationCacheValue): boolean {
+function isValidValueShape(value: VisualNormalizationCacheValue): boolean {
   return (
     Buffer.isBuffer(value.png) &&
     value.png.byteLength > 0 &&
@@ -179,6 +225,45 @@ function isValidValue(value: VisualNormalizationCacheValue): boolean {
     value.width <= Math.floor(Number.MAX_SAFE_INTEGER / value.height / 4) &&
     value.rgba.byteLength === value.width * value.height * 4
   );
+}
+
+function isCoherentValue(
+  key: VisualNormalizationCacheKey,
+  value: VisualNormalizationCacheValue,
+): boolean {
+  if (
+    !isValidValueShape(value) ||
+    value.width !== key.logicalSize.width ||
+    value.height !== key.logicalSize.height
+  ) {
+    return false;
+  }
+  try {
+    assertBoundedPng(value.png, "visual normalization cache entry");
+    const decoded = decodePng(value.png);
+    return (
+      decoded.width === value.width &&
+      decoded.height === value.height &&
+      decoded.data.equals(value.rgba)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isValidResidentEntry(key: VisualNormalizationCacheKey, entry: CacheEntry): boolean {
+  return (
+    isValidValueShape(entry.value) &&
+    entry.value.width === key.logicalSize.width &&
+    entry.value.height === key.logicalSize.height &&
+    entry.chargedBytes === entry.value.png.byteLength + entry.value.rgba.byteLength &&
+    entry.pngDigest === sha256(entry.value.png) &&
+    entry.rgbaDigest === sha256(entry.value.rgba)
+  );
+}
+
+function sha256(content: Buffer): string {
+  return createHash("sha256").update(content).digest("hex");
 }
 
 function cloneValue(value: VisualNormalizationCacheValue): VisualNormalizationCacheValue {

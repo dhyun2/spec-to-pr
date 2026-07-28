@@ -10,9 +10,9 @@
     {
       "name": "mixed-intake",
       "fixtureDigest": "sha256:01f8dcbc7f6ad711167479dab0af3e4e6720d228f30d5f94b50fc74285cdc470",
-      "p50WallMs": 317.33991700000024,
-      "p95WallMs": 327.7022920000004,
-      "peakRssBytes": 914620416,
+      "p50WallMs": 307.6256659999999,
+      "p95WallMs": 320.4347089999999,
+      "peakRssBytes": 242417664,
       "environment": {
         "nodeVersion": "v24.12.0",
         "platform": "darwin",
@@ -30,9 +30,9 @@
     {
       "name": "legacy",
       "fixtureDigest": "sha256:34f75192ee4936af70d2b63387c004fd500252299099c0da221fc1fa2274d440",
-      "p50WallMs": 175.9476249999998,
-      "p95WallMs": 200.13470800000005,
-      "peakRssBytes": 914620416,
+      "p50WallMs": 176.6666250000003,
+      "p95WallMs": 194.5874160000003,
+      "peakRssBytes": 300531712,
       "environment": {
         "nodeVersion": "v24.12.0",
         "platform": "darwin",
@@ -56,9 +56,9 @@
     {
       "name": "status-action",
       "fixtureDigest": "sha256:8c57658706741c9bb691092107bc1a5c5bbdfa938b070a4489eb0deedc70a59a",
-      "p50WallMs": 0.31158300000015515,
-      "p95WallMs": 1.2037909999999101,
-      "peakRssBytes": 914620416,
+      "p50WallMs": 0.3963340000000244,
+      "p95WallMs": 0.5572910000000775,
+      "peakRssBytes": 300777472,
       "environment": {
         "nodeVersion": "v24.12.0",
         "platform": "darwin",
@@ -75,9 +75,9 @@
     {
       "name": "mutating-action",
       "fixtureDigest": "sha256:7c7e79a685dd9ae96576e3c3f943f872ea7893f93a5c46df249dc25e1d569f13",
-      "p50WallMs": 96.9565419999999,
-      "p95WallMs": 101.3600419999998,
-      "peakRssBytes": 914620416,
+      "p50WallMs": 99.59416599999986,
+      "p95WallMs": 104.0146250000007,
+      "peakRssBytes": 315310080,
       "environment": {
         "nodeVersion": "v24.12.0",
         "platform": "darwin",
@@ -93,11 +93,73 @@
       }
     },
     {
+      "name": "visual-cold",
+      "fixtureDigest": "sha256:ea8587c5d7b5dfa8e45bb758d3590029e2b955c7d1c6ae30b098b11827cfdaec",
+      "p50WallMs": 337.7819589999999,
+      "p95WallMs": 396.3049169999995,
+      "peakRssBytes": 831700992,
+      "environment": {
+        "nodeVersion": "v24.12.0",
+        "platform": "darwin",
+        "architecture": "arm64",
+        "cpuCount": 14
+      },
+      "metricCounters": {
+        "targets": 2,
+        "comparisons": 1,
+        "pixelsPerTarget": 659160,
+        "mode": "cold",
+        "cacheHits": 1,
+        "cacheMisses": 1,
+        "cacheSingleFlights": 0,
+        "cacheBypasses": 2,
+        "cacheResidentBytes": 2642443,
+        "peakWorkers": 2,
+        "peakActivePixels": 1318320,
+        "peakManagedBytes": 23735563,
+        "managedMemoryBudgetBytes": 262217728,
+        "rssBaselineBytes": 613629952,
+        "inFlightPeakRssBytes": 831700992,
+        "inFlightRssDeltaBytes": 56557568
+      }
+    },
+    {
+      "name": "visual-warm",
+      "fixtureDigest": "sha256:b8fcfb17bd329485972ddfbd82fd9fffdc5d158a6f66214c99b7d9a54e512e97",
+      "p50WallMs": 261.9474170000003,
+      "p95WallMs": 265.2341670000005,
+      "peakRssBytes": 845611008,
+      "environment": {
+        "nodeVersion": "v24.12.0",
+        "platform": "darwin",
+        "architecture": "arm64",
+        "cpuCount": 14
+      },
+      "metricCounters": {
+        "targets": 2,
+        "comparisons": 2,
+        "pixelsPerTarget": 659160,
+        "mode": "warm",
+        "cacheHits": 4,
+        "cacheMisses": 0,
+        "cacheSingleFlights": 0,
+        "cacheBypasses": 4,
+        "cacheResidentBytes": 2642443,
+        "peakWorkers": 2,
+        "peakActivePixels": 1318320,
+        "peakManagedBytes": 23735563,
+        "managedMemoryBudgetBytes": 262217728,
+        "rssBaselineBytes": 663502848,
+        "inFlightPeakRssBytes": 845611008,
+        "inFlightRssDeltaBytes": 41959424
+      }
+    },
+    {
       "name": "visual",
-      "fixtureDigest": "sha256:13c55a0b2293161e1cd311e5ed8e2ea6199f615688f40e6fe4f22622dfae52aa",
-      "p50WallMs": 583.5422500000004,
-      "p95WallMs": 641.3549590000002,
-      "peakRssBytes": 914620416,
+      "fixtureDigest": "sha256:4e2efa1c8f3c35cfa2e590ae89e18d50f325bae3499e130c7018baa78860a288",
+      "p50WallMs": 601.319708,
+      "p95WallMs": 661.539084,
+      "peakRssBytes": 845611008,
       "environment": {
         "nodeVersion": "v24.12.0",
         "platform": "darwin",
@@ -108,12 +170,19 @@
         "targets": 2,
         "comparisons": 3,
         "pixelsPerTarget": 659160,
+        "mode": "total",
         "cacheHits": 5,
         "cacheMisses": 1,
+        "cacheSingleFlights": 0,
         "cacheBypasses": 6,
         "cacheResidentBytes": 2642443,
         "peakWorkers": 2,
-        "peakActivePixels": 1318320
+        "peakActivePixels": 1318320,
+        "peakManagedBytes": 23735563,
+        "managedMemoryBudgetBytes": 262217728,
+        "rssBaselineBytes": 613629952,
+        "inFlightPeakRssBytes": 845611008,
+        "inFlightRssDeltaBytes": 56557568
       }
     }
   ],
@@ -139,11 +208,20 @@
     "mutatingAdvanceSerializedBytes": 1276,
     "mutatingSubmitSerializedBytes": 1761,
     "visualComparisons": 3,
-    "visualCacheHits": 5,
-    "visualCacheMisses": 1,
-    "visualCacheBypasses": 6,
+    "visualColdCacheHits": 1,
+    "visualColdCacheMisses": 1,
+    "visualColdCacheSingleFlights": 0,
+    "visualColdCacheBypasses": 2,
+    "visualWarmCacheHits": 4,
+    "visualWarmCacheMisses": 0,
+    "visualWarmCacheSingleFlights": 0,
+    "visualWarmCacheBypasses": 4,
     "visualCacheResidentBytes": 2642443,
     "visualPeakWorkers": 2,
-    "visualPeakActivePixels": 1318320
+    "visualPeakActivePixels": 1318320,
+    "visualPeakManagedBytes": 23735563,
+    "visualManagedMemoryBudgetBytes": 262217728,
+    "visualInFlightPeakRssBytes": 845611008,
+    "visualInFlightRssDeltaBytes": 56557568
   }
 }

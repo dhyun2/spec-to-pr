@@ -28,7 +28,7 @@ export async function normalizeVisualPng(input: {
   width: number;
   height: number;
   version: "visual-normalizer-v1";
-  cacheStatus: "hit" | "miss" | "bypassed";
+  cacheStatus: "hit" | "miss" | "single-flight" | "bypassed";
 }> {
   const sourceSize = VisualSizeSchema.parse(input.sourceSize);
   const logicalSize = VisualSizeSchema.parse(input.logicalSize);
@@ -64,12 +64,10 @@ export async function normalizeVisualPng(input: {
     );
     return toResult(normalized, "bypassed");
   }
-  const before = cache.snapshotStats();
-  const normalized = await cache.getOrCompute(key, () =>
+  const cached = await cache.getOrCompute(key, () =>
     computeNormalizedVisual(input.content, sourceSize, logicalSize, input.role),
   );
-  const cacheStatus = cache.snapshotStats().hits > before.hits ? "hit" : "miss";
-  return toResult(normalized, cacheStatus);
+  return toResult(cached.value, cached.disposition);
 }
 
 async function computeNormalizedVisual(
@@ -115,7 +113,10 @@ async function computeNormalizedVisual(
   };
 }
 
-function toResult(value: VisualNormalizationCacheValue, cacheStatus: "hit" | "miss" | "bypassed") {
+function toResult(
+  value: VisualNormalizationCacheValue,
+  cacheStatus: "hit" | "miss" | "single-flight" | "bypassed",
+) {
   return {
     content: Buffer.from(value.png),
     rgba: Buffer.from(value.rgba),

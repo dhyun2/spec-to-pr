@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   MAX_ACTIVE_VISUAL_PIXELS,
   MAX_VISUAL_COMPARISON_WORKERS,
+  VISUAL_COMPARISON_MANAGED_BYTES_PER_PIXEL,
   VisualComparisonPool,
 } from "../../src/visual/visual-comparison-pool.js";
 
@@ -45,6 +46,9 @@ describe("visual comparison worker pool", () => {
       peakWorkers: 3,
     });
     expect(pool.snapshotStats().peakActivePixels).toBeLessThanOrEqual(3);
+    expect(pool.snapshotStats().peakManagedBytes).toBe(
+      pool.snapshotStats().peakActivePixels * VISUAL_COMPARISON_MANAGED_BYTES_PER_PIXEL,
+    );
   });
 
   it("reports a worker crash as an ordinary comparison failure", async () => {
@@ -77,6 +81,7 @@ describe("visual comparison worker pool", () => {
   it("exports the production memory and concurrency budgets", () => {
     expect(MAX_VISUAL_COMPARISON_WORKERS).toBe(3);
     expect(MAX_ACTIVE_VISUAL_PIXELS).toBe(8_000_000);
+    expect(VISUAL_COMPARISON_MANAGED_BYTES_PER_PIXEL).toBe(16);
   });
 });
 

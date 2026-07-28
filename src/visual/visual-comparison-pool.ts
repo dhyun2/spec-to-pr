@@ -17,6 +17,7 @@ import type {
 
 export const MAX_VISUAL_COMPARISON_WORKERS = 3;
 export const MAX_ACTIVE_VISUAL_PIXELS = 8_000_000;
+export const VISUAL_COMPARISON_MANAGED_BYTES_PER_PIXEL = 4 * 4;
 export const DEFAULT_VISUAL_COMPARISON_TIMEOUT_MS = 30_000;
 
 export type VisualComparisonPoolJob = {
@@ -43,6 +44,7 @@ export type VisualComparisonPoolStats = {
   peakWorkers: number;
   peakActiveWorkers: number;
   peakActivePixels: number;
+  peakManagedBytes: number;
   completedJobs: number;
   failedJobs: number;
 };
@@ -170,6 +172,7 @@ export class VisualComparisonPool {
       peakWorkers: this.peakWorkers,
       peakActiveWorkers: this.peakActiveWorkers,
       peakActivePixels: this.peakActivePixels,
+      peakManagedBytes: this.peakActivePixels * VISUAL_COMPARISON_MANAGED_BYTES_PER_PIXEL,
       completedJobs: this.completedJobs,
       failedJobs: this.failedJobs,
     };

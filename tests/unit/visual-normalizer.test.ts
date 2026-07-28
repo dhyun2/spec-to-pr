@@ -112,6 +112,32 @@ describe("visual normalizer", () => {
       }),
     ]);
   });
+
+  it("returns atomic miss and single-flight dispositions for concurrent normalization", async () => {
+    const cache = new VisualNormalizationCache();
+    const source = solidPng(400, 400, [10, 20, 30, 255]);
+    const input = {
+      content: source,
+      sourceDigest: `sha256:${"3".repeat(64)}` as const,
+      sourceSize: { width: 400, height: 400 },
+      logicalSize: { width: 400, height: 400 },
+      colorSpace: "srgb" as const,
+      role: "concurrent baseline",
+      cache,
+    };
+
+    const [first, second] = await Promise.all([
+      normalizeVisualPng(input),
+      normalizeVisualPng(input),
+    ]);
+
+    expect([first.cacheStatus, second.cacheStatus]).toEqual(["miss", "single-flight"]);
+    expect(cache.snapshotStats()).toMatchObject({
+      hits: 0,
+      misses: 1,
+      singleFlights: 1,
+    });
+  });
 });
 
 function solidPng(width: number, height: number, rgba: [number, number, number, number]): Buffer {
