@@ -12,12 +12,14 @@ import { RunService } from "../../src/application/run-service.js";
 import { RuntimeMetricsRecorder } from "../../src/runtime/performance-instrumentation.js";
 import { sha256Digest } from "../../src/source-registry/content-hash.js";
 import { SourceSnapshotStore } from "../../src/source-registry/snapshot-store.js";
+import { orderedConcurrentMap } from "../../src/source-ingestion/source-loader.js";
 import { SqliteRunStore } from "../../src/store/sqlite-run-store.js";
 import { compareVisualPngs } from "../../src/visual/visual-comparator.js";
 
 const collectedAt = "2026-07-28T00:00:00.000Z";
 const samplesByFixture = new Map<string, number[]>();
 const measuredMixedIntakeRunSaves: number[] = [];
+const measuredMixedIntakeMaxSourceConcurrency: number[] = [];
 let peakRss = process.memoryUsage().rss;
 let legacyDirectory = "";
 const visualPng = PNG.sync.write(new PNG({ width: 360, height: 1831 }));
@@ -87,12 +89,37 @@ describe("runtime reduction fixtures", () => {
     "mixed intake: 20 local documents, 4 parser-safe chunks, 4 OpenAPI sources",
     async () => {
       const metricRunId = "run_11111111111111111111111111111111";
+      let maxSourceConcurrency = 0;
       const snapshot = await measureFixture(
         "run_11111111111111111111111111111111",
         "mixed-intake",
         async (recorder) =>
           recorder.withRun(metricRunId, async () => {
             const directory = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-intake-bench-"));
+            await Promise.all(
+              fixtures.mixedIntake.localDocuments.map(async (document) => {
+                const absolutePath = path.join(directory, document.path);
+                await mkdir(path.dirname(absolutePath), { recursive: true });
+                await writeFile(absolutePath, document.content);
+              }),
+            );
+            let activeSourceLoads = 0;
+            const loadedDocuments = await orderedConcurrentMap(
+              fixtures.mixedIntake.localDocuments,
+              4,
+              async (document) => {
+                activeSourceLoads += 1;
+                maxSourceConcurrency = Math.max(maxSourceConcurrency, activeSourceLoads);
+                try {
+                  return {
+                    ...document,
+                    content: await readFile(path.join(directory, document.path), "utf8"),
+                  };
+                } finally {
+                  activeSourceLoads -= 1;
+                }
+              },
+            );
             const databasePath = path.join(directory, "runs.sqlite3");
             const setupStore = new SqliteRunStore(databasePath);
             const runService = new RunService(setupStore, {
@@ -116,7 +143,7 @@ describe("runtime reduction fixtures", () => {
                 label: "user-request",
               });
               const requests = [
-                ...fixtures.mixedIntake.localDocuments.map((document) => ({
+                ...loadedDocuments.map((document) => ({
                   requestText: document.content,
                   label: `docs:${document.path}`,
                 })),
@@ -158,6 +185,7 @@ describe("runtime reduction fixtures", () => {
       if (totalRunSaves === undefined) {
         throw new Error("mixed intake benchmark did not record actual Run saves");
       }
+      measuredMixedIntakeMaxSourceConcurrency.push(maxSourceConcurrency);
       measuredMixedIntakeRunSaves.push(totalRunSaves);
     },
     { iterations: 5, warmupIterations: 1, time: 0, warmupTime: 0 },
@@ -213,6 +241,18 @@ describe("runtime reduction fixtures", () => {
 });
 
 afterAll(async () => {
+  const observedMixedIntakeMaxSourceConcurrency = [
+    ...new Set(measuredMixedIntakeMaxSourceConcurrency),
+  ];
+  if (
+    observedMixedIntakeMaxSourceConcurrency.length !== 1 ||
+    observedMixedIntakeMaxSourceConcurrency[0] !== 4
+  ) {
+    throw new Error(
+      "mixed intake source concurrency must be four and derived from the production pool",
+    );
+  }
+  const mixedIntakeMaxSourceConcurrency = observedMixedIntakeMaxSourceConcurrency[0];
   const observedMixedIntakeRunSaves = [...new Set(measuredMixedIntakeRunSaves)];
   if (observedMixedIntakeRunSaves.length !== 1) {
     throw new Error("mixed intake Run saves must be stable and derived from measured services");
@@ -253,7 +293,7 @@ afterAll(async () => {
               localDocuments: 20,
               parserSafeChunks: 4,
               openApiSources: 4,
-              maxSourceConcurrency: 4,
+              maxSourceConcurrency: mixedIntakeMaxSourceConcurrency,
               intakeRunSaves: mixedIntakeRunSaves,
             }
           : name === "legacy"
@@ -272,7 +312,7 @@ afterAll(async () => {
     fixtures: records,
     metricCounters: {
       mixedIntakeDocuments: fixtures.mixedIntake.localDocuments.length,
-      mixedIntakeMaxSourceConcurrency: 4,
+      mixedIntakeMaxSourceConcurrency,
       mixedIntakeRunSaves,
       legacyFiles: fixtures.legacy.files.length,
       legacyTerminalApiCalls: fixtures.legacy.terminalApiCalls.length,
