@@ -6,9 +6,16 @@ import {
   LegacySourceCache,
   createLegacySourceManifest,
   findLegacyApplicationRoot,
-  legacyEnvironmentDigest,
+  isSafeLegacyUrlEnvironmentName,
+  legacyEnvironmentReferencesDigest,
+  legacyEnvironmentValue,
+  legacyManifestConfigDigest,
   legacyManifestFile,
+  legacyResolutionStateDigest,
   loadLegacyResolutionConfig,
+  sanitizedLegacyHttpOrigin,
+  type LegacyResolutionDependency,
+  type LegacySourceEnvironmentReference,
   type LegacySourceManifest,
   type LegacySourceRecord,
 } from "./legacy-source-cache.js";
@@ -108,13 +115,7 @@ export type LegacyDependencyEdge = {
   resolver: "relative-import" | "alias" | "style" | "asset";
 };
 
-export type LegacyEnvironmentReference = {
-  runtime: "process.env" | "import.meta.env";
-  name: string;
-  sourcePaths: string[];
-  sanitizedOrigin?: string;
-  sanitizedOrigins?: Array<{ sourceName: string; origin: string }>;
-};
+export type LegacyEnvironmentReference = LegacySourceEnvironmentReference;
 
 export type LegacySourceGraph = {
   featureRoot: string;
@@ -335,14 +336,34 @@ export async function discoverLegacySourceGraph(
   const allFiles = [...files.values()].sort((left, right) =>
     left.applicationRelativePath.localeCompare(right.applicationRelativePath),
   );
-  const environmentDigest = await legacyEnvironmentDigest(applicationRoot, sourceCache);
+  const filesByApplicationPath = new Map(
+    allFiles.map((file) => [file.applicationRelativePath, file] as const),
+  );
+  const resolutionDependencies: LegacyResolutionDependency[] = edges.flatMap((edge) => {
+    const target = filesByApplicationPath.get(edge.resolvedPath);
+    return target?.ownership === "supporting-dependency"
+      ? [
+          {
+            importer: edge.importer,
+            specifier: edge.specifier,
+            applicationRelativePath: edge.resolvedPath,
+          },
+        ]
+      : [];
+  });
+  const resolutionStateDigest = await legacyResolutionStateDigest({
+    featureRoot: canonicalFeatureRoot,
+    applicationRoot,
+    aliases,
+    dependencies: resolutionDependencies,
+  });
   const sourceManifest = createLegacySourceManifest({
     files: allFiles.flatMap((file) => {
       const record = sourceCache.record(file.absolutePath, file.digest);
       return record === undefined ? [] : [legacyManifestFile(record, file.applicationRelativePath)];
     }),
-    environmentDigest,
-    configDigest: resolutionConfig.digest,
+    environmentDigest: legacyEnvironmentReferencesDigest(environmentRefs),
+    configDigest: legacyManifestConfigDigest(resolutionConfig.digest, resolutionStateDigest),
   });
   const sourceHash = createHash("sha256");
   for (const file of allFiles) {
@@ -940,10 +961,10 @@ async function enrichEnvironmentReferences(
     .map((reference) => {
       const origins = new Set<string>();
       const sanitizedOrigins: Array<{ sourceName: string; origin: string }> = [];
-      if (isSafeUrlEnvironmentName(reference.name)) {
+      if (isSafeLegacyUrlEnvironmentName(reference.name)) {
         for (const content of contents) {
-          const value = environmentValue(content.text, reference.name);
-          const origin = value === undefined ? undefined : sanitizedHttpOrigin(value);
+          const value = legacyEnvironmentValue(content.text, reference.name);
+          const origin = value === undefined ? undefined : sanitizedLegacyHttpOrigin(value);
           if (origin !== undefined) {
             origins.add(origin);
             sanitizedOrigins.push({ sourceName: content.sourceName, origin });
@@ -962,41 +983,6 @@ async function enrichEnvironmentReferences(
     .sort((left, right) =>
       `${left.runtime}:${left.name}`.localeCompare(`${right.runtime}:${right.name}`),
     );
-}
-
-function environmentValue(content: string, name: string): string | undefined {
-  const escaped = name.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-  const match = new RegExp(`^\\s*(?:export\\s+)?${escaped}\\s*=\\s*(.*?)\\s*$`, "mu").exec(content);
-  if (match === null) return undefined;
-  const value = match[1]!.trim();
-  if (
-    (value.startsWith('"') && value.endsWith('"')) ||
-    (value.startsWith("'") && value.endsWith("'"))
-  ) {
-    return value.slice(1, -1);
-  }
-  return value;
-}
-
-function isSafeUrlEnvironmentName(name: string): boolean {
-  return (
-    !/(?:^|_)(?:AUTH|COOKIE|CREDENTIAL|KEY|PASS|PASSWORD|SECRET|TOKEN)(?:_|$)/iu.test(name) &&
-    /(?:^|_)(?:API|BASE|ENDPOINT|GATEWAY|GW|HOST|ORIGIN|URI|URL)(?:_|$)/iu.test(name)
-  );
-}
-
-function sanitizedHttpOrigin(value: string): string | undefined {
-  try {
-    const parsed = new URL(value);
-    if (!/^https?:$/u.test(parsed.protocol) || parsed.username !== "" || parsed.password !== "") {
-      return undefined;
-    }
-    parsed.search = "";
-    parsed.hash = "";
-    return parsed.toString();
-  } catch {
-    return undefined;
-  }
 }
 
 function publicGraphPath(

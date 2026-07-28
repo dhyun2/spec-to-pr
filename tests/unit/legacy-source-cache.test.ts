@@ -84,6 +84,8 @@ describe("legacy source cache", () => {
       maxBytes: 1,
       maxDepth: 32,
       maxElapsedMs: 5_000,
+      maxDirectories: 2_000,
+      maxEntries: 20_000,
     });
 
     expect(current.truncated).toBe(true);
@@ -104,6 +106,59 @@ describe("legacy source cache", () => {
     await buildLegacyInventory(path.join(root, "src"), {}, { sourceCache: cache });
 
     expect(cache.snapshotStats().fileReads).toBe(1);
+  });
+
+  it("bounds warm source and environment traversal by directories and entries", async () => {
+    const root = await legacyFixture(1);
+    await writeFile(path.join(root, "package.json"), '{"name":"bounded-warm-traversal"}\n', "utf8");
+    await writeFile(
+      path.join(root, "src", "file-000.ts"),
+      "export const gateway = process.env.SERVICE_GW;\n",
+      "utf8",
+    );
+    await writeFile(path.join(root, ".env.qa"), "SERVICE_GW=https://example.test/gw/\n", "utf8");
+    await writeFile(path.join(root, "unrelated.txt"), "bounded directory entry", "utf8");
+    await mkdir(path.join(root, "src", "nested"), { recursive: true });
+    await writeFile(path.join(root, "src", "nested", "feature.ts"), "export const nested = 1;\n");
+    const inventory = await buildLegacyInventory(path.join(root, "src"));
+
+    const directoryLimited = await currentLegacySourceManifest(
+      path.join(root, "src"),
+      inventory.sourceManifest!,
+      new LegacySourceCache(),
+      {
+        maxFiles: 250,
+        maxBytes: 1024 * 1024,
+        maxDepth: 32,
+        maxElapsedMs: 5_000,
+        maxDirectories: 1,
+        maxEntries: 20_000,
+      },
+      {
+        environmentReferences: inventory.sourceEnvironmentRefs ?? [],
+        supportingDependencies: inventory.supportingDependencies,
+      },
+    );
+    const entryLimited = await currentLegacySourceManifest(
+      path.join(root, "src"),
+      inventory.sourceManifest!,
+      new LegacySourceCache(),
+      {
+        maxFiles: 250,
+        maxBytes: 1024 * 1024,
+        maxDepth: 32,
+        maxElapsedMs: 5_000,
+        maxDirectories: 2_000,
+        maxEntries: 1,
+      },
+      {
+        environmentReferences: inventory.sourceEnvironmentRefs ?? [],
+        supportingDependencies: inventory.supportingDependencies,
+      },
+    );
+
+    expect(directoryLimited.truncated).toBe(true);
+    expect(entryLimited.truncated).toBe(true);
   });
 });
 

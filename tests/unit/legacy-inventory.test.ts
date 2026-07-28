@@ -27,6 +27,82 @@ afterEach(async () => {
 });
 
 describe("legacy inventory v3", () => {
+  it("revalidates bytes when the same cache is reused across snapshots", async () => {
+    const root = await temporaryLegacyProject();
+    const sourcePath = path.join(root, "src", "route.ts");
+    const cache = new LegacySourceCache();
+    await writeFile(sourcePath, 'export const route = { path: "/before" };\n', "utf8");
+    const pinned = await buildLegacyInventory(root, {}, { sourceCache: cache });
+
+    await writeFile(sourcePath, 'export const route = { path: "/after" };\n', "utf8");
+
+    await expect(assertLegacyInventoryFresh(root, pinned, { sourceCache: cache })).rejects.toThrow(
+      /LEGACY_SOURCE_CHANGED/,
+    );
+  });
+
+  it("invalidates when referenced GW and URI environment origins change", async () => {
+    const root = await temporaryLegacyProject();
+    await writeFile(path.join(root, "package.json"), '{"name":"environment-freshness"}\n', "utf8");
+    const featureRoot = path.join(root, "src", "modules", "shop");
+    await mkdir(featureRoot, { recursive: true });
+    await writeFile(
+      path.join(featureRoot, "client.ts"),
+      [
+        "export const gateway = process.env.SERVICE_GW;",
+        "export const backend = import.meta.env.SERVICE_URI;",
+      ].join("\n"),
+      "utf8",
+    );
+    const environmentPath = path.join(root, ".env.qa");
+    await writeFile(
+      environmentPath,
+      "SERVICE_GW=https://before.example/gw/\nSERVICE_URI=https://before.example/backend/\n",
+      "utf8",
+    );
+    const pinned = await buildLegacyInventory(featureRoot);
+
+    await writeFile(
+      environmentPath,
+      "SERVICE_GW=https://after.example/gw/\nSERVICE_URI=https://after.example/backend/\n",
+      "utf8",
+    );
+
+    await expect(assertLegacyInventoryFresh(featureRoot, pinned)).rejects.toThrow(
+      /LEGACY_SOURCE_CHANGED/,
+    );
+  });
+
+  it("invalidates when a higher-priority supporting dependency appears", async () => {
+    const root = await temporaryLegacyProject();
+    await writeFile(path.join(root, "package.json"), '{"name":"resolver-freshness"}\n', "utf8");
+    const featureRoot = path.join(root, "src", "modules", "shop");
+    const apiRoot = path.join(root, "src", "api");
+    await mkdir(featureRoot, { recursive: true });
+    await mkdir(apiRoot, { recursive: true });
+    await writeFile(
+      path.join(featureRoot, "index.ts"),
+      'import { client } from "../../api/client"; export const feature = client;\n',
+      "utf8",
+    );
+    await writeFile(
+      path.join(apiRoot, "client.js"),
+      "export const client = 'javascript';\n",
+      "utf8",
+    );
+    const pinned = await buildLegacyInventory(featureRoot);
+
+    await writeFile(
+      path.join(apiRoot, "client.ts"),
+      "export const client = 'typescript';\n",
+      "utf8",
+    );
+
+    await expect(assertLegacyInventoryFresh(featureRoot, pinned)).rejects.toThrow(
+      /LEGACY_SOURCE_CHANGED/,
+    );
+  });
+
   it("uses one cache across a deterministic 250-file cold, warm, and change cycle", async () => {
     const root = await temporaryLegacyProject();
     await Promise.all(
@@ -38,25 +114,24 @@ describe("legacy inventory v3", () => {
         ),
       ),
     );
-    const coldCache = new LegacySourceCache();
+    const sourceCache = new LegacySourceCache();
 
-    const pinned = await buildLegacyInventory(root, {}, { sourceCache: coldCache });
+    const pinned = await buildLegacyInventory(root, {}, { sourceCache });
 
-    expect(coldCache.snapshotStats()).toMatchObject({
+    expect(sourceCache.snapshotStats()).toMatchObject({
       fileReads: 250,
       astParses: 250,
       semanticRebuilds: 1,
     });
     expect(pinned.sourceManifestDigest).toBe(pinned.sourceManifest?.manifestDigest);
 
-    const warmCache = new LegacySourceCache();
-    const fresh = await assertLegacyInventoryFresh(root, pinned, { sourceCache: warmCache });
+    const fresh = await assertLegacyInventoryFresh(root, pinned, { sourceCache });
 
     expect(fresh).toBe(pinned);
-    expect(warmCache.snapshotStats()).toMatchObject({
-      fileReads: 250,
-      astParses: 0,
-      semanticRebuilds: 0,
+    expect(sourceCache.snapshotStats()).toMatchObject({
+      fileReads: 500,
+      astParses: 250,
+      semanticRebuilds: 1,
     });
 
     await writeFile(
@@ -64,14 +139,13 @@ describe("legacy inventory v3", () => {
       'export const route125 = { path: "/changed" };\n',
       "utf8",
     );
-    const changedCache = new LegacySourceCache();
-    await expect(
-      assertLegacyInventoryFresh(root, pinned, { sourceCache: changedCache }),
-    ).rejects.toThrow(/LEGACY_SOURCE_CHANGED/);
-    expect(changedCache.snapshotStats()).toMatchObject({
-      fileReads: 250,
-      astParses: 250,
-      semanticRebuilds: 1,
+    await expect(assertLegacyInventoryFresh(root, pinned, { sourceCache })).rejects.toThrow(
+      /LEGACY_SOURCE_CHANGED/,
+    );
+    expect(sourceCache.snapshotStats()).toMatchObject({
+      fileReads: 750,
+      astParses: 251,
+      semanticRebuilds: 2,
     });
   });
 
@@ -408,9 +482,9 @@ describe("legacy inventory v3", () => {
         }),
       ]),
     );
-    await expect(assertLegacyInventoryFresh(root, merged)).resolves.toMatchObject({
-      rootDigest: sourceInventory.rootDigest,
-    });
+    const fresh = await assertLegacyInventoryFresh(root, merged);
+    expect(fresh).toBe(merged);
+    expect(fresh.rootDigest).toBe(merged.rootDigest);
   });
 
   it("promotes only API resource types from HAR while retaining explicit request arrays", async () => {

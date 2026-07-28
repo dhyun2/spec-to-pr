@@ -21,6 +21,27 @@ const SKIPPED_DIRECTORIES = new Set([
 ]);
 const MAX_ENVIRONMENT_EVIDENCE_FILES = 100;
 const MAX_LEGACY_DIGEST_INPUT_BYTES = 2 * 1024 * 1024;
+const RESOLUTION_EXTENSIONS = [
+  "",
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".vue",
+  ".svelte",
+  ".json",
+  ".css",
+  ".scss",
+  ".sass",
+  ".less",
+  "/index.ts",
+  "/index.tsx",
+  "/index.js",
+  "/index.jsx",
+  "/index.vue",
+] as const;
 
 export const LegacySourceManifestSchema = z
   .object({
@@ -44,6 +65,35 @@ export const LegacySourceManifestSchema = z
 
 export type LegacySourceManifest = z.infer<typeof LegacySourceManifestSchema>;
 export type LegacySourceManifestFile = LegacySourceManifest["files"][number];
+
+export const LegacySourceEnvironmentReferenceSchema = z
+  .object({
+    runtime: z.enum(["process.env", "import.meta.env"]),
+    name: z.string().trim().min(1),
+    sourcePaths: z.array(z.string().trim().min(1)),
+    sanitizedOrigin: z.string().url().optional(),
+    sanitizedOrigins: z
+      .array(
+        z
+          .object({
+            sourceName: z.string().trim().min(1),
+            origin: z.string().url(),
+          })
+          .strict(),
+      )
+      .optional(),
+  })
+  .strict();
+
+export type LegacySourceEnvironmentReference = z.infer<
+  typeof LegacySourceEnvironmentReferenceSchema
+>;
+
+export type LegacyResolutionDependency = {
+  importer: string;
+  specifier: string;
+  applicationRelativePath: string;
+};
 
 export type LegacySourceCacheStats = {
   fileReads: number;
@@ -117,6 +167,10 @@ export class LegacySourceCache {
     return record;
   }
 
+  beginSnapshot(): void {
+    this.#recordsByRealPath.clear();
+  }
+
   record(realPath: string, digest: Sha256Digest): LegacySourceRecord | undefined {
     return this.#recordsByKey.get(`${realPath}\0${digest}`);
   }
@@ -185,36 +239,58 @@ export async function loadLegacyResolutionConfig(
   };
 }
 
-export async function legacyEnvironmentDigest(
-  applicationRoot: string,
-  cache: LegacySourceCache,
-): Promise<Sha256Digest> {
-  const directory = await opendir(applicationRoot);
-  const names: string[] = [];
-  for await (const entry of directory) {
-    if (entry.isFile() && /^\.env(?:\..+)?$/u.test(entry.name)) names.push(entry.name);
-  }
-  names.sort();
-  const evidence: Array<[string, string, string]> = [];
-  for (const sourceName of names.slice(0, MAX_ENVIRONMENT_EVIDENCE_FILES)) {
-    const source = await readBoundedDigestInput(path.join(applicationRoot, sourceName), cache);
-    if (source === undefined) continue;
-    for (const line of source.text().split(/\r?\n/u)) {
-      const match = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/u.exec(line);
-      if (match === null || !isSafeUrlEnvironmentName(match[1]!)) continue;
-      const origin = sanitizedHttpOrigin(unquote(match[2]!));
-      if (origin !== undefined) evidence.push([sourceName, match[1]!, origin]);
+export function legacyEnvironmentReferencesDigest(
+  references: LegacySourceEnvironmentReference[],
+): Sha256Digest {
+  return sha256Digest(JSON.stringify(canonicalEnvironmentReferences(references)));
+}
+
+export function legacyManifestConfigDigest(
+  resolutionConfigDigest: Sha256Digest,
+  resolutionStateDigest: Sha256Digest,
+): Sha256Digest {
+  return sha256Digest(JSON.stringify([resolutionConfigDigest, resolutionStateDigest]));
+}
+
+export async function legacyResolutionStateDigest(input: {
+  featureRoot: string;
+  applicationRoot: string;
+  aliases: Record<string, string>;
+  dependencies: LegacyResolutionDependency[];
+  expired?: () => boolean;
+}): Promise<Sha256Digest> {
+  const state: Array<[string, string, string, string]> = [];
+  for (const dependency of [...input.dependencies].sort((left, right) =>
+    `${left.importer}\0${left.specifier}`.localeCompare(`${right.importer}\0${right.specifier}`),
+  )) {
+    if (input.expired?.() === true) {
+      state.push([
+        dependency.importer,
+        dependency.specifier,
+        dependency.applicationRelativePath,
+        "@truncated",
+      ]);
+      break;
     }
-  }
-  if (names.length > MAX_ENVIRONMENT_EVIDENCE_FILES) {
-    evidence.push([
-      "@bounded",
-      "remaining-file-count",
-      String(names.length - MAX_ENVIRONMENT_EVIDENCE_FILES),
+    const importer = dependency.importer.startsWith("@app/")
+      ? path.join(input.applicationRoot, dependency.importer.slice("@app/".length))
+      : path.join(input.featureRoot, dependency.importer);
+    const resolved = await resolveLegacyDependencyProbe(
+      importer,
+      dependency.specifier,
+      input.applicationRoot,
+      input.aliases,
+    );
+    state.push([
+      dependency.importer,
+      dependency.specifier,
+      dependency.applicationRelativePath,
+      resolved === undefined
+        ? "@missing"
+        : path.relative(input.applicationRoot, resolved).split(path.sep).join("/"),
     ]);
   }
-  evidence.sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
-  return sha256Digest(JSON.stringify(evidence));
+  return sha256Digest(JSON.stringify(state));
 }
 
 export function createLegacySourceManifest(input: {
@@ -255,6 +331,13 @@ export type LegacyManifestScanLimits = {
   maxBytes: number;
   maxDepth: number;
   maxElapsedMs: number;
+  maxDirectories: number;
+  maxEntries: number;
+};
+
+export type LegacyManifestRefreshContext = {
+  environmentReferences?: LegacySourceEnvironmentReference[];
+  supportingDependencies?: LegacyResolutionDependency[];
 };
 
 export async function currentLegacySourceManifest(
@@ -262,13 +345,38 @@ export async function currentLegacySourceManifest(
   pinned: LegacySourceManifest,
   cache: LegacySourceCache,
   limits: LegacyManifestScanLimits,
+  context: LegacyManifestRefreshContext = {},
 ): Promise<{ manifest: LegacySourceManifest; truncated: boolean }> {
+  cache.beginSnapshot();
   const startedAt = Date.now();
+  const traversal: LegacyWarmTraversal = {
+    limits,
+    startedAt,
+    visitedDirectories: 0,
+    visitedEntries: 0,
+    scannedFiles: 0,
+    scannedBytes: 0,
+    truncated: false,
+  };
   const canonicalFeatureRoot = await realpath(featureRoot);
   const applicationRoot = await findLegacyApplicationRoot(canonicalFeatureRoot);
   const config = await loadLegacyResolutionConfig(applicationRoot, cache);
-  const environmentDigest = await legacyEnvironmentDigest(applicationRoot, cache);
-  const paths = await collectCurrentOwnedPaths(canonicalFeatureRoot, limits, startedAt);
+  if (Date.now() - startedAt >= limits.maxElapsedMs) traversal.truncated = true;
+  const refreshedEnvironment = await refreshLegacyEnvironmentReferences(
+    applicationRoot,
+    context.environmentReferences ?? [],
+    cache,
+    traversal,
+  );
+  const resolutionStateDigest = await legacyResolutionStateDigest({
+    featureRoot: canonicalFeatureRoot,
+    applicationRoot,
+    aliases: config.aliases,
+    dependencies: context.supportingDependencies ?? [],
+    expired: () => Date.now() - startedAt >= limits.maxElapsedMs,
+  });
+  if (Date.now() - startedAt >= limits.maxElapsedMs) traversal.truncated = true;
+  const paths = await collectCurrentOwnedPaths(canonicalFeatureRoot, traversal);
   const byApplicationPath = new Map<string, string>();
   for (const realPath of paths.files) {
     byApplicationPath.set(
@@ -282,8 +390,7 @@ export async function currentLegacySourceManifest(
     byApplicationPath.set(file.applicationRelativePath, absolutePath);
   }
   const files: LegacySourceManifestFile[] = [];
-  let truncated = paths.truncated;
-  let scannedBytes = 0;
+  let truncated = traversal.truncated;
   if (byApplicationPath.size > limits.maxFiles) truncated = true;
   for (const [applicationRelativePath, absolutePath] of [...byApplicationPath]
     .sort(([left], [right]) => left.localeCompare(right))
@@ -294,20 +401,24 @@ export async function currentLegacySourceManifest(
     }
     const record = await cache.read(absolutePath);
     if (record === undefined) continue;
-    if (scannedBytes + record.byteLength > limits.maxBytes) {
+    if (
+      traversal.scannedFiles >= limits.maxFiles ||
+      traversal.scannedBytes + record.byteLength > limits.maxBytes
+    ) {
       truncated = true;
       break;
     }
-    scannedBytes += record.byteLength;
+    traversal.scannedFiles += 1;
+    traversal.scannedBytes += record.byteLength;
     files.push(legacyManifestFile(record, applicationRelativePath));
   }
   return {
     manifest: createLegacySourceManifest({
       files,
-      environmentDigest,
-      configDigest: config.digest,
+      environmentDigest: legacyEnvironmentReferencesDigest(refreshedEnvironment.references),
+      configDigest: legacyManifestConfigDigest(config.digest, resolutionStateDigest),
     }),
-    truncated,
+    truncated: truncated || traversal.truncated,
   };
 }
 
@@ -363,11 +474,14 @@ function jsonConfigurationText(content: string): string {
   return result.replace(/,\s*([}\]])/gu, "$1");
 }
 
-function isSafeUrlEnvironmentName(name: string): boolean {
-  return /(?:^|_)(?:API|BASE|BACKEND|ENDPOINT|GATEWAY|HOST|ORIGIN|URL)(?:_|$)/iu.test(name);
+export function isSafeLegacyUrlEnvironmentName(name: string): boolean {
+  return (
+    !/(?:^|_)(?:AUTH|COOKIE|CREDENTIAL|KEY|PASS|PASSWORD|SECRET|TOKEN)(?:_|$)/iu.test(name) &&
+    /(?:^|_)(?:API|BASE|ENDPOINT|GATEWAY|GW|HOST|ORIGIN|URI|URL)(?:_|$)/iu.test(name)
+  );
 }
 
-function sanitizedHttpOrigin(value: string): string | undefined {
+export function sanitizedLegacyHttpOrigin(value: string): string | undefined {
   try {
     const parsed = new URL(value);
     if (!/^https?:$/u.test(parsed.protocol) || parsed.username !== "" || parsed.password !== "") {
@@ -381,28 +495,55 @@ function sanitizedHttpOrigin(value: string): string | undefined {
   }
 }
 
-function unquote(value: string): string {
-  const trimmed = value.trim();
-  return /^(['"]).*\1$/su.test(trimmed) ? trimmed.slice(1, -1) : trimmed;
+export function legacyEnvironmentValue(content: string, name: string): string | undefined {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const match = new RegExp(`^\\s*(?:export\\s+)?${escaped}\\s*=\\s*(.*?)\\s*$`, "mu").exec(content);
+  if (match === null) return undefined;
+  const value = match[1]!.trim();
+  return /^(['"]).*\1$/su.test(value) ? value.slice(1, -1) : value;
 }
+
+type LegacyWarmTraversal = {
+  limits: LegacyManifestScanLimits;
+  startedAt: number;
+  visitedDirectories: number;
+  visitedEntries: number;
+  scannedFiles: number;
+  scannedBytes: number;
+  truncated: boolean;
+};
 
 async function collectCurrentOwnedPaths(
   root: string,
-  limits: LegacyManifestScanLimits,
-  startedAt: number,
-): Promise<{ files: string[]; truncated: boolean }> {
+  traversal: LegacyWarmTraversal,
+): Promise<{ files: string[] }> {
   const files: string[] = [];
   const pending = [{ directory: root, depth: 0 }];
-  let truncated = false;
   while (pending.length > 0) {
     const current = pending.pop()!;
-    if (current.depth > limits.maxDepth || Date.now() - startedAt >= limits.maxElapsedMs) {
-      truncated = true;
+    traversal.visitedDirectories += 1;
+    if (
+      traversal.visitedDirectories > traversal.limits.maxDirectories ||
+      current.depth > traversal.limits.maxDepth ||
+      Date.now() - traversal.startedAt >= traversal.limits.maxElapsedMs
+    ) {
+      traversal.truncated = true;
       break;
     }
     const directory = await opendir(current.directory);
     const entries = [];
-    for await (const entry of directory) entries.push(entry);
+    for await (const entry of directory) {
+      traversal.visitedEntries += 1;
+      if (
+        traversal.visitedEntries > traversal.limits.maxEntries ||
+        Date.now() - traversal.startedAt >= traversal.limits.maxElapsedMs
+      ) {
+        traversal.truncated = true;
+        break;
+      }
+      entries.push(entry);
+    }
+    if (traversal.truncated) break;
     entries.sort((left, right) => left.name.localeCompare(right.name));
     for (const entry of entries) {
       if (entry.isSymbolicLink()) continue;
@@ -410,16 +551,16 @@ async function collectCurrentOwnedPaths(
       if (entry.isDirectory() && !SKIPPED_DIRECTORIES.has(entry.name)) {
         pending.push({ directory: absolutePath, depth: current.depth + 1 });
       } else if (entry.isFile() && SOURCE_EXTENSION.test(entry.name)) {
-        if (files.length >= limits.maxFiles) {
-          truncated = true;
+        if (files.length >= traversal.limits.maxFiles) {
+          traversal.truncated = true;
           break;
         }
         files.push(await realpath(absolutePath));
       }
     }
-    if (truncated) break;
+    if (traversal.truncated) break;
   }
-  return { files: files.sort(), truncated };
+  return { files: files.sort() };
 }
 
 function isWithin(root: string, candidate: string): boolean {
@@ -441,4 +582,132 @@ async function readBoundedDigestInput(
     return undefined;
   }
   return cache.read(filePath);
+}
+
+async function refreshLegacyEnvironmentReferences(
+  applicationRoot: string,
+  references: LegacySourceEnvironmentReference[],
+  cache: LegacySourceCache,
+  traversal: LegacyWarmTraversal,
+): Promise<{ references: LegacySourceEnvironmentReference[] }> {
+  if (references.length === 0) return { references: [] };
+  traversal.visitedDirectories += 1;
+  if (
+    traversal.visitedDirectories > traversal.limits.maxDirectories ||
+    Date.now() - traversal.startedAt >= traversal.limits.maxElapsedMs
+  ) {
+    traversal.truncated = true;
+    return { references };
+  }
+  const directory = await opendir(applicationRoot);
+  const names: string[] = [];
+  let environmentFileCount = 0;
+  for await (const entry of directory) {
+    traversal.visitedEntries += 1;
+    if (
+      traversal.visitedEntries > traversal.limits.maxEntries ||
+      Date.now() - traversal.startedAt >= traversal.limits.maxElapsedMs
+    ) {
+      traversal.truncated = true;
+      break;
+    }
+    if (!entry.isFile() || !/^\.env(?:\..+)?$/u.test(entry.name)) continue;
+    environmentFileCount += 1;
+    names.push(entry.name);
+    names.sort();
+    if (names.length > MAX_ENVIRONMENT_EVIDENCE_FILES + 1) names.pop();
+  }
+  if (environmentFileCount > MAX_ENVIRONMENT_EVIDENCE_FILES) traversal.truncated = true;
+  const contents: Array<{ sourceName: string; text: string }> = [];
+  for (const sourceName of names.slice(0, MAX_ENVIRONMENT_EVIDENCE_FILES)) {
+    const source = await readBoundedDigestInput(path.join(applicationRoot, sourceName), cache);
+    if (source === undefined) continue;
+    if (
+      traversal.scannedFiles >= traversal.limits.maxFiles ||
+      traversal.scannedBytes + source.byteLength > traversal.limits.maxBytes
+    ) {
+      traversal.truncated = true;
+      break;
+    }
+    traversal.scannedFiles += 1;
+    traversal.scannedBytes += source.byteLength;
+    contents.push({ sourceName, text: source.text() });
+  }
+  return {
+    references: canonicalEnvironmentReferences(
+      references.map((reference) => {
+        const sanitizedOrigins: Array<{ sourceName: string; origin: string }> = [];
+        if (isSafeLegacyUrlEnvironmentName(reference.name)) {
+          for (const content of contents) {
+            const value = legacyEnvironmentValue(content.text, reference.name);
+            const origin = value === undefined ? undefined : sanitizedLegacyHttpOrigin(value);
+            if (origin !== undefined) {
+              sanitizedOrigins.push({ sourceName: content.sourceName, origin });
+            }
+          }
+        }
+        const origins = new Set(sanitizedOrigins.map((item) => item.origin));
+        const sanitizedOrigin = origins.size === 1 ? [...origins][0] : undefined;
+        return {
+          runtime: reference.runtime,
+          name: reference.name,
+          sourcePaths: reference.sourcePaths,
+          ...(sanitizedOrigin === undefined ? {} : { sanitizedOrigin }),
+          ...(sanitizedOrigins.length === 0 ? {} : { sanitizedOrigins }),
+        };
+      }),
+    ),
+  };
+}
+
+function canonicalEnvironmentReferences(
+  references: LegacySourceEnvironmentReference[],
+): LegacySourceEnvironmentReference[] {
+  return references
+    .map((reference) => ({
+      runtime: reference.runtime,
+      name: reference.name,
+      sourcePaths: [...reference.sourcePaths].sort(),
+      ...(reference.sanitizedOrigin === undefined
+        ? {}
+        : { sanitizedOrigin: reference.sanitizedOrigin }),
+      ...(reference.sanitizedOrigins === undefined
+        ? {}
+        : {
+            sanitizedOrigins: [...reference.sanitizedOrigins].sort((left, right) =>
+              `${left.sourceName}\0${left.origin}`.localeCompare(
+                `${right.sourceName}\0${right.origin}`,
+              ),
+            ),
+          }),
+    }))
+    .sort((left, right) =>
+      `${left.runtime}\0${left.name}`.localeCompare(`${right.runtime}\0${right.name}`),
+    );
+}
+
+async function resolveLegacyDependencyProbe(
+  importer: string,
+  specifier: string,
+  applicationRoot: string,
+  aliases: Record<string, string>,
+): Promise<string | undefined> {
+  let candidate: string;
+  if (specifier.startsWith(".")) {
+    candidate = path.resolve(path.dirname(importer), specifier);
+  } else {
+    const alias = Object.keys(aliases)
+      .sort((left, right) => right.length - left.length)
+      .find((prefix) => specifier === prefix || specifier.startsWith(`${prefix}/`));
+    if (alias === undefined) return undefined;
+    candidate = path.resolve(aliases[alias]!, specifier.slice(alias.length).replace(/^\/+/u, ""));
+  }
+  for (const suffix of RESOLUTION_EXTENSIONS) {
+    const attempted = `${candidate}${suffix}`;
+    const details = await lstat(attempted).catch(() => undefined);
+    if (details?.isFile() !== true || details.isSymbolicLink()) continue;
+    const resolved = await realpath(attempted);
+    return isWithin(applicationRoot, resolved) ? resolved : undefined;
+  }
+  return undefined;
 }

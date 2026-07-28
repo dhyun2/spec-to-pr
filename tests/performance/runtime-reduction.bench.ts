@@ -13,7 +13,10 @@ import {
   assertLegacyInventoryFresh,
   buildLegacyInventory,
 } from "../../src/legacy/legacy-inventory.js";
-import { LegacySourceCache } from "../../src/legacy/legacy-source-cache.js";
+import {
+  LegacySourceCache,
+  type LegacySourceCacheStats,
+} from "../../src/legacy/legacy-source-cache.js";
 import { RuntimeMetricsRecorder } from "../../src/runtime/performance-instrumentation.js";
 import { sha256Digest } from "../../src/source-registry/content-hash.js";
 import { SourceSnapshotStore } from "../../src/source-registry/snapshot-store.js";
@@ -86,6 +89,17 @@ async function measureFixture(
   samplesByFixture.set(fixtureName, samples);
   peakRss = Math.max(peakRss, process.memoryUsage().rss);
   return recorder.snapshot({ runId, fixtureDigest, collectedAt });
+}
+
+function subtractLegacyStats(
+  after: Readonly<LegacySourceCacheStats>,
+  before: Readonly<LegacySourceCacheStats>,
+): LegacySourceCacheStats {
+  return {
+    fileReads: after.fileReads - before.fileReads,
+    astParses: after.astParses - before.astParses,
+    semanticRebuilds: after.semanticRebuilds - before.semanticRebuilds,
+  };
 }
 
 beforeAll(async () => {
@@ -219,28 +233,27 @@ describe("runtime reduction fixtures", () => {
     "legacy: 250 JS/Vue files, shared adapters, 40 terminal API calls",
     async () => {
       await measureFixture("run_22222222222222222222222222222222", "legacy", async () => {
-        const coldCache = new LegacySourceCache();
-        const pinned = await buildLegacyInventory(legacyDirectory, {}, { sourceCache: coldCache });
+        const sourceCache = new LegacySourceCache();
+        const pinned = await buildLegacyInventory(legacyDirectory, {}, { sourceCache });
         if (pinned.apiCandidates.length !== fixtures.legacy.terminalApiCalls.length) {
           throw new Error("legacy terminal API fixture mismatch");
         }
-        const cold = coldCache.snapshotStats();
+        const cold = sourceCache.snapshotStats();
 
-        const warmCache = new LegacySourceCache();
         const warm = await assertLegacyInventoryFresh(legacyDirectory, pinned, {
-          sourceCache: warmCache,
+          sourceCache,
         });
         if (warm !== pinned)
           throw new Error("legacy warm freshness did not reuse pinned inventory");
-        const warmStats = warmCache.snapshotStats();
+        const afterWarm = sourceCache.snapshotStats();
+        const warmStats = subtractLegacyStats(afterWarm, cold);
 
         const changedPath = path.join(legacyDirectory, fixtures.legacy.files[125]!.path);
         const original = await readFile(changedPath, "utf8");
         await writeFile(changedPath, `${original} `, "utf8");
-        const changeCache = new LegacySourceCache();
         try {
           await assertLegacyInventoryFresh(legacyDirectory, pinned, {
-            sourceCache: changeCache,
+            sourceCache,
           });
           throw new Error("legacy one-byte mutation was not detected");
         } catch (error) {
@@ -250,7 +263,7 @@ describe("runtime reduction fixtures", () => {
         } finally {
           await writeFile(changedPath, original, "utf8");
         }
-        const changed = changeCache.snapshotStats();
+        const changed = subtractLegacyStats(sourceCache.snapshotStats(), afterWarm);
         measuredLegacyCounters.push({
           coldReads: cold.fileReads,
           coldParses: cold.astParses,
@@ -325,7 +338,7 @@ afterAll(async () => {
     legacyCounters.warmParses !== 0 ||
     legacyCounters.warmRebuilds !== 0 ||
     legacyCounters.changeReads !== 250 ||
-    legacyCounters.changeParses !== 250 ||
+    legacyCounters.changeParses !== 1 ||
     legacyCounters.changeRebuilds !== 1
   ) {
     throw new Error(

@@ -20,6 +20,7 @@ import {
 } from "./legacy-source-graph.js";
 import {
   LegacySourceCache,
+  LegacySourceEnvironmentReferenceSchema,
   LegacySourceManifestSchema,
   currentLegacySourceManifest,
   type LegacySourceManifest,
@@ -111,6 +112,7 @@ export const LegacyInventorySchema = z
       .string()
       .regex(/^sha256:[a-f0-9]{64}$/)
       .optional(),
+    sourceEnvironmentRefs: z.array(LegacySourceEnvironmentReferenceSchema).optional(),
     visitedDirectories: z.number().int().nonnegative().default(0),
     visitedEntries: z.number().int().nonnegative().default(0),
     scannedFiles: z.number().int().nonnegative(),
@@ -237,6 +239,7 @@ export async function buildLegacyInventory(
     sourceDigestAlgorithm: graph.digestAlgorithm,
     sourceManifest: graph.sourceManifest,
     sourceManifestDigest: graph.sourceManifest.manifestDigest,
+    sourceEnvironmentRefs: graph.environmentRefs,
     visitedDirectories: graph.visitedDirectories,
     visitedEntries: graph.visitedEntries,
     scannedFiles: Math.max(scannedFiles, graph.files.length),
@@ -278,6 +281,7 @@ export async function assertLegacyInventoryFresh(
     pinned.version === 3 &&
     pinned.sourceDigestAlgorithm === LEGACY_SOURCE_DIGEST_ALGORITHM_V2 &&
     pinned.sourceManifest !== undefined &&
+    pinned.sourceEnvironmentRefs !== undefined &&
     pinned.sourceManifestDigest === pinned.sourceManifest.manifestDigest
   ) {
     const currentManifest = await currentLegacySourceManifest(
@@ -289,20 +293,19 @@ export async function assertLegacyInventoryFresh(
         maxBytes: DEFAULT_LEGACY_INVENTORY_LIMITS.maxSourceBytes,
         maxDepth: DEFAULT_LEGACY_INVENTORY_LIMITS.maxDepth,
         maxElapsedMs: DEFAULT_LEGACY_INVENTORY_LIMITS.maxElapsedMs,
+        maxDirectories: DEFAULT_LEGACY_INVENTORY_LIMITS.maxDirectories,
+        maxEntries: DEFAULT_LEGACY_INVENTORY_LIMITS.maxEntries,
+      },
+      {
+        environmentReferences: pinned.sourceEnvironmentRefs ?? [],
+        supportingDependencies: pinned.supportingDependencies,
       },
     );
     if (currentManifest.truncated) {
       throw new Error("LEGACY_INVENTORY_TRUNCATED: narrow the migration scope and restart intake");
     }
     if (currentManifest.manifest.manifestDigest === pinned.sourceManifestDigest) {
-      return pinned.rootDigest === (pinned.sourceDigest ?? pinned.rootDigest)
-        ? pinned
-        : freezeInventoryManifest(
-            LegacyInventorySchema.parse({
-              ...pinned,
-              rootDigest: pinned.sourceDigest ?? pinned.rootDigest,
-            }),
-          );
+      return pinned;
     }
     const rebuilt = await buildLegacyInventory(root, {}, { sourceCache });
     if (rebuilt.truncated) {
