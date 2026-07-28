@@ -973,6 +973,20 @@ describe("v2 documentation", () => {
     }
   });
 
+  it("requires intake to bind native Figma state and design-system authority", () => {
+    const intake = readFileSync(path.join(root, "skills", "intake-contracts", "SKILL.md"), "utf8");
+    for (const marker of [
+      "figma-capture-geometry-v2",
+      "captured state facts",
+      "package manifest",
+      "Code Connect",
+      "semantic token",
+      "expected geometry",
+    ]) {
+      expect(intake, `intake:${marker}`).toContain(marker);
+    }
+  });
+
   it("documents composable sources, guidance precedence, and the zero-to-100 feature recipe", () => {
     const readmes = ["README.md", "README.ko.md", "packages/codex-sdk/README.md"].map((file) =>
       readFileSync(path.join(root, file), "utf8"),
