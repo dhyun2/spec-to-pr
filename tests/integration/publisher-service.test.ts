@@ -859,6 +859,7 @@ describe("PublisherService", () => {
       expect(published.result.errorMessage).toMatch(
         new RegExp(`missing an? ${role} artifact`, "i"),
       );
+      expect(githubPublisher.uploadedAssetIds).toHaveLength(0);
       expect(githubPublisher.createdPayloads).toHaveLength(0);
       expect(githubPublisher.updatedMetadata).toHaveLength(0);
     },
