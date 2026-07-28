@@ -5365,6 +5365,61 @@ describe("WorkflowService", () => {
         },
       ],
     });
+    const implementedRun = await store.get(started.runId);
+    const implementationStage = implementedRun.stages.find(
+      (stage) => stage.name === "implementation",
+    );
+    const originalPacket = structuredClone(
+      implementationStage?.checkpoint?.data["reviewPacket"],
+    ) as Record<string, unknown>;
+    const originalEvidenceIndex = structuredClone(originalPacket["evidenceIndex"]);
+    const saveEvidenceIndex = async (evidenceIndex: unknown) => {
+      const current = await store.get(started.runId);
+      await store.save(
+        {
+          ...current,
+          revision: current.revision + 1,
+          updatedAt: new Date().toISOString(),
+          stages: current.stages.map((stage) =>
+            stage.name === "implementation"
+              ? {
+                  ...stage,
+                  checkpoint: {
+                    ...stage.checkpoint!,
+                    data: {
+                      ...stage.checkpoint!.data,
+                      reviewPacket: {
+                        ...originalPacket,
+                        evidenceIndex,
+                      },
+                    },
+                  },
+                }
+              : stage,
+          ),
+        },
+        current.revision,
+      );
+    };
+    const originalEntry = (originalEvidenceIndex as Array<Record<string, unknown>>)[0]!;
+    await saveEvidenceIndex([
+      {
+        ...originalEntry,
+        resultDigest: `sha256:${"a".repeat(64)}`,
+      },
+    ]);
+    const staleEvidenceStatus = await service.status({ runId: started.runId });
+    expect(
+      staleEvidenceStatus.nextActions.find((action) => action.kind === "review-functional"),
+    ).not.toHaveProperty("evidenceIndex");
+
+    await saveEvidenceIndex([{ command: "" }]);
+    const malformedEvidenceStatus = await service.status({ runId: started.runId });
+    expect(
+      malformedEvidenceStatus.nextActions.find((action) => action.kind === "review-functional"),
+    ).not.toHaveProperty("evidenceIndex");
+    await saveEvidenceIndex(originalEvidenceIndex);
+
     const visualAction = implemented.nextActions.find(
       (action) => action.kind === "compare-visuals",
     );
@@ -6580,6 +6635,79 @@ describe("WorkflowService", () => {
       snapshot.samples.find((sample) => sample.name === "git.command_count")?.value,
     ).toBeLessThanOrEqual(14);
     expect(workspace.releaseQaSha).toHaveLength(40);
+  });
+
+  it("invalidates a strict review packet when an untracked file is added or changed", async () => {
+    await prepareStrictWorkspace(directory);
+    const started = await service.start({
+      projectRoot: path.join(directory, "src/pages/shop"),
+      requestText: "Implement and review a shop change.",
+      scope: "non-ui",
+      publication: "none",
+      workspace: {
+        sourceBranch: "codex/shop",
+        targetBranch: "release-qa",
+        remoteName: "origin",
+      },
+    });
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "contracts",
+        status: "passed",
+        summary: "Shop contract ready.",
+        artifactPaths: ["contracts/requirements.json"],
+        requirementManifest: requirements("shop"),
+      },
+    });
+    await changeSource(directory, "src/pages/shop/App.ts", "export const shop = 'clean';\n");
+    await execFileAsync("git", ["add", "src/pages/shop/App.ts"], { cwd: directory });
+    await execFileAsync("git", ["commit", "-qm", "implement shop"], { cwd: directory });
+    const implemented = await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "implementation",
+        status: "passed",
+        summary: "Shop implemented.",
+        apiReady: false,
+        uiChanged: false,
+        changedFiles: ["src/pages/shop/App.ts"],
+        artifactPaths: ["test-results/unit.json"],
+      },
+    });
+    const packetId = reviewPacketId(implemented, "review-functional");
+    const review = () =>
+      service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "functional-review" as const,
+          reviewPacketId: packetId,
+          verdict: "approved" as const,
+          summary: "Functional behavior passed.",
+          findings: [],
+          requirements: [{ id: "shop", verdict: "accepted" as const }],
+          artifactPaths: ["test-results/unit.json"],
+          gateResults: [
+            {
+              id: "functional" as const,
+              status: "passed" as const,
+              evidencePaths: ["test-results/unit.json"],
+            },
+          ],
+        },
+      });
+
+    await writeFile(
+      path.join(directory, "src/pages/shop/untracked.ts"),
+      "export const value = 1;\n",
+    );
+    await expect(review()).rejects.toThrow(/review packet is stale/i);
+
+    await writeFile(
+      path.join(directory, "src/pages/shop/untracked.ts"),
+      "export const value = 2;\n",
+    );
+    await expect(review()).rejects.toThrow(/review packet is stale/i);
   });
 
   it("enforces baseline isolation and renderer lineage, reuses baselines, and keeps full fresh coverage across three visual failures", async () => {

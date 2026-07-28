@@ -1,7 +1,9 @@
+import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
+import { promisify } from "node:util";
 
 import { afterAll, beforeAll, bench, describe } from "vitest";
 import { PNG } from "pngjs";
@@ -25,14 +27,6 @@ import { SourceSnapshotStore } from "../../src/source-registry/snapshot-store.js
 import { orderedConcurrentMap } from "../../src/source-ingestion/source-loader.js";
 import { SqliteRunStore } from "../../src/store/sqlite-run-store.js";
 import {
-  ImplementationSnapshotSchema,
-  reusableImplementationSnapshot,
-} from "../../src/workflow/implementation-snapshot.js";
-import {
-  PacketEvidenceEntrySchema,
-  reusablePacketEvidence,
-} from "../../src/workflow/packet-evidence-index.js";
-import {
   MAX_ACTIVE_VISUAL_PIXELS,
   MAX_VISUAL_COMPARISON_ACTIVE_ALLOCATION_BYTES,
   MAX_VISUAL_COMPARISON_BATCH_INPUT_BYTES,
@@ -52,6 +46,7 @@ import {
 import { normalizeVisualPng } from "../../src/visual/visual-normalizer.js";
 
 const collectedAt = "2026-07-28T00:00:00.000Z";
+const execFileAsync = promisify(execFile);
 const measuredIterations = 5;
 const samplesByFixture = new Map<string, number[]>();
 const peakRssByFixture = new Map<string, number[]>();
@@ -79,6 +74,8 @@ const measuredMutatingStartBytes: number[] = [];
 const measuredMutatingAdvanceBytes: number[] = [];
 const measuredMutatingSubmitBytes: number[] = [];
 const measuredPacketEvidenceReuseHits: number[] = [];
+const measuredPacketBinaryDiffRecaptures: number[] = [];
+const measuredPacketGitCommands: number[] = [];
 type MeasuredVisualCounters = {
   mode: "cold" | "warm" | "total";
   cacheHits: number;
@@ -165,9 +162,9 @@ const fixtures = {
     maximumInventoryReads: 0,
   },
   packetEvidence: {
-    lookupsPerIteration: 10_000,
-    expectedReuseHits: 10_000,
-    expectedStaleHits: 0,
+    workflowPath: ["implementation", "functional-review", "report"],
+    expectedFreshnessChecks: 2,
+    expectedBinaryDiffRecaptures: 0,
   },
 } as const;
 
@@ -200,6 +197,169 @@ function recordFixturePeakRss(fixtureName: string, peakRss: number): void {
   const peaks = peakRssByFixture.get(fixtureName) ?? [];
   peaks.push(peakRss);
   peakRssByFixture.set(fixtureName, peaks);
+}
+
+function metricValue(
+  snapshot: ReturnType<RuntimeMetricsRecorder["snapshot"]>,
+  name: "git.binary_diff_bytes" | "git.command_count",
+): number {
+  return snapshot.samples.find((sample) => sample.name === name)?.value ?? 0;
+}
+
+async function runPacketEvidenceWorkflow(): Promise<{
+  runId: `run_${string}`;
+  elapsed: number;
+  peakRss: number;
+  freshnessChecks: number;
+  binaryDiffRecaptures: number;
+  gitCommands: number;
+}> {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-packet-bench-"));
+  const recorder = new RuntimeMetricsRecorder();
+  const store = new SqliteRunStore(path.join(directory, "runs.sqlite3"), recorder);
+  const artifactStore = new ArtifactBlobStore(path.join(directory, "artifacts"), recorder);
+  try {
+    await Promise.all([
+      mkdir(path.join(directory, "src"), { recursive: true }),
+      mkdir(path.join(directory, "contracts"), { recursive: true }),
+      mkdir(path.join(directory, "test-results"), { recursive: true }),
+    ]);
+    await Promise.all([
+      writeFile(
+        path.join(directory, ".gitignore"),
+        "artifacts/\nsource-snapshots/\nruns.sqlite3*\n",
+      ),
+      writeFile(path.join(directory, "src/parser.ts"), "export const parser = 'base';\n"),
+      writeFile(path.join(directory, "contracts/requirements.json"), "{}\n"),
+      writeFile(path.join(directory, "test-results/unit.json"), '{"status":"passed"}\n'),
+    ]);
+    await execFileAsync("git", ["init", "-q", "-b", "release-qa"], { cwd: directory });
+    await execFileAsync("git", ["config", "user.email", "benchmark@example.test"], {
+      cwd: directory,
+    });
+    await execFileAsync("git", ["config", "user.name", "Runtime Benchmark"], { cwd: directory });
+    await execFileAsync("git", ["add", "."], { cwd: directory });
+    await execFileAsync("git", ["commit", "-qm", "packet benchmark base"], { cwd: directory });
+    await execFileAsync("git", ["switch", "-qc", "codex/packet-benchmark"], { cwd: directory });
+    await execFileAsync(
+      "git",
+      ["remote", "add", "origin", "git@gitlab.com:example/runtime-benchmark.git"],
+      { cwd: directory },
+    );
+
+    const service = new WorkflowService({
+      runStore: store,
+      artifactStore,
+      runService: new RunService(store, {
+        pluginVersion: "benchmark",
+        now: () => collectedAt,
+      }),
+      intakeRequestService: new IntakeRequestService(
+        store,
+        new SourceSnapshotStore(path.join(directory, "source-snapshots")),
+        artifactStore,
+        () => collectedAt,
+      ),
+      stageService: new StageService(store, () => collectedAt),
+      metrics: recorder,
+      now: () => collectedAt,
+    });
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Implement and review the deterministic parser fixture.",
+      scope: "non-ui",
+      publication: "none",
+      workspace: {
+        sourceBranch: "codex/packet-benchmark",
+        targetBranch: "release-qa",
+        remoteName: "origin",
+      },
+    });
+    const runId = started.runId as `run_${string}`;
+    await service.submit({
+      runId,
+      submission: {
+        kind: "contracts",
+        status: "passed",
+        summary: "Parser contract ready.",
+        artifactPaths: ["contracts/requirements.json"],
+        requirementManifest: [
+          {
+            id: "parser",
+            title: "Parser behavior",
+            acceptanceCriteria: ["The parser workflow is independently reviewed."],
+          },
+        ],
+      },
+    });
+    await writeFile(path.join(directory, "src/parser.ts"), "export const parser = 'changed';\n");
+    await execFileAsync("git", ["add", "src/parser.ts"], { cwd: directory });
+    await execFileAsync("git", ["commit", "-qm", "implement parser"], { cwd: directory });
+    const implemented = await service.submit({
+      runId,
+      submission: {
+        kind: "implementation",
+        status: "passed",
+        summary: "Parser implemented.",
+        apiReady: false,
+        uiChanged: false,
+        changedFiles: ["src/parser.ts"],
+        artifactPaths: ["test-results/unit.json"],
+      },
+    });
+    const packetAction = implemented.nextActions.find(
+      (action) => action.kind === "review-functional",
+    );
+    if (packetAction === undefined || !("reviewPacketId" in packetAction)) {
+      throw new Error("packet benchmark did not produce a functional review action");
+    }
+    const before = recorder.snapshot({ runId, fixtureDigest, collectedAt });
+    const initialDiffBytes = metricValue(before, "git.binary_diff_bytes");
+    const initialGitCommands = metricValue(before, "git.command_count");
+    if (initialDiffBytes <= 0) {
+      throw new Error("packet benchmark implementation did not capture a binary diff");
+    }
+
+    const rssBaseline = process.memoryUsage().rss;
+    const benchmarkStarted = performance.now();
+    await service.submit({
+      runId,
+      submission: {
+        kind: "functional-review",
+        reviewPacketId: packetAction.reviewPacketId,
+        verdict: "approved",
+        summary: "Functional behavior passed.",
+        findings: [],
+        requirements: [{ id: "parser", verdict: "accepted" }],
+        artifactPaths: ["test-results/unit.json"],
+        gateResults: [
+          { id: "functional", status: "passed", evidencePaths: ["test-results/unit.json"] },
+        ],
+      },
+    });
+    await service.advance({ runId, until: "report" });
+    const elapsed = performance.now() - benchmarkStarted;
+    const peakRss = Math.max(rssBaseline, process.memoryUsage().rss);
+    const after = recorder.snapshot({ runId, fixtureDigest, collectedAt });
+    const binaryDiffDelta = metricValue(after, "git.binary_diff_bytes") - initialDiffBytes;
+    if (binaryDiffDelta % initialDiffBytes !== 0) {
+      throw new Error(
+        `packet benchmark binary diff metrics were not integral: ${binaryDiffDelta}/${initialDiffBytes}`,
+      );
+    }
+    const gitCommands = metricValue(after, "git.command_count") - initialGitCommands;
+    return {
+      runId,
+      elapsed,
+      peakRss,
+      freshnessChecks: gitCommands / 3,
+      binaryDiffRecaptures: binaryDiffDelta / initialDiffBytes,
+      gitCommands,
+    };
+  } finally {
+    await store.close();
+    await rm(directory, { recursive: true, force: true });
+  }
 }
 
 function percentile(sorted: readonly number[], percent: number): number {
@@ -625,62 +785,22 @@ describe("runtime reduction fixtures", () => {
   );
 
   bench(
-    "packet evidence: reuse exact clean fences without recapturing binary diff",
+    "packet evidence: reviewer and report reuse one strict Git snapshot",
     async () => {
-      const rssBaseline = process.memoryUsage().rss;
-      const snapshot = ImplementationSnapshotSchema.parse({
-        schemaVersion: "implementation-snapshot-v1",
-        repositoryKey: `sha256:${"1".repeat(64)}`,
-        baseSha: "a".repeat(40),
-        headSha: "b".repeat(40),
-        sourceBranch: "codex/runtime-packet-fence",
-        clean: true,
-        changedFiles: ["src/parser.ts"],
-        diffDigest: `sha256:${"2".repeat(64)}`,
-        binaryDiffBytes: 512,
-        capturedAt: collectedAt,
-      });
-      const evidence = PacketEvidenceEntrySchema.parse({
-        command: "pnpm test -- parser",
-        selector: "parser",
-        resultDigest: `sha256:${"3".repeat(64)}`,
-        artifactId: `art_${"4".repeat(32)}`,
-        headSha: snapshot.headSha,
-        diffDigest: snapshot.diffDigest,
-        adapterVersion: "workflow-v2-evidence",
-      });
-      let reuseHits = 0;
-      let staleHits = 0;
-      const started = performance.now();
-      for (let index = 0; index < fixtures.packetEvidence.lookupsPerIteration; index += 1) {
-        if (
-          reusableImplementationSnapshot(snapshot, {
-            headSha: snapshot.headSha,
-            sourceBranch: snapshot.sourceBranch,
-            clean: true,
-          }) &&
-          reusablePacketEvidence([evidence], evidence) !== undefined
-        ) {
-          reuseHits += 1;
-        }
-        if (
-          reusablePacketEvidence([evidence], {
-            ...evidence,
-            diffDigest: `sha256:${"5".repeat(64)}`,
-          }) !== undefined
-        ) {
-          staleHits += 1;
-        }
-      }
-      recordFixtureSample("packet-evidence", performance.now() - started);
-      recordFixturePeakRss("packet-evidence", Math.max(rssBaseline, process.memoryUsage().rss));
+      const measured = await runPacketEvidenceWorkflow();
+      recordFixtureSample("packet-evidence", measured.elapsed);
+      recordFixturePeakRss("packet-evidence", measured.peakRss);
       if (
-        reuseHits !== fixtures.packetEvidence.expectedReuseHits ||
-        staleHits !== fixtures.packetEvidence.expectedStaleHits
+        measured.freshnessChecks !== fixtures.packetEvidence.expectedFreshnessChecks ||
+        measured.binaryDiffRecaptures !== fixtures.packetEvidence.expectedBinaryDiffRecaptures
       ) {
-        throw new Error(`packet evidence fence mismatch: ${reuseHits}/${staleHits}`);
+        throw new Error(
+          `packet workflow fence mismatch: ${measured.freshnessChecks}/${measured.binaryDiffRecaptures}`,
+        );
       }
-      measuredPacketEvidenceReuseHits.push(reuseHits);
+      measuredPacketEvidenceReuseHits.push(measured.freshnessChecks);
+      measuredPacketBinaryDiffRecaptures.push(measured.binaryDiffRecaptures);
+      measuredPacketGitCommands.push(measured.gitCommands);
     },
     { iterations: 5, warmupIterations: 1, time: 0, warmupTime: 0 },
   );
@@ -978,6 +1098,28 @@ afterAll(async () => {
       `status action read an inventory blob: ${JSON.stringify(measuredStatusArtifactReads)}`,
     );
   }
+  const packetEvidenceReuseHits = [
+    ...new Set(measuredPacketEvidenceReuseHits.slice(-measuredIterations)),
+  ];
+  const packetBinaryDiffRecaptures = [
+    ...new Set(measuredPacketBinaryDiffRecaptures.slice(-measuredIterations)),
+  ];
+  const packetGitCommands = [...new Set(measuredPacketGitCommands.slice(-measuredIterations))];
+  if (
+    packetEvidenceReuseHits.length !== 1 ||
+    packetBinaryDiffRecaptures.length !== 1 ||
+    packetGitCommands.length !== 1 ||
+    packetEvidenceReuseHits[0] !== fixtures.packetEvidence.expectedFreshnessChecks ||
+    packetBinaryDiffRecaptures[0] !== fixtures.packetEvidence.expectedBinaryDiffRecaptures
+  ) {
+    throw new Error(
+      `packet workflow metrics must be stable and measured: ${JSON.stringify({
+        packetEvidenceReuseHits,
+        packetBinaryDiffRecaptures,
+        packetGitCommands,
+      })}`,
+    );
+  }
   const pairedSerialSamples = (samplesByFixture.get("visual-paired-serial") ?? [])
     .slice(-measuredIterations)
     .sort((left, right) => left - right);
@@ -1152,10 +1294,10 @@ afterAll(async () => {
                   }
                 : name === "packet-evidence"
                   ? {
-                      lookupsPerIteration: fixtures.packetEvidence.lookupsPerIteration,
-                      reuseHits: measuredPacketEvidenceReuseHits[0]!,
-                      staleHits: fixtures.packetEvidence.expectedStaleHits,
-                      binaryDiffRecaptures: 0,
+                      workflowPath: fixtures.packetEvidence.workflowPath,
+                      reuseHits: packetEvidenceReuseHits[0]!,
+                      gitCommands: packetGitCommands[0]!,
+                      binaryDiffRecaptures: packetBinaryDiffRecaptures[0]!,
                     }
                   : name.startsWith("visual-paired-")
                     ? {
@@ -1214,9 +1356,10 @@ afterAll(async () => {
       mutatingStartSerializedBytes: measuredMutatingStartBytes[0]!,
       mutatingAdvanceSerializedBytes: measuredMutatingAdvanceBytes[0]!,
       mutatingSubmitSerializedBytes: measuredMutatingSubmitBytes[0]!,
-      packetEvidenceLookupsPerIteration: fixtures.packetEvidence.lookupsPerIteration,
-      packetEvidenceReuseHits: measuredPacketEvidenceReuseHits[0]!,
-      packetEvidenceBinaryDiffRecaptures: 0,
+      packetEvidenceWorkflowPath: fixtures.packetEvidence.workflowPath,
+      packetEvidenceReuseHits: packetEvidenceReuseHits[0]!,
+      packetEvidenceGitCommands: packetGitCommands[0]!,
+      packetEvidenceBinaryDiffRecaptures: packetBinaryDiffRecaptures[0]!,
       visualPairedWorkloadDigest: sha256Digest(Buffer.from(JSON.stringify(fixtures.pairedVisual))),
       visualPairedSerialP95Ms: pairedSerialP95,
       visualPairedPoolP95Ms: pairedPoolP95,

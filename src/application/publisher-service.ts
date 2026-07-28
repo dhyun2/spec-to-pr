@@ -69,7 +69,10 @@ import type { ArtifactRef } from "../runtime/index.js";
 import type { RunStore } from "../store/run-store.js";
 import { RevisionConflictError } from "../store/errors.js";
 import { VisualReportSchema, type VisualReport } from "../visual/visual-model.js";
-import { isSafeDurableEvidencePath } from "../workflow/workflow-contracts.js";
+import {
+  ImplementationReviewPacketSchema,
+  isSafeDurableEvidencePath,
+} from "../workflow/workflow-contracts.js";
 import { assertWorkspaceFresh } from "../workspace/workspace-binding.js";
 
 const execFileAsync = promisify(execFile);
@@ -955,12 +958,13 @@ export class PublisherService {
     }
     if (plan.payload.reviewPacketId !== undefined) {
       const implementation = current.stages.find((stage) => stage.name === "implementation");
-      const packet = implementation?.checkpoint?.data["reviewPacket"];
+      const packet = ImplementationReviewPacketSchema.safeParse(
+        implementation?.checkpoint?.data["reviewPacket"],
+      );
       if (
-        typeof packet === "object" &&
-        packet !== null &&
-        ((packet as Record<string, unknown>)["id"] !== plan.payload.reviewPacketId ||
-          (packet as Record<string, unknown>)["headSha"] !== headSha)
+        !packet.success ||
+        packet.data.id !== plan.payload.reviewPacketId ||
+        packet.data.headSha !== headSha
       ) {
         throw new Error("PUBLISH_EXECUTION_FENCE_STALE: review packet or head binding changed");
       }

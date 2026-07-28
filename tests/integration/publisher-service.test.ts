@@ -262,6 +262,44 @@ describe("PublisherService", () => {
     expect(githubPublisher.createdPayloads).toHaveLength(0);
   });
 
+  it.each([
+    ["missing", undefined],
+    ["null", null],
+    ["malformed", { id: canonicalReviewPacketId, headSha: gitHead }],
+    [
+      "mismatched",
+      {
+        id: `packet_${"e".repeat(64)}`,
+        headSha: gitHead,
+      },
+    ],
+  ] as const)(
+    "rejects a %s current implementation packet before push or provider mutation",
+    async (_name, reviewPacket) => {
+      const run = await runService.createRun({ projectRoot });
+      await markRunReadyForPublish(run.id);
+      const report = await prReportService.generatePrReport({ runId: run.id });
+      await replaceImplementationReviewPacket(run.id, reviewPacket);
+      const gitCallsBeforePublish = gitCalls.length;
+
+      await expect(
+        publisherService.publish({
+          runId: run.id,
+          reportArtifactId: report.markdownArtifactId,
+          sourceBranch: "spec-to-pr/run-1",
+          targetBranch: "main",
+          pushBranch: true,
+          confirm: true,
+        }),
+      ).rejects.toThrow(/PUBLISH_EXECUTION_FENCE_STALE.*review packet/i);
+
+      expect(gitCalls.slice(gitCallsBeforePublish).some((args) => args[0] === "push")).toBe(false);
+      expect(githubPublisher.createdPayloads).toHaveLength(0);
+      expect(githubPublisher.updatedMetadata).toHaveLength(0);
+      expect(githubPublisher.uploadedAssets).toHaveLength(0);
+    },
+  );
+
   it("rejects a lookalike remote before any provider request", async () => {
     const previousHostOverride = process.env["SPEC_TO_PR_GIT_HOST"];
     delete process.env["SPEC_TO_PR_GIT_HOST"];
@@ -2361,6 +2399,20 @@ async function markRunReadyForPublish(runId: string): Promise<void> {
         observabilityArtifact,
         scorecardArtifact,
       ],
+      stages: run.stages.map((stage) =>
+        stage.name === "implementation"
+          ? {
+              ...stage,
+              checkpoint: {
+                name: "implementation-complete",
+                data: {
+                  reviewPacket: canonicalImplementationReviewPacket(run.id),
+                },
+                updatedAt: timestamp,
+              },
+            }
+          : stage,
+      ),
       agentResults: [
         ...run.agentResults,
         {
@@ -2381,6 +2433,46 @@ async function markRunReadyForPublish(runId: string): Promise<void> {
           completedAt: timestamp,
         },
       ],
+    },
+    run.revision,
+  );
+}
+
+function canonicalImplementationReviewPacket(runId: string) {
+  return {
+    id: canonicalReviewPacketId,
+    runId,
+    revision: 1,
+    baseSha: "b".repeat(40),
+    headSha: gitHead,
+    evidenceDigest: `sha256:${"e".repeat(64)}`,
+    diffDigest: canonicalDiffDigest,
+    changedFiles: [],
+  };
+}
+
+async function replaceImplementationReviewPacket(
+  runId: string,
+  reviewPacket: unknown,
+): Promise<void> {
+  const run = await store.get(runId);
+  await store.save(
+    {
+      ...run,
+      revision: run.revision + 1,
+      updatedAt: "2026-06-23T00:00:01.500Z",
+      stages: run.stages.map((stage) =>
+        stage.name === "implementation"
+          ? {
+              ...stage,
+              checkpoint: {
+                name: "implementation-complete",
+                data: reviewPacket === undefined ? {} : { reviewPacket },
+                updatedAt: "2026-06-23T00:00:01.500Z",
+              },
+            }
+          : stage,
+      ),
     },
     run.revision,
   );
@@ -2771,6 +2863,21 @@ async function addVisualEvidence(
       revision: run.revision + 1,
       updatedAt: timestamp,
       artifacts: [...run.artifacts, ...artifacts, visualReportArtifact],
+      stages: run.stages.map((stage) =>
+        stage.name === "implementation"
+          ? {
+              ...stage,
+              checkpoint: {
+                name: "implementation-complete",
+                data: {
+                  ...stage.checkpoint?.data,
+                  reviewPacket: canonicalImplementationReviewPacket(run.id),
+                },
+                updatedAt: timestamp,
+              },
+            }
+          : stage,
+      ),
     },
     run.revision,
   );

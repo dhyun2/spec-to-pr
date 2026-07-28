@@ -180,7 +180,9 @@ import {
   type ImplementationSnapshot,
 } from "../workflow/implementation-snapshot.js";
 import {
+  PacketEvidenceEntrySchema,
   PacketEvidenceIndexSchema,
+  reusablePacketEvidence,
   type PacketEvidenceEntry,
 } from "../workflow/packet-evidence-index.js";
 
@@ -2691,6 +2693,12 @@ export class WorkflowService {
                   ...(visualReceipt === undefined ? {} : { targetId: visualReceipt.targetId }),
                 }),
             ...(featureEvidenceRole === undefined ? {} : { featureEvidenceRole }),
+            ...(featureEvidenceRole !== "result" || submission.kind !== "implementation"
+              ? {}
+              : {
+                  evidenceCommand: submission.featureEvidence?.testCommand,
+                  evidenceSelector: submission.featureEvidence?.testSelector,
+                }),
             ...(apiEvidenceRole === undefined ? {} : { apiEvidenceRole }),
             ...(mockFixture === undefined
               ? {}
@@ -6273,6 +6281,7 @@ async function actionsForRun(
   if (packet === undefined) {
     throw new Error(`Run ${run.id} has no implementation review packet`);
   }
+  const evidenceIndex = currentReusablePacketEvidence(run, packet);
 
   const actions = [];
   const currentVisual = currentVisualReport(run, packet.id);
@@ -6297,9 +6306,7 @@ async function actionsForRun(
         kind: "review-functional",
         runId: run.id,
         reviewPacketId: packet.id,
-        ...(packet.evidenceIndex === undefined || packet.evidenceIndex.length === 0
-          ? {}
-          : { evidenceIndex: packet.evidenceIndex }),
+        ...(evidenceIndex.length === 0 ? {} : { evidenceIndex }),
       }),
     );
   }
@@ -6314,9 +6321,7 @@ async function actionsForRun(
         kind: "review-design",
         runId: run.id,
         reviewPacketId: packet.id,
-        ...(packet.evidenceIndex === undefined || packet.evidenceIndex.length === 0
-          ? {}
-          : { evidenceIndex: packet.evidenceIndex }),
+        ...(evidenceIndex.length === 0 ? {} : { evidenceIndex }),
       }),
     );
   }
@@ -6832,10 +6837,9 @@ function contractRequirementIds(run: RunManifest): Set<string> {
 }
 
 function reviewPacketFromRun(run: RunManifest): ImplementationReviewPacket | undefined {
-  const parsed = ImplementationReviewPacketSchema.safeParse(
+  return parseImplementationReviewPacket(
     stage(run, "implementation").checkpoint?.data["reviewPacket"],
   );
-  return parsed.success ? parsed.data : undefined;
 }
 
 function reviewPacketByIdFromRun(
@@ -6845,10 +6849,57 @@ function reviewPacketByIdFromRun(
   const current = reviewPacketFromRun(run);
   if (current?.id === reviewPacketId) return current;
   for (const artifact of run.artifacts) {
-    const parsed = ImplementationReviewPacketSchema.safeParse(artifact.metadata["reviewPacket"]);
-    if (parsed.success && parsed.data.id === reviewPacketId) return parsed.data;
+    const parsed = parseImplementationReviewPacket(artifact.metadata["reviewPacket"]);
+    if (parsed?.id === reviewPacketId) return parsed;
   }
   return undefined;
+}
+
+function parseImplementationReviewPacket(raw: unknown): ImplementationReviewPacket | undefined {
+  const parsed = ImplementationReviewPacketSchema.safeParse(raw);
+  if (parsed.success) return parsed.data;
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
+  const withoutEvidenceIndex = { ...(raw as Record<string, unknown>) };
+  delete withoutEvidenceIndex["evidenceIndex"];
+  const sanitized = ImplementationReviewPacketSchema.safeParse(withoutEvidenceIndex);
+  return sanitized.success ? sanitized.data : undefined;
+}
+
+function currentReusablePacketEvidence(
+  run: RunManifest,
+  packet: ImplementationReviewPacket,
+): PacketEvidenceEntry[] {
+  return (packet.evidenceIndex ?? []).filter((entry) => {
+    const artifact = run.artifacts.find((candidate) => candidate.id === entry.artifactId);
+    if (
+      artifact === undefined ||
+      artifact.metadata["reviewPacketId"] !== packet.id ||
+      artifact.metadata["headSha"] !== packet.headSha ||
+      artifact.metadata["diffDigest"] !== packet.diffDigest
+    ) {
+      return false;
+    }
+    const command = artifact.metadata["evidenceCommand"];
+    const selector = artifact.metadata["evidenceSelector"];
+    const adapterVersion = artifact.metadata["adapter"];
+    if (
+      typeof command !== "string" ||
+      (selector !== undefined && typeof selector !== "string") ||
+      typeof adapterVersion !== "string"
+    ) {
+      return false;
+    }
+    const expected = PacketEvidenceEntrySchema.safeParse({
+      command,
+      ...(selector === undefined ? {} : { selector }),
+      resultDigest: artifact.digest,
+      artifactId: artifact.id,
+      headSha: packet.headSha,
+      diffDigest: packet.diffDigest,
+      adapterVersion,
+    });
+    return expected.success && reusablePacketEvidence([entry], expected.data) !== undefined;
+  });
 }
 
 function legacyFeatureKeysFromRun(run: RunManifest): Set<string> {
@@ -9045,7 +9096,7 @@ export async function captureGitSnapshot(
           encoding: "utf8",
           maxBuffer: 1024 * 1024,
         }),
-        execFileAsync("git", ["status", "--porcelain=v1", "--untracked-files=no"], {
+        execFileAsync("git", ["status", "--porcelain=v1", "--untracked-files=all"], {
           cwd: projectRoot,
           encoding: "utf8",
           maxBuffer: 5 * 1024 * 1024,
@@ -9198,7 +9249,7 @@ async function captureImplementationSnapshotFence(
       encoding: "utf8",
       maxBuffer: 1024 * 1024,
     }),
-    execFileAsync("git", ["status", "--porcelain=v1", "--untracked-files=no"], {
+    execFileAsync("git", ["status", "--porcelain=v1", "--untracked-files=all"], {
       cwd: projectRoot,
       encoding: "utf8",
       maxBuffer: 5 * 1024 * 1024,
