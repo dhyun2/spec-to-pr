@@ -299,7 +299,9 @@ export function validateSpecToPrRunInput(input) {
     if (input.maxTurns !== undefined && (!Number.isInteger(input.maxTurns) || input.maxTurns <= 0)) {
         throw new Error("maxTurns must be a positive integer");
     }
-    if ((input.publication ?? "draft") === "draft" && input.maxTurns !== undefined && input.maxTurns < 2) {
+    if ((input.publication ?? "draft") === "draft" &&
+        input.maxTurns !== undefined &&
+        input.maxTurns < 2) {
         throw new Error("draft publication requires maxTurns to be at least 2");
     }
     if (input.blockedDiagnosticTokenReserve !== undefined &&
