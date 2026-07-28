@@ -143,6 +143,7 @@ type FigmaStateTarget = {
 };
 
 export function assertFigmaStateContracts(rawInput: {
+  nodeIds: string[];
   targets: FigmaStateTarget[];
   stateContracts: FigmaStateContract[];
 }): void {
@@ -156,6 +157,22 @@ export function assertFigmaStateContracts(rawInput: {
     throw stateContractError(parsedContracts.error.issues.map((issue) => issue.message).join("; "));
   }
   const contracts = parsedContracts.data;
+  const targetNodeIds = targets.flatMap((target) =>
+    target.figmaCapture === undefined ? [] : [target.figmaCapture.nodeId],
+  );
+  const duplicateSubmittedNodeIds = duplicates(rawInput.nodeIds);
+  const missingNodeIds = targetNodeIds.filter((nodeId) => !rawInput.nodeIds.includes(nodeId));
+  const extraNodeIds = rawInput.nodeIds.filter((nodeId) => !targetNodeIds.includes(nodeId));
+  if (
+    rawInput.nodeIds.length !== targetNodeIds.length ||
+    duplicateSubmittedNodeIds.length > 0 ||
+    missingNodeIds.length > 0 ||
+    extraNodeIds.length > 0
+  ) {
+    throw stateContractError(
+      `nodeIds must provide unique exact coverage of visual target geometry; missing nodeIds: ${missingNodeIds.join(", ") || "none"}; extra nodeIds: ${extraNodeIds.join(", ") || "none"}; duplicate nodeIds: ${duplicateSubmittedNodeIds.join(", ") || "none"}`,
+    );
+  }
   const targetBindings = targets.map((target) => {
     const capture = target.figmaCapture;
     if (capture === undefined) {

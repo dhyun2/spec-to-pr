@@ -183,7 +183,7 @@ const FigmaManifestSchema = z
     capturedAt: z.string().datetime({ offset: true }),
     fileUrl: FigmaFileUrlSchema,
     fileUrls: z.array(FigmaFileUrlSchema).min(1).max(MAX_COMPOSABLE_SOURCE_PATHS),
-    nodeIds: z.array(z.string().trim().min(1)).min(1),
+    nodeIds: z.array(z.string().trim().min(1)).max(50),
     capturedComponents: z.array(CapturedFigmaComponentSchema).max(1_000),
     designMapping: FigmaDesignMappingSchema,
     stateContracts: z.array(FigmaStateContractSchema).min(1).max(50),
@@ -2305,11 +2305,19 @@ export class WorkflowService {
             );
           }
           const decoded = await decodeBoundedPng(content, evidencePath);
+          const stateContract = submission.stateContracts.find(
+            (contract) => contract.targetId === target.targetId,
+          );
+          if (stateContract === undefined) {
+            throw new Error(
+              `FIGMA_STATE_CONTRACT_INVALID: missing expected node/state binding for ${target.targetId}`,
+            );
+          }
           assertFigmaCaptureGeometry({
             geometry: target.figmaCapture,
             target: {
-              nodeId: target.figmaCapture.nodeId,
-              state: target.state,
+              nodeId: stateContract.nodeId,
+              state: stateContract.state,
             },
             viewport: target.viewport,
             decodedSize: { width: decoded.width, height: decoded.height },
@@ -2677,6 +2685,17 @@ export class WorkflowService {
     const targets = visualTargetsFromRun(run);
     if (targets.length === 0) {
       throw new Error("Visual comparison requires a declared Figma or legacy target manifest");
+    }
+    const historicalFigmaTarget = targets.find(
+      (target) =>
+        target.baselineKind === "figma" &&
+        target.figmaCapture !== undefined &&
+        !("schemaVersion" in target.figmaCapture),
+    );
+    if (historicalFigmaTarget !== undefined) {
+      throw new Error(
+        `FIGMA_CAPTURE_GEOMETRY_REACQUISITION_REQUIRED: persisted target ${historicalFigmaTarget.targetId} uses display-only v1 geometry`,
+      );
     }
     const captures = new Map(submission.captures.map((capture) => [capture.targetId, capture]));
     const targetIds = new Set(targets.map((target) => target.targetId));
@@ -6829,17 +6848,24 @@ function assertFigmaManifest(
     throw new Error(`Figma manifest must be valid JSON: ${evidencePath}`);
   }
   const parsed = FigmaManifestSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new Error(`Figma manifest provenance does not match its submission: ${evidencePath}`);
+  }
+  assertFigmaStateContracts({
+    nodeIds: parsed.data.nodeIds,
+    targets: parsed.data.visualTargets,
+    stateContracts: parsed.data.stateContracts,
+  });
   const submittedFileUrls = submission.fileUrls ?? [submission.fileUrl];
   const expectedVisualPaths = submission.artifactPaths.filter(
     (artifactPath) => artifactPath !== submission.manifestPath,
   );
   if (
-    !parsed.success ||
     parsed.data.provider !== submission.provider ||
     parsed.data.capturedAt !== submission.capturedAt ||
     parsed.data.fileUrl !== submission.fileUrl ||
     JSON.stringify(parsed.data.fileUrls) !== JSON.stringify(submittedFileUrls) ||
-    JSON.stringify(parsed.data.nodeIds) !== JSON.stringify(submission.nodeIds) ||
+    !sameStringMembers(parsed.data.nodeIds, submission.nodeIds) ||
     JSON.stringify(parsed.data.capturedComponents) !==
       JSON.stringify(submission.capturedComponents) ||
     JSON.stringify(parsed.data.designMapping) !== JSON.stringify(submission.designMapping) ||
@@ -6853,10 +6879,6 @@ function assertFigmaManifest(
   assertCompleteDesignMapping({
     capturedComponents: parsed.data.capturedComponents,
     mapping: parsed.data.designMapping,
-  });
-  assertFigmaStateContracts({
-    targets: parsed.data.visualTargets,
-    stateContracts: parsed.data.stateContracts,
   });
 }
 

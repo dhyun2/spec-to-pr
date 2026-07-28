@@ -1442,6 +1442,7 @@ export const FigmaBundleSubmissionSchema = z
     }
     try {
       assertFigmaStateContracts({
+        nodeIds: submission.nodeIds,
         targets: submission.visualTargets,
         stateContracts: submission.stateContracts,
       });

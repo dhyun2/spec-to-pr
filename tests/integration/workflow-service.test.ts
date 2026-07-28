@@ -5160,6 +5160,17 @@ describe("WorkflowService", () => {
       /Figma manifest/i,
     );
 
+    for (const nodeIds of [[], ["9:9"], ["1:2", "9:9"], ["1:2", "1:2"]]) {
+      await writeFile(
+        path.join(directory, submission.manifestPath),
+        JSON.stringify({ ...figmaManifest(), nodeIds }),
+        "utf8",
+      );
+      await expect(service.submit({ runId: started.runId, submission })).rejects.toThrow(
+        /FIGMA_STATE_CONTRACT_INVALID.*nodeIds/i,
+      );
+    }
+
     await writeFile(
       path.join(directory, submission.manifestPath),
       JSON.stringify(figmaManifest()),
@@ -5255,6 +5266,143 @@ describe("WorkflowService", () => {
         (artifact) => artifact.metadata["adapter"] === "visual-attempt-reservation-v3",
       ),
     ).toHaveLength(0);
+  });
+
+  it("rejects persisted v1 Figma geometry without mutating attempt state", async () => {
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: `Implement ${FIGMA_URL}`,
+      scope: "ui",
+      mode: "figma",
+      changeKind: "design",
+      figmaUrl: FIGMA_URL,
+    });
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "figma-bundle",
+        provider: "host-connected-figma",
+        capturedAt: "2026-07-13T00:00:00.000Z",
+        fileUrl: FIGMA_URL,
+        fileUrls: [FIGMA_URL],
+        nodeIds: ["1:2"],
+        capturedComponents: figmaCapturedComponents(),
+        designMapping: figmaDesignMapping(),
+        manifestPath: "figma/design-context.json",
+        stateContracts: figmaStateContracts(),
+        visualTargets: figmaVisualTargets(),
+        artifactPaths: ["figma/design-context.json", "visual/diff.png"],
+      },
+    });
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "contracts",
+        status: "passed",
+        summary: "Figma state contract ready.",
+        artifactPaths: ["contracts/requirements.json"],
+        requirementManifest: requirements("figma-screen"),
+      },
+    });
+    await changeSource(directory, "src/checkout.tsx", "export const checkout = 'v1-seed';\n");
+    const implemented = await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "implementation",
+        status: "passed",
+        summary: "Implementation ready for visual comparison.",
+        apiReady: false,
+        uiChanged: true,
+        changedFiles: ["src/checkout.tsx"],
+        artifactPaths: ["test-results/unit.json", "mocks/manifest.json", "mocks/checkout.json"],
+        mockDataEvidence: {
+          manifestPath: "mocks/manifest.json",
+          fixtures: [
+            {
+              id: "mock:checkout",
+              path: "mocks/checkout.json",
+              stateContractDigest: figmaStateContracts()[0]!.digest,
+            },
+          ],
+        },
+      },
+    });
+    const compareAction = implemented.nextActions.find(
+      (action) => action.kind === "compare-visuals",
+    );
+    if (compareAction === undefined || !("reviewPacketId" in compareAction)) {
+      throw new Error("Missing visual comparison action");
+    }
+
+    const seededRun = await store.get(started.runId);
+    const bundleIndex = seededRun.artifacts.findIndex(
+      (artifact) =>
+        artifact.metadata["workflowSubmissionKind"] === "figma-bundle" &&
+        Array.isArray(artifact.metadata["visualTargets"]),
+    );
+    if (bundleIndex < 0) throw new Error("Missing persisted Figma targets");
+    const bundle = seededRun.artifacts[bundleIndex]!;
+    seededRun.artifacts[bundleIndex] = ArtifactRefSchema.parse({
+      ...bundle,
+      metadata: {
+        ...bundle.metadata,
+        visualTargets: [
+          {
+            ...figmaVisualTargets()[0]!,
+            figmaCapture: {
+              nodeId: "1:2",
+              captureKind: "viewport",
+              logicalSize: { width: 1, height: 1 },
+              exportScale: 1,
+              bitmapSize: { width: 1, height: 1 },
+              colorSpace: "srgb",
+            },
+          },
+        ],
+      },
+    });
+    seededRun.revision += 1;
+    seededRun.updatedAt = new Date().toISOString();
+    await store.save(seededRun, seededRun.revision - 1);
+
+    const before = await store.get(started.runId);
+    const beforeBytes = JSON.stringify(before);
+    const actualPath = `visual/actual/${compareAction.reviewPacketId}/checkout-default.png`;
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "visual-comparison",
+          reviewPacketId: compareAction.reviewPacketId,
+          captures: [
+            {
+              targetId: "checkout-default",
+              route: "/checkout",
+              state: "default",
+              viewport: { width: 1, height: 1 },
+              deviceScaleFactor: 1,
+              fixture: "mock:checkout",
+              provider: "playwright",
+              capturedAt: "2026-07-20T00:00:00.000Z",
+              actualPath,
+              actualDigest: `sha256:${"a".repeat(64)}`,
+            },
+          ],
+          artifactPaths: [actualPath],
+        },
+      }),
+    ).rejects.toThrow(/FIGMA_CAPTURE_GEOMETRY_REACQUISITION_REQUIRED/);
+    const after = await store.get(started.runId);
+    expect(JSON.stringify(after)).toBe(beforeBytes);
+    expect(
+      after.artifacts.filter(
+        (artifact) => artifact.metadata["adapter"] === "visual-attempt-reservation-v3",
+      ),
+    ).toEqual(
+      before.artifacts.filter(
+        (artifact) => artifact.metadata["adapter"] === "visual-attempt-reservation-v3",
+      ),
+    );
   });
 
   it("records at most one Figma bundle under concurrent submissions", async () => {

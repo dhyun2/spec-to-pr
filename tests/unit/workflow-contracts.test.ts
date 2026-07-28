@@ -1117,6 +1117,9 @@ describe("workflow v2 contracts", () => {
     };
 
     expect(WorkflowSubmissionSchema.safeParse(base).success).toBe(true);
+    for (const nodeIds of [[], ["9:9"], ["1:2", "9:9"], ["1:2", "1:2"]]) {
+      expect(WorkflowSubmissionSchema.safeParse({ ...base, nodeIds }).success).toBe(false);
+    }
     for (const stateContracts of [
       [],
       [stateContract(), stateContract()],

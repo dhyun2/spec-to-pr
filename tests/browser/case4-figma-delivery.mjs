@@ -131,7 +131,7 @@ try {
       "tests/integration/publisher-service.test.ts",
       "tests/integration/workflow-service.test.ts",
       "-t",
-      "historical v1 Figma geometry|repairs implementation across visual packets|pinned publication|workspace binding",
+      "v1 Figma geometry|repairs implementation across visual packets|pinned publication|workspace binding",
     ],
     { cwd: root, env: process.env, stdio: "inherit" },
   );
