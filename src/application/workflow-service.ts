@@ -2765,8 +2765,14 @@ export class WorkflowService {
       packet,
       baselineArtifacts,
       evidence,
-      ...sourceInputs,
-      excludedPaths: [...submission.artifactPaths, ...targets.map((target) => target.baselinePath)],
+      implementationSourceFiles: sourceInputs.implementationSourceFiles,
+      designSystemSourceFiles: sourceInputs.designSystemSourceFiles,
+      browserBundlePaths: sourceInputs.browserBundlePaths,
+      excludedPaths: [
+        ...sourceInputs.registeredExcludedPaths,
+        ...submission.artifactPaths,
+        ...targets.map((target) => target.baselinePath),
+      ],
     });
   }
 
@@ -6187,6 +6193,7 @@ function baselineIsolationSourceInputsFromRun(
   implementationSourceFiles: string[];
   designSystemSourceFiles: string[];
   browserBundlePaths: string[];
+  registeredExcludedPaths: string[];
 } {
   const implementationReport = [...run.artifacts].reverse().find((artifact) => {
     if (
@@ -6231,10 +6238,35 @@ function baselineIsolationSourceInputsFromRun(
       ? [projectRelativePath]
       : [];
   });
+  const browserBundlePathSet = new Set(browserBundlePaths);
+  const registeredEvidencePaths = run.artifacts.flatMap((artifact) => {
+    const projectRelativePath = artifact.metadata["projectRelativePath"];
+    return evidenceArtifactIds.has(artifact.id) &&
+      typeof projectRelativePath === "string" &&
+      !browserBundlePathSet.has(projectRelativePath)
+      ? [projectRelativePath]
+      : [];
+  });
+  const mockDataEvidence = z
+    .object({
+      manifestPath: z.string(),
+      fixturePaths: z.array(z.string()).optional(),
+      fixtures: z.array(z.object({ path: z.string() }).passthrough()).optional(),
+    })
+    .passthrough()
+    .safeParse(implementationReport.metadata["mockDataEvidence"]);
+  const registeredMockPaths = mockDataEvidence.success
+    ? [
+        mockDataEvidence.data.manifestPath,
+        ...(mockDataEvidence.data.fixturePaths ?? []),
+        ...(mockDataEvidence.data.fixtures?.map((fixture) => fixture.path) ?? []),
+      ]
+    : [];
   return {
     implementationSourceFiles: implementationSourceFiles.data,
     designSystemSourceFiles,
     browserBundlePaths,
+    registeredExcludedPaths: [...new Set([...registeredEvidencePaths, ...registeredMockPaths])],
   };
 }
 

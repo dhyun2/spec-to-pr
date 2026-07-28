@@ -112,12 +112,7 @@ async function writeBaselineIsolationEvidence(input: {
       typeof usage.sourceFile === "string" ? [usage.sourceFile] : [],
     ) ?? []),
     ...browserBundles,
-  ]
-    .filter((sourcePath) => /\.(?:js|jsx|ts|tsx|vue|svelte|css|scss|mjs|cjs)$/i.test(sourcePath))
-    .filter(
-      (sourcePath) =>
-        !/(?:^|\/)(?:tests?|__tests__|fixtures?|e2e|specs?)(?:\/|$)/i.test(sourcePath),
-    );
+  ].filter((sourcePath) => /\.(?:js|jsx|ts|tsx|vue|svelte|css|scss|mjs|cjs)$/i.test(sourcePath));
   const checkedSourceFiles = await Promise.all(
     [...new Set(sourcePaths)].sort().map(async (sourcePath) => {
       const content = await readFile(path.join(input.directory, sourcePath));
@@ -6003,6 +5998,12 @@ describe("WorkflowService", () => {
       },
     });
     await changeSource(directory, "src/checkout.tsx", "export const checkout = 'visual';\n");
+    await mkdir(path.join(directory, "src/fixtures"), { recursive: true });
+    await changeSource(
+      directory,
+      "src/fixtures/runtime.ts",
+      "export const runtimeFixture = 'production';\n",
+    );
     const summaryFixture = Buffer.from(JSON.stringify([{ state: "summary" }]), "utf8");
     await writeFile(path.join(directory, "mocks/summary.json"), summaryFixture);
     await expect(
@@ -6030,6 +6031,7 @@ describe("WorkflowService", () => {
         "mocks/manifest.json",
         "mocks/summary.json",
         "src/checkout.tsx",
+        "src/fixtures/runtime.ts",
       ],
       artifactPaths: [
         "test-results/unit.json",
@@ -6367,6 +6369,10 @@ describe("WorkflowService", () => {
     };
 
     const originalCheckoutSource = await readFile(path.join(directory, "src/checkout.tsx"), "utf8");
+    const originalRuntimeSource = await readFile(
+      path.join(directory, "src/fixtures/runtime.ts"),
+      "utf8",
+    );
     const sourceReferenceCases = [
       "import baseline from '../visual/diff.png'; export { baseline };\n",
       "export const css = `background-image:url('../visual/diff.png')`;\n",
@@ -6400,6 +6406,40 @@ describe("WorkflowService", () => {
       }
     }
 
+    const runtimeCandidate = await visualSubmission(
+      compareAction,
+      implementationPacket.headSha,
+      "baseline-runtime-fixture-directory",
+      [255, 255, 255, 255],
+    );
+    const maliciousRuntimeSource = "export const runtimeFixture = '/visual/diff.png';\n";
+    await writeFile(
+      path.join(directory, "src/fixtures/runtime.ts"),
+      maliciousRuntimeSource,
+      "utf8",
+    );
+    const invalidRuntime = await mutateBaselineIsolation(runtimeCandidate, (evidence) => {
+      const checked = evidence["checkedSourceFiles"] as Array<Record<string, unknown>>;
+      const runtime = checked.find((item) => item["path"] === "src/fixtures/runtime.ts");
+      if (runtime === undefined) throw new Error("Missing checked runtime source");
+      runtime["digest"] = `sha256:${createHash("sha256")
+        .update(maliciousRuntimeSource)
+        .digest("hex")}`;
+    });
+    const reservationsBeforeRuntime = await visualReservationCount();
+    try {
+      await expect(
+        service.submit({ runId: started.runId, submission: invalidRuntime }),
+      ).rejects.toThrow(/VISUAL_BASELINE_ISOLATION_INVALID/);
+      expect(await visualReservationCount()).toBe(reservationsBeforeRuntime);
+    } finally {
+      await writeFile(
+        path.join(directory, "src/fixtures/runtime.ts"),
+        originalRuntimeSource,
+        "utf8",
+      );
+    }
+
     const baselineArtifact = (await store.get(started.runId)).artifacts.find(
       (artifact) => artifact.metadata["projectRelativePath"] === "visual/diff.png",
     );
@@ -6410,6 +6450,17 @@ describe("WorkflowService", () => {
       },
       (evidence) => {
         evidence["requestedResources"] = [{ url: baselineArtifact.uri }];
+      },
+      (evidence) => {
+        evidence["requestedResources"] = [{ url: "https://app.example/%252Fvisual%252Fdiff.png" }];
+      },
+      (evidence) => {
+        evidence["renderedMedia"] = [
+          {
+            selector: "img#encoded-overlay",
+            sourceUrl: "https://app.example/%252E%252Fvisual%252Fdiff.png",
+          },
+        ];
       },
       (evidence) => {
         evidence["requestedResources"] = [
@@ -6514,21 +6565,50 @@ describe("WorkflowService", () => {
       );
     };
 
-    const busySubmission = await visualSubmission(
+    let busySubmission = await visualSubmission(
       compareAction,
       implementationPacket.headSha,
       "busy",
       [255, 255, 255, 255],
     );
+    const unrelatedBasenameSource = "export const runtimeFixture = '/assets/diff.png';\n";
+    await writeFile(
+      path.join(directory, "src/fixtures/runtime.ts"),
+      unrelatedBasenameSource,
+      "utf8",
+    );
+    busySubmission = await mutateBaselineIsolation(busySubmission, (evidence) => {
+      const checked = evidence["checkedSourceFiles"] as Array<Record<string, unknown>>;
+      const runtime = checked.find((item) => item["path"] === "src/fixtures/runtime.ts");
+      if (runtime === undefined) throw new Error("Missing checked runtime source");
+      runtime["digest"] = `sha256:${createHash("sha256")
+        .update(unrelatedBasenameSource)
+        .digest("hex")}`;
+      evidence["requestedResources"] = [{ url: "https://app.example/assets/diff.png" }];
+      evidence["renderedMedia"] = [
+        {
+          selector: "img#unrelated",
+          sourceUrl: "https://app.example/assets/diff.png",
+        },
+      ];
+    });
     await appendVisualReservation({
       submissionIdentity: "manual-active-submission",
       ownerToken: "manual-active-owner",
       status: "in-progress",
     });
     const busyWriteSpy = vi.spyOn(artifactStore, "writeBlob");
-    await expect(
-      service.submit({ runId: started.runId, submission: busySubmission }),
-    ).rejects.toThrow(/VISUAL_ATTEMPT_IN_PROGRESS/);
+    try {
+      await expect(
+        service.submit({ runId: started.runId, submission: busySubmission }),
+      ).rejects.toThrow(/VISUAL_ATTEMPT_IN_PROGRESS/);
+    } finally {
+      await writeFile(
+        path.join(directory, "src/fixtures/runtime.ts"),
+        originalRuntimeSource,
+        "utf8",
+      );
+    }
     expect(busyWriteSpy).not.toHaveBeenCalled();
     busyWriteSpy.mockRestore();
     await appendVisualReservation({

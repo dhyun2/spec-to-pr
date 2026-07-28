@@ -17,6 +17,12 @@ const sha256 = (content: string | Buffer) =>
   `sha256:${createHash("sha256").update(content).digest("hex")}` as const;
 
 describe("visual baseline isolation", () => {
+  const registeredExcludedPaths = [
+    "src/shop.test.ts",
+    "tests/fixtures/baseline-overlay.html",
+    "visual/shop-baseline.png",
+    "visual/actual/isolation.json",
+  ];
   let projectRoot: string;
   let packet: ImplementationReviewPacket;
   let baseline: ArtifactRef;
@@ -108,6 +114,7 @@ describe("visual baseline isolation", () => {
         packet,
         baselineArtifacts: [baseline],
         evidence: evidence([source], overrides),
+        excludedPaths: registeredExcludedPaths,
       }),
     ).rejects.toThrow(/VISUAL_BASELINE_ISOLATION_INVALID/);
   }
@@ -124,6 +131,7 @@ describe("visual baseline isolation", () => {
         packet,
         baselineArtifacts: [baseline],
         evidence: evidence([source]),
+        excludedPaths: registeredExcludedPaths,
       }),
     ).resolves.toEqual(evidence([source]));
   });
@@ -176,6 +184,7 @@ describe("visual baseline isolation", () => {
           evidence: evidence([source], {
             requestedResources: [{ url }],
           }),
+          excludedPaths: registeredExcludedPaths,
         }),
       ).rejects.toThrow(/VISUAL_BASELINE_ISOLATION_INVALID/);
     }
@@ -208,6 +217,7 @@ describe("visual baseline isolation", () => {
           packet,
           baselineArtifacts: [baseline],
           evidence: evidence([source], override),
+          excludedPaths: registeredExcludedPaths,
         }),
       ).rejects.toThrow(/VISUAL_BASELINE_ISOLATION_INVALID/);
     }
@@ -229,6 +239,7 @@ describe("visual baseline isolation", () => {
             },
           ],
         }),
+        excludedPaths: registeredExcludedPaths,
       }),
     ).rejects.toThrow(/VISUAL_BASELINE_ISOLATION_INVALID/);
   });
@@ -250,6 +261,7 @@ describe("visual baseline isolation", () => {
       designSystemSourceFiles: [designSystem.path],
       browserBundlePaths: [bundle.path],
       evidence: evidence([changed, declared, designSystem, bundle]),
+      excludedPaths: registeredExcludedPaths,
     };
     await expect(assertBaselineIsolation(input)).resolves.toEqual(input.evidence);
 
@@ -298,8 +310,105 @@ describe("visual baseline isolation", () => {
           packet,
           baselineArtifacts: [baseline],
           evidence: evidence([source], overrides),
+          excludedPaths: registeredExcludedPaths,
         }),
       ).rejects.toThrow(/VISUAL_BASELINE_ISOLATION_INVALID/);
     }
+  });
+
+  it("scans implementation source inside directories named fixtures unless explicitly excluded", async () => {
+    const source = await writeProductFile("src/shop.tsx", "export const Shop = 'semantic';\n");
+    const runtime = await writeProductFile(
+      "src/fixtures/runtime.ts",
+      "export const runtimeFixture = 'production';\n",
+    );
+    const runtimePacket = {
+      ...packet,
+      changedFiles: [...packet.changedFiles, runtime.path],
+    };
+    const input = {
+      projectRoot,
+      packet: runtimePacket,
+      baselineArtifacts: [baseline],
+      evidence: evidence([source, runtime]),
+      excludedPaths: registeredExcludedPaths,
+    };
+
+    await expect(assertBaselineIsolation(input)).resolves.toEqual(input.evidence);
+
+    const maliciousRuntime = await writeProductFile(
+      runtime.path,
+      "export const runtimeFixture = '/visual/shop-baseline.png';\n",
+    );
+    await expect(
+      assertBaselineIsolation({
+        ...input,
+        evidence: evidence([source, maliciousRuntime]),
+      }),
+    ).rejects.toThrow(/VISUAL_BASELINE_ISOLATION_INVALID/);
+  });
+
+  it("rejects single, dot-segment, and repeatedly percent-encoded full baseline paths", async () => {
+    for (const encodedPath of [
+      "%2Fvisual%2Fshop-baseline.png",
+      "%2E%2Fvisual%2Fshop-baseline.png",
+      "%252Fvisual%252Fshop-baseline.png",
+    ]) {
+      await assertInvalid(`export const hiddenBaseline = '${encodedPath}';\n`);
+    }
+
+    const source = await writeProductFile("src/shop.tsx", "export const Shop = 'semantic';\n");
+    for (const override of [
+      {
+        requestedResources: [{ url: "https://app.example/%2Fvisual%2Fshop-baseline.png" }],
+      },
+      {
+        requestedResources: [{ url: "https://app.example/%252E%252Fvisual%252Fshop-baseline.png" }],
+      },
+      {
+        renderedMedia: [
+          {
+            selector: "img#overlay",
+            sourceUrl: "https://app.example/%252Fvisual%252Fshop-baseline.png",
+          },
+        ],
+      },
+    ]) {
+      await expect(
+        assertBaselineIsolation({
+          projectRoot,
+          packet,
+          baselineArtifacts: [baseline],
+          evidence: evidence([source], override),
+          excludedPaths: registeredExcludedPaths,
+        }),
+      ).rejects.toThrow(/VISUAL_BASELINE_ISOLATION_INVALID/);
+    }
+  });
+
+  it("allows unrelated resources that share only the baseline basename", async () => {
+    const source = await writeProductFile(
+      "src/shop.tsx",
+      "export const unrelatedAsset = '/assets/shop-baseline.png';\n",
+    );
+    const valid = evidence([source], {
+      requestedResources: [{ url: "https://app.example/assets/shop-baseline.png" }],
+      renderedMedia: [
+        {
+          selector: "img#unrelated",
+          sourceUrl: "https://app.example/assets/shop-baseline.png",
+        },
+      ],
+    });
+
+    await expect(
+      assertBaselineIsolation({
+        projectRoot,
+        packet,
+        baselineArtifacts: [baseline],
+        evidence: valid,
+        excludedPaths: registeredExcludedPaths,
+      }),
+    ).resolves.toEqual(valid);
   });
 });

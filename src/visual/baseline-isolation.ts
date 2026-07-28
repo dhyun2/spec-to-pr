@@ -20,8 +20,7 @@ const RelativePathSchema = z
   .refine(isSafeRelativePath, "Expected a safe project-relative path");
 const PRODUCT_SOURCE_EXTENSION = /\.(?:js|jsx|ts|tsx|vue|svelte|css|scss)$/i;
 const BROWSER_BUNDLE_EXTENSION = /\.(?:js|mjs|cjs|css)$/i;
-const NON_PRODUCT_SEGMENT = /(?:^|\/)(?:tests?|__tests__|fixtures?|e2e)(?:\/|$)/i;
-const NON_PRODUCT_FILE = /(?:^|\/)[^/]+\.(?:test|spec)\.(?:js|jsx|ts|tsx|vue|svelte|css|scss)$/i;
+const MAX_PERCENT_DECODE_ROUNDS = 4;
 
 export const BaselineIsolationEvidenceSchema = z
   .object({
@@ -134,7 +133,7 @@ export async function assertBaselineIsolation(input: {
     if (digest !== source.digest) {
       invalid(`source digest does not match ${sourcePath}`);
     }
-    const text = content.toString("utf8").toLowerCase();
+    const text = canonicalReferenceText(content.toString("utf8"));
     const matchedToken = baselineTokens.find((token) => text.includes(token));
     if (matchedToken !== undefined) {
       invalid(`product source ${sourcePath} references immutable baseline evidence`);
@@ -253,8 +252,6 @@ function deriveProductSourcePaths(input: {
     const sourcePath = normalizeRelativePath(candidate.sourcePath);
     if (
       input.excludedPaths.has(sourcePath) ||
-      NON_PRODUCT_SEGMENT.test(sourcePath) ||
-      NON_PRODUCT_FILE.test(sourcePath) ||
       (!candidate.bundle && !PRODUCT_SOURCE_EXTENSION.test(sourcePath))
     ) {
       continue;
@@ -301,24 +298,11 @@ function assertWithinRoot(root: string, candidate: string, originalPath: string)
 
 function baselineReferenceTokens(baseline: CanonicalBaseline): string[] {
   const artifactDigestPath = baseline.digest.replace("sha256:", "artifact://sha256/");
-  const tokens = [
-    baseline.path,
-    `/${baseline.path}`,
-    path.posix.basename(baseline.path),
-    baseline.digest,
-    baseline.uri,
-    artifactDigestPath,
-  ];
   return [
     ...new Set(
-      tokens.flatMap((token) => {
-        const lower = token.toLowerCase();
-        try {
-          return [lower, encodeURI(lower).toLowerCase()];
-        } catch {
-          return [lower];
-        }
-      }),
+      [baseline.path, `/${baseline.path}`, baseline.digest, baseline.uri, artifactDigestPath].map(
+        canonicalReferenceText,
+      ),
     ),
   ];
 }
@@ -331,22 +315,47 @@ function matchesBaselineDigest(
 }
 
 function matchesBaselineUrl(url: string, baselines: CanonicalBaseline[]): boolean {
-  let decoded = url.toLowerCase();
+  const decoded = canonicalReferenceText(url);
+  let parsed: URL;
   try {
-    decoded = decodeURI(decoded);
+    parsed = new URL(decoded);
   } catch {
-    // The schema already established a URL; compare its undecoded form when escaping is unusual.
+    return false;
   }
+  const requestedPath = canonicalUrlPath(parsed.pathname);
   return baselines.some((baseline) => {
-    const baselinePath = baseline.path.toLowerCase();
-    const basename = path.posix.basename(baselinePath);
+    const baselinePath = canonicalUrlPath(baseline.path);
     return (
-      decoded === baseline.uri.toLowerCase() ||
+      decoded === canonicalReferenceText(baseline.uri) ||
       decoded.includes(baseline.digest.toLowerCase()) ||
-      decoded.includes(baselinePath) ||
-      new URL(url).pathname.split("/").some((segment) => segment.toLowerCase() === basename)
+      requestedPath === baselinePath
     );
   });
+}
+
+function canonicalReferenceText(value: string): string {
+  return decodePercentEncoding(value).replace(/\\+/g, "/").toLowerCase();
+}
+
+function canonicalUrlPath(value: string): string {
+  const decoded = decodePercentEncoding(value).replace(/\\+/g, "/");
+  return path.posix.normalize(`/${decoded}`).replace(/^\/+/, "").toLowerCase();
+}
+
+function decodePercentEncoding(value: string): string {
+  let decoded = value;
+  for (let round = 0; round < MAX_PERCENT_DECODE_ROUNDS; round += 1) {
+    const next = decoded.replace(/(?:%[a-f0-9]{2})+/gi, (encoded) => {
+      try {
+        return decodeURIComponent(encoded);
+      } catch {
+        return encoded;
+      }
+    });
+    if (next === decoded) break;
+    decoded = next;
+  }
+  return decoded;
 }
 
 function normalizeRelativePath(value: string): string {
