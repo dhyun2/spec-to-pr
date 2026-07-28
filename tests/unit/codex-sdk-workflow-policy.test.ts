@@ -618,6 +618,8 @@ describe("Codex SDK workflow policy", () => {
       "react-best-practices",
       "--skill",
       "api-generator",
+      "--blocked-diagnostic-token-reserve",
+      "24000",
     ];
 
     try {
@@ -641,8 +643,31 @@ describe("Codex SDK workflow policy", () => {
         openApiUrls: ["https://api.example.com/openapi.yaml"],
         guidancePaths: ["AGENTS.md", "docs/architecture/ARCHITECTURE.md"],
         skillHints: ["react-best-practices", "api-generator"],
+        blockedDiagnosticTokenReserve: 24_000,
       }),
     ]);
+  });
+
+  it("rejects a draft run without a finalization turn before Codex starts", () => {
+    expect(() =>
+      validateSpecToPrRunInput({
+        workingDirectory: "/tmp/project",
+        publication: "draft",
+        maxTurns: 1,
+      }),
+    ).toThrow(/draft publication requires maxTurns to be at least 2/);
+  });
+
+  it("requires a bounded positive blocked-diagnostic reserve", () => {
+    for (const blockedDiagnosticTokenReserve of [0, 24_000.5, 50_000]) {
+      expect(() =>
+        validateSpecToPrRunInput({
+          workingDirectory: "/tmp/project",
+          publication: "none",
+          blockedDiagnosticTokenReserve,
+        }),
+      ).toThrow(/blockedDiagnosticTokenReserve/);
+    }
   });
 
   it("always activates UI validation for the full brief contract", () => {

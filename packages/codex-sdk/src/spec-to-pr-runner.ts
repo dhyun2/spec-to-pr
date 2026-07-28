@@ -40,6 +40,8 @@ import {
   buildCodexActionEnvelopeInstructions,
 } from "./workflow-policy.js";
 
+export const DEFAULT_BLOCKED_DIAGNOSTIC_TOKEN_RESERVE = 24_000;
+
 export type SpecToPrCodexRunInput = {
   workingDirectory: string;
   deliveryMode?: "auto" | "brief" | "legacy" | "feature" | "figma";
@@ -70,6 +72,7 @@ export type SpecToPrCodexRunInput = {
   outputSchema?: unknown;
   enableReviewAgents?: boolean;
   maxTurns?: number;
+  blockedDiagnosticTokenReserve?: number;
   usageHistoryPath?: string;
   usageCalibration?: boolean;
 };
@@ -176,6 +179,8 @@ export async function runSpecToPrWithCodex(
     ),
     requiredValidations,
     maxTurns: input.maxTurns ?? 12,
+    blockedDiagnosticTokenReserve:
+      input.blockedDiagnosticTokenReserve ?? DEFAULT_BLOCKED_DIAGNOSTIC_TOKEN_RESERVE,
     inspectBlockedDiagnosticPreflight: () =>
       inspectBlockedDiagnosticPreflight(input.workingDirectory, input.env),
   });
@@ -447,6 +452,19 @@ export function validateSpecToPrRunInput(input: SpecToPrCodexRunInput): void {
   }
   if (input.maxTurns !== undefined && (!Number.isInteger(input.maxTurns) || input.maxTurns <= 0)) {
     throw new Error("maxTurns must be a positive integer");
+  }
+  if ((input.publication ?? "draft") === "draft" && input.maxTurns !== undefined && input.maxTurns < 2) {
+    throw new Error("draft publication requires maxTurns to be at least 2");
+  }
+  if (
+    input.blockedDiagnosticTokenReserve !== undefined &&
+    (!Number.isInteger(input.blockedDiagnosticTokenReserve) ||
+      input.blockedDiagnosticTokenReserve <= 0 ||
+      input.blockedDiagnosticTokenReserve >= effectiveHardLimitForWorkload("XS"))
+  ) {
+    throw new Error(
+      "blockedDiagnosticTokenReserve must be a positive integer below the smallest supported hard limit",
+    );
   }
   if (input.usageCalibration !== false) {
     const usageHistoryPath = resolveUsageHistoryPath(input);

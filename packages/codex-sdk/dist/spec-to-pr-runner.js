@@ -7,6 +7,7 @@ import { executeBudgetedBoundaryTurns, } from "./boundary-runner.js";
 import { UsageCalibrationStore, calibrateTokenRange, isUsageCalibrationReadEnabled, isUsageCalibrationEligible, readCalibrationBestEffort, recordCalibrationBestEffort, } from "./usage-calibration.js";
 import { defaultTokenRangeForWorkload, effectiveHardLimitForWorkload, estimateSdkWorkload, } from "./workload-budget.js";
 import { CODEX_WORKFLOW_TOOL_NAMES, buildCodexActionEnvelopeInstructions, } from "./workflow-policy.js";
+export const DEFAULT_BLOCKED_DIAGNOSTIC_TOKEN_RESERVE = 24_000;
 export async function runSpecToPrWithCodex(input) {
     validateSpecToPrRunInput(input);
     const composableSources = normalizeComposableSources(input);
@@ -63,6 +64,7 @@ export async function runSpecToPrWithCodex(input) {
         ])),
         requiredValidations,
         maxTurns: input.maxTurns ?? 12,
+        blockedDiagnosticTokenReserve: input.blockedDiagnosticTokenReserve ?? DEFAULT_BLOCKED_DIAGNOSTIC_TOKEN_RESERVE,
         inspectBlockedDiagnosticPreflight: () => inspectBlockedDiagnosticPreflight(input.workingDirectory, input.env),
     });
     const usage = sdkUsage(result.usage);
@@ -296,6 +298,15 @@ export function validateSpecToPrRunInput(input) {
     }
     if (input.maxTurns !== undefined && (!Number.isInteger(input.maxTurns) || input.maxTurns <= 0)) {
         throw new Error("maxTurns must be a positive integer");
+    }
+    if ((input.publication ?? "draft") === "draft" && input.maxTurns !== undefined && input.maxTurns < 2) {
+        throw new Error("draft publication requires maxTurns to be at least 2");
+    }
+    if (input.blockedDiagnosticTokenReserve !== undefined &&
+        (!Number.isInteger(input.blockedDiagnosticTokenReserve) ||
+            input.blockedDiagnosticTokenReserve <= 0 ||
+            input.blockedDiagnosticTokenReserve >= effectiveHardLimitForWorkload("XS"))) {
+        throw new Error("blockedDiagnosticTokenReserve must be a positive integer below the smallest supported hard limit");
     }
     if (input.usageCalibration !== false) {
         const usageHistoryPath = resolveUsageHistoryPath(input);

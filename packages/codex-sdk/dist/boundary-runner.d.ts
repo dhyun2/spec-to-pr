@@ -95,6 +95,7 @@ export declare function executeBudgetedBoundaryTurns(input: {
     workloadHardLimits?: Partial<Record<WorkloadSize, number>>;
     requiredValidations: readonly string[];
     maxTurns: number;
+    blockedDiagnosticTokenReserve?: number;
     inspectBlockedDiagnosticPreflight?: () => BlockedDiagnosticPreflight | Promise<BlockedDiagnosticPreflight>;
 }): Promise<{
     threadId: string | null;

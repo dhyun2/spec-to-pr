@@ -1,6 +1,7 @@
 import { type ApprovalMode, type ModelReasoningEffort, type RunResult, type SandboxMode } from "@openai/codex-sdk";
 import { type BlockedDiagnosticPreflight } from "./boundary-runner.js";
 import { type AggregatedUsage, type SdkWorkloadEstimate } from "./workload-budget.js";
+export declare const DEFAULT_BLOCKED_DIAGNOSTIC_TOKEN_RESERVE = 24000;
 export type SpecToPrCodexRunInput = {
     workingDirectory: string;
     deliveryMode?: "auto" | "brief" | "legacy" | "feature" | "figma";
@@ -31,6 +32,7 @@ export type SpecToPrCodexRunInput = {
     outputSchema?: unknown;
     enableReviewAgents?: boolean;
     maxTurns?: number;
+    blockedDiagnosticTokenReserve?: number;
     usageHistoryPath?: string;
     usageCalibration?: boolean;
 };

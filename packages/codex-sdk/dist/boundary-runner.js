@@ -4,6 +4,12 @@ export async function executeBudgetedBoundaryTurns(input) {
     if (!Number.isInteger(input.maxTurns) || input.maxTurns <= 0) {
         throw new Error("maxTurns must be a positive integer");
     }
+    if (input.blockedDiagnosticTokenReserve !== undefined &&
+        (!Number.isInteger(input.blockedDiagnosticTokenReserve) ||
+            input.blockedDiagnosticTokenReserve <= 0 ||
+            input.blockedDiagnosticTokenReserve >= input.hardLimitTokens)) {
+        throw new Error("blockedDiagnosticTokenReserve must be a positive integer below hardLimitTokens");
+    }
     let thread = input.resumeThreadId === undefined
         ? input.client.startThread()
         : input.client.resumeThread(input.resumeThreadId);
@@ -22,8 +28,9 @@ export async function executeBudgetedBoundaryTurns(input) {
     let hasAuthoritativeValidations = false;
     let pinnedRunId = null;
     let blockedFinalizationAttempted = false;
+    let blockedDiagnosticReserveLatched = false;
     const items = [];
-    for (let index = 0; index < input.maxTurns; index += 1) {
+    while (turnCount < input.maxTurns) {
         const turn = await thread.run(prompt);
         turnCount += 1;
         finalResponse = turn.finalResponse;
@@ -40,6 +47,7 @@ export async function executeBudgetedBoundaryTurns(input) {
         }
         pinnedRunId ??= currentStatus.runId;
         workflowStatus = currentStatus;
+        blockedDiagnosticReserveLatched ||= currentStatus.deliveryProfile.publication === "draft";
         const configuredHardLimit = input.workloadHardLimits?.[currentStatus.workload.size];
         if (configuredHardLimit !== undefined) {
             activeHardLimitTokens = configuredHardLimit;
@@ -76,9 +84,13 @@ export async function executeBudgetedBoundaryTurns(input) {
             state = "usage-unavailable";
             break;
         }
+        const normalTurnLimit = blockedDiagnosticReserveLatched ? input.maxTurns - 1 : input.maxTurns;
+        const normalTokenLimit = blockedDiagnosticReserveLatched
+            ? activeHardLimitTokens - (input.blockedDiagnosticTokenReserve ?? 0)
+            : activeHardLimitTokens;
         const decision = decideBudgetAction({
             usedTokens: usage.totalTokens,
-            hardLimitTokens: activeHardLimitTokens,
+            hardLimitTokens: normalTokenLimit,
             checkpointed,
             workloadSize: activeWorkloadSize,
             requiredValidations: activeRequiredValidations,
@@ -88,7 +100,7 @@ export async function executeBudgetedBoundaryTurns(input) {
             break;
         }
         if (decision.action === "checkpoint") {
-            if (index + 1 >= input.maxTurns) {
+            if (turnCount >= normalTurnLimit) {
                 state = "turn-limit";
                 break;
             }
@@ -97,13 +109,17 @@ export async function executeBudgetedBoundaryTurns(input) {
             thread = input.client.startThread();
             prompt = buildCompactCheckpointPrompt(workflowStatus, activeRequiredValidations, {
                 usedTokens: usage.totalTokens,
-                hardLimitTokens: activeHardLimitTokens,
+                hardLimitTokens: normalTokenLimit,
             });
             continue;
         }
+        if (turnCount >= normalTurnLimit) {
+            state = "turn-limit";
+            break;
+        }
         prompt = buildBoundaryContinuationPrompt(workflowStatus, activeRequiredValidations, {
             usedTokens: usage.totalTokens,
-            hardLimitTokens: activeHardLimitTokens,
+            hardLimitTokens: normalTokenLimit,
         });
     }
     if (input.outputSchema !== undefined && (state === "completed" || state === "blocked")) {
