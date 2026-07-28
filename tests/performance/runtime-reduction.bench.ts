@@ -337,7 +337,7 @@ afterAll(async () => {
     legacyCounters.warmReads !== 250 ||
     legacyCounters.warmParses !== 0 ||
     legacyCounters.warmRebuilds !== 0 ||
-    legacyCounters.changeReads !== 250 ||
+    legacyCounters.changeReads !== 500 ||
     legacyCounters.changeParses !== 1 ||
     legacyCounters.changeRebuilds !== 1
   ) {

@@ -89,11 +89,15 @@ export type LegacySourceEnvironmentReference = z.infer<
   typeof LegacySourceEnvironmentReferenceSchema
 >;
 
-export type LegacyResolutionDependency = {
-  importer: string;
-  specifier: string;
-  applicationRelativePath: string;
-};
+export const LegacyResolutionDecisionSchema = z
+  .object({
+    importer: z.string().trim().min(1).max(1_000),
+    specifier: z.string().trim().min(1).max(1_000),
+    resolvedPath: z.union([z.literal("@missing"), z.string().trim().min(1).max(1_000)]),
+  })
+  .strict();
+
+export type LegacyResolutionDecision = z.infer<typeof LegacyResolutionDecisionSchema>;
 
 export type LegacySourceCacheStats = {
   fileReads: number;
@@ -200,7 +204,7 @@ export async function loadLegacyResolutionConfig(
   const aliases = new Map<string, string>();
   for (const configName of ["tsconfig.json", "jsconfig.json"]) {
     const configPath = path.join(applicationRoot, configName);
-    const source = await readBoundedDigestInput(configPath, cache);
+    const source = await readLegacyBoundedDigestInput(configPath, cache);
     if (source === undefined) continue;
     let parsed: { compilerOptions?: { baseUrl?: string; paths?: Record<string, string[]> } };
     try {
@@ -216,7 +220,7 @@ export async function loadLegacyResolutionConfig(
       aliases.set(key.replace(/\*$/u, ""), path.resolve(baseUrl, first.replace(/\*$/u, "")));
     }
   }
-  const vueConfig = await readBoundedDigestInput(
+  const vueConfig = await readLegacyBoundedDigestInput(
     path.join(applicationRoot, "vue.config.js"),
     cache,
   );
@@ -256,35 +260,30 @@ export async function legacyResolutionStateDigest(input: {
   featureRoot: string;
   applicationRoot: string;
   aliases: Record<string, string>;
-  dependencies: LegacyResolutionDependency[];
+  decisions: LegacyResolutionDecision[];
   expired?: () => boolean;
 }): Promise<Sha256Digest> {
   const state: Array<[string, string, string, string]> = [];
-  for (const dependency of [...input.dependencies].sort((left, right) =>
+  for (const decision of [...input.decisions].sort((left, right) =>
     `${left.importer}\0${left.specifier}`.localeCompare(`${right.importer}\0${right.specifier}`),
   )) {
     if (input.expired?.() === true) {
-      state.push([
-        dependency.importer,
-        dependency.specifier,
-        dependency.applicationRelativePath,
-        "@truncated",
-      ]);
+      state.push([decision.importer, decision.specifier, decision.resolvedPath, "@truncated"]);
       break;
     }
-    const importer = dependency.importer.startsWith("@app/")
-      ? path.join(input.applicationRoot, dependency.importer.slice("@app/".length))
-      : path.join(input.featureRoot, dependency.importer);
+    const importer = decision.importer.startsWith("@app/")
+      ? path.join(input.applicationRoot, decision.importer.slice("@app/".length))
+      : path.join(input.featureRoot, decision.importer);
     const resolved = await resolveLegacyDependencyProbe(
       importer,
-      dependency.specifier,
+      decision.specifier,
       input.applicationRoot,
       input.aliases,
     );
     state.push([
-      dependency.importer,
-      dependency.specifier,
-      dependency.applicationRelativePath,
+      decision.importer,
+      decision.specifier,
+      decision.resolvedPath,
       resolved === undefined
         ? "@missing"
         : path.relative(input.applicationRoot, resolved).split(path.sep).join("/"),
@@ -337,7 +336,7 @@ export type LegacyManifestScanLimits = {
 
 export type LegacyManifestRefreshContext = {
   environmentReferences?: LegacySourceEnvironmentReference[];
-  supportingDependencies?: LegacyResolutionDependency[];
+  resolutionDecisions?: LegacyResolutionDecision[];
 };
 
 export async function currentLegacySourceManifest(
@@ -372,7 +371,7 @@ export async function currentLegacySourceManifest(
     featureRoot: canonicalFeatureRoot,
     applicationRoot,
     aliases: config.aliases,
-    dependencies: context.supportingDependencies ?? [],
+    decisions: context.resolutionDecisions ?? [],
     expired: () => Date.now() - startedAt >= limits.maxElapsedMs,
   });
   if (Date.now() - startedAt >= limits.maxElapsedMs) traversal.truncated = true;
@@ -568,7 +567,7 @@ function isWithin(root: string, candidate: string): boolean {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-async function readBoundedDigestInput(
+export async function readLegacyBoundedDigestInput(
   filePath: string,
   cache: LegacySourceCache,
 ): Promise<LegacySourceRecord | undefined> {
@@ -620,7 +619,10 @@ async function refreshLegacyEnvironmentReferences(
   if (environmentFileCount > MAX_ENVIRONMENT_EVIDENCE_FILES) traversal.truncated = true;
   const contents: Array<{ sourceName: string; text: string }> = [];
   for (const sourceName of names.slice(0, MAX_ENVIRONMENT_EVIDENCE_FILES)) {
-    const source = await readBoundedDigestInput(path.join(applicationRoot, sourceName), cache);
+    const source = await readLegacyBoundedDigestInput(
+      path.join(applicationRoot, sourceName),
+      cache,
+    );
     if (source === undefined) continue;
     if (
       traversal.scannedFiles >= traversal.limits.maxFiles ||

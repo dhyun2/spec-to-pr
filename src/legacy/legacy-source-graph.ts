@@ -13,8 +13,9 @@ import {
   legacyManifestFile,
   legacyResolutionStateDigest,
   loadLegacyResolutionConfig,
+  readLegacyBoundedDigestInput,
   sanitizedLegacyHttpOrigin,
-  type LegacyResolutionDependency,
+  type LegacyResolutionDecision,
   type LegacySourceEnvironmentReference,
   type LegacySourceManifest,
   type LegacySourceRecord,
@@ -124,6 +125,7 @@ export type LegacySourceGraph = {
   ownedFiles: LegacyGraphFile[];
   supportingFiles: LegacyGraphFile[];
   edges: LegacyDependencyEdge[];
+  resolutionDecisions: LegacyResolutionDecision[];
   aliases: Record<string, string>;
   environmentRefs: LegacyEnvironmentReference[];
   digestAlgorithm: LegacySourceDigestAlgorithm;
@@ -167,6 +169,7 @@ export async function discoverLegacySourceGraph(
   const files = new Map<string, LegacyGraphFile>();
   const edges: LegacyDependencyEdge[] = [];
   const edgeKeys = new Set<string>();
+  const resolutionDecisions = new Map<string, LegacyResolutionDecision>();
   const environmentSources = new Map<
     string,
     { runtime: LegacyEnvironmentReference["runtime"]; sourcePaths: Set<string> }
@@ -276,6 +279,17 @@ export async function discoverLegacySourceGraph(
         applicationRoot,
         aliases,
       });
+      const decisionKey = `${graphFile.sourcePath}\0${reference.specifier}`;
+      if (!resolutionDecisions.has(decisionKey)) {
+        resolutionDecisions.set(decisionKey, {
+          importer: graphFile.sourcePath,
+          specifier: reference.specifier,
+          resolvedPath:
+            resolved === undefined
+              ? "@missing"
+              : path.relative(applicationRoot, resolved.absolutePath).split(path.sep).join("/"),
+        });
+      }
       if (resolved === undefined) continue;
       if (
         digestAlgorithm === LEGACY_SOURCE_DIGEST_ALGORITHM_V2 &&
@@ -336,26 +350,14 @@ export async function discoverLegacySourceGraph(
   const allFiles = [...files.values()].sort((left, right) =>
     left.applicationRelativePath.localeCompare(right.applicationRelativePath),
   );
-  const filesByApplicationPath = new Map(
-    allFiles.map((file) => [file.applicationRelativePath, file] as const),
+  const sortedResolutionDecisions = [...resolutionDecisions.values()].sort((left, right) =>
+    `${left.importer}\0${left.specifier}`.localeCompare(`${right.importer}\0${right.specifier}`),
   );
-  const resolutionDependencies: LegacyResolutionDependency[] = edges.flatMap((edge) => {
-    const target = filesByApplicationPath.get(edge.resolvedPath);
-    return target?.ownership === "supporting-dependency"
-      ? [
-          {
-            importer: edge.importer,
-            specifier: edge.specifier,
-            applicationRelativePath: edge.resolvedPath,
-          },
-        ]
-      : [];
-  });
   const resolutionStateDigest = await legacyResolutionStateDigest({
     featureRoot: canonicalFeatureRoot,
     applicationRoot,
     aliases,
-    dependencies: resolutionDependencies,
+    decisions: sortedResolutionDecisions,
   });
   const sourceManifest = createLegacySourceManifest({
     files: allFiles.flatMap((file) => {
@@ -380,6 +382,7 @@ export async function discoverLegacySourceGraph(
     edges: edges.sort((left, right) =>
       `${left.importer}:${left.specifier}`.localeCompare(`${right.importer}:${right.specifier}`),
     ),
+    resolutionDecisions: sortedResolutionDecisions,
     aliases,
     environmentRefs,
     digestAlgorithm,
@@ -396,6 +399,7 @@ export async function discoverLegacySourceGraph(
 async function readBudgetedSourceFile(
   absolutePath: string,
   budget: SourceReadBudget,
+  options: { boundedDigestInput?: boolean } = {},
 ): Promise<LegacySourceRecord | undefined> {
   if (budget.truncation !== undefined) return undefined;
   if (Date.now() - budget.startedAt >= budget.limits.maxElapsedMs) {
@@ -419,7 +423,10 @@ async function readBudgetedSourceFile(
     budget.truncation = { limit: "maxBytes", absolutePath };
     return undefined;
   }
-  const source = await budget.sourceCache.read(absolutePath);
+  const source =
+    options.boundedDigestInput === true
+      ? await readLegacyBoundedDigestInput(absolutePath, budget.sourceCache)
+      : await budget.sourceCache.read(absolutePath);
   if (source === undefined) return undefined;
   const byteLength = source.byteLength;
   if (budget.scannedBytes + byteLength > budget.limits.maxBytes) {
@@ -946,8 +953,10 @@ async function enrichEnvironmentReferences(
   const contents: Array<{ sourceName: string; text: string }> = [];
   if (readBudget.truncation === undefined) {
     for (const envFile of envFiles.slice(0, MAX_ENVIRONMENT_EVIDENCE_FILES)) {
-      const source = await readBudgetedSourceFile(envFile, readBudget);
-      if (source === undefined) break;
+      const source = await readBudgetedSourceFile(envFile, readBudget, {
+        boundedDigestInput: true,
+      });
+      if (source === undefined) continue;
       contents.push({ sourceName: path.basename(envFile), text: source.text() });
     }
   }

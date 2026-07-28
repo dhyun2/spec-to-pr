@@ -136,7 +136,7 @@ describe("legacy source cache", () => {
       },
       {
         environmentReferences: inventory.sourceEnvironmentRefs ?? [],
-        supportingDependencies: inventory.supportingDependencies,
+        resolutionDecisions: inventory.sourceResolutionDecisions ?? [],
       },
     );
     const entryLimited = await currentLegacySourceManifest(
@@ -153,7 +153,7 @@ describe("legacy source cache", () => {
       },
       {
         environmentReferences: inventory.sourceEnvironmentRefs ?? [],
-        supportingDependencies: inventory.supportingDependencies,
+        resolutionDecisions: inventory.sourceResolutionDecisions ?? [],
       },
     );
 

@@ -22,6 +22,7 @@ import {
   LegacySourceCache,
   LegacySourceEnvironmentReferenceSchema,
   LegacySourceManifestSchema,
+  LegacyResolutionDecisionSchema,
   currentLegacySourceManifest,
   type LegacySourceManifest,
 } from "./legacy-source-cache.js";
@@ -113,6 +114,7 @@ export const LegacyInventorySchema = z
       .regex(/^sha256:[a-f0-9]{64}$/)
       .optional(),
     sourceEnvironmentRefs: z.array(LegacySourceEnvironmentReferenceSchema).optional(),
+    sourceResolutionDecisions: z.array(LegacyResolutionDecisionSchema).max(5_000).optional(),
     visitedDirectories: z.number().int().nonnegative().default(0),
     visitedEntries: z.number().int().nonnegative().default(0),
     scannedFiles: z.number().int().nonnegative(),
@@ -141,6 +143,7 @@ export async function buildLegacyInventory(
 ): Promise<LegacyInventory> {
   const limits = { ...DEFAULT_LEGACY_INVENTORY_LIMITS, ...limitOverrides };
   const sourceCache = options.sourceCache ?? new LegacySourceCache();
+  sourceCache.beginSnapshot();
   sourceCache.recordSemanticRebuild();
   const graph = await discoverLegacySourceGraph(
     root,
@@ -240,6 +243,7 @@ export async function buildLegacyInventory(
     sourceManifest: graph.sourceManifest,
     sourceManifestDigest: graph.sourceManifest.manifestDigest,
     sourceEnvironmentRefs: graph.environmentRefs,
+    sourceResolutionDecisions: graph.resolutionDecisions,
     visitedDirectories: graph.visitedDirectories,
     visitedEntries: graph.visitedEntries,
     scannedFiles: Math.max(scannedFiles, graph.files.length),
@@ -282,6 +286,7 @@ export async function assertLegacyInventoryFresh(
     pinned.sourceDigestAlgorithm === LEGACY_SOURCE_DIGEST_ALGORITHM_V2 &&
     pinned.sourceManifest !== undefined &&
     pinned.sourceEnvironmentRefs !== undefined &&
+    pinned.sourceResolutionDecisions !== undefined &&
     pinned.sourceManifestDigest === pinned.sourceManifest.manifestDigest
   ) {
     const currentManifest = await currentLegacySourceManifest(
@@ -298,7 +303,7 @@ export async function assertLegacyInventoryFresh(
       },
       {
         environmentReferences: pinned.sourceEnvironmentRefs ?? [],
-        supportingDependencies: pinned.supportingDependencies,
+        resolutionDecisions: pinned.sourceResolutionDecisions,
       },
     );
     if (currentManifest.truncated) {

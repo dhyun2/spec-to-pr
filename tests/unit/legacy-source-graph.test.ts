@@ -62,7 +62,16 @@ describe("legacy source graph", () => {
       "src/api/index.ts",
       "src/api/profileApi.ts",
     ]);
-    expect(JSON.stringify(graph)).not.toContain("ordersApi.ts");
+    expect(JSON.stringify(graph.files)).not.toContain("ordersApi.ts");
+    expect(JSON.stringify(graph.edges)).not.toContain("ordersApi.ts");
+    expect(graph.resolutionDecisions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          specifier: "./ordersApi",
+          resolvedPath: "src/api/ordersApi.ts",
+        }),
+      ]),
+    );
 
     await writeFile(
       path.join(project, "src/api/ordersApi.ts"),

@@ -27,6 +27,22 @@ afterEach(async () => {
 });
 
 describe("legacy inventory v3", () => {
+  it("starts a fresh source snapshot for every public inventory build", async () => {
+    const root = await temporaryLegacyProject();
+    const sourcePath = path.join(root, "src", "route.ts");
+    const cache = new LegacySourceCache();
+    await writeFile(sourcePath, 'export const route = { path: "/before" };\n', "utf8");
+    const before = await buildLegacyInventory(root, {}, { sourceCache: cache });
+
+    await writeFile(sourcePath, 'export const route = { path: "/after" };\n', "utf8");
+    const after = await buildLegacyInventory(root, {}, { sourceCache: cache });
+
+    expect(after.rootDigest).not.toBe(before.rootDigest);
+    expect(after.entries).toEqual(
+      expect.arrayContaining([expect.objectContaining({ normalizedKey: "/after" })]),
+    );
+  });
+
   it("revalidates bytes when the same cache is reused across snapshots", async () => {
     const root = await temporaryLegacyProject();
     const sourcePath = path.join(root, "src", "route.ts");
@@ -39,6 +55,22 @@ describe("legacy inventory v3", () => {
     await expect(assertLegacyInventoryFresh(root, pinned, { sourceCache: cache })).rejects.toThrow(
       /LEGACY_SOURCE_CHANGED/,
     );
+  });
+
+  it("uses a fresh source snapshot for pre-fix-v3 compatibility rebuilds", async () => {
+    const root = await temporaryLegacyProject();
+    const sourcePath = path.join(root, "src", "route.ts");
+    const cache = new LegacySourceCache();
+    await writeFile(sourcePath, 'export const route = { path: "/before" };\n', "utf8");
+    const preFixV3 = { ...(await buildLegacyInventory(root, {}, { sourceCache: cache })) };
+    delete preFixV3.sourceEnvironmentRefs;
+    delete preFixV3.sourceResolutionDecisions;
+
+    await writeFile(sourcePath, 'export const route = { path: "/after" };\n', "utf8");
+
+    await expect(
+      assertLegacyInventoryFresh(root, preFixV3, { sourceCache: cache }),
+    ).rejects.toThrow(/LEGACY_SOURCE_CHANGED/);
   });
 
   it("invalidates when referenced GW and URI environment origins change", async () => {
@@ -73,6 +105,27 @@ describe("legacy inventory v3", () => {
     );
   });
 
+  it("uses identical per-file environment bounds for cold and warm manifests", async () => {
+    const root = await temporaryLegacyProject();
+    await writeFile(path.join(root, "package.json"), '{"name":"bounded-environment"}\n', "utf8");
+    const featureRoot = path.join(root, "src", "modules", "shop");
+    await mkdir(featureRoot, { recursive: true });
+    await writeFile(
+      path.join(featureRoot, "client.ts"),
+      "export const gateway = process.env.SERVICE_GW;\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(root, ".env.qa"),
+      `SERVICE_GW=https://legacy.example/${"x".repeat(2 * 1024 * 1024)}\n`,
+      "utf8",
+    );
+
+    const pinned = await buildLegacyInventory(featureRoot);
+
+    await expect(assertLegacyInventoryFresh(featureRoot, pinned)).resolves.toBe(pinned);
+  });
+
   it("invalidates when a higher-priority supporting dependency appears", async () => {
     const root = await temporaryLegacyProject();
     await writeFile(path.join(root, "package.json"), '{"name":"resolver-freshness"}\n', "utf8");
@@ -94,6 +147,46 @@ describe("legacy inventory v3", () => {
 
     await writeFile(
       path.join(apiRoot, "client.ts"),
+      "export const client = 'typescript';\n",
+      "utf8",
+    );
+
+    await expect(assertLegacyInventoryFresh(featureRoot, pinned)).rejects.toThrow(
+      /LEGACY_SOURCE_CHANGED/,
+    );
+  });
+
+  it("invalidates when a previously unresolved bounded dependency appears", async () => {
+    const root = await temporaryLegacyProject();
+    await writeFile(
+      path.join(root, "package.json"),
+      '{"name":"missing-resolver-target"}\n',
+      "utf8",
+    );
+    const featureRoot = path.join(root, "src", "modules", "shop");
+    const apiRoot = path.join(root, "src", "api");
+    await mkdir(featureRoot, { recursive: true });
+    await mkdir(apiRoot, { recursive: true });
+    await writeFile(
+      path.join(featureRoot, "index.ts"),
+      'import { client } from "../../api/missing"; export const feature = client;\n',
+      "utf8",
+    );
+    const pinned = await buildLegacyInventory(featureRoot);
+
+    expect(pinned).toHaveProperty(
+      "sourceResolutionDecisions",
+      expect.arrayContaining([
+        expect.objectContaining({
+          importer: "index.ts",
+          specifier: "../../api/missing",
+          resolvedPath: "@missing",
+        }),
+      ]),
+    );
+
+    await writeFile(
+      path.join(apiRoot, "missing.ts"),
       "export const client = 'typescript';\n",
       "utf8",
     );
@@ -143,7 +236,7 @@ describe("legacy inventory v3", () => {
       /LEGACY_SOURCE_CHANGED/,
     );
     expect(sourceCache.snapshotStats()).toMatchObject({
-      fileReads: 750,
+      fileReads: 1_000,
       astParses: 251,
       semanticRebuilds: 2,
     });
