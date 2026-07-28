@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 
+import type { ArtifactRef } from "../runtime/artifact.js";
 import { RunManifestSchema, type RunManifest } from "../run/run.js";
 import {
   LeaseIdSchema,
@@ -23,6 +24,7 @@ import {
   StageNotFoundError,
   StageRetryExhaustedError,
 } from "./errors.js";
+import type { ImplementationReviewPacket } from "../workflow/workflow-contracts.js";
 
 export type Clock = () => string;
 
@@ -147,6 +149,98 @@ export function reopenImplementationForVisualRepair(
   now: Clock,
 ): RunManifest {
   return reopenImplementation(run, reason, "VISUAL_IMPLEMENTATION_REPAIR_REQUIRED", now);
+}
+
+export function terminalizeVisualThresholdFailure(
+  run: RunManifest,
+  input: {
+    artifacts: ArtifactRef[];
+    reviewPacket: ImplementationReviewPacket;
+    visualLineageId: string;
+    visualReportArtifactId: string;
+    visualReportDigest: string;
+    terminalIdentity: string;
+    timestamp: string;
+  },
+): RunManifest {
+  const implementation = findStage(run, "implementation");
+  if (implementation.status !== "passed") {
+    throw new InvalidStageTransitionError("implementation", implementation.status, "failed");
+  }
+  const currentPacket = implementation.checkpoint?.data["reviewPacket"];
+  if (
+    typeof currentPacket !== "object" ||
+    currentPacket === null ||
+    !("id" in currentPacket) ||
+    !("headSha" in currentPacket) ||
+    !("diffDigest" in currentPacket) ||
+    currentPacket.id !== input.reviewPacket.id ||
+    currentPacket.headSha !== input.reviewPacket.headSha ||
+    currentPacket.diffDigest !== input.reviewPacket.diffDigest ||
+    input.reviewPacket.runId !== run.id
+  ) {
+    throw new Error(
+      "VISUAL_ATTEMPT_STALE: the implementation review packet, head, or diff is no longer current",
+    );
+  }
+
+  const invalidatedStages = new Set<RunStageName>([
+    "functional-review",
+    "design-review",
+    "report",
+    "publish",
+    "archive",
+  ]);
+  const artifactIds = input.artifacts.map((artifact) => artifact.id);
+
+  return RunManifestSchema.parse({
+    ...run,
+    revision: run.revision + 1,
+    updatedAt: input.timestamp,
+    status: "blocked",
+    artifacts: [...run.artifacts, ...input.artifacts],
+    stages: run.stages.map((stage) => {
+      if (stage.name === "implementation") {
+        return {
+          ...stage,
+          status: "failed",
+          lease: undefined,
+          completedAt: input.timestamp,
+          artifactIds: mergeUnique(stage.artifactIds, artifactIds),
+          checkpoint: {
+            name: "visual-threshold-not-met",
+            data: {
+              reviewPacket: input.reviewPacket,
+              visualLineageId: input.visualLineageId,
+              visualComparisonAttempt: 3,
+              visualReportArtifactId: input.visualReportArtifactId,
+              visualReportDigest: input.visualReportDigest,
+              visualTerminalIdentity: input.terminalIdentity,
+            },
+            updatedAt: input.timestamp,
+          },
+          error: {
+            code: "VISUAL_REVIEW_THRESHOLD_NOT_MET",
+            message: "The third visual comparison did not meet the required 92% review threshold.",
+            retryable: false,
+          },
+        };
+      }
+      if (!invalidatedStages.has(stage.name)) return stage;
+      return {
+        ...stage,
+        status: "pending",
+        attempt: 0,
+        startedAt: undefined,
+        completedAt: undefined,
+        lease: undefined,
+        checkpoint: undefined,
+        artifactIds: [],
+        gapIds: [],
+        error: undefined,
+      };
+    }),
+  });
 }
 
 function reopenImplementation(

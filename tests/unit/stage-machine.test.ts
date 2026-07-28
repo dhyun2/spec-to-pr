@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { ArtifactRefSchema, type ArtifactRef } from "../../src/runtime/artifact.js";
 import { createInitialRun } from "../../src/run/index.js";
 import {
   InvalidStageTransitionError,
@@ -13,7 +14,9 @@ import {
   reopenImplementationForReviewChanges,
   reopenImplementationForVisualRepair,
   startStage,
+  terminalizeVisualThresholdFailure,
 } from "../../src/state/stage-machine.js";
+import { ImplementationReviewPacketSchema } from "../../src/workflow/workflow-contracts.js";
 
 const runId = "run_11111111111111111111111111111111";
 
@@ -27,6 +30,24 @@ function baseRun() {
       now: "2026-06-23T00:00:00.000Z",
     },
   );
+}
+
+function artifact(
+  id: `art_${string}`,
+  kind: ArtifactRef["kind"],
+  digestCharacter: string,
+): ArtifactRef {
+  return ArtifactRefSchema.parse({
+    id,
+    kind,
+    uri: `blob:sha256:${digestCharacter.repeat(64)}`,
+    mediaType: "application/json",
+    digest: `sha256:${digestCharacter.repeat(64)}`,
+    producedBy: "orchestrator",
+    evidenceIds: [],
+    createdAt: "2026-06-23T00:00:20.000Z",
+    metadata: {},
+  });
 }
 
 describe("stage machine", () => {
@@ -311,5 +332,108 @@ describe("stage machine", () => {
         () => "2026-06-23T00:00:30.000Z",
       ).stage,
     ).toMatchObject({ status: "running", attempt: 2 });
+  });
+
+  it("terminalizes the third failed visual comparison in one revision", () => {
+    const reviewPacket = ImplementationReviewPacketSchema.parse({
+      id: `packet_${"a".repeat(64)}`,
+      runId,
+      revision: 3,
+      baseSha: "1".repeat(40),
+      headSha: "2".repeat(40),
+      evidenceDigest: `sha256:${"3".repeat(64)}`,
+      diffDigest: `sha256:${"4".repeat(64)}`,
+      changedFiles: ["src/checkout.tsx"],
+      visualLineageId: `packet_${"5".repeat(64)}`,
+    });
+    const run = {
+      ...baseRun(),
+      status: "running" as const,
+      revision: 9,
+      stages: baseRun().stages.map((stage) =>
+        [
+          "implementation",
+          "functional-review",
+          "design-review",
+          "report",
+          "publish",
+          "archive",
+        ].includes(stage.name)
+          ? {
+              ...stage,
+              status: "passed" as const,
+              startedAt: "2026-06-23T00:00:10.000Z",
+              completedAt: "2026-06-23T00:00:15.000Z",
+              artifactIds: [],
+              checkpoint:
+                stage.name === "implementation"
+                  ? {
+                      name: "implementation-complete",
+                      data: { reviewPacket },
+                      updatedAt: "2026-06-23T00:00:15.000Z",
+                    }
+                  : {
+                      name: `${stage.name}-complete`,
+                      data: { stale: true },
+                      updatedAt: "2026-06-23T00:00:15.000Z",
+                    },
+            }
+          : stage,
+      ),
+    };
+    const committedAttempt = artifact("art_11111111111111111111111111111111", "other", "6");
+    const visualReport = artifact("art_22222222222222222222222222222222", "visual-report", "7");
+    const exhaustedLineage = artifact("art_33333333333333333333333333333333", "other", "8");
+    const terminalIdentity = `sha256:${"9".repeat(64)}`;
+    const visualLineageId = reviewPacket.visualLineageId!;
+    const timestamp = "2026-06-23T00:00:20.000Z";
+
+    const terminal = terminalizeVisualThresholdFailure(run, {
+      artifacts: [committedAttempt, visualReport, exhaustedLineage],
+      reviewPacket,
+      visualLineageId,
+      visualReportArtifactId: visualReport.id,
+      visualReportDigest: visualReport.digest,
+      terminalIdentity,
+      timestamp,
+    });
+
+    expect(terminal.revision).toBe(run.revision + 1);
+    expect(terminal.status).toBe("blocked");
+    expect(terminal.artifacts.slice(-3)).toEqual([
+      committedAttempt,
+      visualReport,
+      exhaustedLineage,
+    ]);
+    expect(terminal.stages.find((stage) => stage.name === "implementation")).toMatchObject({
+      status: "failed",
+      artifactIds: [committedAttempt.id, visualReport.id, exhaustedLineage.id],
+      error: {
+        code: "VISUAL_REVIEW_THRESHOLD_NOT_MET",
+        message: expect.stringContaining("92%"),
+        retryable: false,
+      },
+      checkpoint: {
+        name: "visual-threshold-not-met",
+        data: {
+          reviewPacket,
+          visualLineageId,
+          visualComparisonAttempt: 3,
+          visualReportArtifactId: visualReport.id,
+          visualReportDigest: visualReport.digest,
+          visualTerminalIdentity: terminalIdentity,
+        },
+      },
+    });
+    for (const name of ["functional-review", "design-review", "report", "publish", "archive"]) {
+      expect(terminal.stages.find((stage) => stage.name === name)).toMatchObject({
+        status: "pending",
+        attempt: 0,
+        artifactIds: [],
+        gapIds: [],
+      });
+      expect(terminal.stages.find((stage) => stage.name === name)?.checkpoint).toBeUndefined();
+      expect(terminal.stages.find((stage) => stage.name === name)?.error).toBeUndefined();
+    }
   });
 });

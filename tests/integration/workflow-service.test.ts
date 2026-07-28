@@ -5232,7 +5232,7 @@ describe("WorkflowService", () => {
     ).toHaveLength(1);
   });
 
-  it("repairs implementation across visual comparison packets and caps valid comparisons at three", async () => {
+  it("repairs implementation across packets and blocks after three visual comparison failures", async () => {
     const baseline = new PNG({ width: 1, height: 1 });
     baseline.data.set([0, 0, 0, 255]);
     await writeFile(path.join(directory, "visual/diff.png"), PNG.sync.write(baseline));
@@ -6015,25 +6015,46 @@ describe("WorkflowService", () => {
       "attempt-3",
       [128, 128, 128, 255],
     );
+    const beforeThirdFailure = await store.get(started.runId);
     const afterThirdFailure = await service.submit({
       runId: started.runId,
       submission: thirdAttempt,
     });
-    expect(afterThirdFailure.nextActions.map((action) => action.kind)).not.toContain(
-      "implementation-repair",
+    expect(afterThirdFailure.revision).toBe(beforeThirdFailure.revision + 2);
+    expect(afterThirdFailure.status).toBe("blocked");
+    expect(afterThirdFailure.blockerDetails).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          stage: "implementation",
+          code: "VISUAL_REVIEW_THRESHOLD_NOT_MET",
+          kind: "verification",
+          retryable: false,
+          exactUnblockAction:
+            "Inspect the failed 92% visual comparison in the draft, correct the implementation or evidence source, and start a new approved Run for further work.",
+        }),
+      ]),
     );
-    expect(afterThirdFailure.nextActions.map((action) => action.kind)).not.toContain(
-      "compare-visuals",
-    );
-    const fourthAttempt = await visualSubmission(
-      compareThird,
-      thirdPacketHead,
-      "attempt-4",
-      [64, 64, 64, 255],
-    );
-    await expect(
-      service.submit({ runId: started.runId, submission: fourthAttempt }),
-    ).rejects.toThrow(/VISUAL_ATTEMPT_LIMIT_REACHED/);
+    expect(
+      afterThirdFailure.nextActions
+        .map((action) => action.kind)
+        .filter((kind) =>
+          [
+            "compare-visuals",
+            "implementation-repair",
+            "review-functional",
+            "review-design",
+          ].includes(kind),
+        ),
+    ).toEqual([]);
+    const beforeReplay = await store.get(started.runId);
+    const replayedThirdFailure = await service.submit({
+      runId: started.runId,
+      submission: thirdAttempt,
+    });
+    const terminalAfterReplay = await store.get(started.runId);
+    expect(replayedThirdFailure.revision).toBe(beforeReplay.revision);
+    expect(terminalAfterReplay.revision).toBe(beforeReplay.revision);
+    expect(terminalAfterReplay.artifacts).toEqual(beforeReplay.artifacts);
 
     const run = await store.get(started.runId);
     const reports = run.artifacts.filter((artifact) => artifact.kind === "visual-report");
@@ -6056,6 +6077,41 @@ describe("WorkflowService", () => {
       (artifact) => artifact.metadata["visualComparisonAttempt"] === 3,
     );
     if (thirdReport === undefined) throw new Error("Missing third visual report");
+    const terminalIdentity = `sha256:${createHash("sha256")
+      .update(
+        JSON.stringify({
+          runId: started.runId,
+          lineageId: firstRepair?.lineageId,
+          reviewPacketId: compareThird.reviewPacketId,
+          attempt: 3,
+          visualReportDigest: thirdReport.digest,
+        }),
+      )
+      .digest("hex")}`;
+    const implementationStage = run.stages.find((item) => item.name === "implementation");
+    expect(implementationStage).toMatchObject({
+      status: "failed",
+      checkpoint: {
+        name: "visual-threshold-not-met",
+        data: {
+          visualTerminalIdentity: terminalIdentity,
+          visualReportArtifactId: thirdReport.id,
+          visualReportDigest: thirdReport.digest,
+        },
+      },
+    });
+    const terminalArtifactIds = run.artifacts
+      .filter(
+        (artifact) =>
+          artifact.id === thirdReport.id ||
+          (artifact.metadata["visualComparisonAttempt"] === 3 &&
+            (artifact.metadata["reservationStatus"] === "committed" ||
+              artifact.metadata["visualRole"] !== undefined)) ||
+          (artifact.metadata["visualLineageAttempt"] === 3 &&
+            artifact.metadata["visualLineageStatus"] === "exhausted"),
+      )
+      .map((artifact) => artifact.id);
+    expect(implementationStage?.artifactIds).toEqual(expect.arrayContaining(terminalArtifactIds));
     const lastReport = JSON.parse(
       (await artifactStore.readContent(thirdReport.digest)).toString("utf8"),
     ) as Record<string, unknown>;
@@ -6093,6 +6149,19 @@ describe("WorkflowService", () => {
         },
       }),
     ).rejects.toThrow(/VISUAL_ATTEMPT_LIMIT_REACHED/);
+
+    const diagnosticReport = await service.ensureBlockedDiagnosticReport({
+      runId: started.runId,
+    });
+    expect(diagnosticReport.metadata["idempotencyKey"]).toBe(
+      `implementation:VISUAL_REVIEW_THRESHOLD_NOT_MET:${terminalIdentity}`,
+    );
+    const revisionWithDiagnostic = (await store.get(started.runId)).revision;
+    const replayedDiagnosticReport = await service.ensureBlockedDiagnosticReport({
+      runId: started.runId,
+    });
+    expect(replayedDiagnosticReport.id).toBe(diagnosticReport.id);
+    expect((await store.get(started.runId)).revision).toBe(revisionWithDiagnostic);
   });
 
   it("enforces contracts and API-ready before accepting UI implementation", async () => {
