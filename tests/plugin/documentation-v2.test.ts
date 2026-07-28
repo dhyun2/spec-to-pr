@@ -987,6 +987,22 @@ describe("v2 documentation", () => {
     }
   });
 
+  it("requires implementation to produce strict Figma evidence and repair autonomously", () => {
+    const implement = readFileSync(path.join(root, "skills", "implement", "SKILL.md"), "utf8");
+
+    for (const marker of [
+      "visual-capture-receipt-v2",
+      "baseline-isolation-v1",
+      "ui-assertions-v1",
+      "Playwright Test CLI",
+      "92%",
+      "first two valid failures",
+      "without asking the user",
+    ]) {
+      expect(implement, `implement:${marker}`).toContain(marker);
+    }
+  });
+
   it("documents composable sources, guidance precedence, and the zero-to-100 feature recipe", () => {
     const readmes = ["README.md", "README.ko.md", "packages/codex-sdk/README.md"].map((file) =>
       readFileSync(path.join(root, file), "utf8"),
