@@ -45,6 +45,7 @@ const execFileAsync = promisify(execFile);
 const UI_ROOT_BARREL_PATH = "test-ui-package/index.js";
 const UI_ICON_BARREL_PATH = "test-ui-package/icons/vue.js";
 const UI_CODE_CONNECT_PATH = "test-ui-package/code-connect.manifest.json";
+const UI_PACKAGE_MANIFEST_PATH = "test-ui-package/package.json";
 const UI_ROOT_BARREL_BYTES = Buffer.from("export const IconButton = {};\n", "utf8");
 const UI_ICON_BARREL_BYTES = Buffer.from(
   "export const Spot = {}; export const Circle = {}; export const Close = {};\n",
@@ -52,6 +53,17 @@ const UI_ICON_BARREL_BYTES = Buffer.from(
 );
 const UI_CODE_CONNECT_BYTES = Buffer.from(
   JSON.stringify({ mappings: [], packageName: "@frontend/ui", packageVersion: "1.2.3" }),
+  "utf8",
+);
+const UI_PACKAGE_MANIFEST_BYTES = Buffer.from(
+  JSON.stringify({
+    name: "@frontend/ui",
+    version: "1.2.3",
+    exports: {
+      ".": "./index.js",
+      "./icons/vue": "./icons/vue.js",
+    },
+  }),
   "utf8",
 );
 
@@ -277,6 +289,7 @@ describe("WorkflowService", () => {
     await writeFile(path.join(directory, UI_ROOT_BARREL_PATH), UI_ROOT_BARREL_BYTES);
     await writeFile(path.join(directory, UI_ICON_BARREL_PATH), UI_ICON_BARREL_BYTES);
     await writeFile(path.join(directory, UI_CODE_CONNECT_PATH), UI_CODE_CONNECT_BYTES);
+    await writeFile(path.join(directory, UI_PACKAGE_MANIFEST_PATH), UI_PACKAGE_MANIFEST_BYTES);
     await writeFile(
       path.join(directory, "visual/diff.png"),
       PNG.sync.write(new PNG({ width: 1, height: 1 })),
@@ -4587,6 +4600,78 @@ describe("WorkflowService", () => {
     expect(accepted.nextActions[0]?.kind).toBe("implement");
   });
 
+  it("CALLER_CATALOG_AND_UNVERIFIED_VERSION_EXPORT_ACCEPTED", async () => {
+    const { digest: _catalogDigest, ...baseCatalogFields } = figmaPublicApiCatalog();
+    const callerCatalogFields = {
+      ...baseCatalogFields,
+      packageVersion: "999.0.0",
+      exports: [
+        {
+          figmaComponent: "button/invented",
+          nodeId: "999:1",
+          module: "@frontend/ui" as const,
+          exportName: "DefinitelyNotInBarrel",
+          allowedProps: ["size"],
+        },
+      ],
+    };
+    const callerCatalog = {
+      ...callerCatalogFields,
+      digest: figmaPublicApiCatalogDigest(callerCatalogFields),
+    };
+    const callerMapping = {
+      ...figmaDesignMapping(),
+      designSystem: {
+        ...figmaDesignMapping().designSystem,
+        packageVersion: "999.0.0",
+        catalogDigest: callerCatalog.digest,
+      },
+      publicApiCatalog: callerCatalog,
+    };
+    await writeFile(
+      path.join(directory, "figma/design-context.json"),
+      JSON.stringify({
+        ...figmaManifest(),
+        designMapping: callerMapping,
+      }),
+      "utf8",
+    );
+    await execFileAsync("git", ["add", "figma/design-context.json"], { cwd: directory });
+    await execFileAsync("git", ["commit", "-qm", "claim unverified UI catalog"], {
+      cwd: directory,
+    });
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: `Implement ${FIGMA_URL}`,
+      scope: "ui",
+      mode: "figma",
+      changeKind: "design",
+      figmaUrl: FIGMA_URL,
+    });
+
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "figma-bundle",
+          provider: "host-connected-figma",
+          capturedAt: "2026-07-13T00:00:00.000Z",
+          fileUrl: FIGMA_URL,
+          fileUrls: [FIGMA_URL],
+          nodeIds: ["1:2"],
+          capturedComponents: figmaCapturedComponents(),
+          designMapping: callerMapping,
+          manifestPath: "figma/design-context.json",
+          stateContracts: figmaStateContracts(),
+          visualTargets: figmaVisualTargets(),
+          artifactPaths: ["figma/design-context.json", "visual/diff.png"],
+        },
+      }),
+    ).rejects.toThrow(
+      /FIGMA_DESIGN_MAPPING_INCOMPLETE.*package|version|DefinitelyNotInBarrel|barrel|Code Connect/i,
+    );
+  });
+
   it("binds captured Figma components and named fixtures to implementation evidence", async () => {
     const capturedComponents = [{ name: "Logo/Normal/nxplus_park", nodeId: "1:2" }];
     const logoBytes = Buffer.from("canonical nxplus park webp fixture", "utf8");
@@ -5089,13 +5174,79 @@ describe("WorkflowService", () => {
     const featureAssertionResultPath =
       `visual/actual/${visualAction.reviewPacketId}/checkout.playwright.json` as const;
     const featureAssertionTestId = "checkout compatibility assertions";
+    const featureAssertionProjectName = "ui-chromium";
+    const featureAssertionObservationPath =
+      `visual/actual/${visualAction.reviewPacketId}/checkout.observation.json` as const;
+    const featureAssertionObservationBytes = Buffer.from(
+      JSON.stringify({
+        schemaVersion: "ui-assertion-observation-v1",
+        targetId: "checkout-default",
+        state: "default",
+        fixtureId: "mock:checkout",
+        screenshot: {
+          path: featureActualPath,
+          digest: featureActualDigest,
+        },
+        observations: {
+          "assert-checkout-default": "rendered",
+        },
+      }),
+      "utf8",
+    );
+    const featureAssertionObservationDigest =
+      `sha256:${createHash("sha256").update(featureAssertionObservationBytes).digest("hex")}` as const;
+    const featureProducerBinding = {
+      targetId: "checkout-default",
+      state: "default",
+      fixtureId: "mock:checkout",
+      observation: {
+        path: featureAssertionObservationPath,
+        digest: featureAssertionObservationDigest,
+      },
+      screenshot: {
+        path: featureActualPath,
+        digest: featureActualDigest,
+      },
+    };
+    const featureBindingAnnotation = {
+      type: "spec-to-pr-ui-binding",
+      description: JSON.stringify(featureProducerBinding),
+    };
     const featureAssertionResultBytes = Buffer.from(
       JSON.stringify({
         config: { version: "1.61.1" },
         suites: [
           {
             title: "checkout.spec.ts",
-            specs: [{ title: featureAssertionTestId, ok: true, tests: [] }],
+            specs: [
+              {
+                title: featureAssertionTestId,
+                ok: true,
+                tests: [
+                  {
+                    expectedStatus: "passed",
+                    projectId: featureAssertionProjectName,
+                    projectName: featureAssertionProjectName,
+                    results: [
+                      {
+                        status: "passed",
+                        errors: [],
+                        annotations: [featureBindingAnnotation],
+                        attachments: [
+                          {
+                            name: "spec-to-pr-ui-observation",
+                            contentType: "application/vnd.spec-to-pr.ui-observation+json",
+                            body: featureAssertionObservationBytes.toString("base64"),
+                          },
+                        ],
+                      },
+                    ],
+                    status: "expected",
+                    annotations: [featureBindingAnnotation],
+                  },
+                ],
+              },
+            ],
           },
         ],
         errors: [],
@@ -5106,6 +5257,10 @@ describe("WorkflowService", () => {
     const featureAssertionResultDigest =
       `sha256:${createHash("sha256").update(featureAssertionResultBytes).digest("hex")}` as const;
     await writeFile(path.join(directory, featureAssertionResultPath), featureAssertionResultBytes);
+    await writeFile(
+      path.join(directory, featureAssertionObservationPath),
+      featureAssertionObservationBytes,
+    );
     const featureAssertionReportPath =
       `visual/actual/${visualAction.reviewPacketId}/checkout.assertions.json` as const;
     const featureAssertionReportBytes = Buffer.from(
@@ -5120,8 +5275,10 @@ describe("WorkflowService", () => {
         producer: {
           kind: "playwright-test-cli",
           testId: featureAssertionTestId,
+          projectName: featureAssertionProjectName,
           resultPath: featureAssertionResultPath,
           resultDigest: featureAssertionResultDigest,
+          binding: featureProducerBinding,
         },
         assertions: [
           {
@@ -5156,6 +5313,8 @@ describe("WorkflowService", () => {
         `sha256:${createHash("sha256").update(featureAssertionReportBytes).digest("hex")}` as const,
       assertionResultPath: featureAssertionResultPath,
       assertionResultDigest: featureAssertionResultDigest,
+      assertionObservationPath: featureAssertionObservationPath,
+      assertionObservationDigest: featureAssertionObservationDigest,
       receiptPath: featureReceiptPath,
       receiptDigest: featureReceiptDigest,
     };
@@ -5171,6 +5330,7 @@ describe("WorkflowService", () => {
             featureActualPath,
             featureAssertionReportPath,
             featureAssertionResultPath,
+            featureAssertionObservationPath,
             featureReceiptPath,
             featureIsolation.baselineIsolationPath,
           ],
@@ -5189,6 +5349,7 @@ describe("WorkflowService", () => {
             featureActualPath,
             featureAssertionReportPath,
             featureAssertionResultPath,
+            featureAssertionObservationPath,
             featureReceiptPath,
             featureIsolation.baselineIsolationPath,
           ],
@@ -5206,6 +5367,7 @@ describe("WorkflowService", () => {
           featureActualPath,
           featureAssertionReportPath,
           featureAssertionResultPath,
+          featureAssertionObservationPath,
           featureReceiptPath,
           featureIsolation.baselineIsolationPath,
         ],
@@ -5230,6 +5392,7 @@ describe("WorkflowService", () => {
           featureActualPath,
           featureAssertionReportPath,
           featureAssertionResultPath,
+          featureAssertionObservationPath,
           featureReceiptPath,
           featureIsolation.baselineIsolationPath,
         ],
@@ -6356,6 +6519,43 @@ describe("WorkflowService", () => {
         const receiptDigest =
           `sha256:${createHash("sha256").update(receiptBytes).digest("hex")}` as const;
         const assertionTestId = `${targetId} focused UI assertions`;
+        const assertionProjectName = "ui-chromium";
+        const assertionObservationPath = `visual/actual/${action.reviewPacketId}/${name}-${suffix}.observation.json`;
+        const assertionObservationBytes = Buffer.from(
+          JSON.stringify({
+            schemaVersion: "ui-assertion-observation-v1",
+            targetId,
+            state: targetState,
+            fixtureId,
+            screenshot: {
+              path: actualPath,
+              digest: actualDigest,
+            },
+            observations: {
+              [`assert-checkout-${targetState}`]: "rendered",
+            },
+          }),
+          "utf8",
+        );
+        const assertionObservationDigest =
+          `sha256:${createHash("sha256").update(assertionObservationBytes).digest("hex")}` as const;
+        const producerBinding = {
+          targetId,
+          state: targetState,
+          fixtureId,
+          observation: {
+            path: assertionObservationPath,
+            digest: assertionObservationDigest,
+          },
+          screenshot: {
+            path: actualPath,
+            digest: actualDigest,
+          },
+        };
+        const bindingAnnotation = {
+          type: "spec-to-pr-ui-binding",
+          description: JSON.stringify(producerBinding),
+        };
         const assertionResultPath = `visual/actual/${action.reviewPacketId}/${name}-${suffix}.playwright.json`;
         const assertionResultBytes = Buffer.from(
           JSON.stringify({
@@ -6363,7 +6563,35 @@ describe("WorkflowService", () => {
             suites: [
               {
                 title: "checkout.spec.ts",
-                specs: [{ title: assertionTestId, ok: true, tests: [] }],
+                specs: [
+                  {
+                    title: assertionTestId,
+                    ok: true,
+                    tests: [
+                      {
+                        expectedStatus: "passed",
+                        projectId: assertionProjectName,
+                        projectName: assertionProjectName,
+                        results: [
+                          {
+                            status: "passed",
+                            errors: [],
+                            annotations: [bindingAnnotation],
+                            attachments: [
+                              {
+                                name: "spec-to-pr-ui-observation",
+                                contentType: "application/vnd.spec-to-pr.ui-observation+json",
+                                body: assertionObservationBytes.toString("base64"),
+                              },
+                            ],
+                          },
+                        ],
+                        status: "expected",
+                        annotations: [bindingAnnotation],
+                      },
+                    ],
+                  },
+                ],
               },
             ],
             errors: [],
@@ -6386,8 +6614,10 @@ describe("WorkflowService", () => {
             producer: {
               kind: "playwright-test-cli",
               testId: assertionTestId,
+              projectName: assertionProjectName,
               resultPath: assertionResultPath,
               resultDigest: assertionResultDigest,
+              binding: producerBinding,
             },
             assertions: [
               {
@@ -6409,6 +6639,7 @@ describe("WorkflowService", () => {
           await writeFile(path.join(directory, receiptPath), receiptBytes);
         }
         await writeFile(path.join(directory, assertionResultPath), assertionResultBytes);
+        await writeFile(path.join(directory, assertionObservationPath), assertionObservationBytes);
         await writeFile(path.join(directory, assertionReportPath), assertionReportBytes);
         return {
           targetId,
@@ -6426,6 +6657,8 @@ describe("WorkflowService", () => {
             `sha256:${createHash("sha256").update(assertionReportBytes).digest("hex")}` as const,
           assertionResultPath,
           assertionResultDigest,
+          assertionObservationPath,
+          assertionObservationDigest,
           ...(withReceipt
             ? {
                 receiptPath,
@@ -6453,6 +6686,7 @@ describe("WorkflowService", () => {
             capture.actualPath,
             capture.assertionReportPath,
             capture.assertionResultPath,
+            capture.assertionObservationPath,
             ...(capture.receiptPath === undefined ? [] : [capture.receiptPath]),
           ])
           .concat(baselineIsolation.baselineIsolationPath),
@@ -7659,6 +7893,7 @@ describe("WorkflowService", () => {
             secondAttempt.captures[0]!.actualPath,
             secondAttempt.captures[0]!.assertionReportPath,
             secondAttempt.captures[0]!.assertionResultPath,
+            secondAttempt.captures[0]!.assertionObservationPath,
             secondAttempt.captures[0]!.receiptPath!,
             secondAttempt.baselineIsolationPath,
           ],
@@ -8971,6 +9206,11 @@ function figmaPublicApiCatalog() {
     schemaVersion: "figma-public-api-catalog-v1" as const,
     packageName: "@frontend/ui" as const,
     packageVersion: "1.2.3",
+    packageManifest: {
+      path: UI_PACKAGE_MANIFEST_PATH,
+      digest:
+        `sha256:${createHash("sha256").update(UI_PACKAGE_MANIFEST_BYTES).digest("hex")}` as const,
+    },
     publicBarrels: [
       {
         module: "@frontend/ui" as const,

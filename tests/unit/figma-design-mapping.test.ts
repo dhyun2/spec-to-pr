@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
@@ -13,6 +14,7 @@ const digest = `sha256:${"a".repeat(64)}` as const;
 const otherDigest = `sha256:${"b".repeat(64)}` as const;
 const barrelDigest = `sha256:${"c".repeat(64)}` as const;
 const codeConnectDigest = `sha256:${"d".repeat(64)}` as const;
+const packageManifestDigest = `sha256:${"e".repeat(64)}` as const;
 const logo = { name: "Logo/Normal/nxplus_park", nodeId: "1:2" };
 
 const spotBinding = {
@@ -125,6 +127,10 @@ const publicApiCatalogFields = {
   schemaVersion: "figma-public-api-catalog-v1" as const,
   packageName: "@frontend/ui" as const,
   packageVersion: "1.2.3",
+  packageManifest: {
+    path: "tests/fixtures/case4-figma/ui-consumer/package.json",
+    digest: packageManifestDigest,
+  },
   publicBarrels: [
     {
       module: "@frontend/ui" as const,
@@ -309,6 +315,10 @@ describe("Figma design mapping", () => {
       schemaVersion: "figma-public-api-catalog-v1" as const,
       packageName: "@frontend/ui" as const,
       packageVersion: "1.2.3",
+      packageManifest: {
+        path: "tests/fixtures/case4-figma/ui-consumer/package.json",
+        digest: packageManifestDigest,
+      },
       publicBarrels: [
         {
           module: "@frontend/ui/icons/vue" as const,
@@ -382,6 +392,202 @@ describe("Figma design mapping", () => {
         }),
       ).toThrow(/FIGMA_DESIGN_MAPPING_INCOMPLETE|catalog|frontend\/ui|prop/i);
     }
+  });
+
+  it("CALLER_CATALOG_AND_UNVERIFIED_VERSION_EXPORT_ACCEPTED", () => {
+    const packageManifestBytes = Buffer.from(
+      JSON.stringify({
+        name: "@frontend/ui",
+        version: "1.2.3",
+        exports: {
+          ".": "./index.js",
+          "./icons/vue": "./icons/vue.js",
+        },
+      }),
+    );
+    const rootBarrelBytes = Buffer.from("export const IconButton = {};\n");
+    const iconBarrelBytes = Buffer.from(
+      "export const Spot = {}; export const Circle = {}; export const Close = {};\n",
+    );
+    const claimedCatalogFields = {
+      ...publicApiCatalogFields,
+      packageVersion: "999.0.0",
+      packageManifest: {
+        ...publicApiCatalogFields.packageManifest,
+        digest:
+          `sha256:${createHash("sha256").update(packageManifestBytes).digest("hex")}` as const,
+      },
+      publicBarrels: publicApiCatalogFields.publicBarrels.map((barrel) => ({
+        ...barrel,
+        digest: `sha256:${createHash("sha256")
+          .update(barrel.module === "@frontend/ui" ? rootBarrelBytes : iconBarrelBytes)
+          .digest("hex")}` as const,
+      })),
+      exports: [
+        {
+          figmaComponent: "button/invented",
+          nodeId: "10:999",
+          module: "@frontend/ui" as const,
+          exportName: "DefinitelyNotInBarrel",
+          allowedProps: ["size"],
+        },
+      ],
+    };
+    const codeConnectBytes = Buffer.from(
+      JSON.stringify({
+        packageName: "@frontend/ui",
+        packageVersion: "999.0.0",
+        mappings: claimedCatalogFields.exports,
+      }),
+    );
+    claimedCatalogFields.codeConnectManifest = {
+      ...claimedCatalogFields.codeConnectManifest,
+      digest: `sha256:${createHash("sha256").update(codeConnectBytes).digest("hex")}`,
+    };
+    const claimedCatalog = {
+      ...claimedCatalogFields,
+      digest: figmaContract.figmaPublicApiCatalogDigest(claimedCatalogFields),
+    };
+    const claimedBinding = {
+      id: "invented-button",
+      figmaComponent: "button/invented",
+      nodeId: "10:999",
+      role: "component" as const,
+      resolution: {
+        kind: "component" as const,
+        module: "@frontend/ui" as const,
+        exportName: "DefinitelyNotInBarrel",
+        props: { size: "small" },
+      },
+      semanticTokens: [],
+    };
+    const claimedMapping = {
+      designSystem: {
+        ...designSystem,
+        packageVersion: "999.0.0",
+        catalogDigest: claimedCatalog.digest,
+      },
+      publicApiCatalog: claimedCatalog,
+      components: [claimedBinding],
+      fonts: [],
+      tokens: [],
+    };
+    const authorityValidator = Reflect.get(figmaContract, "assertFigmaPublicApiCatalogEvidence");
+
+    expect(typeof authorityValidator).toBe("function");
+    if (typeof authorityValidator !== "function") return;
+    expect(() =>
+      authorityValidator({
+        mapping: claimedMapping,
+        evidence: [
+          {
+            path: "tests/fixtures/case4-figma/ui-consumer/package.json",
+            content: packageManifestBytes,
+          },
+          {
+            path: "tests/fixtures/case4-figma/ui-consumer/index.js",
+            content: rootBarrelBytes,
+          },
+          {
+            path: "tests/fixtures/case4-figma/ui-consumer/icons/vue.js",
+            content: iconBarrelBytes,
+          },
+          {
+            path: "tests/fixtures/case4-figma/ui-consumer/code-connect.manifest.json",
+            content: codeConnectBytes,
+          },
+        ],
+      }),
+    ).toThrow(/FIGMA_DESIGN_MAPPING_INCOMPLETE.*package|version|export|barrel/i);
+  });
+
+  it("parses the case4 fixture package, public barrels, and Code Connect manifest", () => {
+    const packagePath = "tests/fixtures/case4-figma/ui-consumer/package.json";
+    const rootBarrelPath = "tests/fixtures/case4-figma/ui-consumer/index.js";
+    const iconBarrelPath = "tests/fixtures/case4-figma/ui-consumer/icons/vue.js";
+    const manifestPath = "tests/fixtures/case4-figma/ui-consumer/code-connect.manifest.json";
+    const evidence = [packagePath, rootBarrelPath, iconBarrelPath, manifestPath].map(
+      (evidencePath) => ({
+        path: evidencePath,
+        content: readFileSync(evidencePath),
+      }),
+    );
+    const codeConnect = JSON.parse(
+      evidence.find((item) => item.path === manifestPath)!.content.toString("utf8"),
+    ) as { mappings: typeof publicApiCatalogFields.exports };
+    const fields = {
+      ...publicApiCatalogFields,
+      packageManifest: {
+        path: packagePath,
+        digest: digestOf(evidence, packagePath),
+      },
+      publicBarrels: [
+        {
+          module: "@frontend/ui" as const,
+          path: rootBarrelPath,
+          digest: digestOf(evidence, rootBarrelPath),
+        },
+        {
+          module: "@frontend/ui/icons/vue" as const,
+          path: iconBarrelPath,
+          digest: digestOf(evidence, iconBarrelPath),
+        },
+      ],
+      codeConnectManifest: {
+        path: manifestPath,
+        digest: digestOf(evidence, manifestPath),
+      },
+      exports: codeConnect.mappings,
+    };
+    const catalog = {
+      ...fields,
+      digest: figmaContract.figmaPublicApiCatalogDigest(fields),
+    };
+    const fixtureMapping = {
+      designSystem: {
+        ...designSystem,
+        catalogDigest: catalog.digest,
+      },
+      publicApiCatalog: catalog,
+      components: [],
+      fonts: [],
+      tokens: [],
+    };
+
+    expect(() =>
+      figmaContract.assertFigmaPublicApiCatalogEvidence({
+        mapping: fixtureMapping,
+        evidence,
+      }),
+    ).not.toThrow();
+  });
+
+  it("KNOWN_SPOT_EXCEPTION_SUBSTITUTION_ACCEPTED", () => {
+    expect(() =>
+      assertCompleteDesignMapping({
+        capturedComponents: [{ name: spotBinding.figmaComponent, nodeId: spotBinding.nodeId }],
+        mapping: mapping([
+          {
+            ...spotBinding,
+            resolution: {
+              kind: "exception",
+              reason: "Use a nearby substitute.",
+              unavailableExport: {
+                requestedModule: "@frontend/ui/icons/vue",
+                requestedExport: "SpotAlternate",
+                catalogDigest: publicApiCatalog.digest,
+              },
+              substitute: {
+                path: "assets/spot-alternate.svg",
+                digest,
+                size: 16,
+                color: "--semantic-text-tertiary",
+              },
+            },
+          },
+        ]),
+      }),
+    ).toThrow(/FIGMA_DESIGN_MAPPING_INCOMPLETE.*known|Spot|component/i);
   });
 
   it("rejects raw colors and swapped CSS/icon semantic-token formats", () => {
@@ -609,3 +815,12 @@ describe("Figma design mapping", () => {
     ).toThrow();
   });
 });
+
+function digestOf(
+  evidence: Array<{ path: string; content: Buffer }>,
+  evidencePath: string,
+): `sha256:${string}` {
+  return `sha256:${createHash("sha256")
+    .update(evidence.find((item) => item.path === evidencePath)!.content)
+    .digest("hex")}`;
+}

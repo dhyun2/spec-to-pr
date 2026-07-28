@@ -1448,6 +1448,7 @@ export const FigmaBundleSubmissionSchema = z
       });
     }
     const catalogEvidencePaths = [
+      submission.designMapping.publicApiCatalog.packageManifest.path,
       ...submission.designMapping.publicApiCatalog.publicBarrels.map((barrel) => barrel.path),
       submission.designMapping.publicApiCatalog.codeConnectManifest.path,
     ];
@@ -1587,10 +1588,15 @@ export const VisualComparisonSubmissionSchema = z
       targetIds.add(capture.targetId);
       actualPaths.add(capture.actualPath);
       expectedArtifactPaths.add(capture.actualPath);
-      if (capture.assertionReportPath !== undefined && capture.assertionResultPath !== undefined) {
+      if (
+        capture.assertionReportPath !== undefined &&
+        capture.assertionResultPath !== undefined &&
+        capture.assertionObservationPath !== undefined
+      ) {
         for (const [field, evidencePath] of [
           ["assertionReportPath", capture.assertionReportPath],
           ["assertionResultPath", capture.assertionResultPath],
+          ["assertionObservationPath", capture.assertionObservationPath],
         ] as const) {
           const evidenceFileName = evidencePath.slice(expectedDirectory.length);
           if (

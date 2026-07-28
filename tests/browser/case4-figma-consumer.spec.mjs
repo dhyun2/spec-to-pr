@@ -1,4 +1,5 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { expect, test } from "playwright/test";
@@ -7,6 +8,9 @@ const origin = requiredEnvironment("CASE4_ORIGIN");
 const state = requiredEnvironment("CASE4_STATE");
 const observationPath = requiredEnvironment("CASE4_OBSERVATION_PATH");
 const screenshotPath = requiredEnvironment("CASE4_SCREENSHOT_PATH");
+const targetId = requiredEnvironment("CASE4_TARGET_ID");
+const observationRepositoryPath = requiredEnvironment("CASE4_OBSERVATION_REPOSITORY_PATH");
+const screenshotRepositoryPath = requiredEnvironment("CASE4_SCREENSHOT_REPOSITORY_PATH");
 
 test.use({
   viewport: { width: 360, height: 800 },
@@ -18,7 +22,7 @@ test.use({
   permissions: ["clipboard-read", "clipboard-write"],
 });
 
-test("case4 focused UI assertions", async ({ page }) => {
+test("case4 focused UI assertions", async ({ page }, testInfo) => {
   const requestedResources = [];
   page.on("request", (request) => {
     requestedResources.push(new URL(request.url()).pathname);
@@ -196,24 +200,75 @@ test("case4 focused UI assertions", async ({ page }) => {
   await mkdir(path.dirname(observationPath), { recursive: true });
   await mkdir(path.dirname(screenshotPath), { recursive: true });
   await page.screenshot({ path: screenshotPath, fullPage: true });
-  await writeFile(
-    observationPath,
-    `${JSON.stringify(
-      {
-        ...observation,
-        focusBefore,
-        focusAfter,
-        focusVisible,
-        clickOutcome,
-        keyboardOutcome,
-        route: page.url(),
-        requestedResources,
-      },
-      null,
-      2,
-    )}\n`,
-    "utf8",
-  );
+  const screenshotDigest = sha256(await readFile(screenshotPath));
+  const assertionObservations = {
+    "paired-image-geometry": observation.images.right,
+    "table-border-top": observation.table.borderTopStyle,
+    "table-border-bottom": observation.table.borderBottomStyle,
+    "table-border-left": observation.table.borderLeftStyle,
+    "table-border-right": observation.table.borderRightStyle,
+    "copy-button-geometry": observation.copyButton.rect,
+    ...Object.fromEntries(
+      ["spot", "circle", "close"].flatMap((icon) => [
+        [`${icon}-icon-width`, observation.icons[icon].width],
+        [`${icon}-icon-height`, observation.icons[icon].height],
+        [`${icon}-icon-color`, observation.icons[icon].color],
+        [`${icon}-icon-token`, observation.icons[icon].inlineColor],
+        [`${icon}-icon-alignment`, observation.icons[icon].alignment],
+        [`${icon}-icon-flex-shrink`, observation.icons[icon].flexShrink],
+      ]),
+    ),
+    "copy-button-focus-order": `${focusBefore}->${focusAfter}`,
+    "copy-button-focus-visible": focusVisible,
+    "heading-order": observation.headingOrder,
+    "copy-button-name": observation.copyButton.accessibleName,
+    "copy-click": clickOutcome,
+    "copy-keyboard": keyboardOutcome,
+  };
+  const observationEnvelope = {
+    schemaVersion: "ui-assertion-observation-v1",
+    targetId,
+    state,
+    fixtureId: ready.fixtureId,
+    screenshot: {
+      path: screenshotRepositoryPath,
+      digest: screenshotDigest,
+    },
+    observations: assertionObservations,
+    diagnostics: {
+      ...observation,
+      focusBefore,
+      focusAfter,
+      focusVisible,
+      clickOutcome,
+      keyboardOutcome,
+      route: page.url(),
+      requestedResources,
+    },
+  };
+  const observationBytes = Buffer.from(`${JSON.stringify(observationEnvelope, null, 2)}\n`, "utf8");
+  await writeFile(observationPath, observationBytes);
+  const binding = {
+    targetId,
+    state,
+    fixtureId: ready.fixtureId,
+    observation: {
+      path: observationRepositoryPath,
+      digest: sha256(observationBytes),
+    },
+    screenshot: {
+      path: screenshotRepositoryPath,
+      digest: screenshotDigest,
+    },
+  };
+  testInfo.annotations.push({
+    type: "spec-to-pr-ui-binding",
+    description: JSON.stringify(binding),
+  });
+  await testInfo.attach("spec-to-pr-ui-observation", {
+    body: observationBytes,
+    contentType: "application/vnd.spec-to-pr.ui-observation+json",
+  });
 });
 
 function requiredEnvironment(name) {
@@ -222,4 +277,8 @@ function requiredEnvironment(name) {
     throw new Error(`${name} is required`);
   }
   return value;
+}
+
+function sha256(bytes) {
+  return `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 }

@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
+import path from "node:path";
 
+import { parse } from "@babel/parser";
 import { z } from "zod";
 
 import { Sha256DigestSchema } from "../runtime/scalars.js";
@@ -404,11 +406,41 @@ const FrontendUiPublicModuleSchema = z.enum([
   "@frontend/ui/icons/react",
 ]);
 
+const FigmaPublicApiExportSchema = z
+  .object({
+    figmaComponent: z.string().trim().min(1),
+    nodeId: z.string().trim().min(1),
+    module: FrontendUiPublicModuleSchema,
+    exportName: z
+      .string()
+      .trim()
+      .min(1)
+      .max(300)
+      .regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/),
+    allowedProps: z
+      .array(
+        z
+          .string()
+          .trim()
+          .min(1)
+          .max(200)
+          .regex(/^[A-Za-z_$][A-Za-z0-9_$-]*$/),
+      )
+      .max(100),
+  })
+  .strict();
+
 const FigmaPublicApiCatalogFieldsSchema = z
   .object({
     schemaVersion: z.literal("figma-public-api-catalog-v1"),
     packageName: z.literal("@frontend/ui"),
     packageVersion: ExactSemanticVersionSchema,
+    packageManifest: z
+      .object({
+        path: RepositoryPathSchema,
+        digest: Sha256DigestSchema,
+      })
+      .strict(),
     publicBarrels: z
       .array(
         z
@@ -427,33 +459,7 @@ const FigmaPublicApiCatalogFieldsSchema = z
         digest: Sha256DigestSchema,
       })
       .strict(),
-    exports: z
-      .array(
-        z
-          .object({
-            figmaComponent: z.string().trim().min(1),
-            nodeId: z.string().trim().min(1),
-            module: FrontendUiPublicModuleSchema,
-            exportName: z
-              .string()
-              .trim()
-              .min(1)
-              .max(300)
-              .regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/),
-            allowedProps: z
-              .array(
-                z
-                  .string()
-                  .trim()
-                  .min(1)
-                  .max(200)
-                  .regex(/^[A-Za-z_$][A-Za-z0-9_$-]*$/),
-              )
-              .max(100),
-          })
-          .strict(),
-      )
-      .max(2_000),
+    exports: z.array(FigmaPublicApiExportSchema).max(2_000),
   })
   .strict();
 
@@ -467,6 +473,7 @@ export function figmaPublicApiCatalogDigest(
     schemaVersion: fields.schemaVersion,
     packageName: fields.packageName,
     packageVersion: fields.packageVersion,
+    packageManifest: fields.packageManifest,
     publicBarrels: [...fields.publicBarrels].sort((left, right) =>
       compareCanonicalStrings(left.module, right.module),
     ),
@@ -500,11 +507,13 @@ export const FigmaPublicApiCatalogSchema = FigmaPublicApiCatalogFieldsSchema.ext
       });
     }
     const duplicateBarrels = duplicates(catalog.publicBarrels.map((barrel) => barrel.module));
+    const duplicateEvidencePaths = duplicates([
+      catalog.packageManifest.path,
+      ...catalog.publicBarrels.map((barrel) => barrel.path),
+      catalog.codeConnectManifest.path,
+    ]);
     const duplicateExports = duplicates(
-      catalog.exports.map(
-        (entry) =>
-          `${entry.figmaComponent}\u0000${entry.nodeId}\u0000${entry.module}\u0000${entry.exportName}`,
-      ),
+      catalog.exports.map((entry) => `${entry.figmaComponent}\u0000${entry.nodeId}`),
     );
     if (duplicateBarrels.length > 0) {
       context.addIssue({
@@ -518,6 +527,13 @@ export const FigmaPublicApiCatalogSchema = FigmaPublicApiCatalogFieldsSchema.ext
         code: "custom",
         path: ["exports"],
         message: `Duplicate public API exports: ${duplicateExports.join(", ")}`,
+      });
+    }
+    if (duplicateEvidencePaths.length > 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["packageManifest"],
+        message: `Public API evidence paths must be distinct: ${duplicateEvidencePaths.join(", ")}`,
       });
     }
     for (const [index, entry] of catalog.exports.entries()) {
@@ -540,6 +556,119 @@ export const FigmaPublicApiCatalogSchema = FigmaPublicApiCatalogFieldsSchema.ext
   });
 
 export type FigmaPublicApiCatalog = z.infer<typeof FigmaPublicApiCatalogSchema>;
+
+export function assertFigmaPublicApiCatalogEvidence(rawInput: {
+  mapping: FigmaDesignMapping;
+  evidence: Array<{ path: string; content: Buffer | string }>;
+}): void {
+  const mapping = FigmaDesignMappingSchema.parse(rawInput.mapping);
+  const catalog = mapping.publicApiCatalog;
+  const duplicateEvidencePaths = duplicates(rawInput.evidence.map((entry) => entry.path));
+  if (duplicateEvidencePaths.length > 0) {
+    throw designMappingError(
+      `duplicate public API evidence paths: ${duplicateEvidencePaths.join(", ")}`,
+    );
+  }
+  const evidence = new Map(
+    rawInput.evidence.map((entry) => [
+      RepositoryPathSchema.parse(entry.path),
+      Buffer.isBuffer(entry.content) ? entry.content : Buffer.from(entry.content, "utf8"),
+    ]),
+  );
+  const expectedEvidence = [
+    catalog.packageManifest,
+    ...catalog.publicBarrels,
+    catalog.codeConnectManifest,
+  ];
+  for (const expected of expectedEvidence) {
+    const content = evidence.get(expected.path);
+    if (content === undefined) {
+      throw designMappingError(`missing public API evidence: ${expected.path}`);
+    }
+    const observedDigest = `sha256:${createHash("sha256").update(content).digest("hex")}` as const;
+    if (observedDigest !== expected.digest) {
+      throw designMappingError(`public API evidence digest does not match: ${expected.path}`);
+    }
+  }
+
+  const packageManifestBytes = evidence.get(catalog.packageManifest.path)!;
+  const packageManifest = parseJsonEvidence(
+    packageManifestBytes,
+    catalog.packageManifest.path,
+    z
+      .object({
+        name: z.literal("@frontend/ui"),
+        version: ExactSemanticVersionSchema,
+        exports: z.record(z.string(), z.string().trim().min(1)),
+      })
+      .passthrough(),
+  );
+  if (
+    packageManifest.name !== catalog.packageName ||
+    packageManifest.version !== catalog.packageVersion ||
+    packageManifest.name !== mapping.designSystem.packageName ||
+    packageManifest.version !== mapping.designSystem.packageVersion
+  ) {
+    throw designMappingError(
+      `package manifest name/version ${packageManifest.name}@${packageManifest.version} does not exact-match the catalog`,
+    );
+  }
+  const packageDirectory = pathDirectory(catalog.packageManifest.path);
+  const barrelsByModule = new Map(catalog.publicBarrels.map((barrel) => [barrel.module, barrel]));
+  const exportedNamesByModule = new Map<string, Set<string>>();
+  for (const barrel of catalog.publicBarrels) {
+    const exportKey =
+      barrel.module === "@frontend/ui" ? "." : `.${barrel.module.slice("@frontend/ui".length)}`;
+    const declaredTarget = packageManifest.exports[exportKey];
+    if (declaredTarget === undefined) {
+      throw designMappingError(
+        `package manifest does not publish ${barrel.module} at ${exportKey}`,
+      );
+    }
+    const resolvedTarget = normalizeRepositoryPath(packageDirectory, declaredTarget);
+    if (resolvedTarget !== barrel.path) {
+      throw designMappingError(
+        `package export ${exportKey} resolves to ${resolvedTarget}, not evidence ${barrel.path}`,
+      );
+    }
+    exportedNamesByModule.set(
+      barrel.module,
+      namedModuleExports(evidence.get(barrel.path)!, barrel.path),
+    );
+  }
+
+  for (const entry of catalog.exports) {
+    const barrel = barrelsByModule.get(entry.module);
+    const namedExports = exportedNamesByModule.get(entry.module);
+    if (barrel === undefined || namedExports === undefined || !namedExports.has(entry.exportName)) {
+      throw designMappingError(
+        `catalog export ${entry.module}#${entry.exportName} is not a real named barrel export`,
+      );
+    }
+  }
+
+  const codeConnectManifest = parseJsonEvidence(
+    evidence.get(catalog.codeConnectManifest.path)!,
+    catalog.codeConnectManifest.path,
+    z
+      .object({
+        packageName: z.literal("@frontend/ui"),
+        packageVersion: ExactSemanticVersionSchema,
+        mappings: z.array(FigmaPublicApiExportSchema).max(2_000),
+      })
+      .strict(),
+  );
+  if (
+    codeConnectManifest.packageName !== catalog.packageName ||
+    codeConnectManifest.packageVersion !== catalog.packageVersion ||
+    canonicalPublicApiExports(codeConnectManifest.mappings) !==
+      canonicalPublicApiExports(catalog.exports)
+  ) {
+    throw designMappingError(
+      "Code Connect manifest package/version/mappings do not exact-match the public API catalog",
+    );
+  }
+}
 
 export const FigmaSemanticTokenBindingSchema = z
   .object({
@@ -792,6 +921,7 @@ export const FigmaDesignMappingSchema = z
       });
     }
     mapping.components.forEach((component, index) => {
+      assertKnownIconContract(component, index, context);
       if (component.resolution.kind === "exception") {
         const resolution = component.resolution;
         if (resolution.unavailableExport.catalogDigest !== mapping.publicApiCatalog.digest) {
@@ -853,7 +983,6 @@ export const FigmaDesignMappingSchema = z
           });
         }
       }
-      assertKnownIconContract(component, index, context);
     });
   });
 
@@ -1220,7 +1349,6 @@ function assertKnownIconContract(
   index: number,
   context: z.RefinementCtx,
 ): void {
-  if (binding.role !== "icon" || binding.resolution.kind !== "component") return;
   const known = {
     "icon/normal/spot": {
       exportName: "Spot",
@@ -1252,6 +1380,14 @@ function assertKnownIconContract(
   } as const;
   const expected = known[binding.figmaComponent as keyof typeof known];
   if (expected === undefined) return;
+  if (binding.role !== "icon" || binding.resolution.kind !== "component") {
+    context.addIssue({
+      code: "custom",
+      path: ["components", index, "resolution"],
+      message: `${binding.figmaComponent} is a required known icon and must use its public component export`,
+    });
+    return;
+  }
   if (
     binding.resolution.module !== "@frontend/ui/icons/vue" ||
     binding.resolution.exportName !== expected.exportName ||
@@ -1292,6 +1428,145 @@ function expectedIconStateFacts(
 
 function canonicalBindingValue(value: unknown): string {
   return JSON.stringify(canonicalizeBindingValue(value));
+}
+
+function parseJsonEvidence<T>(content: Buffer, evidencePath: string, schema: z.ZodType<T>): T {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(content.toString("utf8"));
+  } catch {
+    throw designMappingError(`${evidencePath} must contain strict JSON`);
+  }
+  const parsed = schema.safeParse(raw);
+  if (!parsed.success) {
+    throw designMappingError(
+      `${evidencePath} is invalid: ${parsed.error.issues.map((issue) => issue.message).join("; ")}`,
+    );
+  }
+  return parsed.data;
+}
+
+function pathDirectory(repositoryPath: string): string {
+  const directory = path.posix.dirname(repositoryPath);
+  return directory === "." ? "" : directory;
+}
+
+function normalizeRepositoryPath(directory: string, target: string): string {
+  if (!target.startsWith("./")) {
+    throw designMappingError(`package export target must be a relative ./ path: ${target}`);
+  }
+  const normalized = path.posix.normalize(path.posix.join(directory, target));
+  return RepositoryPathSchema.parse(normalized);
+}
+
+function namedModuleExports(content: Buffer, evidencePath: string): Set<string> {
+  let program: ReturnType<typeof parse>["program"];
+  try {
+    program = parse(content.toString("utf8"), {
+      sourceType: "module",
+      plugins: ["jsx", "typescript"],
+    }).program;
+  } catch {
+    throw designMappingError(
+      `public barrel is not parseable JavaScript/TypeScript: ${evidencePath}`,
+    );
+  }
+  const names = new Set<string>();
+  for (const rawStatement of program.body) {
+    const statement = rawStatement as unknown as Record<string, unknown>;
+    if (statement["type"] === "ExportAllDeclaration") {
+      throw designMappingError(
+        `public barrel ${evidencePath} must use bounded named exports, not export *`,
+      );
+    }
+    if (statement["type"] !== "ExportNamedDeclaration") continue;
+    const declaration = asRecord(statement["declaration"]);
+    if (declaration !== undefined) {
+      const declarationType = declaration["type"];
+      if (
+        (declarationType === "FunctionDeclaration" ||
+          declarationType === "ClassDeclaration" ||
+          declarationType === "TSTypeAliasDeclaration" ||
+          declarationType === "TSInterfaceDeclaration" ||
+          declarationType === "TSEnumDeclaration") &&
+        asRecord(declaration["id"])?.["type"] === "Identifier"
+      ) {
+        names.add(String(asRecord(declaration["id"])?.["name"]));
+      } else if (
+        declarationType === "VariableDeclaration" &&
+        Array.isArray(declaration["declarations"])
+      ) {
+        for (const item of declaration["declarations"]) {
+          collectBindingNames(asRecord(item)?.["id"], names);
+        }
+      }
+    }
+    if (Array.isArray(statement["specifiers"])) {
+      for (const rawSpecifier of statement["specifiers"]) {
+        const specifier = asRecord(rawSpecifier);
+        if (specifier?.["type"] !== "ExportSpecifier") continue;
+        const exported = asRecord(specifier["exported"]);
+        if (exported?.["type"] === "Identifier") names.add(String(exported["name"]));
+        if (exported?.["type"] === "StringLiteral") names.add(String(exported["value"]));
+      }
+    }
+  }
+  return names;
+}
+
+function collectBindingNames(rawPattern: unknown, names: Set<string>): void {
+  const pattern = asRecord(rawPattern);
+  if (pattern === undefined) return;
+  if (pattern["type"] === "Identifier") {
+    names.add(String(pattern["name"]));
+    return;
+  }
+  if (pattern["type"] === "AssignmentPattern" || pattern["type"] === "RestElement") {
+    collectBindingNames(
+      pattern[pattern["type"] === "AssignmentPattern" ? "left" : "argument"],
+      names,
+    );
+    return;
+  }
+  if (pattern["type"] === "ObjectPattern" && Array.isArray(pattern["properties"])) {
+    for (const property of pattern["properties"]) {
+      const propertyRecord = asRecord(property);
+      collectBindingNames(
+        propertyRecord?.["type"] === "RestElement"
+          ? propertyRecord["argument"]
+          : propertyRecord?.["value"],
+        names,
+      );
+    }
+    return;
+  }
+  if (pattern["type"] === "ArrayPattern" && Array.isArray(pattern["elements"])) {
+    for (const element of pattern["elements"]) collectBindingNames(element, names);
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function canonicalPublicApiExports(
+  entries: Array<z.infer<typeof FigmaPublicApiExportSchema>>,
+): string {
+  return JSON.stringify(
+    [...entries]
+      .sort((left, right) =>
+        compareCanonicalStrings(
+          `${left.figmaComponent}\u0000${left.nodeId}`,
+          `${right.figmaComponent}\u0000${right.nodeId}`,
+        ),
+      )
+      .map((entry) => ({
+        ...entry,
+        allowedProps: [...entry.allowedProps].sort(compareCanonicalStrings),
+      })),
+  );
 }
 
 function canonicalizeBindingValue(value: unknown): unknown {

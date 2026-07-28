@@ -122,6 +122,7 @@ import {
 } from "../visual/baseline-isolation.js";
 import {
   PlaywrightCliResultSchema,
+  UiAssertionObservationSchema,
   UiAssertionReportSchema,
   assertUiAssertionReport,
 } from "../visual/ui-assertion-contract.js";
@@ -132,6 +133,7 @@ import {
   assertCompleteDesignMapping,
   assertExactFigmaImplementationBindings,
   assertFigmaCaptureGeometry,
+  assertFigmaPublicApiCatalogEvidence,
   assertFigmaStateContracts,
   type FigmaDesignMapping,
   type FigmaStateContract,
@@ -2168,6 +2170,7 @@ export class WorkflowService {
       submission.kind === "figma-bundle"
         ? [
             ...submission.artifactPaths,
+            submission.designMapping.publicApiCatalog.packageManifest.path,
             ...submission.designMapping.publicApiCatalog.publicBarrels.map((barrel) => barrel.path),
             submission.designMapping.publicApiCatalog.codeConnectManifest.path,
           ]
@@ -2200,6 +2203,22 @@ export class WorkflowService {
 
     if (submission.kind === "figma-bundle") {
       await assertFigmaDesignAssets(root, submission.designMapping);
+      const catalogPaths = new Set([
+        submission.designMapping.publicApiCatalog.packageManifest.path,
+        ...submission.designMapping.publicApiCatalog.publicBarrels.map((barrel) => barrel.path),
+        submission.designMapping.publicApiCatalog.codeConnectManifest.path,
+      ]);
+      assertFigmaPublicApiCatalogEvidence({
+        mapping: submission.designMapping,
+        evidence: await Promise.all(
+          preparedEvidencePaths
+            .filter((item) => catalogPaths.has(item.evidencePath))
+            .map(async (item) => ({
+              path: item.evidencePath,
+              content: await readFile(item.resolvedPath),
+            })),
+        ),
+      });
     }
 
     const mockFixtureDigests = new Map<
@@ -2323,6 +2342,7 @@ export class WorkflowService {
           assertFigmaManifest(content, evidencePath, submission);
         } else {
           const catalogEvidence = [
+            submission.designMapping.publicApiCatalog.packageManifest,
             ...submission.designMapping.publicApiCatalog.publicBarrels,
             submission.designMapping.publicApiCatalog.codeConnectManifest,
           ].find((candidate) => candidate.path === evidencePath);
@@ -2537,6 +2557,9 @@ export class WorkflowService {
       const visualAssertionResult = submission.captures.find(
         (capture) => capture.assertionResultPath === evidencePath,
       );
+      const visualAssertionObservation = submission.captures.find(
+        (capture) => capture.assertionObservationPath === evidencePath,
+      );
       const baselineIsolationEvidence = submission.baselineIsolationPath === evidencePath;
       if (baselineIsolationEvidence) {
         let rawEvidence: unknown;
@@ -2597,6 +2620,21 @@ export class WorkflowService {
             `UI_ASSERTION_REPORT_INVALID: Playwright CLI result schema is invalid: ${evidencePath}: ${parsedResult.error.issues.map((issue) => issue.message).join("; ")}`,
           );
         }
+      } else if (visualAssertionObservation !== undefined) {
+        let rawObservation: unknown;
+        try {
+          rawObservation = JSON.parse(content.toString("utf8"));
+        } catch {
+          throw new Error(
+            `UI_ASSERTION_REPORT_INVALID: observation must be strict JSON: ${evidencePath}`,
+          );
+        }
+        const parsedObservation = UiAssertionObservationSchema.safeParse(rawObservation);
+        if (!parsedObservation.success) {
+          throw new Error(
+            `UI_ASSERTION_REPORT_INVALID: observation schema is invalid: ${evidencePath}: ${parsedObservation.error.issues.map((issue) => issue.message).join("; ")}`,
+          );
+        }
       } else if (visualCapture !== undefined) {
         await assertPng(content, evidencePath);
       } else {
@@ -2635,13 +2673,18 @@ export class WorkflowService {
                   ? "ui-assertions"
                   : visualAssertionResult !== undefined
                     ? "ui-assertion-result"
-                    : "actual",
+                    : visualAssertionObservation !== undefined
+                      ? "ui-assertion-observation"
+                      : "actual",
             ...(visualCapture === undefined ? {} : { targetId: visualCapture.targetId }),
             ...(visualReceipt === undefined ? {} : { targetId: visualReceipt.targetId }),
             ...(visualAssertion === undefined ? {} : { targetId: visualAssertion.targetId }),
             ...(visualAssertionResult === undefined
               ? {}
               : { targetId: visualAssertionResult.targetId }),
+            ...(visualAssertionObservation === undefined
+              ? {}
+              : { targetId: visualAssertionObservation.targetId }),
           },
         }),
       });
@@ -2718,7 +2761,8 @@ export class WorkflowService {
       if (target.figmaCapture === undefined) {
         if (
           capture.assertionReportPath !== undefined ||
-          capture.assertionResultPath !== undefined
+          capture.assertionResultPath !== undefined ||
+          capture.assertionObservationPath !== undefined
         ) {
           throw new Error(
             `UI_ASSERTION_REPORT_INVALID: compatibility target ${target.targetId} forbids unbound UI assertion artifacts`,
@@ -2740,7 +2784,9 @@ export class WorkflowService {
         capture.assertionReportPath === undefined ||
         capture.assertionReportDigest === undefined ||
         capture.assertionResultPath === undefined ||
-        capture.assertionResultDigest === undefined
+        capture.assertionResultDigest === undefined ||
+        capture.assertionObservationPath === undefined ||
+        capture.assertionObservationDigest === undefined
       ) {
         throw new Error(
           `UI_ASSERTION_REPORT_INVALID: strict target ${target.targetId} requires a report and Playwright CLI result`,
@@ -2833,6 +2879,14 @@ export class WorkflowService {
           `UI_ASSERTION_REPORT_INVALID: missing Playwright CLI result for ${target.targetId}`,
         );
       }
+      const assertionObservationArtifact = evidenceArtifacts.find(
+        (artifact) =>
+          artifact.metadata["projectRelativePath"] === capture.assertionObservationPath &&
+          artifact.metadata["visualRole"] === "ui-assertion-observation",
+      );
+      if (assertionObservationArtifact === undefined) {
+        throw new Error(`UI_ASSERTION_REPORT_INVALID: missing observation for ${target.targetId}`);
+      }
       let assertionReport: unknown;
       try {
         const assertionContent =
@@ -2855,6 +2909,17 @@ export class WorkflowService {
           `UI_ASSERTION_REPORT_INVALID: Playwright CLI result must be strict JSON for ${target.targetId}`,
         );
       }
+      let assertionObservation: unknown;
+      try {
+        const assertionObservationContent =
+          preparedContent.get(assertionObservationArtifact.digest) ??
+          (await this.dependencies.artifactStore.readContent(assertionObservationArtifact.digest));
+        assertionObservation = JSON.parse(assertionObservationContent.toString("utf8"));
+      } catch {
+        throw new Error(
+          `UI_ASSERTION_REPORT_INVALID: observation must be strict JSON for ${target.targetId}`,
+        );
+      }
       assertUiAssertionReport({
         report: assertionReport,
         packet,
@@ -2864,6 +2929,11 @@ export class WorkflowService {
         producerResultPath: capture.assertionResultPath,
         producerResultDigest: capture.assertionResultDigest,
         producerResult: assertionResult,
+        producerObservationPath: capture.assertionObservationPath,
+        producerObservationDigest: capture.assertionObservationDigest,
+        producerObservation: assertionObservation,
+        screenshotPath: capture.actualPath,
+        screenshotDigest: capture.actualDigest,
       });
       const captureLineageId = captureRendererLineageId(validated.environment);
       if (rendererLineageId !== undefined && captureLineageId !== rendererLineageId) {
@@ -3010,6 +3080,9 @@ export class WorkflowService {
       const assertionResultCapture = submission.captures.find(
         (capture) => capture.assertionResultPath === artifact.metadata["projectRelativePath"],
       );
+      const assertionObservationCapture = submission.captures.find(
+        (capture) => capture.assertionObservationPath === artifact.metadata["projectRelativePath"],
+      );
       const baselineIsolationArtifact =
         submission.baselineIsolationPath === artifact.metadata["projectRelativePath"];
       if (capture !== undefined && capture.actualDigest !== artifact.digest) {
@@ -3038,6 +3111,14 @@ export class WorkflowService {
           `UI_ASSERTION_REPORT_INVALID: ${assertionResultCapture.assertionResultPath} does not match its declared digest`,
         );
       }
+      if (
+        assertionObservationCapture !== undefined &&
+        assertionObservationCapture.assertionObservationDigest !== artifact.digest
+      ) {
+        throw new Error(
+          `UI_ASSERTION_REPORT_INVALID: ${assertionObservationCapture.assertionObservationPath} does not match its declared digest`,
+        );
+      }
       if (baselineIsolationArtifact && submission.baselineIsolationDigest !== artifact.digest) {
         throw new Error(
           `VISUAL_BASELINE_ISOLATION_INVALID: ${submission.baselineIsolationPath} does not match its declared digest`,
@@ -3050,19 +3131,25 @@ export class WorkflowService {
           ...(capture === undefined &&
           receiptCapture === undefined &&
           assertionCapture === undefined &&
-          assertionResultCapture === undefined
+          assertionResultCapture === undefined &&
+          assertionObservationCapture === undefined
             ? {}
             : {
-                targetId: (capture ?? receiptCapture ?? assertionCapture ?? assertionResultCapture)!
-                  .targetId,
+                targetId: (capture ??
+                  receiptCapture ??
+                  assertionCapture ??
+                  assertionResultCapture ??
+                  assertionObservationCapture)!.targetId,
                 captureProvider: (capture ??
                   receiptCapture ??
                   assertionCapture ??
-                  assertionResultCapture)!.provider,
+                  assertionResultCapture ??
+                  assertionObservationCapture)!.provider,
                 visualCapturedAt: (capture ??
                   receiptCapture ??
                   assertionCapture ??
-                  assertionResultCapture)!.capturedAt,
+                  assertionResultCapture ??
+                  assertionObservationCapture)!.capturedAt,
                 ...(capture !== undefined
                   ? { declaredCaptureDigest: capture.actualDigest }
                   : receiptCapture !== undefined
@@ -3071,10 +3158,15 @@ export class WorkflowService {
                       ? {
                           declaredAssertionReportDigest: assertionCapture!.assertionReportDigest,
                         }
-                      : {
-                          declaredAssertionResultDigest:
-                            assertionResultCapture!.assertionResultDigest,
-                        }),
+                      : assertionResultCapture !== undefined
+                        ? {
+                            declaredAssertionResultDigest:
+                              assertionResultCapture!.assertionResultDigest,
+                          }
+                        : {
+                            declaredAssertionObservationDigest:
+                              assertionObservationCapture!.assertionObservationDigest,
+                          }),
               }),
         },
       });
@@ -6946,6 +7038,8 @@ function visualSubmissionIdentity(
     assertionReportDigest?: string | undefined;
     assertionResultPath?: string | undefined;
     assertionResultDigest?: string | undefined;
+    assertionObservationPath?: string | undefined;
+    assertionObservationDigest?: string | undefined;
     receiptPath?: string | undefined;
     receiptDigest?: string | undefined;
   }>,
@@ -6977,6 +7071,12 @@ function visualSubmissionIdentity(
       ...(capture.assertionResultDigest === undefined
         ? {}
         : { assertionResultDigest: capture.assertionResultDigest }),
+      ...(capture.assertionObservationPath === undefined
+        ? {}
+        : { assertionObservationPath: capture.assertionObservationPath }),
+      ...(capture.assertionObservationDigest === undefined
+        ? {}
+        : { assertionObservationDigest: capture.assertionObservationDigest }),
       ...(capture.receiptPath === undefined ? {} : { receiptPath: capture.receiptPath }),
       ...(capture.receiptDigest === undefined ? {} : { receiptDigest: capture.receiptDigest }),
     }))
@@ -7343,6 +7443,7 @@ function assertFigmaManifest(
   });
   const submittedFileUrls = submission.fileUrls ?? [submission.fileUrl];
   const catalogEvidencePaths = [
+    submission.designMapping.publicApiCatalog.packageManifest.path,
     ...submission.designMapping.publicApiCatalog.publicBarrels.map((barrel) => barrel.path),
     submission.designMapping.publicApiCatalog.codeConnectManifest.path,
   ];

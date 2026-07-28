@@ -37,6 +37,10 @@ function figmaDesignMappingFixture() {
     schemaVersion: "figma-public-api-catalog-v1" as const,
     packageName: "@frontend/ui" as const,
     packageVersion: "1.2.3",
+    packageManifest: {
+      path: "test-ui-package/package.json",
+      digest: `sha256:${"c".repeat(64)}` as const,
+    },
     publicBarrels: [
       {
         module: "@frontend/ui" as const,
@@ -1344,6 +1348,7 @@ describe("workflow v2 contracts", () => {
     const baselineIsolationPath = `visual/actual/${reviewPacketId}/baseline-isolation.json`;
     const assertionReportPath = `visual/actual/${reviewPacketId}/checkout.assertions.json`;
     const assertionResultPath = `visual/actual/${reviewPacketId}/checkout.playwright.json`;
+    const assertionObservationPath = `visual/actual/${reviewPacketId}/checkout.observation.json`;
     const submission = {
       kind: "visual-comparison",
       reviewPacketId,
@@ -1363,6 +1368,8 @@ describe("workflow v2 contracts", () => {
           assertionReportDigest: `sha256:${"4".repeat(64)}`,
           assertionResultPath,
           assertionResultDigest: `sha256:${"5".repeat(64)}`,
+          assertionObservationPath,
+          assertionObservationDigest: `sha256:${"6".repeat(64)}`,
         },
       ],
       baselineIsolationPath,
@@ -1371,6 +1378,7 @@ describe("workflow v2 contracts", () => {
         `visual/actual/${reviewPacketId}/checkout.png`,
         assertionReportPath,
         assertionResultPath,
+        assertionObservationPath,
         baselineIsolationPath,
       ],
     };
@@ -1407,12 +1415,16 @@ describe("workflow v2 contracts", () => {
             assertionReportDigest: undefined,
             assertionResultPath: undefined,
             assertionResultDigest: undefined,
+            assertionObservationPath: undefined,
+            assertionObservationDigest: undefined,
           },
         ],
-        artifactPaths: submission.artifactPaths.filter(
-          (artifactPath) =>
-            artifactPath !== assertionReportPath && artifactPath !== assertionResultPath,
-        ),
+        artifactPaths: submission.artifactPaths
+          .filter(
+            (artifactPath) =>
+              artifactPath !== assertionReportPath && artifactPath !== assertionResultPath,
+          )
+          .filter((artifactPath) => artifactPath !== assertionObservationPath),
       }).success,
     ).toBe(true);
     expect(

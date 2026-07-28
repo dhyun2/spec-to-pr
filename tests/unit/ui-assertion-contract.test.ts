@@ -12,17 +12,67 @@ const captureReceiptDigest = `sha256:${"c".repeat(64)}` as const;
 const producerResultPath = "visual/actual/packet/assert-checkout.playwright.json";
 const producerResultDigest = `sha256:${"d".repeat(64)}` as const;
 const producerTestId = "checkout focused UI assertions";
-const producerResult = {
+const producerProjectName = "ui-chromium";
+const producerObservationPath = "visual/actual/packet/checkout.observation.json";
+const producerObservationDigest = `sha256:${"e".repeat(64)}` as const;
+const screenshotPath = "visual/actual/packet/checkout.png";
+const screenshotDigest = `sha256:${"f".repeat(64)}` as const;
+const producerBinding = {
+  targetId: "checkout-default",
+  state: "default",
+  fixtureId: "fixture:checkout",
+  observation: {
+    path: producerObservationPath,
+    digest: producerObservationDigest,
+  },
+  screenshot: {
+    path: screenshotPath,
+    digest: screenshotDigest,
+  },
+};
+const bindingAnnotation = {
+  type: "spec-to-pr-ui-binding",
+  description: JSON.stringify(producerBinding),
+};
+const producerResultFor = (observation: unknown) => ({
   config: { version: "1.61.1" },
   suites: [
     {
       title: "checkout.spec.ts",
-      specs: [{ title: producerTestId, ok: true, tests: [] }],
+      specs: [
+        {
+          title: producerTestId,
+          ok: true,
+          tests: [
+            {
+              expectedStatus: "passed",
+              projectId: producerProjectName,
+              projectName: producerProjectName,
+              results: [
+                {
+                  status: "passed",
+                  errors: [],
+                  annotations: [bindingAnnotation],
+                  attachments: [
+                    {
+                      name: "spec-to-pr-ui-observation",
+                      contentType: "application/vnd.spec-to-pr.ui-observation+json",
+                      body: Buffer.from(JSON.stringify(observation), "utf8").toString("base64"),
+                    },
+                  ],
+                },
+              ],
+              status: "expected",
+              annotations: [bindingAnnotation],
+            },
+          ],
+        },
+      ],
     },
   ],
   errors: [],
   stats: { expected: 1, unexpected: 0, flaky: 0, skipped: 0 },
-};
+});
 const target = {
   targetId: "checkout-default",
   name: "Checkout",
@@ -163,6 +213,27 @@ const stateContract = {
   ...stateFields,
   digest: figmaStateFactsDigest(stateFields),
 };
+const producerObservation = {
+  schemaVersion: "ui-assertion-observation-v1",
+  targetId: target.targetId,
+  state: target.state,
+  fixtureId: target.fixture,
+  screenshot: {
+    path: screenshotPath,
+    digest: screenshotDigest,
+  },
+  observations: Object.fromEntries(
+    assertions.map((assertion) => [assertion.id, assertion.observed]),
+  ),
+};
+const producerResult = producerResultFor(producerObservation);
+const producerEvidenceInput = {
+  producerObservationPath,
+  producerObservationDigest,
+  producerObservation,
+  screenshotPath,
+  screenshotDigest,
+};
 
 function report(overrides: Record<string, unknown> = {}) {
   return {
@@ -176,8 +247,10 @@ function report(overrides: Record<string, unknown> = {}) {
     producer: {
       kind: "playwright-test-cli",
       testId: producerTestId,
+      projectName: producerProjectName,
       resultPath: producerResultPath,
       resultDigest: producerResultDigest,
+      binding: producerBinding,
     },
     assertions,
     status: "passed",
@@ -197,6 +270,7 @@ describe("focused UI assertion report", () => {
         producerResultPath,
         producerResultDigest,
         producerResult,
+        ...producerEvidenceInput,
       }),
     ).not.toThrow();
   });
@@ -218,6 +292,7 @@ describe("focused UI assertion report", () => {
         producerResultPath,
         producerResultDigest,
         producerResult,
+        ...producerEvidenceInput,
       }),
     ).toThrow(/UI_ASSERTION_REPORT_INVALID/);
   });
@@ -238,6 +313,7 @@ describe("focused UI assertion report", () => {
           producerResultPath,
           producerResultDigest,
           producerResult,
+          ...producerEvidenceInput,
         }),
       ).toThrow(/UI_ASSERTION_REPORT_INVALID.*assertion IDs/i);
     }
@@ -266,8 +342,60 @@ describe("focused UI assertion report", () => {
         producerResultPath,
         producerResultDigest,
         producerResult,
+        ...producerEvidenceInput,
       }),
     ).toThrow(/UI_ASSERTION_REPORT_INVALID.*definition|immutable|semantic/i);
+  });
+
+  it("FABRICATED_PLAYWRIGHT_RESULT_AND_OBSERVATION_ACCEPTED", () => {
+    const fabricatedResult = {
+      config: { version: "not-a-real-project" },
+      suites: [
+        {
+          title: "fabricated.spec.ts",
+          specs: [{ title: producerTestId, ok: true, tests: [] }],
+        },
+      ],
+      errors: [],
+      stats: { expected: 1, unexpected: 0, flaky: 0, skipped: 0 },
+    };
+
+    expect(() =>
+      assertUiAssertionReport({
+        report: report(),
+        packet: { id: reviewPacketId, headSha },
+        target,
+        stateContract,
+        captureReceiptDigest,
+        producerResultPath,
+        producerResultDigest,
+        producerResult: fabricatedResult,
+        ...producerEvidenceInput,
+      }),
+    ).toThrow(/UI_ASSERTION_REPORT_INVALID.*Playwright|project|result|attachment|binding/i);
+  });
+
+  it("rejects an observation artifact that substitutes a report observation", () => {
+    expect(() =>
+      assertUiAssertionReport({
+        report: report(),
+        packet: { id: reviewPacketId, headSha },
+        target,
+        stateContract,
+        captureReceiptDigest,
+        producerResultPath,
+        producerResultDigest,
+        producerResult,
+        ...producerEvidenceInput,
+        producerObservation: {
+          ...producerObservation,
+          observations: {
+            ...producerObservation.observations,
+            "copy-click": "fabricated",
+          },
+        },
+      }),
+    ).toThrow(/UI_ASSERTION_REPORT_INVALID.*observation|assertion|artifact/i);
   });
 
   it.each([
@@ -308,6 +436,7 @@ describe("focused UI assertion report", () => {
         producerResultPath,
         producerResultDigest,
         producerResult,
+        ...producerEvidenceInput,
       }),
     ).toThrow(/UI_ASSERTION_REPORT_INVALID/);
   });
@@ -334,6 +463,7 @@ describe("focused UI assertion report", () => {
         producerResultPath,
         producerResultDigest,
         producerResult,
+        ...producerEvidenceInput,
       }),
     ).toThrow(/UI_ASSERTION_REPORT_INVALID/);
   });

@@ -20,6 +20,7 @@ const outputRoot = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-case4-"));
 const browserChannel = "chromium";
 const adapterVersion = "capture-runner-v2";
 const playwrightTestId = "case4 focused UI assertions";
+const playwrightProjectName = "case4-chromium";
 
 const baselineImage = new PNG({ width: 1, height: 1 });
 baselineImage.data.set([29, 78, 216, 255]);
@@ -31,6 +32,7 @@ const sourcePaths = [
   "tests/fixtures/case4-figma/ui-consumer/consumer.js",
   "tests/fixtures/case4-figma/ui-consumer/index.js",
   "tests/fixtures/case4-figma/ui-consumer/icons/vue.js",
+  "tests/fixtures/case4-figma/ui-consumer/package.json",
   "tests/fixtures/case4-figma/ui-consumer/code-connect.manifest.json",
 ];
 const sourceEvidence = await Promise.all(
@@ -49,6 +51,10 @@ const publicApiCatalogFields = {
   schemaVersion: "figma-public-api-catalog-v1",
   packageName: "@frontend/ui",
   packageVersion: "1.2.3",
+  packageManifest: {
+    path: "tests/fixtures/case4-figma/ui-consumer/package.json",
+    digest: sourceByPath.get("tests/fixtures/case4-figma/ui-consumer/package.json").digest,
+  },
   publicBarrels: [
     {
       module: "@frontend/ui",
@@ -81,6 +87,7 @@ const publicApiCatalog = {
         schemaVersion: publicApiCatalogFields.schemaVersion,
         packageName: publicApiCatalogFields.packageName,
         packageVersion: publicApiCatalogFields.packageVersion,
+        packageManifest: publicApiCatalogFields.packageManifest,
         publicBarrels: [...publicApiCatalogFields.publicBarrels].sort((left, right) =>
           canonicalCompare(left.module, right.module),
         ),
@@ -412,6 +419,9 @@ try {
     const screenshotPath = path.join(outputRoot, `${state}.png`);
     const observationPath = path.join(outputRoot, `${state}.observation.json`);
     const resultPath = path.join(outputRoot, `${state}.playwright-result.json`);
+    const targetId = `shop-${state}`;
+    const screenshotRepositoryPath = `visual/actual/case4/${state}.png`;
+    const observationRepositoryPath = `visual/assertions/case4/${state}.observation.json`;
 
     await runFile(
       "pnpm",
@@ -420,6 +430,8 @@ try {
         "playwright",
         "test",
         "tests/browser/case4-figma-consumer.spec.mjs",
+        "--config=tests/browser/case4-playwright.config.mjs",
+        `--project=${playwrightProjectName}`,
         "--reporter=json",
         "--workers=1",
       ],
@@ -431,13 +443,17 @@ try {
           CASE4_STATE: state,
           CASE4_OBSERVATION_PATH: observationPath,
           CASE4_SCREENSHOT_PATH: screenshotPath,
+          CASE4_TARGET_ID: targetId,
+          CASE4_OBSERVATION_REPOSITORY_PATH: observationRepositoryPath,
+          CASE4_SCREENSHOT_REPOSITORY_PATH: screenshotRepositoryPath,
           PLAYWRIGHT_JSON_OUTPUT_NAME: resultPath,
         },
         maxBuffer: 10 * 1024 * 1024,
       },
     );
 
-    const observation = JSON.parse(await readFile(observationPath, "utf8"));
+    const observationEnvelope = JSON.parse(await readFile(observationPath, "utf8"));
+    const observation = observationEnvelope.diagnostics;
     assert.equal(observation.ready.fixtureId, fixture.id);
     assert.deepEqual(observation.ready.stateFacts, fixture.stateFacts);
     assert.equal(observation.documentReadyState, "complete");
@@ -447,7 +463,7 @@ try {
 
     const uiAssertions = requiredAssertions.map((definition) => ({
       ...definition,
-      observed: observedValue(definition, observation),
+      observed: observationEnvelope.observations[definition.id],
       status: "passed",
     }));
     for (const assertion of uiAssertions) {
@@ -468,7 +484,7 @@ try {
     }
 
     const stateContractFields = {
-      targetId: `shop-${state}`,
+      targetId,
       nodeId: state === "available" ? "2558:4382" : "2558:4383",
       state,
       fixtureId: fixture.id,
@@ -542,7 +558,7 @@ try {
       schemaVersion: "visual-capture-receipt-v2",
       reviewPacketId: `packet_${"a".repeat(64)}`,
       headSha: "b".repeat(40),
-      targetId: `shop-${state}`,
+      targetId,
       route: observation.route,
       state,
       captureKind: "full-frame",
@@ -572,7 +588,7 @@ try {
       fixture: { id: fixture.id, digest: fixtureDigest },
       assets: [{ path: `tests/fixtures/case4-figma/${state}.json`, digest: fixtureDigest }],
       actual: {
-        path: `visual/actual/case4/${state}.png`,
+        path: screenshotRepositoryPath,
         digest: actualDigest,
         bitmapSize: { width: decoded.width, height: decoded.height },
       },
@@ -590,8 +606,46 @@ try {
     assert.equal(producerResult.stats.flaky, 0);
     assert.equal(producerResult.suites[0].specs[0].title, playwrightTestId);
     assert.equal(producerResult.suites[0].specs[0].ok, true);
+    assert.equal(producerResult.suites[0].specs[0].tests[0].projectName, playwrightProjectName);
+    assert.equal(producerResult.suites[0].specs[0].tests[0].results[0].status, "passed");
     const producerResultDigest = digest(resultBytes);
     const producerRepositoryPath = `visual/assertions/case4/${state}.playwright-result.json`;
+    const observationBytes = await readFile(observationPath);
+    const observationDigest = digest(observationBytes);
+    const producerBinding = {
+      targetId,
+      state,
+      fixtureId: fixture.id,
+      observation: {
+        path: observationRepositoryPath,
+        digest: observationDigest,
+      },
+      screenshot: {
+        path: screenshotRepositoryPath,
+        digest: actualDigest,
+      },
+    };
+    const producerTest = producerResult.suites[0].specs[0].tests[0];
+    const producerTestResult = producerTest.results[0];
+    const bindingAnnotations = [
+      ...producerTest.annotations,
+      ...producerTestResult.annotations,
+    ].filter((annotation) => annotation.type === "spec-to-pr-ui-binding");
+    assert.ok(bindingAnnotations.length >= 1);
+    for (const annotation of bindingAnnotations) {
+      assert.deepEqual(JSON.parse(annotation.description), producerBinding);
+    }
+    const observationAttachments = producerTestResult.attachments.filter(
+      (attachment) =>
+        attachment.name === "spec-to-pr-ui-observation" &&
+        attachment.contentType === "application/vnd.spec-to-pr.ui-observation+json",
+    );
+    assert.equal(observationAttachments.length, 1);
+    assert.equal(observationAttachments[0].path, undefined);
+    assert.deepEqual(
+      JSON.parse(Buffer.from(observationAttachments[0].body, "base64").toString("utf8")),
+      observationEnvelope,
+    );
     const uiAssertionReport = {
       schemaVersion: "ui-assertions-v1",
       reviewPacketId: receipt.reviewPacketId,
@@ -603,8 +657,10 @@ try {
       producer: {
         kind: "playwright-test-cli",
         testId: playwrightTestId,
+        projectName: playwrightProjectName,
         resultPath: producerRepositoryPath,
         resultDigest: producerResultDigest,
+        binding: producerBinding,
       },
       assertions: uiAssertions,
       status: "passed",
@@ -627,6 +683,9 @@ try {
       producerResultPath: producerRepositoryPath,
       producerResultDigest,
       producerResult,
+      producerObservationPath: observationRepositoryPath,
+      producerObservationDigest: observationDigest,
+      producerObservation: observationEnvelope,
       uiAssertionReportDigest: digest(uiAssertionReportBytes),
       uiAssertionReport,
       baselineIsolation: {
@@ -769,36 +828,6 @@ try {
   await browser.close();
   await new Promise((resolve) => server.close(resolve));
   await rm(outputRoot, { recursive: true, force: true });
-}
-
-function observedValue(definition, observation) {
-  if (definition.id === "paired-image-geometry") return observation.images.right;
-  if (definition.id === "copy-button-geometry") return observation.copyButton.rect;
-  if (definition.id.startsWith("table-border-")) {
-    const edge = definition.id.replace("table-border-", "");
-    return observation.table[`border${edge[0].toUpperCase()}${edge.slice(1)}Style`];
-  }
-  const iconMatch = /^(spot|circle|close)-icon-(.+)$/.exec(definition.id);
-  if (iconMatch !== null) {
-    const [, icon, property] = iconMatch;
-    const observationProperty = {
-      width: "width",
-      height: "height",
-      color: "color",
-      token: "inlineColor",
-      alignment: "alignment",
-      "flex-shrink": "flexShrink",
-    }[property];
-    return observation.icons[icon][observationProperty];
-  }
-  return {
-    "copy-button-focus-order": `${observation.focusBefore}->${observation.focusAfter}`,
-    "copy-button-focus-visible": observation.focusVisible,
-    "heading-order": observation.headingOrder,
-    "copy-button-name": observation.copyButton.accessibleName,
-    "copy-click": observation.clickOutcome,
-    "copy-keyboard": observation.keyboardOutcome,
-  }[definition.id];
 }
 
 function iconStateFacts(binding) {
