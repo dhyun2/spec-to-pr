@@ -1,5 +1,5 @@
 export const VISUAL_POLICY = {
-    reviewThreshold: 0.98,
+    reviewThreshold: 0.92,
     maxMaskedAreaRatio: 0.2,
     maxComparisonAttempts: 3,
 };

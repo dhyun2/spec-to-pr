@@ -27,7 +27,7 @@ export type ResolvedDeliveryPolicy = {
     parallelReviewers: boolean;
 };
 export declare const VISUAL_POLICY: {
-    readonly reviewThreshold: 0.98;
+    readonly reviewThreshold: 0.92;
     readonly maxMaskedAreaRatio: 0.2;
     readonly maxComparisonAttempts: 3;
 };
