@@ -62,6 +62,10 @@ describe("visual comparison worker pool", () => {
     await expect(pool.compare([job("crash", 1, 1)])).rejects.toThrow(
       /VISUAL_COMPARISON_WORKER_CRASH.*crash/,
     );
+    expect(pool.snapshotStats()).toMatchObject({
+      admittedInputBytes: 0,
+      currentManagedBytes: 0,
+    });
   });
 
   it("reports a worker timeout as an ordinary comparison failure", async () => {
@@ -77,6 +81,10 @@ describe("visual comparison worker pool", () => {
     await expect(pool.compare([job("timeout", 1, 1)])).rejects.toThrow(
       /VISUAL_COMPARISON_WORKER_TIMEOUT.*timeout/,
     );
+    expect(pool.snapshotStats()).toMatchObject({
+      admittedInputBytes: 0,
+      currentManagedBytes: 0,
+    });
   });
 
   it("owns queued image bytes at admission before callers can mutate them", async () => {
@@ -145,6 +153,8 @@ describe("visual comparison worker pool", () => {
 
     expect(pool.snapshotStats()).toMatchObject({
       maximumBatchInputBytes: 400_000,
+      admittedInputBytes: 0,
+      peakAdmittedInputBytes: 0,
       workerCount: 0,
       activeWorkers: 0,
       currentManagedBytes: 0,
@@ -185,7 +195,57 @@ describe("visual comparison worker pool", () => {
       MAX_VISUAL_COMPARISON_BATCH_INPUT_BYTES,
     );
     expect(pool.snapshotStats()).toMatchObject({
+      admittedInputBytes: 0,
       activeWorkers: 0,
+      currentManagedBytes: 0,
+      completedJobs: 2,
+      failedJobs: 0,
+    });
+  });
+
+  it("reserves admission bytes across concurrent batches and releases them for later work", async () => {
+    const pool = new VisualComparisonPool({
+      maximumWorkers: 1,
+      maximumActivePixels: 1,
+      maximumBatchInputBytes: 400_000,
+      timeoutMs: 5_000,
+    });
+    pools.push(pool);
+    const firstJob = encodedPressureJobs()[0]!;
+    const secondJob = {
+      ...encodedPressureJobs()[0]!,
+      targetId: "concurrent-second",
+    };
+
+    const first = pool.compare([firstJob]);
+    const second = pool.compare([secondJob]);
+
+    await expect(second).rejects.toThrow(
+      /VISUAL_COMPARISON_BATCH_BYTE_BUDGET.*260288.*260288.*400000/,
+    );
+    expect(pool.snapshotStats()).toMatchObject({
+      maximumBatchInputBytes: 400_000,
+      admittedInputBytes: 260_288,
+      peakAdmittedInputBytes: 260_288,
+    });
+    expect(pool.snapshotStats().currentManagedBytes).toBeLessThanOrEqual(400_000);
+
+    await expect(first).resolves.toMatchObject([
+      { targetId: "pressure-first", comparison: { status: "passed" } },
+    ]);
+    expect(pool.snapshotStats()).toMatchObject({
+      admittedInputBytes: 0,
+      currentManagedBytes: 0,
+      completedJobs: 1,
+      failedJobs: 0,
+    });
+
+    await expect(pool.compare([secondJob])).resolves.toMatchObject([
+      { targetId: "concurrent-second", comparison: { status: "passed" } },
+    ]);
+    expect(pool.snapshotStats()).toMatchObject({
+      admittedInputBytes: 0,
+      peakAdmittedInputBytes: 260_288,
       currentManagedBytes: 0,
       completedJobs: 2,
       failedJobs: 0,
@@ -245,6 +305,7 @@ describe("visual comparison worker pool", () => {
     ).rejects.toThrow(/VISUAL_COMPARISON_FAILED.*first-failure.*first failure/);
 
     expect(pool.snapshotStats()).toMatchObject({
+      admittedInputBytes: 0,
       activeWorkers: 0,
       activePixels: 0,
       currentManagedBytes: 0,
@@ -332,6 +393,8 @@ describe("visual comparison worker pool", () => {
     expect(pool.snapshotStats()).toMatchObject({
       maximumWorkers: MAX_VISUAL_COMPARISON_WORKERS,
       maximumActivePixels: MAX_ACTIVE_VISUAL_PIXELS,
+      admittedInputBytes: 0,
+      peakAdmittedInputBytes: measured.measurement.projectedBatchInputBytes,
       peakActivePixels: pixels,
       currentManagedBytes: 0,
     });

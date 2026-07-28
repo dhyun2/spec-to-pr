@@ -61,6 +61,8 @@ export type VisualComparisonPoolStats = {
   maximumWorkers: number;
   maximumActivePixels: number;
   maximumBatchInputBytes: number;
+  admittedInputBytes: number;
+  peakAdmittedInputBytes: number;
   workerCount: number;
   activeWorkers: number;
   activePixels: number;
@@ -160,6 +162,8 @@ export class VisualComparisonPool {
   private readonly workerExecArgv: string[] | undefined;
   private readonly workers = new Set<WorkerSlot>();
   private readonly queue: PendingJob[] = [];
+  private admittedInputBytes = 0;
+  private peakAdmittedInputBytes = 0;
   private activePixels = 0;
   private peakWorkers = 0;
   private peakActiveWorkers = 0;
@@ -272,65 +276,77 @@ export class VisualComparisonPool {
         measurement: finishMeasurement(tracker),
       };
     }
-    const jobs = validatedJobs.map((job) => snapshotJob(job));
-    this.ensureWorkerCount(Math.min(this.maximumWorkers, jobs.length));
-    tracker.externalManagedBytes = callerSourceBytes;
-    this.currentManagedBytes += callerSourceBytes;
-    const pendingPromises = jobs.map(
-      (job) =>
-        new Promise<VisualComparisonPoolResult>((resolve, reject) => {
-          const pending: PendingJob = {
-            id: this.nextJobId++,
-            job,
-            resolve,
-            reject,
-            tracker,
-            managedBytes: job.ownedManagedBytes,
-            retainedOwnedBytes: job.ownedManagedBytes,
-            settled: false,
-          };
-          tracker.pending.push(pending);
-          this.queue.push(pending);
-          this.currentManagedBytes += pending.managedBytes;
-        }),
-    );
-    this.observeTracker(tracker, "parent-validated-inputs", {
-      callerSources: callerSourceBytes,
-      ownedSnapshots: ownedSnapshotBytes,
-      projectedBatchInputs: projectedBatchInputBytes,
-    });
-    this.observeTracker(tracker, "parent-queued-owned-inputs", {
-      ownedSnapshots: ownedSnapshotBytes,
-    });
-    const sampleRss = () => {
-      tracker.inFlightPeakRssBytes = Math.max(
-        tracker.inFlightPeakRssBytes,
-        process.memoryUsage().rss,
+    const combinedAdmittedInputBytes = this.admittedInputBytes + projectedBatchInputBytes;
+    if (combinedAdmittedInputBytes > this.maximumBatchInputBytes) {
+      throw new Error(
+        `VISUAL_COMPARISON_BATCH_BYTE_BUDGET: batch requires ${projectedBatchInputBytes} bytes with ${this.admittedInputBytes} already admitted; maximum is ${this.maximumBatchInputBytes}`,
       );
-    };
-    const sampler = setInterval(sampleRss, 1);
-    sampler.unref();
-    this.schedule();
-    let settled: PromiseSettledResult<VisualComparisonPoolResult>[];
-    try {
-      settled = await Promise.allSettled(pendingPromises);
-      sampleRss();
-    } finally {
-      clearInterval(sampler);
-      sampleRss();
-      for (const pending of tracker.pending) this.setPendingManagedBytes(pending, 0);
-      this.releaseExternalManagedBytes(tracker);
     }
-    const firstFailure = settled.find(
-      (result): result is PromiseRejectedResult => result.status === "rejected",
-    );
-    if (firstFailure !== undefined) throw firstFailure.reason;
-    return {
-      results: settled.map(
-        (result) => (result as PromiseFulfilledResult<VisualComparisonPoolResult>).value,
-      ),
-      measurement: finishMeasurement(tracker),
-    };
+    this.admittedInputBytes = combinedAdmittedInputBytes;
+    this.peakAdmittedInputBytes = Math.max(this.peakAdmittedInputBytes, this.admittedInputBytes);
+    try {
+      const jobs = validatedJobs.map((job) => snapshotJob(job));
+      this.ensureWorkerCount(Math.min(this.maximumWorkers, jobs.length));
+      tracker.externalManagedBytes = callerSourceBytes;
+      this.currentManagedBytes += callerSourceBytes;
+      const pendingPromises = jobs.map(
+        (job) =>
+          new Promise<VisualComparisonPoolResult>((resolve, reject) => {
+            const pending: PendingJob = {
+              id: this.nextJobId++,
+              job,
+              resolve,
+              reject,
+              tracker,
+              managedBytes: job.ownedManagedBytes,
+              retainedOwnedBytes: job.ownedManagedBytes,
+              settled: false,
+            };
+            tracker.pending.push(pending);
+            this.queue.push(pending);
+            this.currentManagedBytes += pending.managedBytes;
+          }),
+      );
+      this.observeTracker(tracker, "parent-validated-inputs", {
+        callerSources: callerSourceBytes,
+        ownedSnapshots: ownedSnapshotBytes,
+        projectedBatchInputs: projectedBatchInputBytes,
+      });
+      this.observeTracker(tracker, "parent-queued-owned-inputs", {
+        ownedSnapshots: ownedSnapshotBytes,
+      });
+      const sampleRss = () => {
+        tracker.inFlightPeakRssBytes = Math.max(
+          tracker.inFlightPeakRssBytes,
+          process.memoryUsage().rss,
+        );
+      };
+      const sampler = setInterval(sampleRss, 1);
+      sampler.unref();
+      this.schedule();
+      let settled: PromiseSettledResult<VisualComparisonPoolResult>[];
+      try {
+        settled = await Promise.allSettled(pendingPromises);
+        sampleRss();
+      } finally {
+        clearInterval(sampler);
+        sampleRss();
+        for (const pending of tracker.pending) this.setPendingManagedBytes(pending, 0);
+        this.releaseExternalManagedBytes(tracker);
+      }
+      const firstFailure = settled.find(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
+      if (firstFailure !== undefined) throw firstFailure.reason;
+      return {
+        results: settled.map(
+          (result) => (result as PromiseFulfilledResult<VisualComparisonPoolResult>).value,
+        ),
+        measurement: finishMeasurement(tracker),
+      };
+    } finally {
+      this.admittedInputBytes -= projectedBatchInputBytes;
+    }
   }
 
   public snapshotStats(): VisualComparisonPoolStats {
@@ -339,6 +355,8 @@ export class VisualComparisonPool {
       maximumWorkers: this.maximumWorkers,
       maximumActivePixels: this.maximumActivePixels,
       maximumBatchInputBytes: this.maximumBatchInputBytes,
+      admittedInputBytes: this.admittedInputBytes,
+      peakAdmittedInputBytes: this.peakAdmittedInputBytes,
       workerCount: this.workers.size,
       activeWorkers,
       activePixels: this.activePixels,
@@ -604,6 +622,7 @@ export class VisualComparisonPool {
       managedBytes,
       rssBytes,
       ownership: {
+        poolAdmittedInputBytes: this.admittedInputBytes,
         externalCallerSources: tracker.externalManagedBytes,
         ...ownership,
       },

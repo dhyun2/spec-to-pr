@@ -83,6 +83,8 @@ type MeasuredVisualCounters = {
   callerSourceBytes: number;
   ownedSnapshotBytes: number;
   batchInputBudgetBytes: number;
+  peakAdmittedInputBytes: number;
+  terminalAdmittedInputBytes: number;
   activeAllocationBudgetBytes: number;
   peakComparisonManagedBytes: number;
   comparisonManagedMemoryBudgetBytes: number;
@@ -346,6 +348,8 @@ async function runVisualPhase(
       callerSourceBytes,
       ownedSnapshotBytes,
       batchInputBudgetBytes: MAX_VISUAL_COMPARISON_BATCH_INPUT_BYTES,
+      peakAdmittedInputBytes: poolAfter.peakAdmittedInputBytes,
+      terminalAdmittedInputBytes: poolAfter.admittedInputBytes,
       activeAllocationBudgetBytes: MAX_VISUAL_COMPARISON_ACTIVE_ALLOCATION_BYTES,
       peakComparisonManagedBytes,
       comparisonManagedMemoryBudgetBytes: MAX_VISUAL_COMPARISON_LIVE_BYTES,
@@ -956,6 +960,8 @@ afterAll(async () => {
       counters.projectedBatchInputBytes !==
         counters.callerSourceBytes + counters.ownedSnapshotBytes ||
       counters.projectedBatchInputBytes > counters.batchInputBudgetBytes ||
+      counters.peakAdmittedInputBytes > counters.batchInputBudgetBytes ||
+      counters.terminalAdmittedInputBytes !== 0 ||
       counters.peakComparisonManagedBytes > counters.comparisonManagedMemoryBudgetBytes ||
       counters.peakManagedBytes > counters.managedMemoryBudgetBytes ||
       counters.inFlightRssDeltaBytes > counters.managedMemoryBudgetBytes
@@ -981,6 +987,7 @@ afterAll(async () => {
       ),
       callerSourceBytes: Math.max(...counters.map((value) => value.callerSourceBytes)),
       ownedSnapshotBytes: Math.max(...counters.map((value) => value.ownedSnapshotBytes)),
+      peakAdmittedInputBytes: Math.max(...counters.map((value) => value.peakAdmittedInputBytes)),
       peakComparisonManagedBytes: Math.max(
         ...counters.map((value) => value.peakComparisonManagedBytes),
       ),
@@ -1145,6 +1152,8 @@ afterAll(async () => {
       visualCallerSourceBytes: totalVisual.callerSourceBytes,
       visualOwnedSnapshotBytes: totalVisual.ownedSnapshotBytes,
       visualBatchInputBudgetBytes: totalVisual.batchInputBudgetBytes,
+      visualPeakAdmittedInputBytes: totalVisual.peakAdmittedInputBytes,
+      visualTerminalAdmittedInputBytes: totalVisual.terminalAdmittedInputBytes,
       visualActiveAllocationBudgetBytes: totalVisual.activeAllocationBudgetBytes,
       visualPeakComparisonManagedBytes: totalVisual.peakComparisonManagedBytes,
       visualComparisonManagedMemoryBudgetBytes: totalVisual.comparisonManagedMemoryBudgetBytes,

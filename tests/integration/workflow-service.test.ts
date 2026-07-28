@@ -38,6 +38,7 @@ import { ArtifactRefSchema } from "../../src/runtime/artifact.js";
 import { createArtifactId } from "../../src/runtime/id-factory.js";
 import type { RunManifest } from "../../src/run/index.js";
 import { createDraftEvidenceBundle } from "../../src/workflow/draft-evidence-bundle.js";
+import { defaultVisualComparisonPool } from "../../src/visual/visual-comparison-pool.js";
 import { defaultVisualNormalizationCache } from "../../src/visual/visual-normalizer.js";
 
 const FIGMA_URL = "https://www.figma.com/design/abc/file?node-id=1-2";
@@ -7786,6 +7787,61 @@ describe("WorkflowService", () => {
     firstAttempt = await mutateReceiptAt(firstAttempt, 1, (receipt) => {
       receipt["assets"] = [sharedAsset];
     });
+    const beforeAdmissionFailure = await store.get(started.runId);
+    const poolCapacity = defaultVisualComparisonPool as unknown as {
+      maximumBatchInputBytes: number;
+    };
+    const originalBatchInputCapacity = poolCapacity.maximumBatchInputBytes;
+    poolCapacity.maximumBatchInputBytes = 1;
+    try {
+      await expect(
+        service.submit({
+          runId: started.runId,
+          submission: firstAttempt,
+        }),
+      ).rejects.toThrow(/VISUAL_COMPARISON_BATCH_BYTE_BUDGET/);
+    } finally {
+      poolCapacity.maximumBatchInputBytes = originalBatchInputCapacity;
+    }
+    const afterAdmissionFailure = await store.get(started.runId);
+    const admissionFailureArtifacts = afterAdmissionFailure.artifacts.slice(
+      beforeAdmissionFailure.artifacts.length,
+    );
+    expect(
+      admissionFailureArtifacts.map((artifact) => ({
+        adapter: artifact.metadata["adapter"],
+        attempt: artifact.metadata["visualComparisonAttempt"],
+        status: artifact.metadata["reservationStatus"],
+      })),
+    ).toEqual([
+      {
+        adapter: "visual-attempt-reservation-v3",
+        attempt: 1,
+        status: "in-progress",
+      },
+      {
+        adapter: "visual-attempt-reservation-v3",
+        attempt: 1,
+        status: "aborted",
+      },
+    ]);
+    expect(
+      admissionFailureArtifacts.filter(
+        (artifact) =>
+          artifact.kind === "visual-report" ||
+          ["diff", "overlay"].includes(String(artifact.metadata["visualRole"])),
+      ),
+    ).toEqual([]);
+    expect(defaultVisualComparisonPool.snapshotStats()).toMatchObject({
+      admittedInputBytes: 0,
+      currentManagedBytes: 0,
+    });
+    expect(
+      (await service.status({ runId: started.runId })).nextActions.find(
+        (action) => action.kind === "compare-visuals",
+      ),
+    ).toMatchObject({ attempt: 1 });
+
     const originalWriteBlob = artifactStore.writeBlob.bind(artifactStore);
     let failVisualDiffWrite = true;
     const writeBlobSpy = vi.spyOn(artifactStore, "writeBlob").mockImplementation(async (input) => {
@@ -7828,7 +7884,7 @@ describe("WorkflowService", () => {
     const cacheAfterFirst = defaultVisualNormalizationCache.snapshotStats();
     expect(cacheAfterFirst.misses).toBe(1);
     expect(cacheAfterFirst.hits).toBeGreaterThanOrEqual(3);
-    expect(cacheAfterFirst.bypasses).toBe(4);
+    expect(cacheAfterFirst.bypasses).toBe(6);
     const afterCommittedAttempt = await store.get(started.runId);
     const revisionBeforeReplay = afterCommittedAttempt.revision;
     const reportCountBeforeReplay = afterCommittedAttempt.artifacts.filter(
