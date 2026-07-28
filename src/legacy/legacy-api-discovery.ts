@@ -20,7 +20,6 @@ import {
   legacyProgramBody as programBody,
   legacyPropertyName,
   legacyStringLiteralValue as stringLiteralValue,
-  parseLegacySource,
   unwrapLegacyExpression,
   walkLegacyAst,
 } from "./legacy-parser.js";
@@ -84,7 +83,8 @@ export function discoverLegacyApiCandidates(graph: LegacySourceGraph): LegacyApi
   const bindingsByPath = new Map<string, FileBindings>();
   for (const file of graph.files) {
     if (!/\.(?:[cm]?[jt]sx?|vue|svelte)$/iu.test(file.absolutePath)) continue;
-    bindingsByPath.set(file.absolutePath, bindingsFor(file));
+    const parsed = graph.sourceCache.record(file.absolutePath, file.digest)?.parsed();
+    if (parsed !== undefined) bindingsByPath.set(file.absolutePath, bindingsFor(parsed));
   }
   for (const file of productionReachableOwnedFiles(graph)) {
     const bindings = bindingsByPath.get(file.absolutePath);
@@ -159,8 +159,7 @@ export function isAuxiliaryLegacySourcePath(applicationRelativePath: string): bo
   return /\.(?:fixture|mock|spec|stor(?:y|ies)|storybook|test)\.[^/]+$/u.test(fileName);
 }
 
-function bindingsFor(file: LegacyGraphFile): FileBindings {
-  const parsed = parseLegacySource(file.content, file.absolutePath);
+function bindingsFor(parsed: ParsedLegacySource): FileBindings {
   const variables = new Map<string, LegacyAstNode>();
   const receivers = new Map<string, ReceiverBinding>();
   const imports = new Map<string, ImportBinding>();

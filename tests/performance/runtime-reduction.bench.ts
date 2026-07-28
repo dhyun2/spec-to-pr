@@ -9,6 +9,11 @@ import { PNG } from "pngjs";
 import { ArtifactBlobStore } from "../../src/artifact-registry/artifact-blob-store.js";
 import { IntakeRequestService } from "../../src/application/intake-request-service.js";
 import { RunService } from "../../src/application/run-service.js";
+import {
+  assertLegacyInventoryFresh,
+  buildLegacyInventory,
+} from "../../src/legacy/legacy-inventory.js";
+import { LegacySourceCache } from "../../src/legacy/legacy-source-cache.js";
 import { RuntimeMetricsRecorder } from "../../src/runtime/performance-instrumentation.js";
 import { sha256Digest } from "../../src/source-registry/content-hash.js";
 import { SourceSnapshotStore } from "../../src/source-registry/snapshot-store.js";
@@ -20,6 +25,16 @@ const collectedAt = "2026-07-28T00:00:00.000Z";
 const samplesByFixture = new Map<string, number[]>();
 const measuredMixedIntakeRunSaves: number[] = [];
 const measuredMixedIntakeMaxSourceConcurrency: number[] = [];
+const measuredLegacyCounters: Array<{
+  coldReads: number;
+  coldParses: number;
+  warmReads: number;
+  warmParses: number;
+  warmRebuilds: number;
+  changeReads: number;
+  changeParses: number;
+  changeRebuilds: number;
+}> = [];
 let peakRss = process.memoryUsage().rss;
 let legacyDirectory = "";
 const visualPng = PNG.sync.write(new PNG({ width: 360, height: 1831 }));
@@ -79,7 +94,16 @@ beforeAll(async () => {
     fixtures.legacy.files.map(async (file) => {
       const absolute = path.join(legacyDirectory, file.path);
       await mkdir(path.dirname(absolute), { recursive: true });
-      await writeFile(absolute, `export const adapter = '${file.adapter}';\n`);
+      const index = fixtures.legacy.files.indexOf(file);
+      const endpoint =
+        index < fixtures.legacy.terminalApiCalls.length
+          ? `\nexport const load${index} = () => fetch("/api/deterministic/${index + 1}");`
+          : "";
+      const script = `export const adapter = '${file.adapter}';${endpoint}\n`;
+      await writeFile(
+        absolute,
+        file.path.endsWith(".vue") ? `<script>${script}</script><template />\n` : script,
+      );
     }),
   );
 });
@@ -194,23 +218,49 @@ describe("runtime reduction fixtures", () => {
   bench(
     "legacy: 250 JS/Vue files, shared adapters, 40 terminal API calls",
     async () => {
-      await measureFixture("run_22222222222222222222222222222222", "legacy", async (recorder) => {
-        for (const file of fixtures.legacy.files) {
-          const content = await readFile(path.join(legacyDirectory, file.path), "utf8");
-          if (!content.includes(file.adapter)) throw new Error("legacy adapter fixture mismatch");
-          recorder.increment("legacy.file_read_count");
-          recorder.increment("legacy.parse_count");
+      await measureFixture("run_22222222222222222222222222222222", "legacy", async () => {
+        const coldCache = new LegacySourceCache();
+        const pinned = await buildLegacyInventory(legacyDirectory, {}, { sourceCache: coldCache });
+        if (pinned.apiCandidates.length !== fixtures.legacy.terminalApiCalls.length) {
+          throw new Error("legacy terminal API fixture mismatch");
         }
-        for (const call of fixtures.legacy.terminalApiCalls) {
-          const [method, endpoint] = call.split(" ");
-          if (
-            method !== "GET" ||
-            new URL(endpoint!, "https://benchmark.invalid").pathname === "/"
-          ) {
-            throw new Error("terminal API fixture mismatch");
+        const cold = coldCache.snapshotStats();
+
+        const warmCache = new LegacySourceCache();
+        const warm = await assertLegacyInventoryFresh(legacyDirectory, pinned, {
+          sourceCache: warmCache,
+        });
+        if (warm !== pinned)
+          throw new Error("legacy warm freshness did not reuse pinned inventory");
+        const warmStats = warmCache.snapshotStats();
+
+        const changedPath = path.join(legacyDirectory, fixtures.legacy.files[125]!.path);
+        const original = await readFile(changedPath, "utf8");
+        await writeFile(changedPath, `${original} `, "utf8");
+        const changeCache = new LegacySourceCache();
+        try {
+          await assertLegacyInventoryFresh(legacyDirectory, pinned, {
+            sourceCache: changeCache,
+          });
+          throw new Error("legacy one-byte mutation was not detected");
+        } catch (error) {
+          if (!(error instanceof Error) || !error.message.includes("LEGACY_SOURCE_CHANGED")) {
+            throw error;
           }
+        } finally {
+          await writeFile(changedPath, original, "utf8");
         }
-        recorder.increment("legacy.rebuild_count");
+        const changed = changeCache.snapshotStats();
+        measuredLegacyCounters.push({
+          coldReads: cold.fileReads,
+          coldParses: cold.astParses,
+          warmReads: warmStats.fileReads,
+          warmParses: warmStats.astParses,
+          warmRebuilds: warmStats.semanticRebuilds,
+          changeReads: changed.fileReads,
+          changeParses: changed.astParses,
+          changeRebuilds: changed.semanticRebuilds,
+        });
       });
     },
     { iterations: 5, warmupIterations: 1, time: 0, warmupTime: 0 },
@@ -261,6 +311,27 @@ afterAll(async () => {
   if (mixedIntakeRunSaves > 2) {
     throw new Error(`mixed intake exceeded two bounded Run saves: ${mixedIntakeRunSaves}`);
   }
+  const legacyCounters = measuredLegacyCounters[0];
+  if (
+    legacyCounters === undefined ||
+    measuredLegacyCounters.some((value) => JSON.stringify(value) !== JSON.stringify(legacyCounters))
+  ) {
+    throw new Error("legacy cold/warm/change counters must be stable");
+  }
+  if (
+    legacyCounters.coldReads !== 250 ||
+    legacyCounters.coldParses !== 250 ||
+    legacyCounters.warmReads !== 250 ||
+    legacyCounters.warmParses !== 0 ||
+    legacyCounters.warmRebuilds !== 0 ||
+    legacyCounters.changeReads !== 250 ||
+    legacyCounters.changeParses !== 250 ||
+    legacyCounters.changeRebuilds !== 1
+  ) {
+    throw new Error(
+      `legacy cold/warm/change counters were unexpected: ${JSON.stringify(legacyCounters)}`,
+    );
+  }
   const percentile = (sorted: number[], percent: number) =>
     sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * percent) - 1)] ?? 0;
   const records = [...samplesByFixture.entries()].map(([name, samples]) => {
@@ -297,7 +368,12 @@ afterAll(async () => {
               intakeRunSaves: mixedIntakeRunSaves,
             }
           : name === "legacy"
-            ? { files: 250, terminalApiCalls: 40, sharedAdapters: 5 }
+            ? {
+                files: 250,
+                terminalApiCalls: 40,
+                sharedAdapters: 5,
+                ...legacyCounters,
+              }
             : { targets: 2, comparisons: 3, pixelsPerTarget: 659160 },
     };
   });
@@ -316,6 +392,14 @@ afterAll(async () => {
       mixedIntakeRunSaves,
       legacyFiles: fixtures.legacy.files.length,
       legacyTerminalApiCalls: fixtures.legacy.terminalApiCalls.length,
+      legacyColdReads: legacyCounters.coldReads,
+      legacyColdParses: legacyCounters.coldParses,
+      legacyWarmReads: legacyCounters.warmReads,
+      legacyWarmParses: legacyCounters.warmParses,
+      legacyWarmRebuilds: legacyCounters.warmRebuilds,
+      legacyChangeReads: legacyCounters.changeReads,
+      legacyChangeParses: legacyCounters.changeParses,
+      legacyChangeRebuilds: legacyCounters.changeRebuilds,
       visualComparisons: fixtures.visual.comparisons.length,
     },
   };

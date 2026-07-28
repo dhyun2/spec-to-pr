@@ -16,6 +16,7 @@ import {
   directoriesOverlap,
   mergeLegacyRuntimeNetworkEvidence,
 } from "../../src/legacy/legacy-inventory.js";
+import { LegacySourceCache } from "../../src/legacy/legacy-source-cache.js";
 
 const directories: string[] = [];
 
@@ -26,6 +27,54 @@ afterEach(async () => {
 });
 
 describe("legacy inventory v3", () => {
+  it("uses one cache across a deterministic 250-file cold, warm, and change cycle", async () => {
+    const root = await temporaryLegacyProject();
+    await Promise.all(
+      Array.from({ length: 250 }, (_, index) =>
+        writeFile(
+          path.join(root, "src", `file-${String(index).padStart(3, "0")}.ts`),
+          `export const route${index} = { path: "/route-${index}" };\n`,
+          "utf8",
+        ),
+      ),
+    );
+    const coldCache = new LegacySourceCache();
+
+    const pinned = await buildLegacyInventory(root, {}, { sourceCache: coldCache });
+
+    expect(coldCache.snapshotStats()).toMatchObject({
+      fileReads: 250,
+      astParses: 250,
+      semanticRebuilds: 1,
+    });
+    expect(pinned.sourceManifestDigest).toBe(pinned.sourceManifest?.manifestDigest);
+
+    const warmCache = new LegacySourceCache();
+    const fresh = await assertLegacyInventoryFresh(root, pinned, { sourceCache: warmCache });
+
+    expect(fresh).toBe(pinned);
+    expect(warmCache.snapshotStats()).toMatchObject({
+      fileReads: 250,
+      astParses: 0,
+      semanticRebuilds: 0,
+    });
+
+    await writeFile(
+      path.join(root, "src", "file-125.ts"),
+      'export const route125 = { path: "/changed" };\n',
+      "utf8",
+    );
+    const changedCache = new LegacySourceCache();
+    await expect(
+      assertLegacyInventoryFresh(root, pinned, { sourceCache: changedCache }),
+    ).rejects.toThrow(/LEGACY_SOURCE_CHANGED/);
+    expect(changedCache.snapshotStats()).toMatchObject({
+      fileReads: 250,
+      astParses: 250,
+      semanticRebuilds: 1,
+    });
+  });
+
   it("discovers bounded structural migration signals with stable feature keys", async () => {
     const root = await temporaryLegacyProject();
     await writeFile(

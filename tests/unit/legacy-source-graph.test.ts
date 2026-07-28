@@ -8,6 +8,7 @@ import {
   LEGACY_SOURCE_DIGEST_ALGORITHM_V2,
   discoverLegacySourceGraph,
 } from "../../src/legacy/legacy-source-graph.js";
+import { LegacySourceCache } from "../../src/legacy/legacy-source-cache.js";
 
 const temporaryRoots: string[] = [];
 
@@ -18,6 +19,29 @@ afterEach(async () => {
 });
 
 describe("legacy source graph", () => {
+  it("reads and parses each of 250 included code files at most once", async () => {
+    const files = Object.fromEntries(
+      Array.from({ length: 250 }, (_, index) => [
+        `src/file-${String(index).padStart(3, "0")}.ts`,
+        `export const value${index} = ${index};`,
+      ]),
+    );
+    const project = await vueFixture(files);
+    const cache = new LegacySourceCache();
+
+    const graph = await discoverLegacySourceGraph(
+      path.join(project, "src"),
+      {},
+      { sourceCache: cache },
+    );
+
+    expect(graph.files).toHaveLength(250);
+    expect(cache.snapshotStats()).toMatchObject({
+      fileReads: 251,
+      astParses: 250,
+    });
+  });
+
   it("follows only the requested symbol through a supporting barrel", async () => {
     const project = await vueFixture({
       "src/modules/shop/profile.ts":
