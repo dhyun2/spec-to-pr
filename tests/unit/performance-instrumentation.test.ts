@@ -97,4 +97,32 @@ describe("RuntimeMetricsRecorder", () => {
       sink.time("stage.wall_ms", { stage: "intake" }, async () => "preserved"),
     ).resolves.toBe("preserved");
   });
+
+  it("keeps concurrent run scopes out of each other's persisted snapshots", async () => {
+    // Catches a server-lifetime recorder exporting another Run's counters.
+    const recorder = new RuntimeMetricsRecorder();
+    const firstRun = "run_11111111111111111111111111111111";
+    const secondRun = "run_22222222222222222222222222222222";
+
+    await Promise.all([
+      recorder.withRun(firstRun, async () => {
+        recorder.increment("artifact.read_count", 2, { stage: "intake" });
+      }),
+      recorder.withRun(secondRun, async () => {
+        recorder.increment("git.command_count", 3, { stage: "implementation" });
+      }),
+    ]);
+
+    expect(recorder.snapshot({ runId: firstRun, fixtureDigest, collectedAt }).samples).toEqual([
+      { kind: "counter", name: "artifact.read_count", tags: { stage: "intake" }, value: 2 },
+    ]);
+    expect(recorder.snapshot({ runId: secondRun, fixtureDigest, collectedAt }).samples).toEqual([
+      {
+        kind: "counter",
+        name: "git.command_count",
+        tags: { stage: "implementation" },
+        value: 3,
+      },
+    ]);
+  });
 });

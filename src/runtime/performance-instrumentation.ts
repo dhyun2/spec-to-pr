@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { performance } from "node:perf_hooks";
 
 import { z } from "zod";
@@ -139,7 +140,9 @@ type RuntimeMetricsRecorderOptions = {
 };
 
 export class RuntimeMetricsRecorder implements RuntimeMetricsSink {
-  private readonly samples = new Map<string, RuntimePerformanceSample>();
+  private readonly samplesByRun = new Map<string, Map<string, RuntimePerformanceSample>>();
+  private readonly unscopedSamples = new Map<string, RuntimePerformanceSample>();
+  private readonly runScope = new AsyncLocalStorage<RunId>();
   private readonly now: () => number;
 
   public constructor(options: RuntimeMetricsRecorderOptions = {}) {
@@ -151,9 +154,10 @@ export class RuntimeMetricsRecorder implements RuntimeMetricsSink {
     const parsedTags = RuntimeMetricTagsSchema.parse(tags);
     const parsedValue = metricValue(value);
     const key = sampleKey("counter", parsedName, parsedTags);
-    const current = this.samples.get(key);
+    const samples = this.currentSamples();
+    const current = samples.get(key);
 
-    this.samples.set(key, {
+    samples.set(key, {
       kind: "counter",
       name: parsedName,
       tags: parsedTags,
@@ -166,12 +170,17 @@ export class RuntimeMetricsRecorder implements RuntimeMetricsSink {
     const parsedTags = RuntimeMetricTagsSchema.parse(tags);
     const parsedValue = metricValue(value);
 
-    this.samples.set(sampleKey("gauge", parsedName, parsedTags), {
+    this.currentSamples().set(sampleKey("gauge", parsedName, parsedTags), {
       kind: "gauge",
       name: parsedName,
       tags: parsedTags,
       value: parsedValue,
     });
+  }
+
+  public async withRun<T>(runId: RunId, operation: () => Promise<T>): Promise<T> {
+    const parsedRunId = RunIdSchema.parse(runId);
+    return this.runScope.run(parsedRunId, operation);
   }
 
   public async time<T>(
@@ -197,12 +206,24 @@ export class RuntimeMetricsRecorder implements RuntimeMetricsSink {
       runId: input.runId,
       fixtureDigest: input.fixtureDigest,
       collectedAt: input.collectedAt,
-      samples: [...this.samples.values()].sort((left, right) =>
-        sampleKey(left.kind, left.name, left.tags).localeCompare(
-          sampleKey(right.kind, right.name, right.tags),
-        ),
+      samples: [...(this.samplesByRun.get(input.runId) ?? this.unscopedSamples).values()].sort(
+        (left, right) =>
+          sampleKey(left.kind, left.name, left.tags).localeCompare(
+            sampleKey(right.kind, right.name, right.tags),
+          ),
       ),
     });
+  }
+
+  private currentSamples(): Map<string, RuntimePerformanceSample> {
+    const runId = this.runScope.getStore();
+    if (runId === undefined) return this.unscopedSamples;
+    let samples = this.samplesByRun.get(runId);
+    if (samples === undefined) {
+      samples = new Map();
+      this.samplesByRun.set(runId, samples);
+    }
+    return samples;
   }
 }
 

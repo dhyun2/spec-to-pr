@@ -1,14 +1,21 @@
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
+import path from "node:path";
 import { performance } from "node:perf_hooks";
 
-import { afterAll, bench, describe } from "vitest";
+import { afterAll, beforeAll, bench, describe } from "vitest";
+import { PNG } from "pngjs";
 
+import { buildParserSafeChunks } from "../../src/application/workflow-service.js";
 import { RuntimeMetricsRecorder } from "../../src/runtime/performance-instrumentation.js";
 import { sha256Digest } from "../../src/source-registry/content-hash.js";
+import { decodeBoundedPng } from "../../src/visual/png-decoder.js";
 
 const collectedAt = "2026-07-28T00:00:00.000Z";
-const samples: number[] = [];
+const samplesByFixture = new Map<string, number[]>();
 let peakRss = process.memoryUsage().rss;
+let legacyDirectory = "";
+const visualPng = PNG.sync.write(new PNG({ width: 360, height: 1831 }));
 
 const fixtures = {
   mixedIntake: {
@@ -43,46 +50,81 @@ const fixtures = {
 
 const fixtureDigest = sha256Digest(Buffer.from(JSON.stringify(fixtures)));
 
-function measureFixture(
+async function measureFixture(
   runId: `run_${string}`,
-  operation: (recorder: RuntimeMetricsRecorder) => void,
+  fixtureName: string,
+  operation: (recorder: RuntimeMetricsRecorder) => Promise<void>,
 ) {
   const recorder = new RuntimeMetricsRecorder();
   const started = performance.now();
-  operation(recorder);
+  await operation(recorder);
   const elapsed = performance.now() - started;
+  const samples = samplesByFixture.get(fixtureName) ?? [];
   samples.push(elapsed);
+  samplesByFixture.set(fixtureName, samples);
   peakRss = Math.max(peakRss, process.memoryUsage().rss);
   return recorder.snapshot({ runId, fixtureDigest, collectedAt });
 }
 
+beforeAll(async () => {
+  legacyDirectory = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-runtime-bench-"));
+  await Promise.all(
+    fixtures.legacy.files.map(async (file) => {
+      const absolute = path.join(legacyDirectory, file.path);
+      await mkdir(path.dirname(absolute), { recursive: true });
+      await writeFile(absolute, `export const adapter = '${file.adapter}';\n`);
+    }),
+  );
+});
+
 describe("runtime reduction fixtures", () => {
   bench(
     "mixed intake: 20 local documents, 4 parser-safe chunks, 4 OpenAPI sources",
-    () => {
-      measureFixture("run_11111111111111111111111111111111", (recorder) => {
-        recorder.increment("artifact.read_count", fixtures.mixedIntake.localDocuments.length);
-        recorder.increment(
-          "artifact.read_bytes",
-          Buffer.byteLength(JSON.stringify(fixtures.mixedIntake)),
-        );
-        recorder.increment("legacy.parse_count", fixtures.mixedIntake.parserSafeChunks.length);
-      });
+    async () => {
+      await measureFixture(
+        "run_11111111111111111111111111111111",
+        "mixed-intake",
+        async (recorder) => {
+          for (const document of fixtures.mixedIntake.localDocuments) {
+            const content = Buffer.from(document.content);
+            recorder.increment("artifact.read_count");
+            recorder.increment("artifact.read_bytes", content.byteLength);
+            JSON.parse(JSON.stringify({ path: document.path, content: document.content }));
+          }
+          for (const chunk of fixtures.mixedIntake.parserSafeChunks) {
+            buildParserSafeChunks(chunk);
+          }
+          for (const source of fixtures.mixedIntake.openApiSources) {
+            JSON.parse(
+              JSON.stringify({ openapi: "3.0.0", paths: { [`/${source.operationId}`]: {} } }),
+            );
+          }
+        },
+      );
     },
     { iterations: 5, warmupIterations: 1, time: 0, warmupTime: 0 },
   );
 
   bench(
     "legacy: 250 JS/Vue files, shared adapters, 40 terminal API calls",
-    () => {
-      measureFixture("run_22222222222222222222222222222222", (recorder) => {
-        recorder.increment("legacy.file_read_count", fixtures.legacy.files.length);
-        recorder.increment("legacy.parse_count", fixtures.legacy.files.length);
+    async () => {
+      await measureFixture("run_22222222222222222222222222222222", "legacy", async (recorder) => {
+        for (const file of fixtures.legacy.files) {
+          const content = await readFile(path.join(legacyDirectory, file.path), "utf8");
+          if (!content.includes(file.adapter)) throw new Error("legacy adapter fixture mismatch");
+          recorder.increment("legacy.file_read_count");
+          recorder.increment("legacy.parse_count");
+        }
+        for (const call of fixtures.legacy.terminalApiCalls) {
+          const [method, endpoint] = call.split(" ");
+          if (
+            method !== "GET" ||
+            new URL(endpoint!, "https://benchmark.invalid").pathname === "/"
+          ) {
+            throw new Error("terminal API fixture mismatch");
+          }
+        }
         recorder.increment("legacy.rebuild_count");
-        recorder.increment(
-          "artifact.read_bytes",
-          Buffer.byteLength(JSON.stringify(fixtures.legacy)),
-        );
       });
     },
     { iterations: 5, warmupIterations: 1, time: 0, warmupTime: 0 },
@@ -90,14 +132,18 @@ describe("runtime reduction fixtures", () => {
 
   bench(
     "visual: two 360x1831 targets across three valid comparisons",
-    () => {
-      measureFixture("run_33333333333333333333333333333333", (recorder) => {
-        const pixels = fixtures.visual.targets.reduce(
-          (total, target) => total + target.width * target.height,
-          0,
-        );
-        recorder.increment("visual.decode_pixels", pixels * fixtures.visual.comparisons.length);
-        recorder.increment("visual.encode_pixels", pixels * fixtures.visual.comparisons.length);
+    async () => {
+      await measureFixture("run_33333333333333333333333333333333", "visual", async (recorder) => {
+        for (const comparison of fixtures.visual.comparisons) {
+          for (const target of fixtures.visual.targets) {
+            const decoded = await decodeBoundedPng(visualPng, `${target.targetId}-${comparison}`);
+            if (decoded.width !== target.width || decoded.height !== target.height) {
+              throw new Error("visual fixture geometry mismatch");
+            }
+            recorder.increment("visual.decode_pixels", decoded.width * decoded.height);
+          }
+        }
+        recorder.increment("visual.encode_pixels", 360 * 1831 * 2 * 3);
         recorder.gauge("visual.active_workers", 0, { stage: "implementation" });
         recorder.gauge("visual.peak_workers", fixtures.visual.comparisons.length, {
           stage: "implementation",
@@ -109,22 +155,38 @@ describe("runtime reduction fixtures", () => {
 });
 
 afterAll(() => {
-  const sorted = [...samples].sort((left, right) => left - right);
-  const percentile = (percent: number) =>
+  const percentile = (sorted: number[], percent: number) =>
     sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * percent) - 1)] ?? 0;
+  const records = [...samplesByFixture.entries()].map(([name, samples]) => {
+    const sorted = [...samples].sort((left, right) => left - right);
+    return {
+      name,
+      fixtureDigest: sha256Digest(
+        Buffer.from(
+          JSON.stringify(
+            name === "mixed-intake"
+              ? fixtures.mixedIntake
+              : name === "legacy"
+                ? fixtures.legacy
+                : fixtures.visual,
+          ),
+        ),
+      ),
+      p50WallMs: percentile(sorted, 0.5),
+      p95WallMs: percentile(sorted, 0.95),
+      peakRssBytes: peakRss,
+    };
+  });
   console.info(
     JSON.stringify({
       schemaVersion: "runtime-reduction-benchmark-v1",
-      fixtureDigest,
       nodeVersion: process.version,
       platform: process.platform,
       architecture: process.arch,
       cpuCount: os.cpus().length,
       warmupIterations: 1,
       measuredIterations: 5,
-      p50WallMs: percentile(0.5),
-      p95WallMs: percentile(0.95),
-      peakRssBytes: peakRss,
+      fixtures: records,
       metricCounters: {
         mixedIntakeDocuments: fixtures.mixedIntake.localDocuments.length,
         legacyFiles: fixtures.legacy.files.length,
@@ -133,4 +195,5 @@ afterAll(() => {
       },
     }),
   );
+  return rm(legacyDirectory, { recursive: true, force: true });
 });

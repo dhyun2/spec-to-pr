@@ -542,10 +542,21 @@ export class WorkflowService {
     }
   }
 
+  private async measureWorkflowAction<T>(
+    rawInput: unknown,
+    action: "start" | "advance" | "submit" | "status",
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const measured = () => this.metrics.time("external_action.wall_ms", { action }, operation);
+    const scopedRun = z.object({ runId: RunIdSchema }).passthrough().safeParse(rawInput);
+    if (this.metrics instanceof RuntimeMetricsRecorder && scopedRun.success) {
+      return this.metrics.withRun(scopedRun.data.runId, measured);
+    }
+    return measured();
+  }
+
   public async start(rawInput: unknown): Promise<WorkflowStatus> {
-    return this.metrics.time("external_action.wall_ms", { action: "start" }, () =>
-      this.startUninstrumented(rawInput),
-    );
+    return this.measureWorkflowAction(rawInput, "start", () => this.startUninstrumented(rawInput));
   }
 
   private async startUninstrumented(rawInput: unknown): Promise<WorkflowStatus> {
@@ -591,7 +602,8 @@ export class WorkflowService {
     });
     const sourceOpenApiOperations = inventoryOpenApiOperations(sources.openApi);
     const publication = input.publication ?? "draft";
-    const initialHead = workspaceBinding?.baseSha ?? (await currentGitHead(projectRoot));
+    const initialHead =
+      workspaceBinding?.baseSha ?? (await currentGitHead(projectRoot, this.metrics));
     const created = await this.dependencies.runService.createRun({
       projectRoot,
       ...(initialHead === null ? {} : { baseCommit: initialHead }),
@@ -885,7 +897,7 @@ export class WorkflowService {
   }
 
   public async advance(rawInput: unknown): Promise<WorkflowStatus> {
-    return this.metrics.time("external_action.wall_ms", { action: "advance" }, () =>
+    return this.measureWorkflowAction(rawInput, "advance", () =>
       this.advanceUninstrumented(rawInput),
     );
   }
@@ -935,7 +947,7 @@ export class WorkflowService {
   }
 
   public async submit(rawInput: unknown): Promise<WorkflowStatus> {
-    return this.metrics.time("external_action.wall_ms", { action: "submit" }, () =>
+    return this.measureWorkflowAction(rawInput, "submit", () =>
       this.submitUninstrumented(rawInput),
     );
   }
@@ -969,12 +981,12 @@ export class WorkflowService {
       (submission.kind === "functional-review" || submission.kind === "design-review") &&
       submission.verdict !== "changes-requested"
     ) {
-      await assertReviewPacketFresh(run);
+      await assertReviewPacketFresh(run, this.metrics);
     }
     const evidenceArtifacts = await this.ingestSubmissionEvidence(run, submission);
     const implementationSnapshot =
       submission.kind === "implementation" && submission.status === "passed"
-        ? await captureGitSnapshot(run)
+        ? await captureGitSnapshot(run, this.metrics)
         : undefined;
     if (submission.kind === "implementation" && implementationSnapshot !== undefined) {
       assertChangedFilesMatch(submission.changedFiles, implementationSnapshot.changedFiles);
@@ -1251,7 +1263,7 @@ export class WorkflowService {
   }
 
   public async status(rawInput: unknown): Promise<WorkflowStatus> {
-    return this.metrics.time("external_action.wall_ms", { action: "status" }, () =>
+    return this.measureWorkflowAction(rawInput, "status", () =>
       this.statusUninstrumented(rawInput),
     );
   }
@@ -1546,7 +1558,7 @@ export class WorkflowService {
     if (reviewPacketFromRun(run) === undefined) {
       throw new Error("Ready publication requires the current implementation review packet");
     }
-    await assertReviewPacketFresh(run);
+    await assertReviewPacketFresh(run, this.metrics);
     const packet = reviewPacketFromRun(run)!;
     const reportArtifact = readyReportArtifactForPacket(run, packet.id);
     if (reportArtifact === undefined) {
@@ -4114,7 +4126,7 @@ export class WorkflowService {
     const timestamp = this.now();
     const packet = reviewPacketFromRun(run);
     if (packet === undefined) throw new Error("A current implementation review packet is required");
-    await assertReviewPacketFresh(run);
+    await assertReviewPacketFresh(run, this.metrics);
     const submissions = await this.latestWorkflowSubmissions(run);
     const contracts = submissions.get("contracts");
     const implementation = submissions.get("implementation");
@@ -4527,7 +4539,7 @@ export class WorkflowService {
       packet = terminalPacket.data;
     } else if (packet !== undefined) {
       try {
-        await assertReviewPacketFresh(run);
+        await assertReviewPacketFresh(run, this.metrics);
       } catch {
         packet = undefined;
       }
@@ -8618,18 +8630,22 @@ type GitSnapshot = {
   changedFiles: string[];
 };
 
-async function captureGitSnapshot(run: RunManifest): Promise<GitSnapshot> {
+export async function captureGitSnapshot(
+  run: RunManifest,
+  metrics: RuntimeMetricsSink = new NoopRuntimeMetrics(),
+): Promise<GitSnapshot> {
   const baseCommit = run.workspaceBinding?.baseSha ?? run.baseCommit;
   const projectRoot = run.workspaceBinding?.repositoryRoot ?? run.projectRoot;
   if (baseCommit === undefined) {
     throw new Error("Implementation review packets require a Git base commit");
   }
-  const headSha = await currentGitHead(projectRoot);
+  const headSha = await currentGitHead(projectRoot, metrics);
   if (headSha === null)
     throw new Error("Implementation review packets require a readable Git HEAD");
   try {
     const strictBinding = run.workspaceBinding;
     if (strictBinding !== undefined) {
+      metrics.increment("git.command_count", 2);
       const [{ stdout: checkedOutBranch }, { stdout: trackedStatus }] = await Promise.all([
         execFileAsync("git", ["symbolic-ref", "--quiet", "--short", "HEAD"], {
           cwd: projectRoot,
@@ -8654,6 +8670,7 @@ async function captureGitSnapshot(run: RunManifest): Promise<GitSnapshot> {
       }
     }
     const diffRange = strictBinding === undefined ? [baseCommit] : [baseCommit, headSha];
+    metrics.increment("git.command_count", strictBinding === undefined ? 3 : 2);
     const [{ stdout: diff }, { stdout: trackedNames }, untrackedResult] = await Promise.all([
       execFileAsync("git", ["diff", "--binary", ...diffRange, "--"], {
         cwd: projectRoot,
@@ -8674,6 +8691,10 @@ async function captureGitSnapshot(run: RunManifest): Promise<GitSnapshot> {
         : Promise.resolve({ stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }),
     ]);
     const untrackedNames = untrackedResult.stdout;
+    metrics.increment(
+      "git.binary_diff_bytes",
+      Buffer.isBuffer(diff) ? diff.byteLength : Buffer.byteLength(diff),
+    );
     const tracked = splitNullPaths(trackedNames);
     const untracked = splitNullPaths(untrackedNames);
     const changedFiles = [...new Set([...tracked, ...untracked])].sort();
@@ -8702,10 +8723,13 @@ async function captureGitSnapshot(run: RunManifest): Promise<GitSnapshot> {
   }
 }
 
-async function assertReviewPacketFresh(run: RunManifest): Promise<void> {
+async function assertReviewPacketFresh(
+  run: RunManifest,
+  metrics: RuntimeMetricsSink = new NoopRuntimeMetrics(),
+): Promise<void> {
   const packet = reviewPacketFromRun(run);
   if (packet === undefined) throw new Error("The implementation review packet is missing");
-  const snapshot = await captureGitSnapshot(run);
+  const snapshot = await captureGitSnapshot(run, metrics);
   if (
     snapshot.headSha !== packet.headSha ||
     snapshot.diffDigest !== packet.diffDigest ||
@@ -8752,8 +8776,12 @@ async function hasPackageManifest(packageRoot: string): Promise<boolean> {
   }
 }
 
-async function currentGitHead(projectRoot: string): Promise<string | null> {
+async function currentGitHead(
+  projectRoot: string,
+  metrics: RuntimeMetricsSink = new NoopRuntimeMetrics(),
+): Promise<string | null> {
   try {
+    metrics.increment("git.command_count");
     const { stdout } = await execFileAsync("git", ["rev-parse", "--verify", "HEAD"], {
       cwd: projectRoot,
       encoding: "utf8",
