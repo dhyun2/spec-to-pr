@@ -5232,6 +5232,317 @@ describe("WorkflowService", () => {
     ).toHaveLength(1);
   });
 
+  it.each([
+    {
+      name: "review packet ID",
+      mutate: (run: Awaited<ReturnType<typeof store.get>>) => ({
+        ...run,
+        stages: run.stages.map((item) =>
+          item.name === "implementation"
+            ? {
+                ...item,
+                checkpoint: {
+                  ...item.checkpoint!,
+                  data: {
+                    ...item.checkpoint!.data,
+                    reviewPacket: {
+                      ...(item.checkpoint!.data["reviewPacket"] as Record<string, unknown>),
+                      id: `packet_${"a".repeat(64)}`,
+                    },
+                  },
+                },
+              }
+            : item,
+        ),
+      }),
+    },
+    {
+      name: "review packet head",
+      mutate: (run: Awaited<ReturnType<typeof store.get>>) => ({
+        ...run,
+        stages: run.stages.map((item) =>
+          item.name === "implementation"
+            ? {
+                ...item,
+                checkpoint: {
+                  ...item.checkpoint!,
+                  data: {
+                    ...item.checkpoint!.data,
+                    reviewPacket: {
+                      ...(item.checkpoint!.data["reviewPacket"] as Record<string, unknown>),
+                      headSha: "a".repeat(40),
+                    },
+                  },
+                },
+              }
+            : item,
+        ),
+      }),
+    },
+    {
+      name: "review packet diff",
+      mutate: (run: Awaited<ReturnType<typeof store.get>>) => ({
+        ...run,
+        stages: run.stages.map((item) =>
+          item.name === "implementation"
+            ? {
+                ...item,
+                checkpoint: {
+                  ...item.checkpoint!,
+                  data: {
+                    ...item.checkpoint!.data,
+                    reviewPacket: {
+                      ...(item.checkpoint!.data["reviewPacket"] as Record<string, unknown>),
+                      diffDigest: `sha256:${"a".repeat(64)}`,
+                    },
+                  },
+                },
+              }
+            : item,
+        ),
+      }),
+    },
+    {
+      name: "implementation state",
+      mutate: (run: Awaited<ReturnType<typeof store.get>>) => ({
+        ...run,
+        stages: run.stages.map((item) =>
+          item.name === "implementation"
+            ? {
+                ...item,
+                status: "failed" as const,
+                completedAt: new Date().toISOString(),
+                error: {
+                  code: "IMPLEMENTATION_REPLACED",
+                  message: "Implementation was superseded while review evidence was being stored.",
+                  retryable: true,
+                },
+              }
+            : item,
+        ),
+      }),
+    },
+    {
+      name: "terminal visual threshold",
+      mutate: (run: Awaited<ReturnType<typeof store.get>>) => ({
+        ...run,
+        status: "blocked" as const,
+        stages: run.stages.map((item) => {
+          if (item.name === "implementation") {
+            return {
+              ...item,
+              status: "failed" as const,
+              completedAt: new Date().toISOString(),
+              checkpoint: {
+                name: "visual-threshold-not-met",
+                data: {
+                  ...item.checkpoint!.data,
+                  visualTerminalIdentity: `sha256:${"a".repeat(64)}`,
+                },
+                updatedAt: new Date().toISOString(),
+              },
+              error: {
+                code: "VISUAL_REVIEW_THRESHOLD_NOT_MET",
+                message: "The visual threshold was not met.",
+                retryable: false,
+              },
+            };
+          }
+          if (item.name === "functional-review" || item.name === "design-review") {
+            return {
+              ...item,
+              status: "pending" as const,
+              attempt: 0,
+              startedAt: undefined,
+              completedAt: undefined,
+              lease: undefined,
+              checkpoint: undefined,
+              artifactIds: [],
+              gapIds: [],
+              error: undefined,
+            };
+          }
+          return item;
+        }),
+      }),
+    },
+  ])("rejects late reviewer evidence after a changed $name", async ({ mutate }) => {
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Refactor the parser with covered behavior.",
+      scope: "non-ui",
+      publication: "none",
+    });
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "contracts",
+        status: "passed",
+        summary: "Parser contract ready.",
+        artifactPaths: ["contracts/requirements.json"],
+        requirementManifest: requirements("parser"),
+      },
+    });
+    await changeSource(directory, "src/parser.ts", "export const parser = 'review-race';\n");
+    const implemented = await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "implementation",
+        status: "passed",
+        summary: "Parser implemented.",
+        apiReady: false,
+        uiChanged: false,
+        changedFiles: ["src/parser.ts"],
+        artifactPaths: ["test-results/unit.json"],
+      },
+    });
+    const reviewerEvidenceIngested = deferred<void>();
+    const releaseReviewerEvidence = deferred<void>();
+    const originalWriteBlob = artifactStore.writeBlob.bind(artifactStore);
+    const writeBlobSpy = vi.spyOn(artifactStore, "writeBlob").mockImplementation(async (input) => {
+      if (input.label === "unit.json") {
+        reviewerEvidenceIngested.resolve();
+        await releaseReviewerEvidence.promise;
+      }
+      return originalWriteBlob(input);
+    });
+    const lateReview = service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "functional-review",
+        reviewPacketId: reviewPacketId(implemented, "review-functional"),
+        verdict: "approved",
+        summary: "Functional evidence passed.",
+        findings: [],
+        requirements: [{ id: "parser", verdict: "accepted" }],
+        artifactPaths: ["test-results/unit.json"],
+        gateResults: [
+          { id: "functional", status: "passed", evidencePaths: ["test-results/unit.json"] },
+        ],
+      },
+    });
+
+    await reviewerEvidenceIngested.promise;
+    const current = await store.get(started.runId);
+    const terminal = mutate(current);
+    await store.save(
+      { ...terminal, revision: current.revision + 1, updatedAt: new Date().toISOString() },
+      current.revision,
+    );
+    const expectedTerminal = await store.get(started.runId);
+    releaseReviewerEvidence.resolve();
+    await expect(lateReview).rejects.toThrow(/REVIEW_PACKET_STALE|visual threshold/i);
+    writeBlobSpy.mockRestore();
+
+    const afterLateReview = await store.get(started.runId);
+    expect(afterLateReview).toEqual(expectedTerminal);
+  });
+
+  it("accepts a sibling reviewer after another reviewer advances the same packet revision", async () => {
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Implement a large enough UI change to use parallel reviewers.",
+      scope: "ui",
+      publication: "none",
+    });
+    const startedRun = await store.get(started.runId);
+    await store.save(
+      {
+        ...startedRun,
+        revision: startedRun.revision + 1,
+        stages: startedRun.stages.map((item) =>
+          item.name === "intake"
+            ? {
+                ...item,
+                checkpoint: {
+                  ...item.checkpoint!,
+                  data: {
+                    ...item.checkpoint!.data,
+                    workload: {
+                      size: "L",
+                      score: 51,
+                      confidence: "high",
+                      source: "contracts",
+                      tokenRange: { min: 160_000, max: 320_000 },
+                      budget: {
+                        checkpointPercent: 80,
+                        checkpointAtTokens: 256_000,
+                        hardLimitTokens: 320_000,
+                      },
+                      sampleCount: 1,
+                      reasons: ["parallel reviewer coverage"],
+                    },
+                  },
+                },
+              }
+            : item,
+        ),
+      },
+      startedRun.revision,
+    );
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "contracts",
+        status: "passed",
+        summary: "UI contract ready.",
+        artifactPaths: ["contracts/requirements.json"],
+        requirementManifest: requirements("checkout"),
+      },
+    });
+    await changeSource(directory, "src/checkout.tsx", "export const checkout = 'parallel';\n");
+    const implemented = await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "implementation",
+        status: "passed",
+        summary: "Checkout implemented.",
+        apiReady: false,
+        uiChanged: true,
+        changedFiles: ["src/checkout.tsx"],
+        artifactPaths: ["test-results/unit.json"],
+      },
+    });
+    const packetId = reviewPacketId(implemented, "review-functional");
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "functional-review",
+        reviewPacketId: packetId,
+        verdict: "approved",
+        summary: "Functional evidence passed.",
+        findings: [],
+        requirements: [{ id: "checkout", verdict: "accepted" }],
+        artifactPaths: ["test-results/unit.json"],
+        gateResults: [
+          { id: "functional", status: "passed", evidencePaths: ["test-results/unit.json"] },
+        ],
+      },
+    });
+    const design = await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "design-review",
+        reviewPacketId: packetId,
+        verdict: "approved",
+        summary: "Design evidence passed.",
+        requirements: [{ id: "checkout", verdict: "accepted" }],
+        artifactPaths: ["visual/diff.png"],
+        gateResults: [
+          { id: "visual", status: "passed", evidencePaths: ["visual/diff.png"] },
+          { id: "accessibility", status: "passed", evidencePaths: ["visual/diff.png"] },
+        ],
+      },
+    });
+
+    expect(design.stages).toEqual(
+      expect.arrayContaining([
+        { name: "functional-review", status: "passed" },
+        { name: "design-review", status: "passed" },
+      ]),
+    );
+  });
+
   it("repairs implementation across packets and blocks after three visual comparison failures", async () => {
     const baseline = new PNG({ width: 1, height: 1 });
     baseline.data.set([0, 0, 0, 255]);
@@ -7332,6 +7643,16 @@ function reviewPacketId(
     throw new Error(`Missing ${kind} packet`);
   }
   return action.reviewPacketId;
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
 }
 
 async function reportMarkdown(

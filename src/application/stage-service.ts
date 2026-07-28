@@ -31,6 +31,7 @@ export const StartStageInputSchema = z
     runId: RunIdSchema,
     stageName: RunStageNameSchema,
     workerId: WorkerIdSchema,
+    expectedRevision: z.number().int().nonnegative().optional(),
     leaseTtlMs: z
       .number()
       .int()
@@ -128,7 +129,7 @@ export class StageService {
       this.now,
     );
 
-    await this.store.save(result.run, run.revision);
+    await this.store.save(result.run, input.expectedRevision ?? run.revision);
 
     return result;
   }

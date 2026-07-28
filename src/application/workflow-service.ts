@@ -904,6 +904,11 @@ export class WorkflowService {
     }
     assertSubmissionPrerequisites(run, submission, this.now());
     await assertDraftBundleIntegrity(run, submission);
+    const reviewStage =
+      submission.kind === "functional-review" || submission.kind === "design-review"
+        ? submission.kind
+        : undefined;
+    const reviewFence = reviewStage === undefined ? undefined : reviewSubmissionFence(run);
     if (
       (submission.kind === "functional-review" || submission.kind === "design-review") &&
       submission.verdict !== "changes-requested"
@@ -945,11 +950,14 @@ export class WorkflowService {
     }
 
     const stageName = stageForSubmission(submission);
-    const started = await this.dependencies.stageService.start({
-      runId: run.id,
-      stageName,
-      workerId: WORKER_ID,
-    });
+    const started =
+      reviewFence === undefined
+        ? await this.dependencies.stageService.start({
+            runId: run.id,
+            stageName,
+            workerId: WORKER_ID,
+          })
+        : await this.startFencedReviewStage(run.id, reviewStage!, reviewFence);
     const activeRun = await this.dependencies.runStore.get(run.id);
     const runWithEvidence = {
       ...activeRun,
@@ -1039,6 +1047,28 @@ export class WorkflowService {
     }
 
     return this.status({ runId: run.id });
+  }
+
+  private async startFencedReviewStage(
+    runId: string,
+    stageName: "functional-review" | "design-review",
+    fence: ReviewSubmissionFence,
+  ) {
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const current = await this.dependencies.runStore.get(runId);
+      assertCurrentReviewFence(current, fence, stageName);
+      try {
+        return await this.dependencies.stageService.start({
+          runId,
+          stageName,
+          workerId: WORKER_ID,
+          expectedRevision: current.revision,
+        });
+      } catch (error: unknown) {
+        if (!(error instanceof RevisionConflictError)) throw error;
+      }
+    }
+    throw new Error("REVIEW_PACKET_STALE: refresh the Run before submitting the reviewer result");
   }
 
   private async submitLegacyNetworkEvidence(
@@ -5305,6 +5335,54 @@ function stageForSubmission(
   if (submission.kind === "contracts") return "contracts";
   if (submission.kind === "implementation") return "implementation";
   return submission.kind;
+}
+
+type ReviewSubmissionFence = {
+  reviewPacketId: string;
+  headSha: string;
+  diffDigest: string;
+};
+
+function reviewSubmissionFence(run: RunManifest): ReviewSubmissionFence {
+  const packet = reviewPacketFromRun(run);
+  if (packet === undefined) {
+    throw new Error("REVIEW_PACKET_STALE: the implementation review packet is missing");
+  }
+  return {
+    reviewPacketId: packet.id,
+    headSha: packet.headSha,
+    diffDigest: packet.diffDigest,
+  };
+}
+
+function assertCurrentReviewFence(
+  run: RunManifest,
+  fence: ReviewSubmissionFence,
+  reviewStage: "functional-review" | "design-review",
+): void {
+  const implementation = stage(run, "implementation");
+  if (implementation.checkpoint?.name === "visual-threshold-not-met") {
+    throw new Error(
+      "REVIEW_PACKET_STALE: visual threshold terminalization invalidated the reviewer result",
+    );
+  }
+  const packet = reviewPacketFromRun(run);
+  if (
+    packet === undefined ||
+    packet.id !== fence.reviewPacketId ||
+    packet.headSha !== fence.headSha ||
+    packet.diffDigest !== fence.diffDigest
+  ) {
+    throw new Error(
+      "REVIEW_PACKET_STALE: the current implementation packet, head, or diff no longer matches the reviewer result",
+    );
+  }
+  if (implementation.status !== "passed") {
+    throw new Error("REVIEW_PACKET_STALE: implementation is no longer passed for this review");
+  }
+  if (!isActionable(stage(run, reviewStage))) {
+    throw new Error(`REVIEW_PACKET_STALE: ${reviewStage} is no longer actionable`);
+  }
 }
 
 function assertSubmissionPrerequisites(
