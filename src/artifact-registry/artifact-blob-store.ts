@@ -64,7 +64,13 @@ export class ArtifactBlobStore {
       mode: 0o700,
     });
 
-    await atomicCreateFile(contentPath, input.content);
+    await atomicCreateFile(contentPath, input.content, (existing) => {
+      const existingDigest = sha256Digest(existing);
+      this.metrics.increment("artifact.hash_count");
+      if (!existing.equals(input.content) || existingDigest !== digest) {
+        throw integrityFailure("existing blob file does not match content");
+      }
+    });
 
     const metadata: ArtifactBlobMetadata = {
       digest,
@@ -74,30 +80,21 @@ export class ArtifactBlobStore {
       ...(input.label === undefined ? {} : { label: input.label }),
     };
 
-    await atomicCreateFile(
+    let existingMetadata: ArtifactBlobMetadata | undefined;
+    const metadataDisposition = await atomicCreateFile(
       metadataPath,
       Buffer.from(`${JSON.stringify(metadata, null, 2)}\n`, "utf8"),
       (existing) => {
-        const parsed = ArtifactBlobMetadataSchema.safeParse(JSON.parse(existing.toString("utf8")));
-        if (
-          !parsed.success ||
-          parsed.data.digest !== digest ||
-          parsed.data.byteLength !== input.content.byteLength
-        ) {
-          throw integrityFailure("existing metadata does not match the content digest and length");
-        }
+        existingMetadata = parseExistingMetadata(existing, digest, input.content.byteLength);
       },
     );
-
-    const storedMetadata = await this.readMetadata(digest);
-    await this.readContent(digest);
 
     return {
       digest,
       uri: `artifact://sha256/${hex}`,
       contentPath,
       metadataPath,
-      metadata: storedMetadata,
+      metadata: metadataDisposition === "created" ? metadata : existingMetadata!,
     };
   }
 
@@ -146,15 +143,13 @@ export class ArtifactBlobStore {
   }
 }
 
+type AtomicCreateDisposition = "created" | "verified-existing";
+
 async function atomicCreateFile(
   filePath: string,
   content: Buffer,
-  validateExisting: (existing: Buffer) => void = (existing) => {
-    if (!existing.equals(content)) {
-      throw integrityFailure(`existing blob file does not match ${path.basename(filePath)}`);
-    }
-  },
-): Promise<void> {
+  validateExisting?: (existing: Buffer) => void,
+): Promise<AtomicCreateDisposition> {
   const temporaryPath = `${filePath}.tmp-${process.pid}-${randomUUID()}`;
   const handle = await open(temporaryPath, "wx", 0o600);
   try {
@@ -167,13 +162,46 @@ async function atomicCreateFile(
   try {
     try {
       await link(temporaryPath, filePath);
+      return "created";
     } catch (error: unknown) {
       if (!isAlreadyExistsError(error)) throw error;
       const existing = await readRegularFileNoFollow(filePath);
-      validateExisting(existing);
+      if (validateExisting === undefined) {
+        if (!existing.equals(content)) {
+          throw integrityFailure(`existing blob file does not match ${path.basename(filePath)}`);
+        }
+      } else {
+        validateExisting(existing);
+      }
+      return "verified-existing";
     }
   } finally {
     await unlink(temporaryPath).catch(() => undefined);
+  }
+}
+
+function parseExistingMetadata(
+  content: Buffer,
+  digest: Sha256Digest,
+  byteLength: number,
+): ArtifactBlobMetadata {
+  try {
+    const parsed = ArtifactBlobMetadataSchema.safeParse(JSON.parse(content.toString("utf8")));
+    if (!parsed.success || parsed.data.digest !== digest || parsed.data.byteLength !== byteLength) {
+      throw integrityFailure("existing metadata does not match the content digest and length");
+    }
+    return {
+      digest: parsed.data.digest,
+      mediaType: parsed.data.mediaType,
+      byteLength: parsed.data.byteLength,
+      storedAt: parsed.data.storedAt,
+      ...(parsed.data.label === undefined ? {} : { label: parsed.data.label }),
+    };
+  } catch (error: unknown) {
+    if (error instanceof Error && error.message.startsWith("ARTIFACT_INTEGRITY_FAILED")) {
+      throw error;
+    }
+    throw integrityFailure(`invalid existing metadata: ${errorMessage(error)}`);
   }
 }
 

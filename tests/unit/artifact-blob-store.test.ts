@@ -5,12 +5,38 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { ArtifactBlobStore } from "../../src/artifact-registry/artifact-blob-store.js";
+import {
+  type RuntimeMetricName,
+  type RuntimeMetricsSink,
+} from "../../src/runtime/performance-instrumentation.js";
 import { digestPathSegments, sha256Digest } from "../../src/source-registry/content-hash.js";
 
 let directory: string;
 let store: ArtifactBlobStore;
 
 const storedAt = "2026-07-20T00:00:00.000Z";
+
+class CountingMetrics implements RuntimeMetricsSink {
+  private readonly values = new Map<RuntimeMetricName, number>();
+
+  public increment(name: RuntimeMetricName, value = 1): void {
+    this.values.set(name, (this.values.get(name) ?? 0) + value);
+  }
+
+  public gauge(_name: RuntimeMetricName, _value: number): void {}
+
+  public async time<T>(
+    _name: RuntimeMetricName,
+    _tags: Record<string, never>,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    return operation();
+  }
+
+  public value(name: RuntimeMetricName): number {
+    return this.values.get(name) ?? 0;
+  }
+}
 
 beforeEach(async () => {
   directory = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-artifact-unit-"));
@@ -22,6 +48,21 @@ afterEach(async () => {
 });
 
 describe("ArtifactBlobStore integrity", () => {
+  it("does not reread or rehash a freshly written blob", async () => {
+    const metrics = new CountingMetrics();
+    const metricsStore = new ArtifactBlobStore(directory, metrics);
+
+    const stored = await metricsStore.writeBlob({
+      content: Buffer.alloc(1_048_576, 7),
+      mediaType: "application/octet-stream",
+      storedAt,
+    });
+
+    expect(stored.metadata.byteLength).toBe(1_048_576);
+    expect(metrics.value("artifact.read_bytes")).toBe(0);
+    expect(metrics.value("artifact.hash_count")).toBe(1);
+  });
+
   it("rejects content changed after storage", async () => {
     const stored = await store.writeBlob({
       content: Buffer.from("trusted"),
