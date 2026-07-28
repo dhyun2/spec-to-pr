@@ -14,6 +14,8 @@ import {
   WorkflowReportMetadataSchema,
   assertCurrentPrReportV2,
   type PrReportSectionStatus,
+  type PrReportV2,
+  type WorkflowReportIntent,
 } from "../pr-report/pr-report-model.js";
 import { publicSourceRows } from "../pr-report/public-provenance.js";
 import {
@@ -1404,62 +1406,17 @@ export class WorkflowService {
     const timestamp = this.now();
     const sourceRunRevision = run.revision;
     const report = await this.materializeBlockedReport(run, blocker, timestamp);
-    const jsonBlob = await this.dependencies.artifactStore.writeBlob({
-      content: Buffer.from(`${JSON.stringify(report, null, 2)}\n`, "utf8"),
-      mediaType: "application/json",
-      storedAt: timestamp,
-      label: "pr-report-v2.1.json",
-    });
-    const jsonArtifact = ArtifactRefSchema.parse({
-      id: createArtifactId(),
-      kind: "pr-report",
-      uri: jsonBlob.uri,
-      mediaType: "application/json",
-      digest: jsonBlob.digest,
-      producedBy: "orchestrator",
-      evidenceIds: [],
-      createdAt: timestamp,
+    const { jsonArtifact, markdownArtifact: artifact } = await this.writePrReportArtifacts({
+      run,
+      report,
+      reportIntent: "blocked-diagnostic",
+      timestamp,
       metadata: {
-        adapter: "pr-report-v2",
-        reportKind: "pr-report-v2-json",
-        reportSchemaVersion: "pr-report-v2.1",
-        decision: "blocked",
-        blockedStage: blocker.stage,
-        errorCode: blocker.code,
-        idempotencyKey,
-      },
-    });
-    const markdown = renderPrReportV2Markdown(report);
-    const blob = await this.dependencies.artifactStore.writeBlob({
-      content: Buffer.from(markdown, "utf8"),
-      mediaType: "text/markdown",
-      storedAt: timestamp,
-      label: "pr-report.md",
-    });
-    const artifact = ArtifactRefSchema.parse({
-      id: createArtifactId(),
-      kind: "pr-report",
-      uri: blob.uri,
-      mediaType: "text/markdown",
-      digest: blob.digest,
-      producedBy: "orchestrator",
-      evidenceIds: [],
-      createdAt: timestamp,
-      metadata: {
-        adapter: "pr-report-v2",
-        ...WorkflowReportMetadataSchema.parse({
-          reportKind: "pr-body-markdown",
-          reportIntent: "blocked-diagnostic",
-          decision: "blocked",
-        }),
-        locale: "en",
         blockedStage: blocker.stage,
         errorCode: blocker.code,
         blockedStageAttempt,
         sourceRunRevision,
         idempotencyKey,
-        reportSchemaVersion: "pr-report-v2.1",
-        reportJsonArtifactId: jsonArtifact.id,
       },
     });
 
@@ -1707,6 +1664,30 @@ export class WorkflowService {
       };
       return stopped;
     }
+    const runWithReport = await this.dependencies.runStore.get(run.id);
+    const reportJsonArtifactId = reportArtifact.metadata["reportJsonArtifactId"];
+    const reportJsonArtifact =
+      typeof reportJsonArtifactId === "string"
+        ? runWithReport.artifacts.find((artifact) => artifact.id === reportJsonArtifactId)
+        : undefined;
+    if (reportJsonArtifact === undefined) {
+      throw new Error("Blocked diagnostic publication requires its canonical report JSON");
+    }
+    const canonicalReport = PrReportV2Schema.parse(
+      JSON.parse(
+        (await this.dependencies.artifactStore.readContent(reportJsonArtifact.digest)).toString(
+          "utf8",
+        ),
+      ),
+    );
+    assertCurrentPrReportV2(canonicalReport);
+    if (
+      canonicalReport.schemaVersion !== "pr-report-v2.1" ||
+      canonicalReport.runId !== run.id ||
+      canonicalReport.decision !== "blocked"
+    ) {
+      throw new Error("Blocked diagnostic publication requires a current Run-bound report");
+    }
     if (blocker.kind === "publish-precondition") {
       return {
         intent: input.intent,
@@ -1718,7 +1699,6 @@ export class WorkflowService {
         status: await this.status({ runId: run.id }),
       };
     }
-    const runWithReport = await this.dependencies.runStore.get(run.id);
     const synchronized = await this.synchronizedDiagnosticPublishResultForRun(
       runWithReport,
       reportArtifact.id,
@@ -1765,6 +1745,12 @@ export class WorkflowService {
       labels: ["spec-to-pr"],
       reviewers: [],
       assignees: [],
+      ...(canonicalReport.binding === undefined
+        ? {}
+        : {
+            reviewPacketId: canonicalReport.binding.reviewPacketId,
+            headSha: canonicalReport.binding.headSha,
+          }),
     };
     try {
       const result = await this.withDiagnosticPublishClaimHeartbeat(
@@ -3748,62 +3734,12 @@ export class WorkflowService {
       ],
     });
     assertCurrentPrReportV2(report);
-    const jsonBlob = await this.dependencies.artifactStore.writeBlob({
-      content: Buffer.from(`${JSON.stringify(report, null, 2)}\n`, "utf8"),
-      mediaType: "application/json",
-      storedAt: timestamp,
-      label: "pr-report-v2.1.json",
-    });
-    const jsonArtifact = ArtifactRefSchema.parse({
-      id: createArtifactId(),
-      kind: "pr-report",
-      uri: jsonBlob.uri,
-      mediaType: "application/json",
-      digest: jsonBlob.digest,
-      producedBy: "orchestrator",
-      evidenceIds: [],
-      createdAt: timestamp,
-      metadata: {
-        adapter: "pr-report-v2",
-        reportKind: "pr-report-v2-json",
-        reportSchemaVersion: "pr-report-v2.1",
-        reportIntent: "ready",
-        decision: "ready",
-        reviewPacketId: packet.id,
-        headSha: packet.headSha,
-        diffDigest: packet.diffDigest,
-      },
-    });
-    const markdown = renderPrReportV2Markdown(report);
-    const markdownBlob = await this.dependencies.artifactStore.writeBlob({
-      content: Buffer.from(markdown, "utf8"),
-      mediaType: "text/markdown",
-      storedAt: timestamp,
-      label: "pr-report.md",
-    });
-    const markdownArtifact = ArtifactRefSchema.parse({
-      id: createArtifactId(),
-      kind: "pr-report",
-      uri: markdownBlob.uri,
-      mediaType: "text/markdown",
-      digest: markdownBlob.digest,
-      producedBy: "orchestrator",
-      evidenceIds: [],
-      createdAt: timestamp,
-      metadata: {
-        adapter: "pr-report-v2",
-        ...WorkflowReportMetadataSchema.parse({
-          reportKind: "pr-body-markdown",
-          reportIntent: "ready",
-          decision: "ready",
-        }),
-        locale: "ko",
-        reviewPacketId: packet.id,
-        headSha: packet.headSha,
-        diffDigest: packet.diffDigest,
-        reportSchemaVersion: "pr-report-v2.1",
-        reportJsonArtifactId: jsonArtifact.id,
-      },
+    const { jsonArtifact, markdownArtifact } = await this.writePrReportArtifacts({
+      run,
+      report,
+      reportIntent: "ready",
+      timestamp,
+      metadata: {},
     });
 
     await this.dependencies.runStore.save(
@@ -3816,6 +3752,95 @@ export class WorkflowService {
       run.revision,
     );
     await this.completeStage(run.id, "report", [jsonArtifact.id, markdownArtifact.id]);
+  }
+
+  private async writePrReportArtifacts(input: {
+    run: RunManifest;
+    report: PrReportV2;
+    reportIntent: WorkflowReportIntent;
+    timestamp: string;
+    metadata: Record<string, unknown>;
+  }): Promise<{
+    jsonArtifact: ArtifactRef;
+    markdownArtifact: ArtifactRef;
+  }> {
+    const report = PrReportV2Schema.parse(input.report);
+    assertCurrentPrReportV2(report);
+    if (report.schemaVersion !== "pr-report-v2.1" || report.runId !== input.run.id) {
+      throw new Error("Current PR report persistence requires a Run-bound pr-report-v2.1");
+    }
+    if (
+      (input.reportIntent === "ready" && report.decision !== "ready") ||
+      (input.reportIntent === "blocked-diagnostic" && report.decision !== "blocked")
+    ) {
+      throw new Error("PR report intent and decision must agree before persistence");
+    }
+
+    const bindingMetadata =
+      report.binding === undefined
+        ? {}
+        : {
+            reviewPacketId: report.binding.reviewPacketId,
+            headSha: report.binding.headSha,
+            diffDigest: report.binding.diffDigest,
+            ...(report.visual.reportArtifactId === undefined
+              ? {}
+              : { visualReportArtifactId: report.visual.reportArtifactId }),
+          };
+    const jsonBlob = await this.dependencies.artifactStore.writeBlob({
+      content: Buffer.from(`${JSON.stringify(report, null, 2)}\n`, "utf8"),
+      mediaType: "application/json",
+      storedAt: input.timestamp,
+      label: "pr-report-v2.1.json",
+    });
+    const jsonArtifact = ArtifactRefSchema.parse({
+      id: createArtifactId(),
+      kind: "pr-report",
+      uri: jsonBlob.uri,
+      mediaType: "application/json",
+      digest: jsonBlob.digest,
+      producedBy: "orchestrator",
+      evidenceIds: [],
+      createdAt: input.timestamp,
+      metadata: {
+        ...input.metadata,
+        adapter: "pr-report-v2",
+        reportKind: "pr-report-v2-json",
+        reportSchemaVersion: "pr-report-v2.1",
+        decision: report.decision,
+        ...bindingMetadata,
+      },
+    });
+    const markdownBlob = await this.dependencies.artifactStore.writeBlob({
+      content: Buffer.from(renderPrReportV2Markdown(report), "utf8"),
+      mediaType: "text/markdown",
+      storedAt: input.timestamp,
+      label: "pr-report.md",
+    });
+    const markdownArtifact = ArtifactRefSchema.parse({
+      id: createArtifactId(),
+      kind: "pr-report",
+      uri: markdownBlob.uri,
+      mediaType: "text/markdown",
+      digest: markdownBlob.digest,
+      producedBy: "orchestrator",
+      evidenceIds: [],
+      createdAt: input.timestamp,
+      metadata: {
+        ...input.metadata,
+        adapter: "pr-report-v2",
+        ...WorkflowReportMetadataSchema.parse({
+          reportKind: "pr-body-markdown",
+          reportIntent: input.reportIntent,
+          decision: report.decision,
+        }),
+        locale: "ko",
+        reportSchemaVersion: "pr-report-v2.1",
+        reportJsonArtifactId: jsonArtifact.id,
+        ...bindingMetadata,
+      },
+    });
+    return { jsonArtifact, markdownArtifact };
   }
 
   private async featureTestCountForRun(
@@ -3871,7 +3896,40 @@ export class WorkflowService {
     const implementation = submissions.get("implementation");
     const rawPacket = reviewPacketFromRun(run);
     let packet = rawPacket;
-    if (packet !== undefined) {
+    let terminalVisualArtifact: ArtifactRef | undefined;
+    if (blocker.code === "VISUAL_REVIEW_THRESHOLD_NOT_MET") {
+      const checkpoint = stage(run, "implementation").checkpoint;
+      const terminalPacket = ImplementationReviewPacketSchema.safeParse(
+        checkpoint?.data["reviewPacket"],
+      );
+      const reportArtifactId = checkpoint?.data["visualReportArtifactId"];
+      const reportDigest = checkpoint?.data["visualReportDigest"];
+      if (
+        checkpoint?.name !== "visual-threshold-not-met" ||
+        !terminalPacket.success ||
+        typeof reportArtifactId !== "string" ||
+        typeof reportDigest !== "string"
+      ) {
+        throw new Error(
+          "VISUAL_TERMINAL_REPORT_BINDING_INVALID: terminal packet and visual report identity are required",
+        );
+      }
+      terminalVisualArtifact = run.artifacts.find(
+        (artifact) => artifact.id === reportArtifactId && artifact.kind === "visual-report",
+      );
+      if (
+        terminalVisualArtifact === undefined ||
+        terminalVisualArtifact.digest !== reportDigest ||
+        terminalVisualArtifact.metadata["reviewPacketId"] !== terminalPacket.data.id ||
+        terminalVisualArtifact.metadata["headSha"] !== terminalPacket.data.headSha ||
+        terminalVisualArtifact.metadata["diffDigest"] !== terminalPacket.data.diffDigest
+      ) {
+        throw new Error(
+          "VISUAL_TERMINAL_REPORT_BINDING_INVALID: the exact terminal visual report is unavailable or stale",
+        );
+      }
+      packet = terminalPacket.data;
+    } else if (packet !== undefined) {
       try {
         await assertReviewPacketFresh(run);
       } catch {
@@ -3884,7 +3942,9 @@ export class WorkflowService {
         packet !== undefined &&
         submission.reviewPacketId === packet.id,
     );
-    const visualArtifact = packet === undefined ? undefined : currentVisualReport(run, packet.id);
+    const visualArtifact =
+      terminalVisualArtifact ??
+      (packet === undefined ? undefined : currentVisualReport(run, packet.id));
     let visualReport: Record<string, unknown> | undefined;
     if (visualArtifact !== undefined) {
       try {

@@ -369,6 +369,52 @@ describe("workflow report renderer", () => {
       evidencePaths: ["evidence/shop.json"],
     });
     const readyMarkdown = renderPrReportV2Markdown(ready);
+    const blockedVisual = PrReportV2Schema.parse({
+      ...ready,
+      decision: "blocked",
+      sectionStatuses: {
+        ...ready.sectionStatuses,
+        visual: "blocked",
+        "functional-review": "not-run",
+        "design-review": "not-run",
+      },
+      visual: {
+        ...ready.visual,
+        status: "failed",
+        results: ready.visual.results.map((result) => ({
+          ...result,
+          status: "failed" as const,
+          metrics: {
+            ...result.metrics,
+            reviewMatchRatio: 0.91,
+            threshold: 0.92,
+          },
+        })),
+      },
+      reviews: [],
+      blockers: ["implementation/VISUAL_REVIEW_THRESHOLD_NOT_MET: 92% 기준 미달"],
+      unrunValidations: ["functional-review", "design-review"],
+    });
+    const blockedVisualMarkdown = renderPrReportV2Markdown(blockedVisual);
+    const headings = (markdown: string) =>
+      markdown
+        .split("\n")
+        .filter((line) => line.startsWith("## "))
+        .filter((line) => line !== "## 확인 필요");
+    const readyHeadings = headings(readyMarkdown);
+    const blockedHeadings = headings(blockedVisualMarkdown);
+
+    expect(blockedHeadings).toEqual(readyHeadings);
+    expect(blockedVisual.sectionStatuses).toMatchObject({
+      visual: "blocked",
+      "functional-review": "not-run",
+      "design-review": "not-run",
+    });
+    expect(blockedVisualMarkdown).toContain(
+      "| Shop detail | /shop/&#35;/main/1 · initial detail viewport | 390×844 @1x | 91.00% | 94.00% | 92.00% | 실패 |",
+    );
+    expect(blockedVisualMarkdown).toContain("| 기능 리뷰 | 미실행 | 미실행 |");
+    expect(blockedVisualMarkdown).toContain("| 디자인·접근성 | 미실행 | 미실행 |");
 
     expect(readyMarkdown).toContain("**레거시 이관 결과**");
     expect(readyMarkdown).not.toContain("SpecToPR legacy delivery");
@@ -511,5 +557,56 @@ describe("workflow report renderer", () => {
     expect(translatedStatusesMarkdown).toContain(
       "| 계획 | REQ-SHOP-ROUTING | 아직 이관하지 않았습니다. |",
     );
+  });
+
+  it("rejects a visual report reference without a canonical packet binding", () => {
+    const parsed = PrReportV2Schema.safeParse({
+      schemaVersion: "pr-report-v2.1",
+      runId: `run_${"a".repeat(32)}`,
+      generatedAt: "2026-07-20T00:00:00.000Z",
+      decision: "blocked",
+      mode: "figma",
+      sectionStatuses: {
+        api: "not-applicable",
+        legacy: "not-applicable",
+        visual: "blocked",
+        "functional-review": "not-run",
+        "design-review": "not-run",
+        performance: "not-run",
+        "feature-evidence": "not-applicable",
+      },
+      summary: { title: "Blocked visual delivery", bullets: [], exclusions: [] },
+      sources: [],
+      skills: { hints: [], applied: [] },
+      requirements: [],
+      changedFiles: [],
+      implementationNotes: [],
+      api: { applicable: false, operations: [], gaps: [] },
+      legacy: { applicable: false, coverage: [] },
+      visual: {
+        applicable: true,
+        reportArtifactId: `art_${"b".repeat(32)}`,
+        attempt: 3,
+        status: "failed",
+        results: [],
+      },
+      reviews: [],
+      performance: { applicable: false },
+      gaps: [],
+      blockers: ["VISUAL_REVIEW_THRESHOLD_NOT_MET"],
+      unrunValidations: ["functional-review", "design-review"],
+      risks: [],
+      rollback: {
+        trigger: "Visual threshold failure.",
+        strategy: "Start a new run.",
+        steps: ["Inspect the failed comparison."],
+        dataImpact: "None.",
+        postChecks: ["Repeat visual review."],
+      },
+      evidencePaths: [],
+      artifactIds: [`art_${"b".repeat(32)}`],
+    });
+
+    expect(parsed.success).toBe(false);
   });
 });

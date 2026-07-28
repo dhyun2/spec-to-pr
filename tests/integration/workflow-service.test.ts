@@ -6467,6 +6467,52 @@ describe("WorkflowService", () => {
     expect(diagnosticReport.metadata["idempotencyKey"]).toBe(
       `implementation:VISUAL_REVIEW_THRESHOLD_NOT_MET:${terminalIdentity}`,
     );
+    const runWithDiagnostic = await store.get(started.runId);
+    const diagnosticJsonArtifact = runWithDiagnostic.artifacts.find(
+      (artifact) => artifact.id === diagnosticReport.metadata["reportJsonArtifactId"],
+    );
+    if (diagnosticJsonArtifact === undefined) {
+      throw new Error("Missing canonical blocked diagnostic JSON");
+    }
+    const diagnosticJson = JSON.parse(
+      (await artifactStore.readContent(diagnosticJsonArtifact.digest)).toString("utf8"),
+    ) as Record<string, unknown>;
+    expect(diagnosticJson).toMatchObject({
+      schemaVersion: "pr-report-v2.1",
+      runId: started.runId,
+      decision: "blocked",
+      binding: {
+        reviewPacketId: compareThird.reviewPacketId,
+        headSha: thirdPacketHead,
+        diffDigest: expect.stringMatching(/^sha256:/),
+      },
+      visual: {
+        applicable: true,
+        reportArtifactId: thirdReport.id,
+        attempt: 3,
+        status: "failed",
+        results: expect.arrayContaining([
+          expect.objectContaining({
+            targetId: "checkout-default",
+            status: "failed",
+            metrics: expect.objectContaining({ threshold: 0.92 }),
+          }),
+        ]),
+      },
+    });
+    expect(diagnosticReport.metadata).toMatchObject({
+      locale: "ko",
+      reviewPacketId: compareThird.reviewPacketId,
+      headSha: thirdPacketHead,
+      diffDigest: (diagnosticJson["binding"] as Record<string, unknown>)["diffDigest"],
+      visualReportArtifactId: thirdReport.id,
+    });
+    expect(diagnosticJsonArtifact.metadata).toMatchObject({
+      reviewPacketId: compareThird.reviewPacketId,
+      headSha: thirdPacketHead,
+      diffDigest: (diagnosticJson["binding"] as Record<string, unknown>)["diffDigest"],
+      visualReportArtifactId: thirdReport.id,
+    });
     const revisionWithDiagnostic = (await store.get(started.runId)).revision;
     const replayedDiagnosticReport = await service.ensureBlockedDiagnosticReport({
       runId: started.runId,

@@ -35,8 +35,11 @@ import type {
 import {
   ReportLocaleSchema,
   ReportDecisionSchema,
+  PrReportV2Schema,
   WorkflowReportMetadataSchema,
   WorkflowReportIntentSchema,
+  assertCurrentPrReportV2,
+  type PrReportV2,
   type ReportDecision,
   type WorkflowReportIntent,
 } from "../pr-report/pr-report-model.js";
@@ -79,6 +82,15 @@ type VisualPreviewResult = VisualReport["results"][number] & {
 
 type VisualPreviewReport = Omit<VisualReport, "results"> & {
   results: VisualPreviewResult[];
+};
+
+type PublicationReportBinding = {
+  report: PrReportV2;
+  jsonArtifact: ArtifactRef;
+  reviewPacketId?: string;
+  headSha?: string;
+  diffDigest?: string;
+  visualReportArtifact?: ArtifactRef;
 };
 
 const VisualPreviewContextSchema = z
@@ -150,6 +162,10 @@ const BasePublishInputShape = {
   remoteName: z.string().trim().min(1).default("origin"),
   remoteUrl: z.string().trim().min(1).optional(),
   headSha: GitObjectIdSchema.optional(),
+  reviewPacketId: z
+    .string()
+    .regex(/^packet_[a-f0-9]{64}$/)
+    .optional(),
 } as const;
 
 export const DetectPublishTargetInputSchema = z
@@ -312,6 +328,8 @@ export class PublisherService {
   public async plan(rawInput: unknown) {
     const input = PlanReviewRequestPublishInputSchema.parse(rawInput);
     const run = await this.runStore.get(input.runId);
+    const reportArtifact = resolvePrReportArtifact(run.artifacts, input.reportArtifactId);
+    const binding = await this.resolvePublicationReportBinding(run, reportArtifact);
     if (run.workspaceBinding !== undefined) {
       await assertWorkspaceFresh(
         run.workspaceBinding,
@@ -320,15 +338,12 @@ export class PublisherService {
           targetBranch: input.targetBranch,
           remoteName: input.remoteName,
           ...(input.remoteUrl === undefined ? {} : { remoteUrl: input.remoteUrl }),
-          ...(input.headSha === undefined || input.intent === "blocked-diagnostic"
-            ? {}
-            : { reviewedHeadSha: input.headSha }),
+          ...(binding.headSha === undefined ? {} : { reviewedHeadSha: binding.headSha }),
         },
         { git: (cwd, args) => this.git(cwd, args) },
       );
     }
     const timestamp = IsoDateTimeSchema.parse(this.now());
-    const reportArtifact = resolvePrReportArtifact(run.artifacts, input.reportArtifactId);
     const reportBody = (await this.artifactStore.readContent(reportArtifact.digest)).toString(
       "utf8",
     );
@@ -348,7 +363,6 @@ export class PublisherService {
         `Requested host ${input.host} but ${input.remoteName} remote is ${target.host}`,
       );
     }
-    const reviewPacketId = reportArtifact.metadata["reviewPacketId"];
     const payload = ReviewRequestPayloadSchema.parse({
       runId: run.id,
       title: publishTitle({
@@ -359,14 +373,8 @@ export class PublisherService {
       body: reportBody,
       sourceBranch: input.sourceBranch,
       targetBranch: input.targetBranch,
-      ...(input.headSha === undefined || input.intent === "blocked-diagnostic"
-        ? {}
-        : { headSha: input.headSha }),
-      ...(input.intent === "ready" &&
-      typeof reviewPacketId === "string" &&
-      /^packet_[a-f0-9]{64}$/.test(reviewPacketId)
-        ? { reviewPacketId }
-        : {}),
+      ...(binding.headSha === undefined ? {} : { headSha: binding.headSha }),
+      ...(binding.reviewPacketId === undefined ? {} : { reviewPacketId: binding.reviewPacketId }),
       mode: input.mode,
       labels: publishLabels(input.labels, input.intent),
       reviewers: input.reviewers,
@@ -441,9 +449,7 @@ export class PublisherService {
         projectRoot: publicationProjectRoot(run),
         sourceBranch: input.sourceBranch,
         targetBranch: input.targetBranch,
-        ...(input.headSha === undefined || plan.intent === "blocked-diagnostic"
-          ? {}
-          : { headSha: input.headSha }),
+        ...(plan.payload.headSha === undefined ? {} : { headSha: plan.payload.headSha }),
       });
     } catch (error: unknown) {
       if (!(error instanceof PublishNoDeltaError)) throw error;
@@ -567,6 +573,154 @@ export class PublisherService {
       artifactId: artifact.id,
       result,
     });
+  }
+
+  private async resolvePublicationReportBinding(
+    run: Awaited<ReturnType<RunStore["get"]>>,
+    markdownArtifact: ArtifactRef,
+  ): Promise<PublicationReportBinding> {
+    const invalid = (message: string): never => {
+      throw new Error(`PUBLISH_REPORT_BINDING_INVALID: ${message}`);
+    };
+    const reportJsonArtifactId = markdownArtifact.metadata["reportJsonArtifactId"];
+    if (typeof reportJsonArtifactId !== "string") {
+      return invalid("Markdown does not reference its canonical JSON artifact");
+    }
+    const jsonArtifact = run.artifacts.find((artifact) => artifact.id === reportJsonArtifactId);
+    if (
+      jsonArtifact === undefined ||
+      jsonArtifact.kind !== "pr-report" ||
+      jsonArtifact.mediaType !== "application/json" ||
+      jsonArtifact.metadata["reportKind"] !== "pr-report-v2-json"
+    ) {
+      return invalid("the referenced canonical JSON artifact is missing or invalid");
+    }
+
+    let report: PrReportV2;
+    try {
+      report = PrReportV2Schema.parse(
+        JSON.parse((await this.artifactStore.readContent(jsonArtifact.digest)).toString("utf8")),
+      );
+      assertCurrentPrReportV2(report);
+    } catch (error: unknown) {
+      return invalid(
+        `the referenced canonical JSON cannot be validated: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    if (report.schemaVersion !== "pr-report-v2.1" || report.runId !== run.id) {
+      return invalid("the canonical JSON is not current or belongs to another Run");
+    }
+
+    const markdownMetadata = reportMetadataFromArtifact(markdownArtifact);
+    const expectedIntent = report.decision === "ready" ? "ready" : "blocked-diagnostic";
+    if (
+      markdownMetadata.valid &&
+      (markdownMetadata.reportDecision !== report.decision ||
+        markdownMetadata.reportIntent !== expectedIntent)
+    ) {
+      return invalid("Markdown intent or decision does not match the canonical JSON");
+    }
+    if (
+      jsonArtifact.metadata["reportSchemaVersion"] !== report.schemaVersion ||
+      jsonArtifact.metadata["decision"] !== report.decision
+    ) {
+      return invalid("canonical JSON artifact metadata does not match its content");
+    }
+
+    if (report.binding === undefined) {
+      if (report.visual.reportArtifactId !== undefined) {
+        return invalid("packetless reports cannot reference visual media");
+      }
+      return { report, jsonArtifact };
+    }
+
+    const binding = report.binding;
+    for (const artifact of [markdownArtifact, jsonArtifact]) {
+      if (
+        artifact.metadata["reviewPacketId"] !== binding.reviewPacketId ||
+        artifact.metadata["headSha"] !== binding.headSha ||
+        artifact.metadata["diffDigest"] !== binding.diffDigest
+      ) {
+        return invalid(`artifact ${artifact.id} metadata crosses the canonical packet binding`);
+      }
+    }
+
+    let visualReportArtifact: ArtifactRef | undefined;
+    if (report.visual.reportArtifactId !== undefined) {
+      visualReportArtifact = run.artifacts.find(
+        (artifact) => artifact.id === report.visual.reportArtifactId,
+      );
+      if (
+        visualReportArtifact === undefined ||
+        visualReportArtifact.kind !== "visual-report" ||
+        visualReportArtifact.metadata["reviewPacketId"] !== binding.reviewPacketId ||
+        visualReportArtifact.metadata["headSha"] !== binding.headSha ||
+        visualReportArtifact.metadata["diffDigest"] !== binding.diffDigest
+      ) {
+        return invalid("the exact visual report artifact crosses the canonical packet binding");
+      }
+      if (
+        markdownArtifact.metadata["visualReportArtifactId"] !== visualReportArtifact.id ||
+        jsonArtifact.metadata["visualReportArtifactId"] !== visualReportArtifact.id
+      ) {
+        return invalid("report artifact metadata does not name the exact visual report");
+      }
+
+      let rawVisual: Record<string, unknown>;
+      try {
+        const raw = JSON.parse(
+          (await this.artifactStore.readContent(visualReportArtifact.digest)).toString("utf8"),
+        ) as unknown;
+        if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+          return invalid("the exact visual report content is not an object");
+        }
+        rawVisual = raw as Record<string, unknown>;
+      } catch (error: unknown) {
+        return invalid(
+          `the exact visual report cannot be read: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      if (rawVisual["runId"] !== run.id) {
+        return invalid("the exact visual report belongs to another Run");
+      }
+      if (
+        rawVisual["reviewPacketId"] !== binding.reviewPacketId ||
+        rawVisual["headSha"] !== binding.headSha ||
+        rawVisual["diffDigest"] !== binding.diffDigest
+      ) {
+        return invalid("the exact visual report content crosses the canonical packet binding");
+      }
+    }
+
+    const implementation = run.stages.find((candidate) => candidate.name === "implementation");
+    if (implementation?.error?.code === "VISUAL_REVIEW_THRESHOLD_NOT_MET") {
+      const checkpoint = implementation.checkpoint;
+      const checkpointPacket =
+        typeof checkpoint?.data["reviewPacket"] === "object" &&
+        checkpoint.data["reviewPacket"] !== null
+          ? (checkpoint.data["reviewPacket"] as Record<string, unknown>)
+          : undefined;
+      if (
+        visualReportArtifact === undefined ||
+        checkpoint?.name !== "visual-threshold-not-met" ||
+        checkpoint.data["visualReportArtifactId"] !== visualReportArtifact.id ||
+        checkpoint.data["visualReportDigest"] !== visualReportArtifact.digest ||
+        checkpointPacket?.["id"] !== binding.reviewPacketId ||
+        checkpointPacket["headSha"] !== binding.headSha ||
+        checkpointPacket["diffDigest"] !== binding.diffDigest
+      ) {
+        return invalid("terminal visual blocker does not bind the persisted checkpoint report");
+      }
+    }
+
+    return {
+      report,
+      jsonArtifact,
+      reviewPacketId: binding.reviewPacketId,
+      headSha: binding.headSha,
+      diffDigest: binding.diffDigest,
+      ...(visualReportArtifact === undefined ? {} : { visualReportArtifact }),
+    };
   }
 
   private async assertPublishBranchReady(input: {
@@ -1055,15 +1209,15 @@ export class PublisherService {
     run: Awaited<ReturnType<RunStore["get"]>>,
     payload: ReviewRequestPayload,
   ): Promise<ReviewRequestAsset | undefined> {
-    const reportArtifact = requireArtifact(run.artifacts, payload.reportArtifactId);
-    const reviewPacketId = reportArtifact.metadata["reviewPacketId"];
+    const reviewPacketId = payload.reviewPacketId;
+    if (reviewPacketId === undefined) return undefined;
     const artifact = [...run.artifacts]
       .reverse()
       .find(
         (item) =>
           item.metadata["workflowSubmissionKind"] === "implementation" &&
           item.metadata["featureEvidenceRole"] === "video" &&
-          (reviewPacketId === undefined || item.metadata["reviewPacketId"] === reviewPacketId),
+          item.metadata["reviewPacketId"] === reviewPacketId,
       );
 
     if (artifact === undefined) return undefined;
@@ -1093,8 +1247,8 @@ export class PublisherService {
   }> {
     const prReportArtifact = requireArtifact(run.artifacts, payload.reportArtifactId);
     const locale = ReportLocaleSchema.safeParse(prReportArtifact.metadata["locale"]);
-    const reviewPacketId = prReportArtifact.metadata["reviewPacketId"];
-    const reportArtifact = latestVisualReportArtifact(run.artifacts, reviewPacketId);
+    const binding = await this.resolvePublicationReportBinding(run, prReportArtifact);
+    const reportArtifact = binding.visualReportArtifact;
 
     if (reportArtifact === undefined) {
       return {
@@ -1517,21 +1671,6 @@ function latestPublishResultArtifact(artifacts: ArtifactRef[]): ArtifactRef {
   }
 
   return artifact;
-}
-
-function latestVisualReportArtifact(
-  artifacts: ArtifactRef[],
-  reviewPacketId: unknown,
-): ArtifactRef | undefined {
-  return artifacts
-    .filter(
-      (item) =>
-        item.kind === "visual-report" &&
-        (item.metadata["reportKind"] === "visual-report-json" ||
-          item.metadata["reportKind"] === "visual-report-v2-json") &&
-        (reviewPacketId === undefined || item.metadata["reviewPacketId"] === reviewPacketId),
-    )
-    .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))[0];
 }
 
 function normalizeVisualReport(rawReport: unknown): VisualPreviewReport {

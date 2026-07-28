@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ArtifactBlobStore } from "../../src/artifact-registry/artifact-blob-store.js";
 import { PublisherService } from "../../src/application/publisher-service.js";
 import { RunService } from "../../src/application/run-service.js";
+import { PrReportV2Schema } from "../../src/pr-report/pr-report-model.js";
 import { ArtifactRefSchema } from "../../src/runtime/artifact.js";
 import { createArtifactId } from "../../src/runtime/id-factory.js";
 import type {
@@ -37,6 +38,8 @@ let gitlabPublisher: FakePublisher;
 let gitCalls: string[][];
 let gitCurrentBranch: string;
 const gitHead = "a".repeat(40);
+const canonicalReviewPacketId = `packet_${"c".repeat(64)}`;
+const canonicalDiffDigest = `sha256:${"d".repeat(64)}`;
 
 beforeEach(async () => {
   directory = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-publisher-"));
@@ -630,6 +633,7 @@ describe("PublisherService", () => {
 
   it("creates a synchronized blocked diagnostic draft without requiring a reviewed head SHA", async () => {
     const run = await runService.createRun({ projectRoot });
+    await addFeatureVideoEvidence(run.id);
     const report = await prReportService.generatePrReport({
       runId: run.id,
       metadata: {
@@ -658,6 +662,8 @@ describe("PublisherService", () => {
         labels: ["spec-to-pr", "spec-to-pr:blocked"],
       },
     });
+    expect(plan.payload).not.toHaveProperty("reviewPacketId");
+    expect(plan.payload).not.toHaveProperty("headSha");
 
     const published = await publisherService.publish({
       runId: run.id,
@@ -673,6 +679,8 @@ describe("PublisherService", () => {
     expect(published.result).toMatchObject({
       status: "blocked",
       requestSynced: true,
+      featureVideoExpected: false,
+      featureVideoSynced: false,
       request: { number: "123", draft: true, created: true },
     });
     expect(published.result.errorCode).toBeUndefined();
@@ -681,6 +689,7 @@ describe("PublisherService", () => {
       title: `[Blocked] SpecToPR Run ${run.id}`,
       labels: ["spec-to-pr", "spec-to-pr:blocked"],
     });
+    expect(githubPublisher.uploadedAssets).toHaveLength(0);
     expect(gitCalls).toContainEqual(["rev-list", "--count", "main..spec-to-pr/run-1"]);
 
     const publishedRun = await store.get(run.id);
@@ -695,6 +704,90 @@ describe("PublisherService", () => {
       remoteName: "origin",
       pushBranch: false,
     });
+  });
+
+  it("binds a blocked visual publication to the exact canonical packet and report", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await addVisualEvidence(run.id);
+    const report = await generatePrReport({
+      runId: run.id,
+      binding: {
+        reviewPacketId: canonicalReviewPacketId,
+        headSha: gitHead,
+        diffDigest: canonicalDiffDigest,
+      },
+      visualReportArtifactId: "art_55555555555555555555555555555555",
+    });
+
+    const plan = await publisherService.plan({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      intent: "blocked-diagnostic",
+      pushBranch: false,
+    });
+
+    expect(plan.payload).toMatchObject({
+      reviewPacketId: canonicalReviewPacketId,
+      headSha: gitHead,
+    });
+
+    const mismatchedHeadService = new PublisherService(
+      store,
+      artifactStore,
+      () => "2026-06-23T00:00:02.000Z",
+      { github: githubPublisher, gitlab: gitlabPublisher },
+      async (_cwd, args) => ({
+        stdout:
+          args[0] === "status"
+            ? ""
+            : args[0] === "symbolic-ref"
+              ? "spec-to-pr/run-1\n"
+              : args[0] === "rev-parse"
+                ? `${"b".repeat(40)}\n`
+                : args[0] === "rev-list"
+                  ? "1\n"
+                  : "https://github.com/acme/spec-to-pr.git\n",
+        stderr: "",
+      }),
+    );
+    await expect(
+      mismatchedHeadService.publish({
+        runId: run.id,
+        reportArtifactId: report.markdownArtifactId,
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        intent: "blocked-diagnostic",
+        pushBranch: false,
+        confirm: true,
+      }),
+    ).rejects.toThrow(/reviewed source SHA/);
+  });
+
+  it("rejects a crossed blocked report and visual artifact binding", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await addVisualEvidence(run.id);
+    const report = await generatePrReport({
+      runId: run.id,
+      binding: {
+        reviewPacketId: `packet_${"e".repeat(64)}`,
+        headSha: gitHead,
+        diffDigest: canonicalDiffDigest,
+      },
+      visualReportArtifactId: "art_55555555555555555555555555555555",
+    });
+
+    await expect(
+      publisherService.plan({
+        runId: run.id,
+        reportArtifactId: report.markdownArtifactId,
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        intent: "blocked-diagnostic",
+        pushBranch: false,
+      }),
+    ).rejects.toThrow(/PUBLISH_REPORT_BINDING_INVALID/);
   });
 
   it("updates the same source-target diagnostic draft instead of creating another", async () => {
@@ -1623,6 +1716,7 @@ async function addFeatureVideoEvidence(runId: string): Promise<void> {
       workflowSubmissionKind: "implementation",
       featureEvidenceRole: "video",
       projectRelativePath: "test-results/checkout.webm",
+      reviewPacketId: canonicalReviewPacketId,
     },
   });
 
@@ -1810,6 +1904,12 @@ async function generatePrReport(input: {
   runId: string;
   metadata?: Record<string, unknown>;
   body?: string;
+  binding?: {
+    reviewPacketId: string;
+    headSha: string;
+    diffDigest: string;
+  };
+  visualReportArtifactId?: string;
 }) {
   const run = await store.get(input.runId);
   const timestamp = "2026-06-23T00:00:01.000Z";
@@ -1818,6 +1918,138 @@ async function generatePrReport(input: {
   )
     ? "ready"
     : "blocked";
+  const canonicalDecision =
+    input.metadata?.["decision"] === "ready" || input.metadata?.["decision"] === "blocked"
+      ? input.metadata["decision"]
+      : decision;
+  const reportIntent =
+    input.metadata?.["reportIntent"] === "ready" ||
+    input.metadata?.["reportIntent"] === "blocked-diagnostic"
+      ? input.metadata["reportIntent"]
+      : canonicalDecision === "ready"
+        ? "ready"
+        : "blocked-diagnostic";
+  const binding =
+    input.binding ??
+    (canonicalDecision === "ready"
+      ? {
+          reviewPacketId: canonicalReviewPacketId,
+          headSha: gitHead,
+          diffDigest: canonicalDiffDigest,
+        }
+      : undefined);
+  const visualReportArtifactId =
+    input.visualReportArtifactId ??
+    (canonicalDecision === "ready"
+      ? [...run.artifacts].reverse().find((artifact) => artifact.kind === "visual-report")?.id
+      : undefined);
+  const canonicalReport = PrReportV2Schema.parse({
+    schemaVersion: "pr-report-v2.1",
+    runId: run.id,
+    generatedAt: timestamp,
+    decision: canonicalDecision,
+    mode: "auto",
+    sectionStatuses: {
+      api: "not-applicable",
+      legacy: "not-applicable",
+      visual: visualReportArtifactId === undefined ? "not-applicable" : "complete",
+      "functional-review": canonicalDecision === "ready" ? "complete" : "not-run",
+      "design-review": canonicalDecision === "ready" ? "complete" : "not-run",
+      performance: "not-applicable",
+      "feature-evidence": "not-applicable",
+    },
+    ...(binding === undefined
+      ? {}
+      : {
+          binding: {
+            reviewPacketId: binding.reviewPacketId,
+            revision: 1,
+            baseSha: "b".repeat(40),
+            headSha: binding.headSha,
+            evidenceDigest: `sha256:${"e".repeat(64)}`,
+            diffDigest: binding.diffDigest,
+          },
+        }),
+    summary: {
+      title: canonicalDecision === "ready" ? "Ready fixture" : "Blocked fixture",
+      bullets: [],
+      exclusions: [],
+    },
+    sources: [],
+    skills: { hints: [], applied: [] },
+    requirements:
+      canonicalDecision === "ready"
+        ? [
+            {
+              id: "REQ-PUBLISH",
+              title: "Publish reviewed evidence",
+              acceptanceCriteria: ["The exact report binding is published."],
+              implementationFiles: [],
+              reviewVerdicts: ["approved"],
+            },
+          ]
+        : [],
+    changedFiles: [],
+    implementationNotes: [],
+    api: { applicable: false, operations: [], gaps: [] },
+    legacy: { applicable: false, coverage: [] },
+    visual: {
+      applicable: visualReportArtifactId !== undefined,
+      ...(visualReportArtifactId === undefined ? {} : { reportArtifactId: visualReportArtifactId }),
+      attempt: visualReportArtifactId === undefined ? 0 : 1,
+      status:
+        visualReportArtifactId === undefined
+          ? "not-applicable"
+          : canonicalDecision === "ready"
+            ? "passed"
+            : "failed",
+      results: [],
+    },
+    reviews: [],
+    performance: { applicable: false },
+    gaps: [],
+    blockers: canonicalDecision === "blocked" ? ["Fixture blocker"] : [],
+    unrunValidations: canonicalDecision === "blocked" ? ["functional-review"] : [],
+    risks: [],
+    rollback: {
+      trigger: "Fixture regression.",
+      strategy: "Revert the fixture.",
+      steps: ["Revert the fixture."],
+      dataImpact: "None.",
+      postChecks: ["Rerun the fixture."],
+    },
+    evidencePaths: [],
+    artifactIds: visualReportArtifactId === undefined ? [] : [visualReportArtifactId],
+  });
+  const jsonBlob = await artifactStore.writeBlob({
+    content: Buffer.from(`${JSON.stringify(canonicalReport, null, 2)}\n`),
+    mediaType: "application/json",
+    storedAt: timestamp,
+    label: "pr-report-v2.1.json",
+  });
+  const jsonArtifact = ArtifactRefSchema.parse({
+    id: createArtifactId(),
+    kind: "pr-report",
+    uri: jsonBlob.uri,
+    mediaType: "application/json",
+    digest: jsonBlob.digest,
+    producedBy: "orchestrator",
+    evidenceIds: [],
+    createdAt: timestamp,
+    metadata: {
+      reportKind: "pr-report-v2-json",
+      reportSchemaVersion: "pr-report-v2.1",
+      decision: canonicalDecision,
+      ...(binding === undefined
+        ? {}
+        : {
+            reviewPacketId: binding.reviewPacketId,
+            headSha: binding.headSha,
+            diffDigest: binding.diffDigest,
+          }),
+      ...(visualReportArtifactId === undefined ? {} : { visualReportArtifactId }),
+    },
+  });
   const generatedMarkdown = [
     "# 요약",
     "",
@@ -1844,10 +2076,21 @@ async function generatePrReport(input: {
     producedBy: "orchestrator",
     evidenceIds: [],
     createdAt: timestamp,
-    metadata: input.metadata ?? {
-      reportKind: "pr-body-markdown",
-      reportIntent: decision === "ready" ? "ready" : "blocked-diagnostic",
-      decision,
+    metadata: {
+      ...(input.metadata ?? {
+        reportKind: "pr-body-markdown",
+        reportIntent,
+        decision: canonicalDecision,
+      }),
+      reportJsonArtifactId: jsonArtifact.id,
+      ...(binding === undefined
+        ? {}
+        : {
+            reviewPacketId: binding.reviewPacketId,
+            headSha: binding.headSha,
+            diffDigest: binding.diffDigest,
+          }),
+      ...(visualReportArtifactId === undefined ? {} : { visualReportArtifactId }),
     },
   });
   await store.save(
@@ -1855,7 +2098,7 @@ async function generatePrReport(input: {
       ...run,
       revision: run.revision + 1,
       updatedAt: timestamp,
-      artifacts: [...run.artifacts, artifact],
+      artifacts: [...run.artifacts, jsonArtifact, artifact],
     },
     run.revision,
   );
@@ -1953,66 +2196,55 @@ async function addVisualEvidence(
     meanDistance: 0.1,
     maxDistance: 1,
   };
-  const visualReport =
-    options.context === undefined
-      ? {
-          runId,
-          changeName: "home",
-          ...(options.visualBaseline === undefined
-            ? {}
-            : { visualBaseline: options.visualBaseline }),
-          generatedAt: timestamp,
-          targetCount: 1,
-          passedCount: 1,
-          failedCount: 0,
-          reviewNeededCount: 0,
-          results: [
-            {
-              targetId: "home-desktop",
-              status: "passed",
-              figmaScreenshotArtifactId: "art_22222222222222222222222222222222",
-              browserScreenshotArtifactId: "art_33333333333333333333333333333333",
-              diffArtifactId: "art_44444444444444444444444444444444",
-              metrics: commonMetrics,
-              gapIds: [],
-              notes: [],
-            },
-          ],
-        }
-      : {
-          version: 2,
-          runId,
-          generatedAt: timestamp,
-          results: [
-            {
-              ...options.context,
-              baselineKind: options.visualBaseline ?? "figma",
-              fixture: "고정된 검토 데이터",
-              masks: [],
-              status: "passed",
-              metrics: {
-                ...commonMetrics,
-                maskedAreaRatio: 0,
-                pixelTolerance: 0.02,
-                threshold: 0.98,
-              },
-              baselineArtifactId: "art_22222222222222222222222222222222",
-              actualArtifactId: "art_33333333333333333333333333333333",
-              diffArtifactId: "art_44444444444444444444444444444444",
-            },
-          ],
-        };
+  const visualReport = {
+    version: 2,
+    runId,
+    reviewPacketId: canonicalReviewPacketId,
+    headSha: gitHead,
+    diffDigest: canonicalDiffDigest,
+    attempt: 1,
+    status: "passed",
+    generatedAt: timestamp,
+    results: [
+      {
+        ...(options.context ?? {
+          targetId: "home-desktop",
+          name: "화면 1",
+          route: "/",
+          state: "default",
+          viewport: { width: 1440, height: 900 },
+          deviceScaleFactor: 1,
+        }),
+        baselineKind: options.visualBaseline ?? "figma",
+        fixture: "고정된 검토 데이터",
+        masks: [],
+        status: "passed",
+        metrics: {
+          ...commonMetrics,
+          maskedAreaRatio: 0,
+          pixelTolerance: 0.02,
+          threshold: 0.98,
+        },
+        baselineArtifactId: "art_22222222222222222222222222222222",
+        actualArtifactId: "art_33333333333333333333333333333333",
+        diffArtifactId: "art_44444444444444444444444444444444",
+      },
+    ],
+  };
   const visualReportArtifact = await writeArtifact({
     id: "art_55555555555555555555555555555555",
     kind: "visual-report",
     label: "visual-report.json",
-    reportKind: "visual-report-json",
+    reportKind: "visual-report-v2-json",
     content: Buffer.from(`${JSON.stringify(visualReport, null, 2)}\n`),
     mediaType: "application/json",
     timestamp,
     metadata: {
       changeName: "home",
       decision: "passed",
+      reviewPacketId: canonicalReviewPacketId,
+      headSha: gitHead,
+      diffDigest: canonicalDiffDigest,
     },
   });
 
