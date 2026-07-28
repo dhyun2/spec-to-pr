@@ -154,7 +154,7 @@ describe("runtime reduction fixtures", () => {
   );
 });
 
-afterAll(() => {
+afterAll(async () => {
   const percentile = (sorted: number[], percent: number) =>
     sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * percent) - 1)] ?? 0;
   const records = [...samplesByFixture.entries()].map(([name, samples]) => {
@@ -189,23 +189,26 @@ afterAll(() => {
             : { targets: 2, comparisons: 3, pixelsPerTarget: 659160 },
     };
   });
-  console.info(
-    JSON.stringify({
-      schemaVersion: "runtime-reduction-benchmark-v1",
-      nodeVersion: process.version,
-      platform: process.platform,
-      architecture: process.arch,
-      cpuCount: os.cpus().length,
-      warmupIterations: 1,
-      measuredIterations: 5,
-      fixtures: records,
-      metricCounters: {
-        mixedIntakeDocuments: fixtures.mixedIntake.localDocuments.length,
-        legacyFiles: fixtures.legacy.files.length,
-        legacyTerminalApiCalls: fixtures.legacy.terminalApiCalls.length,
-        visualComparisons: fixtures.visual.comparisons.length,
-      },
-    }),
+  const receipt = {
+    schemaVersion: "runtime-reduction-benchmark-v1",
+    nodeVersion: process.version,
+    platform: process.platform,
+    architecture: process.arch,
+    cpuCount: os.cpus().length,
+    warmupIterations: 1,
+    measuredIterations: 5,
+    fixtures: records,
+    metricCounters: {
+      mixedIntakeDocuments: fixtures.mixedIntake.localDocuments.length,
+      legacyFiles: fixtures.legacy.files.length,
+      legacyTerminalApiCalls: fixtures.legacy.terminalApiCalls.length,
+      visualComparisons: fixtures.visual.comparisons.length,
+    },
+  };
+  await writeFile(
+    path.join(process.cwd(), "benchmarks", "runtime", "latest.json"),
+    `${JSON.stringify(receipt, null, 2)}\n`,
   );
-  return rm(legacyDirectory, { recursive: true, force: true });
+  console.info(JSON.stringify(receipt));
+  await rm(legacyDirectory, { recursive: true, force: true });
 });

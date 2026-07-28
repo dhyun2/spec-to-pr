@@ -544,7 +544,7 @@ export class WorkflowService {
 
   private async measureWorkflowAction<T>(
     rawInput: unknown,
-    action: "start" | "advance" | "submit" | "status",
+    action: "start" | "advance" | "submit" | "status" | "publish" | "archive",
     operation: () => Promise<T>,
   ): Promise<T> {
     const measured = () => this.metrics.time("external_action.wall_ms", { action }, operation);
@@ -1537,6 +1537,12 @@ export class WorkflowService {
   }
 
   public async publish(rawInput: unknown): Promise<unknown> {
+    return this.measureWorkflowAction(rawInput, "publish", () =>
+      this.publishUninstrumented(rawInput),
+    );
+  }
+
+  private async publishUninstrumented(rawInput: unknown): Promise<unknown> {
     const input = WorkflowPublishInputSchema.parse(rawInput);
     const publisher = this.dependencies.publisherService;
 
@@ -1871,6 +1877,12 @@ export class WorkflowService {
   }
 
   public async archive(rawInput: unknown): Promise<unknown> {
+    return this.measureWorkflowAction(rawInput, "archive", () =>
+      this.archiveUninstrumented(rawInput),
+    );
+  }
+
+  private async archiveUninstrumented(rawInput: unknown): Promise<unknown> {
     const input = WorkflowArchiveInputSchema.parse(rawInput);
     const archiveService = this.dependencies.archiveService;
 
