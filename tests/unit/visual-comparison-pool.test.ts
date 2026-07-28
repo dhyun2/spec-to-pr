@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   MAX_ACTIVE_VISUAL_PIXELS,
+  MAX_VISUAL_COMPARISON_ACTIVE_ALLOCATION_BYTES,
+  MAX_VISUAL_COMPARISON_BATCH_INPUT_BYTES,
   MAX_VISUAL_COMPARISON_LIVE_BYTES,
   MAX_VISUAL_COMPARISON_WORKERS,
   VisualComparisonPool,
@@ -123,6 +125,70 @@ describe("visual comparison worker pool", () => {
     expect(pool.snapshotStats()).toMatchObject({
       activeWorkers: 0,
       currentManagedBytes: 0,
+    });
+  });
+
+  it("rejects aggregate encoded queue pressure before copying inputs or starting workers", async () => {
+    const pool = new VisualComparisonPool({
+      maximumWorkers: 1,
+      maximumActivePixels: 1,
+      maximumBatchInputBytes: 400_000,
+      timeoutMs: 5_000,
+    });
+    pools.push(pool);
+    const jobs = encodedPressureJobs();
+    expect(jobs[0]?.baseline).toHaveLength(65_068);
+
+    await expect(pool.compare(jobs)).rejects.toThrow(
+      /VISUAL_COMPARISON_BATCH_BYTE_BUDGET.*520576.*400000/,
+    );
+
+    expect(pool.snapshotStats()).toMatchObject({
+      maximumBatchInputBytes: 400_000,
+      workerCount: 0,
+      activeWorkers: 0,
+      currentManagedBytes: 0,
+      peakManagedBytes: 0,
+      completedJobs: 0,
+      failedJobs: 0,
+    });
+  });
+
+  it("bounds a within-budget encoded queue and charges caller sources for the batch lifetime", async () => {
+    const pool = new VisualComparisonPool({
+      maximumWorkers: 1,
+      maximumActivePixels: 1,
+      maximumBatchInputBytes: 600_000,
+      timeoutMs: 5_000,
+    });
+    pools.push(pool);
+
+    const measured = await pool.compareMeasured(encodedPressureJobs());
+
+    expect(measured.results).toMatchObject([
+      { targetId: "pressure-first", comparison: { status: "passed" } },
+      { targetId: "pressure-second", comparison: { status: "passed" } },
+    ]);
+    const { measurement } = measured;
+    expect(measurement).toMatchObject({
+      projectedBatchInputBytes: 520_576,
+      callerSourceBytes: 260_288,
+      ownedSnapshotBytes: 260_288,
+    });
+    const workerOwnership = measurement.checkpoints.find(
+      (checkpoint) => checkpoint.stage === "worker-inputs",
+    );
+    expect(workerOwnership?.ownership.externalCallerSources).toBe(260_288);
+    expect(workerOwnership?.managedBytes).toBeGreaterThanOrEqual(390_432);
+    expect(measurement.peakManagedBytes).toBeLessThanOrEqual(MAX_VISUAL_COMPARISON_LIVE_BYTES);
+    expect(measurement.projectedBatchInputBytes).toBeLessThanOrEqual(
+      MAX_VISUAL_COMPARISON_BATCH_INPUT_BYTES,
+    );
+    expect(pool.snapshotStats()).toMatchObject({
+      activeWorkers: 0,
+      currentManagedBytes: 0,
+      completedJobs: 2,
+      failedJobs: 0,
     });
   });
 
@@ -272,7 +338,13 @@ describe("visual comparison worker pool", () => {
     expect(measured.measurement.peakManagedBytes).toBeLessThanOrEqual(
       MAX_VISUAL_COMPARISON_LIVE_BYTES,
     );
-    expect(measured.measurement.peakManagedBytes).toBeGreaterThanOrEqual(pixels * 16);
+    expect(MAX_VISUAL_COMPARISON_LIVE_BYTES).toBe(
+      MAX_VISUAL_COMPARISON_BATCH_INPUT_BYTES + MAX_VISUAL_COMPARISON_ACTIVE_ALLOCATION_BYTES,
+    );
+    expect(measured.measurement.projectedBatchInputBytes).toBeLessThanOrEqual(
+      MAX_VISUAL_COMPARISON_BATCH_INPUT_BYTES,
+    );
+    expect(measured.measurement.peakManagedBytes).toBeGreaterThanOrEqual(pixels * 25);
     const admissionOwnership = measured.measurement.checkpoints.find(
       (checkpoint) => checkpoint.stage === "parent-validated-inputs",
     )?.ownership;
@@ -300,4 +372,16 @@ function solidPng(width: number, height: number): Buffer {
     image.data[offset] = 255;
   }
   return PNG.sync.write(image);
+}
+
+function encodedPressureJobs() {
+  const encoded = Buffer.concat([solidPng(1, 1), Buffer.alloc(65_000)]);
+  return ["pressure-first", "pressure-second"].map((targetId) => ({
+    targetId,
+    baseline: Buffer.from(encoded),
+    actual: Buffer.from(encoded),
+    baselineRgba: { data: Buffer.alloc(4), width: 1, height: 1 },
+    actualRgba: { data: Buffer.alloc(4), width: 1, height: 1 },
+    masks: [],
+  }));
 }

@@ -26,6 +26,8 @@ import { orderedConcurrentMap } from "../../src/source-ingestion/source-loader.j
 import { SqliteRunStore } from "../../src/store/sqlite-run-store.js";
 import {
   MAX_ACTIVE_VISUAL_PIXELS,
+  MAX_VISUAL_COMPARISON_ACTIVE_ALLOCATION_BYTES,
+  MAX_VISUAL_COMPARISON_BATCH_INPUT_BYTES,
   MAX_VISUAL_COMPARISON_LIVE_BYTES,
   MAX_VISUAL_COMPARISON_WORKERS,
   VisualComparisonPool,
@@ -77,6 +79,13 @@ type MeasuredVisualCounters = {
   cacheResidentBytes: number;
   peakWorkers: number;
   peakActivePixels: number;
+  projectedBatchInputBytes: number;
+  callerSourceBytes: number;
+  ownedSnapshotBytes: number;
+  batchInputBudgetBytes: number;
+  activeAllocationBudgetBytes: number;
+  peakComparisonManagedBytes: number;
+  comparisonManagedMemoryBudgetBytes: number;
   peakManagedBytes: number;
   managedMemoryBudgetBytes: number;
   rssBaselineBytes: number;
@@ -203,6 +212,10 @@ async function runVisualPhase(
   const rssBaselineBytes = process.memoryUsage().rss;
   let inFlightPeakRssBytes = rssBaselineBytes;
   let peakManagedBytes = cacheBefore.residentBytes;
+  let projectedBatchInputBytes = 0;
+  let callerSourceBytes = 0;
+  let ownedSnapshotBytes = 0;
+  let peakComparisonManagedBytes = 0;
   const sampleRss = () => {
     inFlightPeakRssBytes = Math.max(inFlightPeakRssBytes, process.memoryUsage().rss);
   };
@@ -289,6 +302,16 @@ async function runVisualPhase(
         peakManagedBytes,
         cache.snapshotStats().residentBytes + measured.measurement.peakManagedBytes,
       );
+      projectedBatchInputBytes = Math.max(
+        projectedBatchInputBytes,
+        measured.measurement.projectedBatchInputBytes,
+      );
+      callerSourceBytes = Math.max(callerSourceBytes, measured.measurement.callerSourceBytes);
+      ownedSnapshotBytes = Math.max(ownedSnapshotBytes, measured.measurement.ownedSnapshotBytes);
+      peakComparisonManagedBytes = Math.max(
+        peakComparisonManagedBytes,
+        measured.measurement.peakManagedBytes,
+      );
       const { results } = measured;
       if (
         results.some((result) => result.comparison.status !== "passed") ||
@@ -319,6 +342,13 @@ async function runVisualPhase(
       cacheResidentBytes: cacheAfter.residentBytes,
       peakWorkers: poolAfter.peakActiveWorkers,
       peakActivePixels: poolAfter.peakActivePixels,
+      projectedBatchInputBytes,
+      callerSourceBytes,
+      ownedSnapshotBytes,
+      batchInputBudgetBytes: MAX_VISUAL_COMPARISON_BATCH_INPUT_BYTES,
+      activeAllocationBudgetBytes: MAX_VISUAL_COMPARISON_ACTIVE_ALLOCATION_BYTES,
+      peakComparisonManagedBytes,
+      comparisonManagedMemoryBudgetBytes: MAX_VISUAL_COMPARISON_LIVE_BYTES,
       peakManagedBytes,
       managedMemoryBudgetBytes,
       rssBaselineBytes,
@@ -771,6 +801,22 @@ describe("runtime reduction fixtures", () => {
           cacheMisses: cold.counters.cacheMisses + warm.counters.cacheMisses,
           cacheSingleFlights: cold.counters.cacheSingleFlights + warm.counters.cacheSingleFlights,
           cacheBypasses: cold.counters.cacheBypasses + warm.counters.cacheBypasses,
+          projectedBatchInputBytes: Math.max(
+            cold.counters.projectedBatchInputBytes,
+            warm.counters.projectedBatchInputBytes,
+          ),
+          callerSourceBytes: Math.max(
+            cold.counters.callerSourceBytes,
+            warm.counters.callerSourceBytes,
+          ),
+          ownedSnapshotBytes: Math.max(
+            cold.counters.ownedSnapshotBytes,
+            warm.counters.ownedSnapshotBytes,
+          ),
+          peakComparisonManagedBytes: Math.max(
+            cold.counters.peakComparisonManagedBytes,
+            warm.counters.peakComparisonManagedBytes,
+          ),
           peakManagedBytes: Math.max(
             cold.counters.peakManagedBytes,
             warm.counters.peakManagedBytes,
@@ -907,6 +953,10 @@ afterAll(async () => {
       counters.cacheResidentBytes > MAX_VISUAL_NORMALIZATION_CACHE_BYTES ||
       counters.peakWorkers > MAX_VISUAL_COMPARISON_WORKERS ||
       counters.peakActivePixels > MAX_ACTIVE_VISUAL_PIXELS ||
+      counters.projectedBatchInputBytes !==
+        counters.callerSourceBytes + counters.ownedSnapshotBytes ||
+      counters.projectedBatchInputBytes > counters.batchInputBudgetBytes ||
+      counters.peakComparisonManagedBytes > counters.comparisonManagedMemoryBudgetBytes ||
       counters.peakManagedBytes > counters.managedMemoryBudgetBytes ||
       counters.inFlightRssDeltaBytes > counters.managedMemoryBudgetBytes
     ) {
@@ -926,6 +976,14 @@ afterAll(async () => {
       cacheResidentBytes: Math.max(...counters.map((value) => value.cacheResidentBytes)),
       peakWorkers: Math.max(...counters.map((value) => value.peakWorkers)),
       peakActivePixels: Math.max(...counters.map((value) => value.peakActivePixels)),
+      projectedBatchInputBytes: Math.max(
+        ...counters.map((value) => value.projectedBatchInputBytes),
+      ),
+      callerSourceBytes: Math.max(...counters.map((value) => value.callerSourceBytes)),
+      ownedSnapshotBytes: Math.max(...counters.map((value) => value.ownedSnapshotBytes)),
+      peakComparisonManagedBytes: Math.max(
+        ...counters.map((value) => value.peakComparisonManagedBytes),
+      ),
       peakManagedBytes: Math.max(...counters.map((value) => value.peakManagedBytes)),
     };
   };
@@ -1083,10 +1141,17 @@ afterAll(async () => {
       visualCacheResidentBytes: totalVisual.cacheResidentBytes,
       visualPeakWorkers: totalVisual.peakWorkers,
       visualPeakActivePixels: totalVisual.peakActivePixels,
+      visualProjectedBatchInputBytes: totalVisual.projectedBatchInputBytes,
+      visualCallerSourceBytes: totalVisual.callerSourceBytes,
+      visualOwnedSnapshotBytes: totalVisual.ownedSnapshotBytes,
+      visualBatchInputBudgetBytes: totalVisual.batchInputBudgetBytes,
+      visualActiveAllocationBudgetBytes: totalVisual.activeAllocationBudgetBytes,
+      visualPeakComparisonManagedBytes: totalVisual.peakComparisonManagedBytes,
+      visualComparisonManagedMemoryBudgetBytes: totalVisual.comparisonManagedMemoryBudgetBytes,
       visualPeakManagedBytes: totalVisual.peakManagedBytes,
       visualManagedMemoryBudgetBytes: totalVisual.managedMemoryBudgetBytes,
       visualManagedMemoryBudgetFormula:
-        "128MiB cache + 8M active pixels * (8B source RGBA + 12B source PNG + 8B transferred input + 1B mask + 8B raw outputs + 12B encoded outputs) + 256KiB PNG overhead",
+        "128MiB cache + 320262144B batch caller+owned snapshots + 328262144B active decode/mask/raw/encoded/response allocations; transferred inputs remain in owned snapshots",
       visualInFlightPeakRssBytes: totalVisual.inFlightPeakRssBytes,
       visualInFlightRssDeltaBytes: totalVisual.inFlightRssDeltaBytes,
       visualRssSamplePolicy: "maximum-delta-same-iteration",

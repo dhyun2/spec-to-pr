@@ -20,16 +20,26 @@ export const MAX_VISUAL_COMPARISON_WORKERS = 3;
 export const MAX_ACTIVE_VISUAL_PIXELS = 8_000_000;
 const MAX_ENCODED_PNG_BYTES_PER_PIXEL = 6;
 const MAX_ENCODED_PNG_FIXED_OVERHEAD_BYTES = 64 * 1024;
-const MAX_COMPARISON_LIVE_BYTES_PER_PIXEL =
-  2 * 4 + // caller-owned baseline and actual RGBA
-  2 * MAX_ENCODED_PNG_BYTES_PER_PIXEL + // caller-owned normalized PNGs
-  2 * 4 + // transferred worker inputs (same ownership after transfer)
+const MAX_BATCH_CALLER_AND_OWNED_BYTES_PER_PIXEL =
+  2 *
+  (2 * 4 + // baseline and actual RGBA
+    2 * MAX_ENCODED_PNG_BYTES_PER_PIXEL); // baseline and actual normalized PNGs
+export const MAX_VISUAL_COMPARISON_BATCH_INPUT_BYTES =
+  MAX_ACTIVE_VISUAL_PIXELS * MAX_BATCH_CALLER_AND_OWNED_BYTES_PER_PIXEL +
+  4 * MAX_ENCODED_PNG_FIXED_OVERHEAD_BYTES;
+const MAX_ACTIVE_VISUAL_ALLOCATION_BYTES_PER_PIXEL =
+  2 * 4 + // decoded PNG inputs (RGBA transfers reuse owned snapshots)
   1 + // mask bitmap
   2 * 4 + // raw diff and overlay
-  2 * MAX_ENCODED_PNG_BYTES_PER_PIXEL; // encoded diff and overlay
-export const MAX_VISUAL_COMPARISON_LIVE_BYTES =
-  MAX_ACTIVE_VISUAL_PIXELS * MAX_COMPARISON_LIVE_BYTES_PER_PIXEL +
+  2 * MAX_ENCODED_PNG_BYTES_PER_PIXEL + // encoded diff and overlay
+  2 * MAX_ENCODED_PNG_BYTES_PER_PIXEL; // worst-case response transfer copies
+export const MAX_VISUAL_COMPARISON_ACTIVE_ALLOCATION_BYTES =
+  MAX_ACTIVE_VISUAL_PIXELS * MAX_ACTIVE_VISUAL_ALLOCATION_BYTES_PER_PIXEL +
   4 * MAX_ENCODED_PNG_FIXED_OVERHEAD_BYTES;
+export const MAX_VISUAL_COMPARISON_LIVE_BYTES =
+  MAX_VISUAL_COMPARISON_BATCH_INPUT_BYTES + MAX_VISUAL_COMPARISON_ACTIVE_ALLOCATION_BYTES;
+// Transferred inputs stay in the owned-snapshot charge. The active allowance
+// covers only additional allocations, so the same bytes are never counted twice.
 export const DEFAULT_VISUAL_COMPARISON_TIMEOUT_MS = 30_000;
 
 export type VisualComparisonPoolJob = {
@@ -50,6 +60,7 @@ export type VisualComparisonPoolResult = {
 export type VisualComparisonPoolStats = {
   maximumWorkers: number;
   maximumActivePixels: number;
+  maximumBatchInputBytes: number;
   workerCount: number;
   activeWorkers: number;
   activePixels: number;
@@ -68,7 +79,24 @@ export type VisualComparisonMeasurement = {
   inFlightRssDeltaBytes: number;
   peakManagedBytes: number;
   peakManagedStage: string;
+  projectedBatchInputBytes: number;
+  callerSourceBytes: number;
+  ownedSnapshotBytes: number;
   checkpoints: VisualMemoryCheckpoint[];
+};
+
+type ValidatedSourceJob = {
+  targetId: string;
+  baseline: Buffer;
+  actual: Buffer;
+  baselineRgba?: { data: Buffer; width: number; height: number };
+  actualRgba?: { data: Buffer; width: number; height: number };
+  masks: VisualMask[];
+  pixelTolerance?: number;
+  pixels: number;
+  sourceBuffers: Buffer[];
+  sourceManagedBytes: number;
+  projectedOwnedBytes: number;
 };
 
 type ValidatedJob = {
@@ -81,12 +109,6 @@ type ValidatedJob = {
   pixelTolerance?: number;
   pixels: number;
   ownedManagedBytes: number;
-};
-
-type AdmittedJob = {
-  job: ValidatedJob;
-  sourceBuffers: Buffer[];
-  sourceManagedBytes: number;
 };
 
 type PendingJob = {
@@ -106,6 +128,10 @@ type MeasurementTracker = {
   inFlightPeakRssBytes: number;
   peakManagedBytes: number;
   peakManagedStage: string;
+  externalManagedBytes: number;
+  projectedBatchInputBytes: number;
+  callerSourceBytes: number;
+  ownedSnapshotBytes: number;
   checkpoints: VisualMemoryCheckpoint[];
 };
 
@@ -118,6 +144,7 @@ type WorkerSlot = {
 type VisualComparisonPoolOptions = {
   maximumWorkers?: number;
   maximumActivePixels?: number;
+  maximumBatchInputBytes?: number;
   timeoutMs?: number;
   workerUrl?: URL;
 };
@@ -127,6 +154,7 @@ const TargetIdSchema = z.string().trim().min(1).max(200);
 export class VisualComparisonPool {
   private readonly maximumWorkers: number;
   private readonly maximumActivePixels: number;
+  private readonly maximumBatchInputBytes: number;
   private readonly timeoutMs: number;
   private readonly workerUrl: URL;
   private readonly workerExecArgv: string[] | undefined;
@@ -153,6 +181,11 @@ export class VisualComparisonPool {
       options.maximumActivePixels ?? MAX_ACTIVE_VISUAL_PIXELS,
       MAX_ACTIVE_VISUAL_PIXELS,
       "maximum active pixels",
+    );
+    this.maximumBatchInputBytes = boundedPositiveInteger(
+      options.maximumBatchInputBytes ?? MAX_VISUAL_COMPARISON_BATCH_INPUT_BYTES,
+      MAX_VISUAL_COMPARISON_BATCH_INPUT_BYTES,
+      "batch input bytes",
     );
     this.timeoutMs = boundedPositiveInteger(
       options.timeoutMs ?? DEFAULT_VISUAL_COMPARISON_TIMEOUT_MS,
@@ -194,34 +227,57 @@ export class VisualComparisonPool {
       inFlightPeakRssBytes: rssBaselineBytes,
       peakManagedBytes: 0,
       peakManagedStage: "empty",
+      externalManagedBytes: 0,
+      projectedBatchInputBytes: 0,
+      callerSourceBytes: 0,
+      ownedSnapshotBytes: 0,
       checkpoints: [],
     };
-    const admittedJobs = rawJobs.map((job) => admitJob(job));
-    const seenSourceBuffers = new Set<Buffer>();
-    for (const admitted of admittedJobs) {
-      admitted.sourceManagedBytes = admitted.sourceBuffers.reduce((total, buffer) => {
-        if (seenSourceBuffers.has(buffer)) return total;
-        seenSourceBuffers.add(buffer);
-        return total + buffer.byteLength;
-      }, 0);
-    }
-    const jobs = admittedJobs.map((admitted) => admitted.job);
-    if (jobs.length === 0) {
-      return {
-        results: [],
-        measurement: finishMeasurement(tracker),
-      };
-    }
-    for (const job of jobs) {
+    const validatedJobs = rawJobs.map((job) => validateJob(job));
+    for (const job of validatedJobs) {
       if (job.pixels > this.maximumActivePixels) {
         throw new Error(
           `VISUAL_COMPARISON_PIXEL_BUDGET: target ${job.targetId} requires ${job.pixels} active pixels; maximum is ${this.maximumActivePixels}`,
         );
       }
     }
+    const seenSourceBuffers = new Set<Buffer>();
+    for (const job of validatedJobs) {
+      job.sourceManagedBytes = job.sourceBuffers.reduce((total, buffer) => {
+        if (seenSourceBuffers.has(buffer)) return total;
+        seenSourceBuffers.add(buffer);
+        return total + buffer.byteLength;
+      }, 0);
+    }
+    const callerSourceBytes = validatedJobs.reduce(
+      (total, job) => total + job.sourceManagedBytes,
+      0,
+    );
+    const ownedSnapshotBytes = validatedJobs.reduce(
+      (total, job) => total + job.projectedOwnedBytes,
+      0,
+    );
+    const projectedBatchInputBytes = callerSourceBytes + ownedSnapshotBytes;
+    if (projectedBatchInputBytes > this.maximumBatchInputBytes) {
+      throw new Error(
+        `VISUAL_COMPARISON_BATCH_BYTE_BUDGET: batch requires ${projectedBatchInputBytes} bytes (${callerSourceBytes} caller + ${ownedSnapshotBytes} owned snapshots); maximum is ${this.maximumBatchInputBytes}`,
+      );
+    }
+    tracker.projectedBatchInputBytes = projectedBatchInputBytes;
+    tracker.callerSourceBytes = callerSourceBytes;
+    tracker.ownedSnapshotBytes = ownedSnapshotBytes;
+    if (validatedJobs.length === 0) {
+      return {
+        results: [],
+        measurement: finishMeasurement(tracker),
+      };
+    }
+    const jobs = validatedJobs.map((job) => snapshotJob(job));
     this.ensureWorkerCount(Math.min(this.maximumWorkers, jobs.length));
+    tracker.externalManagedBytes = callerSourceBytes;
+    this.currentManagedBytes += callerSourceBytes;
     const pendingPromises = jobs.map(
-      (job, index) =>
+      (job) =>
         new Promise<VisualComparisonPoolResult>((resolve, reject) => {
           const pending: PendingJob = {
             id: this.nextJobId++,
@@ -229,7 +285,7 @@ export class VisualComparisonPool {
             resolve,
             reject,
             tracker,
-            managedBytes: admittedJobs[index]!.sourceManagedBytes + job.ownedManagedBytes,
+            managedBytes: job.ownedManagedBytes,
             retainedOwnedBytes: job.ownedManagedBytes,
             settled: false,
           };
@@ -239,17 +295,12 @@ export class VisualComparisonPool {
         }),
     );
     this.observeTracker(tracker, "parent-validated-inputs", {
-      callerSources: admittedJobs.reduce(
-        (total, admitted) => total + admitted.sourceManagedBytes,
-        0,
-      ),
-      ownedSnapshots: jobs.reduce((total, job) => total + job.ownedManagedBytes, 0),
+      callerSources: callerSourceBytes,
+      ownedSnapshots: ownedSnapshotBytes,
+      projectedBatchInputs: projectedBatchInputBytes,
     });
-    for (const pending of tracker.pending) {
-      this.setPendingManagedBytes(pending, pending.job.ownedManagedBytes);
-    }
     this.observeTracker(tracker, "parent-queued-owned-inputs", {
-      ownedSnapshots: jobs.reduce((total, job) => total + job.ownedManagedBytes, 0),
+      ownedSnapshots: ownedSnapshotBytes,
     });
     const sampleRss = () => {
       tracker.inFlightPeakRssBytes = Math.max(
@@ -268,6 +319,7 @@ export class VisualComparisonPool {
       clearInterval(sampler);
       sampleRss();
       for (const pending of tracker.pending) this.setPendingManagedBytes(pending, 0);
+      this.releaseExternalManagedBytes(tracker);
     }
     const firstFailure = settled.find(
       (result): result is PromiseRejectedResult => result.status === "rejected",
@@ -286,6 +338,7 @@ export class VisualComparisonPool {
     return {
       maximumWorkers: this.maximumWorkers,
       maximumActivePixels: this.maximumActivePixels,
+      maximumBatchInputBytes: this.maximumBatchInputBytes,
       workerCount: this.workers.size,
       activeWorkers,
       activePixels: this.activePixels,
@@ -517,6 +570,11 @@ export class VisualComparisonPool {
     }
   }
 
+  private releaseExternalManagedBytes(tracker: MeasurementTracker): void {
+    this.currentManagedBytes -= tracker.externalManagedBytes;
+    tracker.externalManagedBytes = 0;
+  }
+
   private resolvePending(pending: PendingJob, result: VisualComparisonPoolResult): void {
     if (pending.settled) return;
     this.setPendingManagedBytes(pending, 0);
@@ -539,13 +597,16 @@ export class VisualComparisonPool {
   ): void {
     const managedBytes = tracker.pending.reduce(
       (total, pending) => total + pending.managedBytes,
-      0,
+      tracker.externalManagedBytes,
     );
     const checkpoint: VisualMemoryCheckpoint = {
       stage,
       managedBytes,
       rssBytes,
-      ownership,
+      ownership: {
+        externalCallerSources: tracker.externalManagedBytes,
+        ...ownership,
+      },
     };
     tracker.checkpoints.push(checkpoint);
     tracker.inFlightPeakRssBytes = Math.max(tracker.inFlightPeakRssBytes, rssBytes);
@@ -566,6 +627,9 @@ function finishMeasurement(tracker: MeasurementTracker): VisualComparisonMeasure
     inFlightRssDeltaBytes: Math.max(0, tracker.inFlightPeakRssBytes - tracker.rssBaselineBytes),
     peakManagedBytes: tracker.peakManagedBytes,
     peakManagedStage: tracker.peakManagedStage,
+    projectedBatchInputBytes: tracker.projectedBatchInputBytes,
+    callerSourceBytes: tracker.callerSourceBytes,
+    ownedSnapshotBytes: tracker.ownedSnapshotBytes,
     checkpoints: tracker.checkpoints.map((checkpoint) => ({
       ...checkpoint,
       ownership: { ...checkpoint.ownership },
@@ -573,7 +637,7 @@ function finishMeasurement(tracker: MeasurementTracker): VisualComparisonMeasure
   };
 }
 
-function admitJob(job: VisualComparisonPoolJob): AdmittedJob {
+function validateJob(job: VisualComparisonPoolJob): ValidatedSourceJob {
   const targetId = TargetIdSchema.parse(job.targetId);
   assertBoundedPng(job.baseline, `${targetId} baseline`);
   assertBoundedPng(job.actual, `${targetId} actual`);
@@ -618,39 +682,15 @@ function admitJob(job: VisualComparisonPoolJob): AdmittedJob {
     job.pixelTolerance === undefined
       ? undefined
       : z.number().min(0).max(1).parse(job.pixelTolerance);
-  const baseline = ownTransferableBuffer(job.baseline);
-  const actual = ownTransferableBuffer(job.actual);
-  const ownedBaselineRgba =
-    baselineRgba === undefined
-      ? undefined
-      : {
-          ...baselineRgba,
-          data: ownTransferableBuffer(baselineRgba.data),
-        };
-  const ownedActualRgba =
-    actualRgba === undefined
-      ? undefined
-      : {
-          ...actualRgba,
-          data: ownTransferableBuffer(actualRgba.data),
-        };
-  const ownedManagedBytes =
-    baseline.byteLength +
-    actual.byteLength +
-    (ownedBaselineRgba?.data.byteLength ?? 0) +
-    (ownedActualRgba?.data.byteLength ?? 0);
   return {
-    job: {
-      targetId,
-      baseline,
-      actual,
-      ...(ownedBaselineRgba === undefined ? {} : { baselineRgba: ownedBaselineRgba }),
-      ...(ownedActualRgba === undefined ? {} : { actualRgba: ownedActualRgba }),
-      masks,
-      ...(pixelTolerance === undefined ? {} : { pixelTolerance }),
-      pixels,
-      ownedManagedBytes,
-    },
+    targetId,
+    baseline: job.baseline,
+    actual: job.actual,
+    ...(baselineRgba === undefined ? {} : { baselineRgba }),
+    ...(actualRgba === undefined ? {} : { actualRgba }),
+    masks,
+    ...(pixelTolerance === undefined ? {} : { pixelTolerance }),
+    pixels,
     sourceBuffers: [
       job.baseline,
       job.actual,
@@ -658,6 +698,41 @@ function admitJob(job: VisualComparisonPoolJob): AdmittedJob {
       ...(actualRgba === undefined ? [] : [actualRgba.data]),
     ],
     sourceManagedBytes: 0,
+    projectedOwnedBytes:
+      job.baseline.byteLength +
+      job.actual.byteLength +
+      (baselineRgba?.data.byteLength ?? 0) +
+      (actualRgba?.data.byteLength ?? 0),
+  };
+}
+
+function snapshotJob(job: ValidatedSourceJob): ValidatedJob {
+  const baseline = ownTransferableBuffer(job.baseline);
+  const actual = ownTransferableBuffer(job.actual);
+  const baselineRgba =
+    job.baselineRgba === undefined
+      ? undefined
+      : {
+          ...job.baselineRgba,
+          data: ownTransferableBuffer(job.baselineRgba.data),
+        };
+  const actualRgba =
+    job.actualRgba === undefined
+      ? undefined
+      : {
+          ...job.actualRgba,
+          data: ownTransferableBuffer(job.actualRgba.data),
+        };
+  return {
+    targetId: job.targetId,
+    baseline,
+    actual,
+    ...(baselineRgba === undefined ? {} : { baselineRgba }),
+    ...(actualRgba === undefined ? {} : { actualRgba }),
+    masks: job.masks,
+    ...(job.pixelTolerance === undefined ? {} : { pixelTolerance: job.pixelTolerance }),
+    pixels: job.pixels,
+    ownedManagedBytes: job.projectedOwnedBytes,
   };
 }
 
