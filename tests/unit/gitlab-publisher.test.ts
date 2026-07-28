@@ -271,6 +271,46 @@ describe("GitLabPublisherAdapter", () => {
     ).resolves.toMatchObject([{ status: "failed", failure: "uncertain" }]);
   });
 
+  it.each([
+    { full_path: 42 },
+    { url: { path: "/uploads/figma.png" } },
+    { full_path: "https://gitlab.com/acme/spec-to-pr/uploads/figma.png" },
+    { url: "//attacker.example/figma.png" },
+    { url: "uploads/figma.png" },
+    { url: "/not-an-upload.png" },
+  ])("rejects malformed successful upload paths %# as uncertain", async (uploaded) => {
+    const adapter = new GitLabPublisherAdapter(
+      vi.fn().mockResolvedValueOnce(jsonResponse(uploaded)),
+    );
+
+    await expect(
+      adapter.publishAssets({
+        target: gitlabTarget(),
+        payload: payload(),
+        token: "glpat-example",
+        maxConcurrency: 3,
+        assets: [
+          {
+            artifactId: "art_22222222222222222222222222222222",
+            artifactDigest: `sha256:${"a".repeat(64)}`,
+            targetId: "home",
+            role: "figma",
+            label: "Figma",
+            filename: "figma.png",
+            mediaType: "image/png",
+            content: Buffer.from("png"),
+          },
+        ],
+      }),
+    ).resolves.toMatchObject([
+      {
+        status: "failed",
+        artifactId: "art_22222222222222222222222222222222",
+        failure: "uncertain",
+      },
+    ]);
+  });
+
   it("reads the current merge request body", async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ description: "# synced" }));
     const adapter = new GitLabPublisherAdapter(fetchMock);
@@ -282,6 +322,41 @@ describe("GitLabPublisherAdapter", () => {
         token: "glpat-example",
       }),
     ).resolves.toBe("# synced");
+  });
+
+  it("never runs more than three GitLab asset uploads concurrently", async () => {
+    let activeUploads = 0;
+    let maxActiveUploads = 0;
+    const fetchMock = vi.fn(async () => {
+      activeUploads += 1;
+      maxActiveUploads = Math.max(maxActiveUploads, activeUploads);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      activeUploads -= 1;
+      return jsonResponse({ url: "/uploads/abc123/asset.png" });
+    });
+    const adapter = new GitLabPublisherAdapter(fetchMock);
+    const assets = ["2", "3", "4", "5", "6"].map((digit, index) => ({
+      artifactId: `art_${digit.repeat(32)}`,
+      artifactDigest: `sha256:${digit.repeat(64)}` as const,
+      targetId: `target-${index}`,
+      role: "figma" as const,
+      label: `Asset ${index}`,
+      filename: `asset-${index}.png`,
+      mediaType: "image/png",
+      content: Buffer.from(`png-${index}`),
+    }));
+
+    const outcomes = await adapter.publishAssets({
+      target: gitlabTarget(),
+      payload: payload(),
+      token: "glpat-example",
+      maxConcurrency: 99,
+      assets,
+    });
+
+    expect(outcomes).toHaveLength(5);
+    expect(outcomes.every((outcome) => outcome.status === "published")).toBe(true);
+    expect(maxActiveUploads).toBe(3);
   });
 });
 

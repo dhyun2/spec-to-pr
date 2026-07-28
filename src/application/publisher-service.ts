@@ -883,6 +883,22 @@ export class PublisherService {
         timestamp: input.timestamp,
         signal: input.signal,
       });
+      try {
+        assertPublishedAssetUrlsInBody(prepared.payload.body, prepared.publishedAssets);
+      } catch (error: unknown) {
+        return partialAssetPublishResult({
+          runId: input.plan.runId,
+          target: input.plan.target,
+          reportArtifactId: input.plan.payload.reportArtifactId,
+          prepared,
+          partialReasons: [
+            ...prepared.partialReasons,
+            error instanceof Error ? error.message : "PUBLISH_ASSET_BODY_SYNC_INCOMPLETE",
+          ],
+          retryable: false,
+          publishedAt: input.timestamp,
+        });
+      }
       const existing = await publisher.findExisting({
         target: input.plan.target,
         payload: prepared.payload,
@@ -1006,6 +1022,22 @@ export class PublisherService {
         timestamp: input.timestamp,
         signal: input.signal,
       });
+      try {
+        assertPublishedAssetUrlsInBody(prepared.payload.body, prepared.publishedAssets);
+      } catch (error: unknown) {
+        return partialAssetPublishResult({
+          runId: input.plan.runId,
+          target: input.plan.target,
+          reportArtifactId: input.plan.payload.reportArtifactId,
+          prepared,
+          partialReasons: [
+            ...prepared.partialReasons,
+            error instanceof Error ? error.message : "PUBLISH_ASSET_BODY_SYNC_INCOMPLETE",
+          ],
+          retryable: false,
+          publishedAt: input.timestamp,
+        });
+      }
       const existing = await publisher.findExisting({
         target: input.plan.target,
         payload: prepared.payload,
@@ -1277,8 +1309,6 @@ export class PublisherService {
     if (videoAsset !== undefined) {
       body = injectFeatureVideoEvidence(body, videoAsset);
     }
-    assertPublishedAssetUrlsInBody(body, publishedAssets);
-
     return {
       payload: ReviewRequestPayloadSchema.parse({
         ...input.plan.payload,
@@ -2528,7 +2558,7 @@ function failedPublishResult(input: {
 function partialAssetPublishResult(input: {
   runId: string;
   target: PublishTarget;
-  request: PublishedReviewRequest;
+  request?: PublishedReviewRequest;
   reportArtifactId: string;
   prepared: {
     publishedAssets: PublishedReviewAsset[];
@@ -2550,7 +2580,7 @@ function partialAssetPublishResult(input: {
     runId: input.runId,
     status: "blocked",
     target: input.target,
-    request: input.request,
+    ...(input.request === undefined ? {} : { request: input.request }),
     reportArtifactId: input.reportArtifactId,
     publishedAssets: input.prepared.publishedAssets,
     uploadReceiptArtifactIds: input.prepared.uploadReceiptArtifactIds,

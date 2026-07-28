@@ -175,9 +175,12 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
     assertGitHub(input.target);
     const target = input.target;
     if (input.payload.headSha === undefined || input.payload.reviewPacketId === undefined) {
-      throw new Error(
-        "EVIDENCE_REF_CONFLICT: review assets require a packet-bound head SHA and packet ID",
-      );
+      return input.assets.map((asset) => ({
+        status: "failed",
+        artifactId: asset.artifactId,
+        failure: "uncertain",
+        message: "GitHub prepare review asset upload failed",
+      }));
     }
 
     // Private repositories cannot render raw.githubusercontent.com images without
@@ -255,10 +258,13 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
           message: "GitHub upload review asset returned a malformed response",
         };
       }
-      const content = uploaded["content"] as Record<string, unknown> | undefined;
+      const content = uploaded["content"];
       const commit = uploaded["commit"] as Record<string, unknown> | undefined;
+      const contentSha = isPlainRecord(content)
+        ? GitObjectIdSchema.safeParse(content["sha"])
+        : undefined;
       const commitSha = GitObjectIdSchema.safeParse(commit?.["sha"]);
-      if (!commitSha.success) {
+      if (contentSha === undefined || !contentSha.success || !commitSha.success) {
         return {
           status: "failed",
           artifactId: asset.artifactId,
@@ -275,8 +281,6 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
       const url = isPrivate
         ? `${target.webBaseUrl}/${target.owner}/${target.repo}/blob/${commitSha.data}/${assetPath}`
         : `https://raw.githubusercontent.com/${target.owner}/${target.repo}/${commitSha.data}/${assetPath}`;
-      void content;
-
       return {
         status: "published",
         asset: PublishedReviewAssetSchema.parse({
@@ -588,4 +592,8 @@ function validateEvidenceRef(raw: unknown): ValidatedEvidenceRef {
     throw new Error("EVIDENCE_REF_CONFLICT: managed evidence ref is not the expected commit ref");
   }
   return { ref: GITHUB_EVIDENCE_REF, sha: sha.data };
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

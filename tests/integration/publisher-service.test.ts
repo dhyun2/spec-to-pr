@@ -972,6 +972,91 @@ describe("PublisherService", () => {
     ).toHaveLength(3);
   });
 
+  it("uploads a changed digest again instead of reusing the old receipt URL", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    await addVisualEvidence(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    const input = {
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      pushBranch: false,
+      confirm: true as const,
+    };
+    const changedArtifactId = "art_33333333333333333333333333333333";
+    const first = await publisherService.publish(input);
+    githubPublisher.existingRequest = {
+      ...first.result.request!,
+      created: false,
+      updated: false,
+    };
+    const current = await store.get(run.id);
+    const changedBlob = await artifactStore.writeBlob({
+      content: Buffer.from("changed-browser-png"),
+      mediaType: "image/png",
+      storedAt: "2026-06-23T00:00:03.000Z",
+      label: "browser-home.png",
+    });
+    await store.save(
+      {
+        ...current,
+        revision: current.revision + 1,
+        updatedAt: "2026-06-23T00:00:03.000Z",
+        artifacts: current.artifacts.map((artifact) =>
+          artifact.id === changedArtifactId
+            ? ArtifactRefSchema.parse({
+                ...artifact,
+                uri: changedBlob.uri,
+                digest: changedBlob.digest,
+              })
+            : artifact,
+        ),
+      },
+      current.revision,
+    );
+    githubPublisher.assetOutcomePlan = ({ assets }) =>
+      assets.map((asset) => {
+        const outcome = githubPublisher.publishedOutcome(asset);
+        if (outcome.status !== "published" || asset.artifactId !== changedArtifactId) {
+          return outcome;
+        }
+        return {
+          ...outcome,
+          asset: {
+            ...outcome.asset,
+            url: `https://github.example/assets/browser-${asset.artifactDigest.slice(-12)}.png`,
+          },
+        };
+      });
+
+    const second = await publisherService.publish(input);
+
+    expect(githubPublisher.uploadedAssetIds).toEqual([
+      [
+        "art_22222222222222222222222222222222",
+        changedArtifactId,
+        "art_44444444444444444444444444444444",
+      ],
+      [changedArtifactId],
+    ]);
+    const firstUrl = first.result.publishedAssets.find(
+      (asset) => asset.artifactId === changedArtifactId,
+    )?.url;
+    const secondUrl = second.result.publishedAssets.find(
+      (asset) => asset.artifactId === changedArtifactId,
+    )?.url;
+    expect(secondUrl).toBeDefined();
+    expect(secondUrl).not.toBe(firstUrl);
+    expect(second.result.uploadReceiptArtifactIds).toHaveLength(3);
+    expect(
+      (await store.get(run.id)).artifacts.filter(
+        (artifact) => artifact.metadata["reportKind"] === "review-asset-upload-receipt",
+      ),
+    ).toHaveLength(4);
+  });
+
   it.each([
     ["permanent", "GitHub upload review asset failed with HTTP 400"],
     ["uncertain", "GitHub upload review asset returned a malformed response"],
@@ -1036,6 +1121,44 @@ describe("PublisherService", () => {
       retryable: true,
     });
     expect(result.result.partialReasons.join("\n")).toContain("PUBLISH_ASSET_BODY_SYNC_INCOMPLETE");
+  });
+
+  it("keeps local body sync blocked before host mutation when a confirmed URL is absent", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    await addVisualEvidence(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    githubPublisher.assetOutcomePlan = ({ assets }) =>
+      assets.map((asset) => {
+        const outcome = githubPublisher.publishedOutcome(asset);
+        if (outcome.status !== "published") return outcome;
+        return {
+          ...outcome,
+          asset: {
+            ...outcome.asset,
+            url: `${outcome.asset.url}?first=1&second=2`,
+          },
+        };
+      });
+
+    const result = await publisherService.publish({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      pushBranch: false,
+      confirm: true,
+    });
+
+    expect(result.result).toMatchObject({
+      status: "blocked",
+      errorCode: "PUBLISH_PARTIAL_SYNC",
+      requestSynced: false,
+      visualPreviewSynced: false,
+    });
+    expect(result.result.partialReasons).toContain("PUBLISH_ASSET_BODY_SYNC_INCOMPLETE");
+    expect(githubPublisher.createdPayloads).toHaveLength(0);
+    expect(githubPublisher.updatedMetadata).toHaveLength(0);
   });
 
   it("records partial GitHub create and update mutations and completes labels on retry", async () => {

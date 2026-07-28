@@ -223,8 +223,10 @@ export class GitLabPublisherAdapter implements ReviewRequestPublisher {
       // (/uploads/...). Both render inside the MR description because GitLab
       // resolves them against the project. We keep the RELATIVE path and never
       // prefix the instance root, which would drop the project path and 404.
-      const uploadPath = String(uploaded["full_path"] ?? uploaded["url"] ?? "");
-      if (uploadPath.trim().length === 0) {
+      const uploadPath =
+        projectRelativeUploadPath(uploaded["full_path"]) ??
+        projectRelativeUploadPath(uploaded["url"]);
+      if (uploadPath === undefined) {
         return {
           status: "failed",
           artifactId: asset.artifactId,
@@ -326,4 +328,33 @@ function normalizeGitLabMr(
     created,
     updated,
   });
+}
+
+function projectRelativeUploadPath(value: unknown): string | undefined {
+  if (
+    typeof value !== "string" ||
+    value !== value.trim() ||
+    !value.startsWith("/") ||
+    value.startsWith("//") ||
+    value.includes("\\") ||
+    /[\u0000-\u001f\u007f\s]/u.test(value)
+  ) {
+    return undefined;
+  }
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(value);
+  } catch {
+    return undefined;
+  }
+  const segments = decoded.split("/");
+  const uploadsIndex = segments.lastIndexOf("uploads");
+  if (
+    segments.some((segment) => segment === "..") ||
+    uploadsIndex < 1 ||
+    segments.slice(uploadsIndex + 1).filter((segment) => segment.length > 0).length < 2
+  ) {
+    return undefined;
+  }
+  return value;
 }
