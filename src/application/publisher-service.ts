@@ -329,7 +329,7 @@ export class PublisherService {
     const input = PlanReviewRequestPublishInputSchema.parse(rawInput);
     const run = await this.runStore.get(input.runId);
     const reportArtifact = resolvePrReportArtifact(run.artifacts, input.reportArtifactId);
-    const binding = await this.resolvePublicationReportBinding(run, reportArtifact);
+    const binding = await this.resolvePublicationReportBinding(run, reportArtifact, input.intent);
     if (run.workspaceBinding !== undefined) {
       await assertWorkspaceFresh(
         run.workspaceBinding,
@@ -578,6 +578,7 @@ export class PublisherService {
   private async resolvePublicationReportBinding(
     run: Awaited<ReturnType<RunStore["get"]>>,
     markdownArtifact: ArtifactRef,
+    requestedIntent: PublishIntent,
   ): Promise<PublicationReportBinding> {
     const invalid = (message: string): never => {
       throw new Error(`PUBLISH_REPORT_BINDING_INVALID: ${message}`);
@@ -613,12 +614,19 @@ export class PublisherService {
 
     const markdownMetadata = reportMetadataFromArtifact(markdownArtifact);
     const expectedIntent = report.decision === "ready" ? "ready" : "blocked-diagnostic";
+    if (!markdownMetadata.valid) {
+      return invalid("Markdown report metadata is missing, malformed, or internally inconsistent");
+    }
     if (
-      markdownMetadata.valid &&
-      (markdownMetadata.reportDecision !== report.decision ||
-        markdownMetadata.reportIntent !== expectedIntent)
+      markdownMetadata.reportDecision !== report.decision ||
+      markdownMetadata.reportIntent !== expectedIntent
     ) {
       return invalid("Markdown intent or decision does not match the canonical JSON");
+    }
+    if (requestedIntent !== expectedIntent) {
+      return invalid(
+        `requested intent ${requestedIntent} does not match canonical intent ${expectedIntent}`,
+      );
     }
     if (
       jsonArtifact.metadata["reportSchemaVersion"] !== report.schemaVersion ||
@@ -990,7 +998,11 @@ export class PublisherService {
     fallbackReason?: string;
     partialReasons: string[];
   }> {
-    const visualPreview = await this.collectVisualPreviewAssets(input.run, input.plan.payload);
+    const visualPreview = await this.collectVisualPreviewAssets(
+      input.run,
+      input.plan.payload,
+      input.plan.intent,
+    );
     const featureVideo = await this.collectFeatureVideoAsset(input.run, input.plan.payload);
     const assets = [...visualPreview.assets, ...(featureVideo === undefined ? [] : [featureVideo])];
     const visualPreviewExpected =
@@ -1240,6 +1252,7 @@ export class PublisherService {
   private async collectVisualPreviewAssets(
     run: Awaited<ReturnType<RunStore["get"]>>,
     payload: ReviewRequestPayload,
+    intent: PublishIntent,
   ): Promise<{
     report?: VisualPreviewReport;
     assets: ReviewRequestAsset[];
@@ -1247,7 +1260,7 @@ export class PublisherService {
   }> {
     const prReportArtifact = requireArtifact(run.artifacts, payload.reportArtifactId);
     const locale = ReportLocaleSchema.safeParse(prReportArtifact.metadata["locale"]);
-    const binding = await this.resolvePublicationReportBinding(run, prReportArtifact);
+    const binding = await this.resolvePublicationReportBinding(run, prReportArtifact, intent);
     const reportArtifact = binding.visualReportArtifact;
 
     if (reportArtifact === undefined) {

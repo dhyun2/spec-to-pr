@@ -598,7 +598,7 @@ describe("PublisherService", () => {
     expect(published.result.errorMessage).toMatch(/draft/i);
   });
 
-  it("refuses to publish a blocked report", async () => {
+  it("rejects a blocked canonical report requested with ready intent", async () => {
     const run = await runService.createRun({
       projectRoot,
     });
@@ -608,23 +608,16 @@ describe("PublisherService", () => {
 
     expect(report.decision).toBe("blocked");
 
-    const blocked = await publisherService.publish({
-      runId: run.id,
-      reportArtifactId: report.markdownArtifactId,
-      sourceBranch: "spec-to-pr/run-1",
-      targetBranch: "main",
-      pushBranch: false,
-      confirm: true,
-    });
-
-    expect(blocked.result).toMatchObject({
-      status: "blocked",
-      errorCode: "PUBLISH_BLOCKED",
-      requestSynced: false,
-      visualPreviewExpected: false,
-      visualPreviewSynced: false,
-    });
-    expect(blocked.agentResultId).toBeUndefined();
+    await expect(
+      publisherService.publish({
+        runId: run.id,
+        reportArtifactId: report.markdownArtifactId,
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        pushBranch: false,
+        confirm: true,
+      }),
+    ).rejects.toThrow(/PUBLISH_REPORT_BINDING_INVALID.*intent/i);
 
     const loadedRun = await store.get(run.id);
 
@@ -1069,29 +1062,24 @@ describe("PublisherService", () => {
     expect(githubPublisher.updatedMetadata).toHaveLength(0);
   });
 
-  it("does not let compatibility flags mutate a ready report as a blocked diagnostic", async () => {
+  it("rejects a ready canonical report requested with blocked intent", async () => {
     const run = await runService.createRun({ projectRoot });
     await markRunReadyForPublish(run.id);
     const report = await prReportService.generatePrReport({ runId: run.id });
     githubPublisher.existingRequest = existingDraftRequest("473");
 
-    const updated = await publisherService.updateBody({
-      runId: run.id,
-      reportArtifactId: report.markdownArtifactId,
-      sourceBranch: "spec-to-pr/run-1",
-      targetBranch: "main",
-      requestNumber: "473",
-      allowBlockedBody: true,
-      pushBranch: false,
-      confirm: true,
-    });
-
-    expect(updated.result).toMatchObject({
-      status: "blocked",
-      errorCode: "PUBLISH_INTENT_MISMATCH",
-      requestSynced: false,
-    });
-    expect(updated.agentResultId).toBeUndefined();
+    await expect(
+      publisherService.updateBody({
+        runId: run.id,
+        reportArtifactId: report.markdownArtifactId,
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        requestNumber: "473",
+        allowBlockedBody: true,
+        pushBranch: false,
+        confirm: true,
+      }),
+    ).rejects.toThrow(/PUBLISH_REPORT_BINDING_INVALID.*intent/i);
     expect(githubPublisher.updatedMetadata).toHaveLength(0);
   });
 
@@ -1108,50 +1096,25 @@ describe("PublisherService", () => {
         decision: "blocked",
       },
     },
-  ])(
-    "does not publish $name report metadata through compatibility update",
-    async ({ metadata }) => {
-      const run = await runService.createRun({ projectRoot });
-      const report = await generatePrReport({ runId: run.id, metadata });
-      githubPublisher.existingRequest = existingDraftRequest("472");
+  ])("rejects $name Markdown report metadata before canonical comparison", async ({ metadata }) => {
+    const run = await runService.createRun({ projectRoot });
+    const report = await generatePrReport({ runId: run.id, metadata });
+    githubPublisher.existingRequest = existingDraftRequest("472");
 
-      const plan = await publisherService.plan({
+    await expect(
+      publisherService.plan({
         runId: run.id,
         reportArtifactId: report.markdownArtifactId,
         sourceBranch: "spec-to-pr/run-1",
         targetBranch: "main",
         intent: "blocked-diagnostic",
         pushBranch: false,
-      });
-      expect(plan).toMatchObject({
-        reportMetadataValid: false,
-        reportDecision: "blocked",
-        willCreateOrUpdate: false,
-      });
-      expect(plan.reportIntent).toBeUndefined();
-      expect(plan.warnings.join("\n")).toMatch(/report metadata.*invalid.*decision blocked/i);
+      }),
+    ).rejects.toThrow(/PUBLISH_REPORT_BINDING_INVALID.*metadata/i);
+    expect(githubPublisher.updatedMetadata).toHaveLength(0);
+  });
 
-      const updated = await publisherService.updateBody({
-        runId: run.id,
-        reportArtifactId: report.markdownArtifactId,
-        sourceBranch: "spec-to-pr/run-1",
-        targetBranch: "main",
-        requestNumber: "472",
-        allowBlockedBody: true,
-        pushBranch: false,
-        confirm: true,
-      });
-      expect(updated.result).toMatchObject({
-        status: "blocked",
-        errorCode: "PUBLISH_REPORT_METADATA_INVALID",
-        requestSynced: false,
-      });
-      expect(updated.result.errorMessage).toMatch(/intent unknown.*decision blocked/i);
-      expect(githubPublisher.updatedMetadata).toHaveLength(0);
-    },
-  );
-
-  it("rejects crossed report metadata and reports both known values", async () => {
+  it("rejects crossed Markdown metadata before canonical comparison", async () => {
     const run = await runService.createRun({ projectRoot });
     const report = await generatePrReport({
       runId: run.id,
@@ -1162,37 +1125,16 @@ describe("PublisherService", () => {
       },
     });
 
-    const plan = await publisherService.plan({
-      runId: run.id,
-      reportArtifactId: report.markdownArtifactId,
-      sourceBranch: "spec-to-pr/run-1",
-      targetBranch: "main",
-      intent: "blocked-diagnostic",
-      pushBranch: false,
-    });
-    expect(plan).toMatchObject({
-      reportMetadataValid: false,
-      reportIntent: "ready",
-      reportDecision: "blocked",
-      willCreateOrUpdate: false,
-    });
-    expect(plan.warnings.join("\n")).toMatch(/intent ready.*decision blocked/i);
-
-    const published = await publisherService.publish({
-      runId: run.id,
-      reportArtifactId: report.markdownArtifactId,
-      sourceBranch: "spec-to-pr/run-1",
-      targetBranch: "main",
-      intent: "blocked-diagnostic",
-      pushBranch: false,
-      confirm: true,
-    });
-    expect(published.result).toMatchObject({
-      status: "blocked",
-      errorCode: "PUBLISH_REPORT_METADATA_INVALID",
-      requestSynced: false,
-    });
-    expect(published.result.errorMessage).toMatch(/intent ready.*decision blocked/i);
+    await expect(
+      publisherService.plan({
+        runId: run.id,
+        reportArtifactId: report.markdownArtifactId,
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        intent: "blocked-diagnostic",
+        pushBranch: false,
+      }),
+    ).rejects.toThrow(/PUBLISH_REPORT_BINDING_INVALID.*metadata/i);
     expect(githubPublisher.createdPayloads).toHaveLength(0);
     expect(githubPublisher.updatedMetadata).toHaveLength(0);
   });
