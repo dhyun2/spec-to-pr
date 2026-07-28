@@ -61,6 +61,7 @@ import {
   WorkflowSourceUrlSchema,
   WorkflowActionSchema,
   CompactFailedVisualTargetsSchema,
+  VisualLineageOutcomeV2Schema,
   VisualRepairEvidenceV2Schema,
   WorkflowScopeSchema,
   WorkflowStatusSchema,
@@ -918,7 +919,12 @@ export class WorkflowService {
     }
     const reviewPacket =
       submission.kind === "implementation" && implementationSnapshot !== undefined
-        ? createImplementationReviewPacket(run, implementationSnapshot, evidenceArtifacts)
+        ? await createImplementationReviewPacket(
+            run,
+            implementationSnapshot,
+            evidenceArtifacts,
+            this.dependencies.artifactStore,
+          )
         : undefined;
 
     if (submission.kind === "figma-bundle") {
@@ -1163,7 +1169,13 @@ export class WorkflowService {
     const scope = scopeFromRun(run);
     const deliveryProfile = deliveryProfileFromRun(run);
     const workload = workloadFromRun(run, scope, deliveryProfile);
-    const nextActions = actionsForRun(run, scope, deliveryProfile, this.now());
+    const nextActions = await actionsForRun(
+      run,
+      scope,
+      deliveryProfile,
+      this.now(),
+      this.dependencies.artifactStore,
+    );
     const requiredValidations = requiredValidationsForRun(scope, deliveryProfile);
     const currentStage = run.stages.find(
       (item) => !["passed", "skipped", "waived"].includes(item.status),
@@ -2897,15 +2909,16 @@ export class WorkflowService {
           deviceScaleFactor: target.deviceScaleFactor,
           fixture: target.fixture,
           captureProvider: capture.provider,
-          captureSummary: {
-            provider: capture.provider,
-            browser:
-              receipt === undefined
-                ? capture.provider
-                : `${receipt.browserName} ${receipt.browserVersion}`,
-            fontsReady: true,
-            assetsReady: receipt === undefined || receipt.assetsComplete,
-          },
+          ...(receipt === undefined
+            ? {}
+            : {
+                captureSummary: {
+                  provider: capture.provider,
+                  browser: `${receipt.browserName} ${receipt.browserVersion}`,
+                  fontsReady: receipt.fonts.length > 0,
+                  assetsReady: receipt.assetsComplete,
+                },
+              }),
           capturedAt: capture.capturedAt,
           actualDigest: capture.actualDigest,
           masks: target.masks,
@@ -3058,20 +3071,51 @@ export class WorkflowService {
     });
     const failedTargets = input.results
       .filter((result) => result["status"] === "failed")
-      .map((result) => ({
-        targetId: result["targetId"],
-        name: result["name"],
-        route: result["route"],
-        state: result["state"],
-        fixture: result["fixture"],
-        viewport: result["viewport"],
-        deviceScaleFactor: result["deviceScaleFactor"],
-        metrics: result["metrics"],
-        diffArtifactId: result["diffArtifactId"],
-        overlayArtifactId: result["overlayArtifactId"],
-        captureSummary: result["captureSummary"],
-        causeHints: ["implementation"],
-      }));
+      .map((result) => {
+        const captureSummary = result["captureSummary"];
+        if (typeof captureSummary !== "object" || captureSummary === null) {
+          throw new Error(
+            `VISUAL_REPAIR_EVIDENCE_INCOMPLETE: failed target ${String(result["targetId"])} has no strict capture receipt`,
+          );
+        }
+        const metrics =
+          typeof result["metrics"] === "object" && result["metrics"] !== null
+            ? (result["metrics"] as Record<string, unknown>)
+            : {};
+        const causeHints: Array<
+          "implementation" | "acquisition" | "fixture" | "design-mapping" | "baseline-isolation"
+        > = [];
+        if (
+          typeof metrics["reviewMatchRatio"] === "number" &&
+          typeof metrics["threshold"] === "number" &&
+          metrics["reviewMatchRatio"] < metrics["threshold"]
+        ) {
+          causeHints.push("implementation");
+        }
+        const captureFacts = captureSummary as Record<string, unknown>;
+        if (captureFacts["fontsReady"] !== true || captureFacts["assetsReady"] !== true) {
+          causeHints.push("acquisition");
+        }
+        if (causeHints.length === 0) {
+          throw new Error(
+            `VISUAL_REPAIR_EVIDENCE_INCOMPLETE: failed target ${String(result["targetId"])} has no validated cause category`,
+          );
+        }
+        return {
+          targetId: result["targetId"],
+          name: result["name"],
+          route: result["route"],
+          state: result["state"],
+          fixture: result["fixture"],
+          viewport: result["viewport"],
+          deviceScaleFactor: result["deviceScaleFactor"],
+          metrics: result["metrics"],
+          diffArtifactId: result["diffArtifactId"],
+          overlayArtifactId: result["overlayArtifactId"],
+          captureSummary,
+          causeHints,
+        };
+      });
     const repairRequired =
       input.visualStatus === "failed" && input.attempt < MAX_VISUAL_REPAIR_ATTEMPTS;
     const status =
@@ -3084,6 +3128,7 @@ export class WorkflowService {
             runId: input.runId,
             lineageId: input.lineageId,
             reviewPacketId: input.packet.id,
+            headSha: input.packet.headSha,
             attempt: input.attempt,
             generatedAt: input.timestamp,
             failedTargets,
@@ -3096,6 +3141,7 @@ export class WorkflowService {
           runId: input.runId,
           lineageId: input.lineageId,
           reviewPacketId: input.packet.id,
+          headSha: input.packet.headSha,
           attempt: input.attempt,
           generatedAt: input.timestamp,
           status,
@@ -3131,6 +3177,7 @@ export class WorkflowService {
         visualLineageAttempt: input.attempt,
         visualLineageStatus: status,
         sourcePacketId: input.packet.id,
+        headSha: input.packet.headSha,
         repairRequired,
         visualStatus: input.visualStatus,
         failedTargets: compactFailedTargets,
@@ -5044,11 +5091,12 @@ function stage(run: RunManifest, name: RunStageName): StageState {
   return value;
 }
 
-function actionsForRun(
+async function actionsForRun(
   run: RunManifest,
   scope: WorkflowScope,
   profile: DeliveryProfile,
   nowIso: string,
+  artifactStore: ArtifactBlobStore,
 ) {
   const intake = stage(run, "intake");
   if (intake.status !== "passed") {
@@ -5071,7 +5119,7 @@ function actionsForRun(
     return [WorkflowActionSchema.parse({ kind: "prepare-contracts", runId: run.id })];
   }
   if (stage(run, "contracts").status === "passed" && isActionable(stage(run, "implementation"))) {
-    const visualRepair = activeVisualRepairAction(run);
+    const visualRepair = await activeVisualRepairAction(run, artifactStore);
     if (visualRepair !== undefined) {
       return [
         WorkflowActionSchema.parse({
@@ -5617,6 +5665,19 @@ function reviewPacketFromRun(run: RunManifest): ImplementationReviewPacket | und
   return parsed.success ? parsed.data : undefined;
 }
 
+function reviewPacketByIdFromRun(
+  run: RunManifest,
+  reviewPacketId: string,
+): ImplementationReviewPacket | undefined {
+  const current = reviewPacketFromRun(run);
+  if (current?.id === reviewPacketId) return current;
+  for (const artifact of run.artifacts) {
+    const parsed = ImplementationReviewPacketSchema.safeParse(artifact.metadata["reviewPacket"]);
+    if (parsed.success && parsed.data.id === reviewPacketId) return parsed.data;
+  }
+  return undefined;
+}
+
 function legacyFeatureKeysFromRun(run: RunManifest): Set<string> {
   const rawKeys = [...run.artifacts]
     .reverse()
@@ -5749,7 +5810,10 @@ function visualLineageId(packet: ImplementationReviewPacket): string {
   return packet.visualLineageId ?? packet.id;
 }
 
-function activeVisualRepairAction(run: RunManifest):
+async function activeVisualRepairAction(
+  run: RunManifest,
+  artifactStore: ArtifactBlobStore,
+): Promise<
   | {
       repairEvidenceVersion: "v2";
       sourcePacketId: string;
@@ -5765,14 +5829,15 @@ function activeVisualRepairAction(run: RunManifest):
       nextAttempt: 2 | 3;
       failedTargets: Array<{ targetId: string; reviewMatchRatio: number }>;
     }
-  | undefined {
+  | undefined
+> {
   if (stage(run, "implementation").error?.code !== "VISUAL_IMPLEMENTATION_REPAIR_REQUIRED") {
     return undefined;
   }
   const packet = reviewPacketFromRun(run);
   if (packet === undefined) return undefined;
   const lineageId = visualLineageId(packet);
-  const latest = latestVisualLineageRecord(run, lineageId);
+  const latest = await latestVisualLineageRecord(run, lineageId, artifactStore);
   if (
     latest === undefined ||
     latest.outcome.status !== "repair-required" ||
@@ -5787,66 +5852,75 @@ function activeVisualRepairAction(run: RunManifest):
     nextAttempt: (latest.outcome.attempt + 1) as 2 | 3,
     failedTargets: latest.failedTargets,
   };
-  return latest.repairEvidenceVersion === "v2"
-    ? {
-        ...common,
-        repairEvidenceVersion: "v2",
-        repairEvidenceArtifactId: latest.repairEvidenceArtifactId,
-      }
-    : { ...common, repairEvidenceVersion: "legacy-v1" };
+  if (latest.repairEvidenceVersion === "legacy-v1") {
+    return { ...common, repairEvidenceVersion: "legacy-v1" };
+  }
+  if (latest.repairEvidenceArtifactId === undefined) {
+    throw invalidVisualRepairEvidence("current v2 repair outcome has no bound evidence artifact");
+  }
+  return {
+    ...common,
+    repairEvidenceVersion: "v2",
+    repairEvidenceArtifactId: latest.repairEvidenceArtifactId,
+  };
 }
 
-type VisualLineageRecord =
-  | {
-      outcome: VisualLineageOutcome;
-      repairEvidenceVersion: "v2";
-      repairEvidenceArtifactId: string;
-      failedTargets: Array<{ targetId: string; reviewMatchRatio: number }>;
-    }
-  | {
-      outcome: VisualLineageOutcome;
-      repairEvidenceVersion: "legacy-v1";
-      failedTargets: Array<{ targetId: string; reviewMatchRatio: number }>;
-    };
+type VisualLineageRecord = {
+  outcome: VisualLineageOutcome;
+  repairEvidenceVersion: "v2" | "legacy-v1";
+  repairEvidenceArtifactId?: string;
+  failedTargets: Array<{ targetId: string; reviewMatchRatio: number }>;
+};
 
-function latestVisualLineageRecord(
+async function latestVisualLineageRecord(
   run: RunManifest,
   lineageId: string,
-): VisualLineageRecord | undefined {
-  const records = visualLineageRecords(run);
-  const latest = latestVisualLineageOutcome(
-    records.map((record) => record.outcome),
-    lineageId,
-  );
+  artifactStore: ArtifactBlobStore,
+): Promise<VisualLineageRecord | undefined> {
+  const records = await visualLineageRecords(run, lineageId, artifactStore);
+  let latest: VisualLineageOutcome | undefined;
+  try {
+    latest = latestVisualLineageOutcome(
+      records.map((record) => record.outcome),
+      lineageId,
+    );
+  } catch (error: unknown) {
+    throw invalidVisualRepairEvidence(
+      error instanceof Error ? error.message : "duplicate lineage outcome",
+    );
+  }
   return records.find((record) => record.outcome === latest);
 }
 
-function visualLineageRecords(run: RunManifest): VisualLineageRecord[] {
-  return run.artifacts.flatMap<VisualLineageRecord>((artifact): VisualLineageRecord[] => {
+async function visualLineageRecords(
+  run: RunManifest,
+  lineageId: string,
+  artifactStore: ArtifactBlobStore,
+): Promise<VisualLineageRecord[]> {
+  const records: VisualLineageRecord[] = [];
+  for (const artifact of run.artifacts) {
     const adapter = artifact.metadata["adapter"];
     if (
       adapter !== "visual-repair-lineage-v1" &&
       adapter !== "visual-repair-lineage-v2" &&
       adapter !== "visual-repair-evidence-v2"
     ) {
-      return [];
+      continue;
     }
-    const lineageId = artifact.metadata["visualLineageId"];
+    if (artifact.metadata["visualLineageId"] !== lineageId) {
+      continue;
+    }
     const sourcePacketId = artifact.metadata["sourcePacketId"];
     const attempt = artifact.metadata["visualLineageAttempt"];
+    if (typeof sourcePacketId !== "string" || (attempt !== 1 && attempt !== 2 && attempt !== 3)) {
+      throw invalidVisualRepairEvidence("current lineage metadata is malformed");
+    }
     const failedTargets = CompactFailedVisualTargetsSchema.safeParse(
       artifact.metadata["failedTargets"],
     );
-    if (
-      typeof lineageId !== "string" ||
-      typeof sourcePacketId !== "string" ||
-      (attempt !== 1 && attempt !== 2 && attempt !== 3)
-    ) {
-      return [];
-    }
     if (adapter === "visual-repair-lineage-v1") {
       if (artifact.metadata["repairRequired"] === true && !failedTargets.success) {
-        return [];
+        throw invalidVisualRepairEvidence("legacy repair targets are malformed");
       }
       const status =
         artifact.metadata["repairRequired"] === true
@@ -5854,43 +5928,116 @@ function visualLineageRecords(run: RunManifest): VisualLineageRecord[] {
           : artifact.metadata["visualStatus"] === "passed"
             ? "closed"
             : "exhausted";
-      return [
-        {
-          outcome: { lineageId, sourcePacketId, attempt, status },
-          repairEvidenceVersion: "legacy-v1" as const,
-          failedTargets: failedTargets.success ? failedTargets.data : [],
-        },
-      ];
+      if (
+        (status === "repair-required" && attempt === 3) ||
+        (status === "exhausted" && attempt !== 3)
+      ) {
+        throw invalidVisualRepairEvidence("legacy outcome status does not match its attempt");
+      }
+      records.push({
+        outcome: { lineageId, sourcePacketId, attempt, status },
+        repairEvidenceVersion: "legacy-v1",
+        failedTargets: failedTargets.success ? failedTargets.data : [],
+      });
+      continue;
     }
+
     const status = artifact.metadata["visualLineageStatus"];
     if (status !== "repair-required" && status !== "closed" && status !== "exhausted") {
-      return [];
+      throw invalidVisualRepairEvidence("current lineage status is malformed");
     }
-    const repairEvidenceArtifactId = artifact.metadata["repairEvidenceArtifactId"];
-    if (
-      status === "repair-required" &&
-      (adapter !== "visual-repair-evidence-v2" ||
+    const sourcePacket = reviewPacketByIdFromRun(run, sourcePacketId);
+    if (sourcePacket === undefined || visualLineageId(sourcePacket) !== lineageId) {
+      throw invalidVisualRepairEvidence("source review packet is missing or outside the lineage");
+    }
+    const payload = await readVisualLineagePayload(artifactStore, artifact);
+    if (adapter === "visual-repair-evidence-v2") {
+      const parsed = VisualRepairEvidenceV2Schema.safeParse(payload);
+      const repairEvidenceArtifactId = artifact.metadata["repairEvidenceArtifactId"];
+      if (
+        !parsed.success ||
+        (status !== "repair-required" && status !== "exhausted") ||
+        (status === "repair-required" && attempt === 3) ||
+        (status === "exhausted" && attempt !== 3) ||
         repairEvidenceArtifactId !== artifact.id ||
-        !failedTargets.success)
-    ) {
-      return [];
-    }
-    return [
-      {
+        !failedTargets.success ||
+        parsed.data.runId !== run.id ||
+        parsed.data.lineageId !== lineageId ||
+        parsed.data.reviewPacketId !== sourcePacketId ||
+        parsed.data.headSha !== sourcePacket.headSha ||
+        artifact.metadata["headSha"] !== sourcePacket.headSha ||
+        parsed.data.attempt !== attempt
+      ) {
+        throw invalidVisualRepairEvidence("rich evidence does not match its lineage metadata");
+      }
+      const payloadCompactTargets = CompactFailedVisualTargetsSchema.parse(
+        parsed.data.failedTargets.map((target) => ({
+          targetId: target.targetId,
+          reviewMatchRatio: target.metrics.reviewMatchRatio,
+        })),
+      );
+      if (JSON.stringify(payloadCompactTargets) !== JSON.stringify(failedTargets.data)) {
+        throw invalidVisualRepairEvidence("compact targets do not match rich evidence");
+      }
+      const artifactIds = new Set(run.artifacts.map((candidate) => candidate.id));
+      if (
+        parsed.data.failedTargets.some(
+          (target) =>
+            !artifactIds.has(target.diffArtifactId) || !artifactIds.has(target.overlayArtifactId),
+        )
+      ) {
+        throw invalidVisualRepairEvidence("rich evidence references missing visual artifacts");
+      }
+      records.push({
         outcome: {
           lineageId,
           sourcePacketId,
           attempt,
           status,
-          ...(typeof repairEvidenceArtifactId === "string" ? { repairEvidenceArtifactId } : {}),
+          repairEvidenceArtifactId,
         },
-        repairEvidenceVersion: "v2" as const,
-        repairEvidenceArtifactId:
-          typeof repairEvidenceArtifactId === "string" ? repairEvidenceArtifactId : artifact.id,
-        failedTargets: failedTargets.success ? failedTargets.data : [],
-      },
-    ];
-  });
+        repairEvidenceVersion: "v2",
+        repairEvidenceArtifactId,
+        failedTargets: failedTargets.data,
+      });
+      continue;
+    }
+
+    const parsed = VisualLineageOutcomeV2Schema.safeParse(payload);
+    if (
+      !parsed.success ||
+      status !== "closed" ||
+      parsed.data.runId !== run.id ||
+      parsed.data.lineageId !== lineageId ||
+      parsed.data.reviewPacketId !== sourcePacketId ||
+      parsed.data.headSha !== sourcePacket.headSha ||
+      artifact.metadata["headSha"] !== sourcePacket.headSha ||
+      parsed.data.attempt !== attempt
+    ) {
+      throw invalidVisualRepairEvidence("closed outcome does not match its lineage metadata");
+    }
+    records.push({
+      outcome: { lineageId, sourcePacketId, attempt, status: "closed" },
+      repairEvidenceVersion: "v2",
+      failedTargets: [],
+    });
+  }
+  return records;
+}
+
+async function readVisualLineagePayload(
+  artifactStore: ArtifactBlobStore,
+  artifact: ArtifactRef,
+): Promise<unknown> {
+  try {
+    return JSON.parse((await artifactStore.readContent(artifact.digest)).toString("utf8"));
+  } catch {
+    throw invalidVisualRepairEvidence("lineage artifact payload is unreadable");
+  }
+}
+
+function invalidVisualRepairEvidence(reason: string): Error {
+  return new Error(`VISUAL_REPAIR_EVIDENCE_INVALID: ${reason}`);
 }
 
 function committedVisualComparisonAttemptCount(
@@ -7385,11 +7532,12 @@ async function countDeclaredWorkspacePackages(projectRoot: string): Promise<numb
   return packageRoots.size;
 }
 
-function createImplementationReviewPacket(
+async function createImplementationReviewPacket(
   run: RunManifest,
   snapshot: GitSnapshot,
   evidenceArtifacts: ArtifactRef[],
-): ImplementationReviewPacket {
+  artifactStore: ArtifactBlobStore,
+): Promise<ImplementationReviewPacket> {
   const previous = reviewPacketFromRun(run);
   const evidenceHex = createHash("sha256")
     .update(
@@ -7414,7 +7562,9 @@ function createImplementationReviewPacket(
   const id = createHash("sha256").update(JSON.stringify(identity)).digest("hex");
   const packetId = `packet_${id}`;
   const lineage = createVisualLineage(
-    previous === undefined ? undefined : activeVisualRepairCheckpoint(run, previous),
+    previous === undefined
+      ? undefined
+      : await activeVisualRepairCheckpoint(run, previous, artifactStore),
     { id: packetId },
   );
   return ImplementationReviewPacketSchema.parse({
@@ -7424,12 +7574,13 @@ function createImplementationReviewPacket(
   });
 }
 
-function activeVisualRepairCheckpoint(
+async function activeVisualRepairCheckpoint(
   run: RunManifest,
   previousPacket: ImplementationReviewPacket,
+  artifactStore: ArtifactBlobStore,
 ) {
   const lineageId = visualLineageId(previousPacket);
-  const latest = latestVisualLineageRecord(run, lineageId);
+  const latest = await latestVisualLineageRecord(run, lineageId, artifactStore);
   if (
     latest === undefined ||
     latest.outcome.status !== "repair-required" ||

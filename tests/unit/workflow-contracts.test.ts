@@ -18,6 +18,7 @@ import {
   DeliveryProfileSchema,
   GuidanceTraceSchema,
   ImplementationReviewPacketSchema,
+  VisualRepairEvidenceV2Schema,
   WorkflowActionSchema,
   WorkflowBlockerSchema,
   WorkflowResumeContextSchema,
@@ -55,6 +56,59 @@ describe("workflow v2 contracts", () => {
     });
     expect(legacy).toMatchObject({ repairEvidenceVersion: "legacy-v1" });
     expect(legacy).not.toHaveProperty("repairEvidenceArtifactId");
+  });
+
+  it("binds rich visual repair evidence to the immutable implementation head", () => {
+    const evidence = {
+      schemaVersion: "visual-repair-evidence-v2",
+      runId: `run_${"a".repeat(32)}`,
+      lineageId: `packet_${"b".repeat(64)}`,
+      reviewPacketId: `packet_${"c".repeat(64)}`,
+      headSha: "d".repeat(40),
+      attempt: 1,
+      generatedAt: "2026-07-28T00:00:00.000Z",
+      failedTargets: [
+        {
+          targetId: "shop-default",
+          name: "Shop",
+          route: "/shop",
+          state: "default",
+          fixture: "mock:shop",
+          viewport: { width: 1280, height: 720 },
+          deviceScaleFactor: 1,
+          metrics: {
+            width: 1280,
+            height: 720,
+            comparedPixelCount: 921_600,
+            maskedPixelCount: 0,
+            maskedAreaRatio: 0,
+            exactMatchRatio: 0.8,
+            reviewMatchRatio: 0.87,
+            meanDistance: 0.04,
+            maxDistance: 0.2,
+            pixelTolerance: 0.02,
+            threshold: 0.92,
+          },
+          diffArtifactId: `art_${"e".repeat(32)}`,
+          overlayArtifactId: `art_${"f".repeat(32)}`,
+          captureSummary: {
+            provider: "playwright",
+            browser: "chromium 138",
+            fontsReady: true,
+            assetsReady: true,
+          },
+          causeHints: ["implementation"],
+        },
+      ],
+    } as const;
+
+    expect(VisualRepairEvidenceV2Schema.parse(evidence)).toMatchObject({
+      reviewPacketId: evidence.reviewPacketId,
+      headSha: evidence.headSha,
+      attempt: 1,
+    });
+    const { headSha: _headSha, ...unbound } = evidence;
+    expect(VisualRepairEvidenceV2Schema.safeParse(unbound).success).toBe(false);
   });
 
   it("defines the bounded strict workflow blocker contract", () => {

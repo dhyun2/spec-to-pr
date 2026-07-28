@@ -1594,6 +1594,7 @@ export const VisualRepairEvidenceV2Schema = z
     runId: RunIdSchema,
     lineageId: ReviewPacketIdSchema,
     reviewPacketId: ReviewPacketIdSchema,
+    headSha: GitObjectIdSchema,
     attempt: z.union([z.literal(1), z.literal(2), z.literal(3)]),
     generatedAt: IsoDateTimeSchema,
     failedTargets: z
@@ -1632,6 +1633,19 @@ export const VisualRepairEvidenceV2Schema = z
       )
       .min(1)
       .max(50),
+  })
+  .strict();
+
+export const VisualLineageOutcomeV2Schema = z
+  .object({
+    schemaVersion: z.literal("visual-repair-lineage-v2"),
+    runId: RunIdSchema,
+    lineageId: ReviewPacketIdSchema,
+    reviewPacketId: ReviewPacketIdSchema,
+    headSha: GitObjectIdSchema,
+    attempt: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+    generatedAt: IsoDateTimeSchema,
+    status: z.literal("closed"),
   })
   .strict();
 

@@ -5834,6 +5834,7 @@ describe("WorkflowService", () => {
       schemaVersion: "visual-repair-evidence-v2",
       lineageId: firstRepair.lineageId,
       reviewPacketId: firstRepair.reviewPacketId,
+      headSha: implementationPacket.headSha,
       attempt: 1,
       failedTargets: [
         {
@@ -5844,20 +5845,92 @@ describe("WorkflowService", () => {
           captureSummary: {
             provider: "playwright",
             browser: "chromium 138.0.7204.168",
-            fontsReady: true,
+            fontsReady: false,
             assetsReady: true,
           },
-          causeHints: ["implementation"],
+          causeHints: ["implementation", "acquisition"],
         },
       ],
     });
+    const originalRepairEvidencePayload = JSON.parse(
+      (await artifactStore.readContent(repairEvidenceArtifact.digest)).toString("utf8"),
+    ) as Record<string, unknown>;
+    const replaceRepairEvidencePayload = async (payload: unknown) => {
+      const timestamp = new Date().toISOString();
+      const blob = await artifactStore.writeBlob({
+        content: Buffer.from(`${JSON.stringify(payload, null, 2)}\n`, "utf8"),
+        mediaType: "application/json",
+        storedAt: timestamp,
+        label: "tampered-visual-repair-evidence.json",
+      });
+      const current = await store.get(started.runId);
+      current.artifacts = current.artifacts.map((artifact) =>
+        artifact.id === repairEvidenceArtifact.id
+          ? ArtifactRefSchema.parse({ ...artifact, uri: blob.uri, digest: blob.digest })
+          : artifact,
+      );
+      current.revision += 1;
+      current.updatedAt = timestamp;
+      await store.save(current, current.revision - 1);
+    };
+    const { headSha: _headSha, ...missingHeadPayload } = originalRepairEvidencePayload;
+    await replaceRepairEvidencePayload(missingHeadPayload);
+    await expect(service.status({ runId: started.runId })).rejects.toThrow(
+      /VISUAL_REPAIR_EVIDENCE_INVALID/,
+    );
+    await replaceRepairEvidencePayload({
+      ...originalRepairEvidencePayload,
+      headSha: "f".repeat(40),
+    });
+    await expect(service.status({ runId: started.runId })).rejects.toThrow(
+      /VISUAL_REPAIR_EVIDENCE_INVALID/,
+    );
+    await replaceRepairEvidencePayload(originalRepairEvidencePayload);
+
+    const malformedTimestamp = new Date().toISOString();
+    const malformedBlob = await artifactStore.writeBlob({
+      content: Buffer.from("{}\n", "utf8"),
+      mediaType: "application/json",
+      storedAt: malformedTimestamp,
+      label: "malformed-newest-visual-repair-evidence.json",
+    });
+    const malformedArtifactId = createArtifactId();
+    const runWithMalformedNewest = await store.get(started.runId);
+    runWithMalformedNewest.artifacts.push(
+      ArtifactRefSchema.parse({
+        ...repairEvidenceArtifact,
+        id: malformedArtifactId,
+        uri: malformedBlob.uri,
+        digest: malformedBlob.digest,
+        createdAt: malformedTimestamp,
+        metadata: {
+          ...repairEvidenceArtifact.metadata,
+          visualLineageAttempt: 2,
+          repairEvidenceArtifactId: malformedArtifactId,
+        },
+      }),
+    );
+    runWithMalformedNewest.revision += 1;
+    runWithMalformedNewest.updatedAt = malformedTimestamp;
+    await store.save(runWithMalformedNewest, runWithMalformedNewest.revision - 1);
+    await expect(service.status({ runId: started.runId })).rejects.toThrow(
+      /VISUAL_REPAIR_EVIDENCE_INVALID/,
+    );
+    const malformedRun = await store.get(started.runId);
+    malformedRun.artifacts = malformedRun.artifacts.filter(
+      (artifact) => artifact.id !== malformedArtifactId,
+    );
+    malformedRun.revision += 1;
+    malformedRun.updatedAt = new Date().toISOString();
+    await store.save(malformedRun, malformedRun.revision - 1);
     const originalRepairEvidenceArtifact = repairEvidenceArtifact;
     const {
       repairEvidenceArtifactId: _repairEvidenceArtifactId,
       schemaVersion: _schemaVersion,
       ...legacyMetadata
     } = repairEvidenceArtifact.metadata;
-    afterFirstFailureRun.artifacts = afterFirstFailureRun.artifacts.map((artifact) =>
+    const legacyCandidateRun = await store.get(started.runId);
+    legacyCandidateRun.artifacts = legacyCandidateRun.artifacts.map((artifact) =>
       artifact.id === repairEvidenceArtifact.id
         ? ArtifactRefSchema.parse({
             ...artifact,
@@ -5868,9 +5941,9 @@ describe("WorkflowService", () => {
           })
         : artifact,
     );
-    afterFirstFailureRun.revision += 1;
-    afterFirstFailureRun.updatedAt = new Date().toISOString();
-    await store.save(afterFirstFailureRun, afterFirstFailureRun.revision - 1);
+    legacyCandidateRun.revision += 1;
+    legacyCandidateRun.updatedAt = new Date().toISOString();
+    await store.save(legacyCandidateRun, legacyCandidateRun.revision - 1);
     const legacyRepair = (await service.status({ runId: started.runId })).nextActions.find(
       (action) => action.kind === "implementation-repair",
     );
