@@ -758,6 +758,90 @@ describe("PublisherService", () => {
     ).rejects.toThrow(/reviewed source SHA/);
   });
 
+  it("renders the bound failed report as an equal-size two-column blocked visual preview", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await addVisualEvidence(run.id, {
+      status: "failed",
+      includeOverlay: true,
+      context: {
+        targetId: "store-cinema4k",
+        name: "매장 상세",
+        route: "/shop/stores/123",
+        state: "available",
+        viewport: { width: 360, height: 1831 },
+        deviceScaleFactor: 1,
+      },
+      metrics: {
+        exactMatchRatio: 0.84,
+        reviewMatchRatio: 0.912,
+        maskedAreaRatio: 0,
+        threshold: 0.92,
+      },
+    });
+    await addNewerUnboundVisualReport(run.id);
+    await addParsedIntakePolicy(run.id, { includeDiff: false });
+    const report = await generatePrReport({
+      runId: run.id,
+      binding: {
+        reviewPacketId: canonicalReviewPacketId,
+        headSha: gitHead,
+        diffDigest: canonicalDiffDigest,
+      },
+      visualReportArtifactId: "art_55555555555555555555555555555555",
+    });
+
+    await publisherService.publish({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      intent: "blocked-diagnostic",
+      pushBranch: false,
+      confirm: true,
+    });
+
+    expect(githubPublisher.uploadedAssetIds[0]).toEqual([
+      "art_22222222222222222222222222222222",
+      "art_33333333333333333333333333333333",
+      "art_44444444444444444444444444444444",
+      "art_88888888888888888888888888888888",
+    ]);
+    const body = githubPublisher.createdPayloads[0]?.body ?? "";
+    expect(body).toContain('width="320"');
+    expect(body.match(/width="320"/g)).toHaveLength(2);
+    expect(body).toContain("검토 일치율");
+    expect(body).toContain("불일치율");
+    expect(body).toContain("Diff");
+    expect(body).toContain("Overlay");
+    expect(body).toContain("91.20%");
+    expect(body).toContain("8.80%");
+    expect(body).toContain("92.00%");
+    expect(body).not.toContain("unbound-newer-report.png");
+  });
+
+  it("starts a separate compact preview block for each visual target", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    await addVisualEvidence(run.id);
+    await appendSecondVisualTarget(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+
+    await publisherService.publish({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      pushBranch: false,
+      confirm: true,
+    });
+
+    const body = githubPublisher.createdPayloads[0]?.body ?? "";
+    expect(body).toContain("#### 화면 1 · 고정된 검토 데이터");
+    expect(body).toContain("#### 화면 2 · 두 번째 검토 데이터");
+    expect(body.match(/\| 경로 \| 상태 \| Fixture \| 화면/g)).toHaveLength(2);
+    expect(body.match(/\| Figma \| 브라우저 \|/g)).toHaveLength(2);
+  });
+
   it("rejects a crossed blocked report and visual artifact binding", async () => {
     const run = await runService.createRun({ projectRoot });
     await addVisualEvidence(run.id);
@@ -1272,7 +1356,7 @@ describe("PublisherService", () => {
     });
 
     expect(githubPublisher.createdPayloads[0]?.body).toContain(
-      "| 화면 | 레거시 | 이관 결과 | 차이 | 검토 일치율 | 픽셀 일치율 | 결과 |",
+      "| 경로 | 상태 | Fixture | 화면 | DPR | 시도 | 검토 일치율 | 불일치율 | 픽셀 일치율 | 마스킹 | 기준 | 결과 |",
     );
     expect(githubPublisher.createdPayloads[0]?.body).toContain(
       "레거시 화면과 이관 결과를 같은 조건으로 비교했습니다.",
@@ -1283,6 +1367,7 @@ describe("PublisherService", () => {
     expect(githubPublisher.createdPayloads[0]?.body).toContain(
       "https://github.example/assets/diff.png",
     );
+    expect(githubPublisher.createdPayloads[0]?.body).toContain("진단: [Diff]");
     expect(githubPublisher.createdPayloads[0]?.body).toContain("95.00%");
     expect(githubPublisher.createdPayloads[0]?.body).toContain("98.00%");
     expect(githubPublisher.createdPayloads[0]?.body).not.toContain("overlay");
@@ -1320,9 +1405,9 @@ describe("PublisherService", () => {
 
     const body = githubPublisher.createdPayloads[0]?.body ?? "";
     expect(body).toContain("매장 상세");
-    expect(body).toContain(
-      "/shop/42?tab=notice&amp;token=[REDACTED] · 공지 탭 &lt;펼침&gt; · 390×844 @2x",
-    );
+    expect(body).toContain("/shop/42?tab=notice&amp;token=[REDACTED]");
+    expect(body).toContain("공지 탭 &lt;펼침&gt;");
+    expect(body).toContain("390×844 | 2");
     expect(body).not.toContain("do-not-publish");
     expect(body).not.toContain("<펼침>");
     expect(body).not.toContain("legacy_01e68a8c011c37b4b997f938");
@@ -1518,7 +1603,7 @@ describe("PublisherService", () => {
     const body = githubPublisher.createdPayloads[0]?.body ?? "";
     expect(body).toContain("[레거시 · 화면 1 ↗]");
     expect(body).toContain("[이관 결과 · 화면 1 ↗]");
-    expect(body).toContain("[차이 · 화면 1 ↗]");
+    expect(body).toContain("[Diff · 화면 1 ↗]");
   });
 
   it("refuses the GitLab raw-evidence fallback when a committed screenshot no longer matches its captured digest", async () => {
@@ -2060,6 +2145,14 @@ async function addVisualEvidence(
   runId: string,
   options: {
     visualBaseline?: "figma" | "legacy-screenshot";
+    status?: "passed" | "failed";
+    includeOverlay?: boolean;
+    metrics?: {
+      exactMatchRatio: number;
+      reviewMatchRatio: number;
+      maskedAreaRatio: number;
+      threshold: number;
+    };
     context?: {
       targetId: string;
       name: string;
@@ -2127,6 +2220,19 @@ async function addVisualEvidence(
       mediaType: "image/png",
       timestamp,
     }),
+    ...(options.includeOverlay
+      ? [
+          await writeArtifact({
+            id: "art_88888888888888888888888888888888",
+            kind: "visual-diff",
+            label: "overlay-home.png",
+            reportKind: "visual-overlay",
+            content: Buffer.from("overlay-png"),
+            mediaType: "image/png",
+            timestamp,
+          }),
+        ]
+      : []),
   ];
   const commonMetrics = {
     width: 100,
@@ -2145,7 +2251,7 @@ async function addVisualEvidence(
     headSha: gitHead,
     diffDigest: canonicalDiffDigest,
     attempt: 1,
-    status: "passed",
+    status: options.status ?? "passed",
     generatedAt: timestamp,
     results: [
       {
@@ -2160,16 +2266,19 @@ async function addVisualEvidence(
         baselineKind: options.visualBaseline ?? "figma",
         fixture: "고정된 검토 데이터",
         masks: [],
-        status: "passed",
+        status: options.status ?? "passed",
         metrics: {
           ...commonMetrics,
-          maskedAreaRatio: 0,
+          ...(options.metrics ?? {}),
           pixelTolerance: 0.02,
-          threshold: 0.98,
+          threshold: options.metrics?.threshold ?? 0.98,
         },
         baselineArtifactId: "art_22222222222222222222222222222222",
         actualArtifactId: "art_33333333333333333333333333333333",
         diffArtifactId: "art_44444444444444444444444444444444",
+        ...(options.includeOverlay
+          ? { overlayArtifactId: "art_88888888888888888888888888888888" }
+          : {}),
       },
     ],
   };
@@ -2196,6 +2305,143 @@ async function addVisualEvidence(
       revision: run.revision + 1,
       updatedAt: timestamp,
       artifacts: [...run.artifacts, ...artifacts, visualReportArtifact],
+    },
+    run.revision,
+  );
+}
+
+async function addNewerUnboundVisualReport(runId: string): Promise<void> {
+  const run = await store.get(runId);
+  const timestamp = "2026-06-23T00:00:01.000Z";
+  const artifact = await writeArtifact({
+    id: "art_99999999999999999999999999999999",
+    kind: "visual-report",
+    label: "unbound-newer-report.png",
+    reportKind: "visual-report-v2-json",
+    content: Buffer.from(
+      `${JSON.stringify({
+        version: 2,
+        runId,
+        reviewPacketId: `packet_${"e".repeat(64)}`,
+        headSha: gitHead,
+        diffDigest: canonicalDiffDigest,
+        attempt: 2,
+        status: "passed",
+        generatedAt: timestamp,
+        results: [],
+      })}\n`,
+    ),
+    mediaType: "application/json",
+    timestamp,
+    metadata: {
+      reviewPacketId: `packet_${"e".repeat(64)}`,
+      headSha: gitHead,
+      diffDigest: canonicalDiffDigest,
+    },
+  });
+
+  await store.save(
+    {
+      ...run,
+      revision: run.revision + 1,
+      updatedAt: timestamp,
+      artifacts: [...run.artifacts, artifact],
+    },
+    run.revision,
+  );
+}
+
+async function appendSecondVisualTarget(runId: string): Promise<void> {
+  const run = await store.get(runId);
+  const timestamp = "2026-06-23T00:00:00.800Z";
+  const baseline = await writeArtifact({
+    id: createArtifactId(),
+    kind: "figma-screenshot",
+    label: "figma-second.png",
+    reportKind: "figma-screenshot",
+    content: Buffer.from("figma-second-png"),
+    mediaType: "image/png",
+    timestamp,
+  });
+  const current = await writeArtifact({
+    id: createArtifactId(),
+    kind: "screenshot",
+    label: "browser-second.png",
+    reportKind: "browser-screenshot",
+    content: Buffer.from("browser-second-png"),
+    mediaType: "image/png",
+    timestamp,
+  });
+  const diff = await writeArtifact({
+    id: createArtifactId(),
+    kind: "visual-diff",
+    label: "diff-second.png",
+    reportKind: "visual-diff",
+    content: Buffer.from("diff-second-png"),
+    mediaType: "image/png",
+    timestamp,
+  });
+  const visualReportArtifact = run.artifacts.find(
+    (artifact) => artifact.id === "art_55555555555555555555555555555555",
+  );
+  if (visualReportArtifact === undefined) throw new Error("Visual report fixture is incomplete");
+  const visualReport = JSON.parse(
+    (await artifactStore.readContent(visualReportArtifact.digest)).toString("utf8"),
+  ) as { results: unknown[] };
+  visualReport.results.push({
+    targetId: "second-screen",
+    name: "화면 2",
+    route: "/second",
+    state: "default",
+    viewport: { width: 1280, height: 720 },
+    deviceScaleFactor: 1,
+    baselineKind: "figma",
+    fixture: "두 번째 검토 데이터",
+    masks: [],
+    status: "passed",
+    metrics: {
+      width: 100,
+      height: 100,
+      comparedPixelCount: 10_000,
+      maskedPixelCount: 0,
+      maskedAreaRatio: 0,
+      exactMatchRatio: 0.99,
+      reviewMatchRatio: 0.99,
+      meanDistance: 0.1,
+      maxDistance: 1,
+      pixelTolerance: 0.02,
+      threshold: 0.98,
+    },
+    baselineArtifactId: baseline.id,
+    actualArtifactId: current.id,
+    diffArtifactId: diff.id,
+  });
+  const blob = await artifactStore.writeBlob({
+    content: Buffer.from(`${JSON.stringify(visualReport, null, 2)}\n`),
+    mediaType: "application/json",
+    storedAt: timestamp,
+    label: visualReportArtifact.metadata["label"] as string,
+  });
+  const updatedReport = ArtifactRefSchema.parse({
+    ...visualReportArtifact,
+    uri: blob.uri,
+    digest: blob.digest,
+    createdAt: timestamp,
+  });
+
+  await store.save(
+    {
+      ...run,
+      revision: run.revision + 1,
+      updatedAt: timestamp,
+      artifacts: [
+        ...run.artifacts.map((artifact) =>
+          artifact.id === updatedReport.id ? updatedReport : artifact,
+        ),
+        baseline,
+        current,
+        diff,
+      ],
     },
     run.revision,
   );
@@ -2405,6 +2651,7 @@ class FakePublisher implements ReviewRequestPublisher {
   public readonly updatedBodies: string[] = [];
   public readonly updatedMetadata: ReviewRequestUpdate[] = [];
   public readonly uploadedAssets: Array<Array<{ role: string }>> = [];
+  public readonly uploadedAssetIds: string[][] = [];
   public readonly receivedSignals: Array<AbortSignal | undefined> = [];
   public failCreate = false;
   public failAssetUpload = false;
@@ -2433,6 +2680,7 @@ class FakePublisher implements ReviewRequestPublisher {
     }
 
     this.uploadedAssets.push(input.assets.map((asset) => ({ role: asset.role })));
+    this.uploadedAssetIds.push(input.assets.map((asset) => asset.artifactId));
 
     return input.assets.map((asset) => ({
       artifactId: asset.artifactId,

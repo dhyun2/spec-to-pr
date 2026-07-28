@@ -80,8 +80,31 @@ type VisualPreviewResult = VisualReport["results"][number] & {
   context?: VisualPreviewContext;
 };
 
+type PublicationVisualTarget = {
+  attempt: number;
+  targetId: string;
+  name: string;
+  route: string;
+  state: string;
+  fixture: string;
+  viewport: { width: number; height: number };
+  deviceScaleFactor: number;
+  status: "passed" | "failed";
+  metrics: {
+    reviewMatchRatio: number;
+    exactMatchRatio: number;
+    maskedAreaRatio: number;
+    threshold: number;
+  };
+  baselineArtifactId: string;
+  actualArtifactId: string;
+  diffArtifactId?: string;
+  overlayArtifactId?: string;
+};
+
 type VisualPreviewReport = Omit<VisualReport, "results"> & {
   results: VisualPreviewResult[];
+  publicationTargets: PublicationVisualTarget[];
 };
 
 type PublicationReportBinding = {
@@ -1110,6 +1133,7 @@ export class PublisherService {
       report?: VisualPreviewReport;
       assets: ReviewRequestAsset[];
       locale?: "ko" | "en";
+      requiresGeneratedDiagnostics: boolean;
     };
     featureVideo: ReviewRequestAsset | undefined;
     error: unknown;
@@ -1119,6 +1143,7 @@ export class PublisherService {
       input.payload.headSha === undefined ||
       input.visualPreview.report === undefined ||
       input.featureVideo !== undefined ||
+      input.visualPreview.requiresGeneratedDiagnostics ||
       !canUseGitLabRawEvidenceFallback(input.error)
     ) {
       return undefined;
@@ -1257,6 +1282,7 @@ export class PublisherService {
     report?: VisualPreviewReport;
     assets: ReviewRequestAsset[];
     locale?: "ko" | "en";
+    requiresGeneratedDiagnostics: boolean;
   }> {
     const prReportArtifact = requireArtifact(run.artifacts, payload.reportArtifactId);
     const locale = ReportLocaleSchema.safeParse(prReportArtifact.metadata["locale"]);
@@ -1266,6 +1292,7 @@ export class PublisherService {
     if (reportArtifact === undefined) {
       return {
         assets: [],
+        requiresGeneratedDiagnostics: false,
       };
     }
 
@@ -1276,9 +1303,15 @@ export class PublisherService {
     const policy = await this.readVisualPreviewPolicy(run.artifacts);
     const assets: ReviewRequestAsset[] = [];
     const labels = visualPreviewLabels(report);
+    const requiresGeneratedDiagnostics =
+      intent === "blocked-diagnostic" &&
+      report.publicationTargets.some((target) => target.status === "failed");
 
-    for (const result of report.results) {
-      if (includeVisualRole(policy, "figma")) {
+    for (const [index, result] of report.results.entries()) {
+      const target = report.publicationTargets[index];
+      if (target === undefined) throw new Error("Visual publication target is missing");
+
+      if (requiresGeneratedDiagnostics || includeVisualRole(policy, "figma")) {
         assets.push(
           await this.visualAssetFromArtifact({
             artifacts: run.artifacts,
@@ -1291,7 +1324,7 @@ export class PublisherService {
         );
       }
 
-      if (includeVisualRole(policy, "browser")) {
+      if (requiresGeneratedDiagnostics || includeVisualRole(policy, "browser")) {
         assets.push(
           await this.visualAssetFromArtifact({
             artifacts: run.artifacts,
@@ -1304,7 +1337,19 @@ export class PublisherService {
         );
       }
 
-      if (result.diffArtifactId !== undefined && includeVisualRole(policy, "diff")) {
+      if (requiresGeneratedDiagnostics && result.diffArtifactId === undefined) {
+        throw new Error(`Blocked visual report is missing a diff artifact for ${result.targetId}`);
+      }
+      if (requiresGeneratedDiagnostics && result.overlayArtifactId === undefined) {
+        throw new Error(
+          `Blocked visual report is missing an overlay artifact for ${result.targetId}`,
+        );
+      }
+
+      if (
+        result.diffArtifactId !== undefined &&
+        (requiresGeneratedDiagnostics || includeVisualRole(policy, "diff"))
+      ) {
         assets.push(
           await this.visualAssetFromArtifact({
             artifacts: run.artifacts,
@@ -1316,11 +1361,25 @@ export class PublisherService {
           }),
         );
       }
+
+      if (result.overlayArtifactId !== undefined && requiresGeneratedDiagnostics) {
+        assets.push(
+          await this.visualAssetFromArtifact({
+            artifacts: run.artifacts,
+            artifactId: result.overlayArtifactId,
+            targetId: result.targetId,
+            role: "overlay",
+            label: "Overlay",
+            payload,
+          }),
+        );
+      }
     }
 
     return {
       report,
       assets,
+      requiresGeneratedDiagnostics,
       ...(locale.success ? { locale: locale.data } : {}),
     };
   }
@@ -1688,7 +1747,34 @@ function latestPublishResultArtifact(artifacts: ArtifactRef[]): ArtifactRef {
 
 function normalizeVisualReport(rawReport: unknown): VisualPreviewReport {
   const legacy = VisualReportSchema.safeParse(rawReport);
-  if (legacy.success) return legacy.data;
+  if (legacy.success) {
+    return {
+      ...legacy.data,
+      publicationTargets: legacy.data.results.map((result) => ({
+        attempt: 1,
+        targetId: result.targetId,
+        name: result.targetId,
+        route: "-",
+        state: "-",
+        fixture: "-",
+        viewport: { width: result.metrics.width, height: result.metrics.height },
+        deviceScaleFactor: 1,
+        status: result.status === "passed" ? "passed" : "failed",
+        metrics: {
+          reviewMatchRatio: result.metrics.reviewMatchRatio,
+          exactMatchRatio: result.metrics.exactMatchRatio,
+          maskedAreaRatio: result.metrics.maskedAreaRatio ?? 0,
+          threshold: result.metrics.threshold ?? 0,
+        },
+        baselineArtifactId: result.figmaScreenshotArtifactId,
+        actualArtifactId: result.browserScreenshotArtifactId,
+        ...(result.diffArtifactId === undefined ? {} : { diffArtifactId: result.diffArtifactId }),
+        ...(result.overlayArtifactId === undefined
+          ? {}
+          : { overlayArtifactId: result.overlayArtifactId }),
+      })),
+    };
+  }
   if (typeof rawReport !== "object" || rawReport === null || Array.isArray(rawReport)) {
     throw new Error("Visual report is not a supported report object");
   }
@@ -1731,12 +1817,46 @@ function normalizeVisualReport(rawReport: unknown): VisualPreviewReport {
     reviewNeededCount: results.filter((result) => result.status === "review-needed").length,
     results,
   });
+  const attempt =
+    typeof report["attempt"] === "number" && Number.isInteger(report["attempt"])
+      ? report["attempt"]
+      : 1;
+  const publicationTargets = normalized.results.map((result, index) => {
+    const rawResult = rawResults[index] as Record<string, unknown>;
+    const context = contexts[index];
+    const fixture = typeof rawResult["fixture"] === "string" ? rawResult["fixture"] : "-";
+
+    return {
+      attempt,
+      targetId: result.targetId,
+      name: context?.name ?? result.targetId,
+      route: context?.route ?? "-",
+      state: context?.state ?? "-",
+      fixture,
+      viewport: context?.viewport ?? { width: result.metrics.width, height: result.metrics.height },
+      deviceScaleFactor: context?.deviceScaleFactor ?? 1,
+      status: result.status === "passed" ? "passed" : "failed",
+      metrics: {
+        reviewMatchRatio: result.metrics.reviewMatchRatio,
+        exactMatchRatio: result.metrics.exactMatchRatio,
+        maskedAreaRatio: result.metrics.maskedAreaRatio ?? 0,
+        threshold: result.metrics.threshold ?? 0,
+      },
+      baselineArtifactId: result.figmaScreenshotArtifactId,
+      actualArtifactId: result.browserScreenshotArtifactId,
+      ...(result.diffArtifactId === undefined ? {} : { diffArtifactId: result.diffArtifactId }),
+      ...(result.overlayArtifactId === undefined
+        ? {}
+        : { overlayArtifactId: result.overlayArtifactId }),
+    } satisfies PublicationVisualTarget;
+  });
   return {
     ...normalized,
     results: normalized.results.map((result, index) => ({
       ...result,
       ...(contexts[index] === undefined ? {} : { context: contexts[index] }),
     })),
+    publicationTargets,
   };
 }
 
@@ -1828,38 +1948,43 @@ function renderVisualEvidencePreview(
     assetByTargetAndRole.set(`${asset.targetId}:${asset.role}`, asset);
   }
 
-  const rows = report.results.map((result, index) => {
+  const blocks = report.results.map((result, index) => {
+    const publicationTarget = report.publicationTargets[index];
+    if (publicationTarget === undefined) return "";
     const figma = assetByTargetAndRole.get(`${result.targetId}:figma`);
     const browser = assetByTargetAndRole.get(`${result.targetId}:browser`);
     const diff = assetByTargetAndRole.get(`${result.targetId}:diff`);
-    const reviewMatch = `${(result.metrics.reviewMatchRatio * 100).toFixed(2)}%`;
-    const exactMatch = `${(result.metrics.exactMatchRatio * 100).toFixed(2)}%`;
+    const overlay = assetByTargetAndRole.get(`${result.targetId}:overlay`);
+    const reviewMatch = `${(publicationTarget.metrics.reviewMatchRatio * 100).toFixed(2)}%`;
+    const mismatch = `${((1 - publicationTarget.metrics.reviewMatchRatio) * 100).toFixed(2)}%`;
+    const exactMatch = `${(publicationTarget.metrics.exactMatchRatio * 100).toFixed(2)}%`;
+    const maskedArea = `${(publicationTarget.metrics.maskedAreaRatio * 100).toFixed(2)}%`;
+    const threshold = `${(publicationTarget.metrics.threshold * 100).toFixed(2)}%`;
     const target = visualTargetDisplay(result, index, locale);
+    const route = escapeMarkdownTableCell(redactSecretShapes(publicationTarget.route));
+    const state = escapeMarkdownTableCell(redactSecretShapes(publicationTarget.state));
+    const fixture = escapeMarkdownTableCell(redactSecretShapes(publicationTarget.fixture));
+    const diagnostics = [
+      diagnosticLink(diff, "Diff", target.name),
+      diagnosticLink(overlay, "Overlay", target.name),
+    ].filter((item): item is string => item !== undefined);
 
-    const screenCell =
-      target.context === undefined
-        ? escapeMarkdownTableCell(target.name)
-        : `${escapeMarkdownTableCell(target.name)}<br>${escapeMarkdownTableCell(target.context)}`;
-
-    return locale === "ko"
-      ? [
-          screenCell,
-          imageCell(figma, labels.baseline, target.name),
-          imageCell(browser, labels.actual, target.name),
-          imageCell(diff, "차이", target.name),
-          reviewMatch,
-          exactMatch,
-          koreanVisualStatus(result.status),
-        ]
-      : [
-          screenCell,
-          imageCell(figma, labels.baseline, target.name),
-          imageCell(browser, labels.actual, target.name),
-          imageCell(diff, "Diff", target.name),
-          reviewMatch,
-          exactMatch,
-          result.status,
-        ];
+    return [
+      `#### ${escapeMarkdownTableCell(target.name)} · ${fixture}`,
+      "",
+      locale === "ko"
+        ? "| 경로 | 상태 | Fixture | 화면 | DPR | 시도 | 검토 일치율 | 불일치율 | 픽셀 일치율 | 마스킹 | 기준 | 결과 |"
+        : "| Route | State | Fixture | Viewport | DPR | Attempt | Review match | Mismatch | Pixel match | Masked | Threshold | Status |",
+      "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+      `| ${route} | ${state} | ${fixture} | ${publicationTarget.viewport.width}×${publicationTarget.viewport.height} | ${publicationTarget.deviceScaleFactor} | ${publicationTarget.attempt} | ${reviewMatch} | ${mismatch} | ${exactMatch} | ${maskedArea} | ${threshold} | ${locale === "ko" ? koreanVisualStatus(result.status) : result.status} |`,
+      "",
+      `| ${labels.baseline} | ${labels.actual} |`,
+      "| --- | --- |",
+      `| ${imageCell(figma, labels.baseline, target.name, 320)} | ${imageCell(browser, labels.actual, target.name, 320)} |`,
+      ...(diagnostics.length === 0
+        ? []
+        : ["", `${locale === "ko" ? "진단" : "Diagnostics"}: ${diagnostics.join(" · ")}`]),
+    ].join("\n");
   });
 
   const hasNonEmbeddable = assets.some((asset) => asset.embeddable === false);
@@ -1880,11 +2005,7 @@ function renderVisualEvidencePreview(
     visualPreviewDescription(report, assets, locale),
     fallbackNote,
     "",
-    locale === "ko"
-      ? `| 화면 | ${labels.baseline} | ${labels.actual} | 차이 | 검토 일치율 | 픽셀 일치율 | 결과 |`
-      : `| Screen | ${labels.baseline} | ${labels.actual} | Diff | Review match | Exact match | Status |`,
-    "| --- | --- | --- | --- | ---: | ---: | --- |",
-    ...rows.map((row) => `| ${row.join(" | ")} |`),
+    ...blocks.filter((block) => block !== ""),
     VISUAL_PREVIEW_END,
   ].join("\n");
 }
@@ -1976,6 +2097,7 @@ function imageCell(
   asset: PublishedReviewAsset | undefined,
   altPrefix: string,
   targetName: string,
+  width = 320,
 ): string {
   if (asset === undefined) {
     return "-";
@@ -1987,7 +2109,19 @@ function imageCell(
     return `[${escapeMarkdownTableCell(`${altPrefix} · ${targetName} ↗`)}](${asset.url})`;
   }
 
-  return `<img src="${escapeHtmlAttribute(asset.url)}" alt="${escapeHtmlAttribute(`${altPrefix} · ${targetName}`)}" width="260" />`;
+  return `<img src="${escapeHtmlAttribute(asset.url)}" alt="${escapeHtmlAttribute(`${altPrefix} · ${targetName}`)}" width="${width}" />`;
+}
+
+function diagnosticLink(
+  asset: PublishedReviewAsset | undefined,
+  label: string,
+  targetName: string,
+): string | undefined {
+  if (asset === undefined) return undefined;
+  if (asset.embeddable === false) {
+    return `[${escapeMarkdownTableCell(`${label} · ${targetName} ↗`)}](${asset.url})`;
+  }
+  return `[${label}](${asset.url})`;
 }
 
 function extensionForMediaType(mediaType: string): string {
