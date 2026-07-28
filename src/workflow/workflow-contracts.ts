@@ -13,6 +13,7 @@ import {
 } from "../visual/visual-comparator.js";
 import { WorkspaceBindingSchema } from "../workspace/workspace-binding.js";
 import { DraftEvidenceBundleSchema } from "./draft-evidence-bundle.js";
+import { PacketEvidenceIndexSchema } from "./packet-evidence-index.js";
 import {
   CapturedFigmaComponentSchema,
   FigmaDesignMappingSchema,
@@ -425,9 +426,21 @@ export const ImplementationReviewPacketSchema = z
     evidenceDigest: Sha256DigestSchema,
     diffDigest: Sha256DigestSchema,
     changedFiles: z.array(z.string().trim().min(1)).max(10_000),
+    snapshotArtifactId: ArtifactIdSchema.optional(),
+    snapshotDigest: Sha256DigestSchema.optional(),
+    evidenceIndex: PacketEvidenceIndexSchema.optional(),
     visualLineageId: ReviewPacketIdSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((packet, context) => {
+    if ((packet.snapshotArtifactId === undefined) !== (packet.snapshotDigest === undefined)) {
+      context.addIssue({
+        code: "custom",
+        path: ["snapshotArtifactId"],
+        message: "Implementation snapshot artifact ID and digest must be bound together",
+      });
+    }
+  });
 
 const RequirementContractSchema = z
   .object({
@@ -1795,6 +1808,7 @@ export const WorkflowActionSchema = z.union([
       kind: z.literal("review-functional"),
       runId: RunIdSchema,
       reviewPacketId: ReviewPacketIdSchema,
+      evidenceIndex: PacketEvidenceIndexSchema.optional(),
     })
     .strict(),
   z
@@ -1802,6 +1816,7 @@ export const WorkflowActionSchema = z.union([
       kind: z.literal("review-design"),
       runId: RunIdSchema,
       reviewPacketId: ReviewPacketIdSchema,
+      evidenceIndex: PacketEvidenceIndexSchema.optional(),
     })
     .strict(),
   z.object({ kind: z.literal("publish-draft"), runId: RunIdSchema }).strict(),

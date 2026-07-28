@@ -173,6 +173,16 @@ import {
   type VisualAttemptReservation,
   type VisualAttemptReservationEvent,
 } from "../workflow/visual-attempt-reservation.js";
+import {
+  ImplementationSnapshotSchema,
+  implementationRepositoryKey,
+  reusableImplementationSnapshot,
+  type ImplementationSnapshot,
+} from "../workflow/implementation-snapshot.js";
+import {
+  PacketEvidenceIndexSchema,
+  type PacketEvidenceEntry,
+} from "../workflow/packet-evidence-index.js";
 
 const WORKER_ID = "workflow-orchestrator" as const;
 const execFileAsync = promisify(execFile);
@@ -1044,16 +1054,27 @@ export class WorkflowService {
       (submission.kind === "functional-review" || submission.kind === "design-review") &&
       submission.verdict !== "changes-requested"
     ) {
-      await assertReviewPacketFresh(run, this.metrics);
+      await assertReviewPacketFresh(run, this.dependencies.artifactStore, this.metrics);
     }
     const evidenceArtifacts = await this.ingestSubmissionEvidence(run, submission);
     const implementationSnapshot =
       submission.kind === "implementation" && submission.status === "passed"
-        ? await captureGitSnapshot(run, this.metrics)
+        ? await captureGitSnapshot(run, this.metrics, this.now())
         : undefined;
     if (submission.kind === "implementation" && implementationSnapshot !== undefined) {
       assertChangedFilesMatch(submission.changedFiles, implementationSnapshot.changedFiles);
     }
+    const implementationSnapshotArtifact =
+      submission.kind === "implementation" &&
+      implementationSnapshot?.implementationSnapshot !== undefined
+        ? await this.writeImplementationSnapshotArtifact(
+            implementationSnapshot.implementationSnapshot,
+          )
+        : undefined;
+    const evidenceIndex =
+      submission.kind === "implementation" && implementationSnapshot !== undefined
+        ? buildImplementationEvidenceIndex(submission, evidenceArtifacts, implementationSnapshot)
+        : [];
     const reviewPacket =
       submission.kind === "implementation" && implementationSnapshot !== undefined
         ? await createImplementationReviewPacket(
@@ -1061,8 +1082,14 @@ export class WorkflowService {
             implementationSnapshot,
             evidenceArtifacts,
             this.dependencies.artifactStore,
+            implementationSnapshotArtifact,
+            evidenceIndex,
           )
         : undefined;
+    const acceptedEvidenceArtifacts =
+      implementationSnapshotArtifact === undefined
+        ? evidenceArtifacts
+        : [...evidenceArtifacts, implementationSnapshotArtifact];
 
     if (submission.kind === "figma-bundle") {
       await this.recordSubmissionArtifact(run, submission, evidenceArtifacts);
@@ -1102,10 +1129,10 @@ export class WorkflowService {
     const artifact = await this.recordSubmissionArtifact(
       activeRun,
       submission,
-      evidenceArtifacts,
+      acceptedEvidenceArtifacts,
       reviewPacket,
     );
-    const artifactIds = [...evidenceArtifacts.map((item) => item.id), artifact.id];
+    const artifactIds = [...acceptedEvidenceArtifacts.map((item) => item.id), artifact.id];
     const outcome = submissionOutcome(submission);
 
     if (
@@ -1645,7 +1672,7 @@ export class WorkflowService {
     if (reviewPacketFromRun(run) === undefined) {
       throw new Error("Ready publication requires the current implementation review packet");
     }
-    await assertReviewPacketFresh(run, this.metrics);
+    await assertReviewPacketFresh(run, this.dependencies.artifactStore, this.metrics);
     const packet = reviewPacketFromRun(run)!;
     const reportArtifact = readyReportArtifactForPacket(run, packet.id);
     if (reportArtifact === undefined) {
@@ -2168,6 +2195,35 @@ export class WorkflowService {
     );
 
     return artifact;
+  }
+
+  private async writeImplementationSnapshotArtifact(
+    snapshot: ImplementationSnapshot,
+  ): Promise<ArtifactRef> {
+    const parsed = ImplementationSnapshotSchema.parse(snapshot);
+    const content = Buffer.from(`${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+    const blob = await this.dependencies.artifactStore.writeBlob({
+      content,
+      mediaType: "application/json",
+      storedAt: parsed.capturedAt,
+      label: "implementation-snapshot-v1.json",
+    });
+    return ArtifactRefSchema.parse({
+      id: createArtifactId(),
+      kind: "agent-result-report",
+      uri: blob.uri,
+      mediaType: "application/json",
+      digest: blob.digest,
+      producedBy: "orchestrator",
+      evidenceIds: [],
+      createdAt: parsed.capturedAt,
+      metadata: {
+        adapter: "implementation-snapshot-v1",
+        schemaVersion: parsed.schemaVersion,
+        headSha: parsed.headSha,
+        diffDigest: parsed.diffDigest,
+      },
+    });
   }
 
   private async withLeaseHeartbeat<T>(
@@ -4296,7 +4352,7 @@ export class WorkflowService {
     const timestamp = this.now();
     const packet = reviewPacketFromRun(run);
     if (packet === undefined) throw new Error("A current implementation review packet is required");
-    await assertReviewPacketFresh(run, this.metrics);
+    await assertReviewPacketFresh(run, this.dependencies.artifactStore, this.metrics);
     const submissions = await this.latestWorkflowSubmissions(run);
     const contracts = submissions.get("contracts");
     const implementation = submissions.get("implementation");
@@ -4709,7 +4765,7 @@ export class WorkflowService {
       packet = terminalPacket.data;
     } else if (packet !== undefined) {
       try {
-        await assertReviewPacketFresh(run, this.metrics);
+        await assertReviewPacketFresh(run, this.dependencies.artifactStore, this.metrics);
       } catch {
         packet = undefined;
       }
@@ -6241,6 +6297,9 @@ async function actionsForRun(
         kind: "review-functional",
         runId: run.id,
         reviewPacketId: packet.id,
+        ...(packet.evidenceIndex === undefined || packet.evidenceIndex.length === 0
+          ? {}
+          : { evidenceIndex: packet.evidenceIndex }),
       }),
     );
   }
@@ -6255,6 +6314,9 @@ async function actionsForRun(
         kind: "review-design",
         runId: run.id,
         reviewPacketId: packet.id,
+        ...(packet.evidenceIndex === undefined || packet.evidenceIndex.length === 0
+          ? {}
+          : { evidenceIndex: packet.evidenceIndex }),
       }),
     );
   }
@@ -8860,6 +8922,8 @@ async function createImplementationReviewPacket(
   snapshot: GitSnapshot,
   evidenceArtifacts: ArtifactRef[],
   artifactStore: ArtifactBlobStore,
+  snapshotArtifact: ArtifactRef | undefined,
+  evidenceIndex: PacketEvidenceEntry[],
 ): Promise<ImplementationReviewPacket> {
   const previous = reviewPacketFromRun(run);
   const evidenceHex = createHash("sha256")
@@ -8881,6 +8945,13 @@ async function createImplementationReviewPacket(
     evidenceDigest: `sha256:${evidenceHex}`,
     diffDigest: snapshot.diffDigest,
     changedFiles: snapshot.changedFiles,
+    ...(snapshotArtifact === undefined
+      ? {}
+      : {
+          snapshotArtifactId: snapshotArtifact.id,
+          snapshotDigest: snapshotArtifact.digest,
+        }),
+    evidenceIndex,
   };
   const id = createHash("sha256").update(JSON.stringify(identity)).digest("hex");
   const packetId = `packet_${id}`;
@@ -8919,15 +8990,42 @@ async function activeVisualRepairCheckpoint(
   };
 }
 
+function buildImplementationEvidenceIndex(
+  submission: Extract<WorkflowSubmission, { kind: "implementation" }>,
+  evidenceArtifacts: ArtifactRef[],
+  snapshot: GitSnapshot,
+): PacketEvidenceEntry[] {
+  const featureEvidence = submission.featureEvidence;
+  if (featureEvidence === undefined) return [];
+  const resultArtifact = evidenceArtifacts.find(
+    (artifact) => artifact.metadata["projectRelativePath"] === featureEvidence.resultPath,
+  );
+  if (resultArtifact === undefined) return [];
+  const adapter = resultArtifact.metadata["adapter"];
+  return PacketEvidenceIndexSchema.parse([
+    {
+      command: featureEvidence.testCommand,
+      selector: featureEvidence.testSelector,
+      resultDigest: resultArtifact.digest,
+      artifactId: resultArtifact.id,
+      headSha: snapshot.headSha,
+      diffDigest: snapshot.diffDigest,
+      adapterVersion: typeof adapter === "string" ? adapter : "workflow-v2-evidence",
+    },
+  ]);
+}
+
 type GitSnapshot = {
   headSha: string;
   diffDigest: `sha256:${string}`;
   changedFiles: string[];
+  implementationSnapshot?: ImplementationSnapshot;
 };
 
 export async function captureGitSnapshot(
   run: RunManifest,
   metrics: RuntimeMetricsSink = new NoopRuntimeMetrics(),
+  capturedAt = new Date().toISOString(),
 ): Promise<GitSnapshot> {
   const baseCommit = run.workspaceBinding?.baseSha ?? run.baseCommit;
   const projectRoot = run.workspaceBinding?.repositoryRoot ?? run.projectRoot;
@@ -8986,10 +9084,8 @@ export async function captureGitSnapshot(
         : Promise.resolve({ stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }),
     ]);
     const untrackedNames = untrackedResult.stdout;
-    metrics.increment(
-      "git.binary_diff_bytes",
-      Buffer.isBuffer(diff) ? diff.byteLength : Buffer.byteLength(diff),
-    );
+    const binaryDiffBytes = Buffer.isBuffer(diff) ? diff.byteLength : Buffer.byteLength(diff);
+    metrics.increment("git.binary_diff_bytes", binaryDiffBytes);
     const tracked = splitNullPaths(trackedNames);
     const untracked = splitNullPaths(untrackedNames);
     const changedFiles = [...new Set([...tracked, ...untracked])].sort();
@@ -9007,11 +9103,26 @@ export async function captureGitSnapshot(
       }
       digest.update(`\0untracked:${relativePath}\0`).update(await readFile(resolvedPath));
     }
-    return {
+    const result: GitSnapshot = {
       headSha,
       diffDigest: `sha256:${digest.digest("hex")}`,
       changedFiles,
     };
+    if (strictBinding !== undefined) {
+      result.implementationSnapshot = ImplementationSnapshotSchema.parse({
+        schemaVersion: "implementation-snapshot-v1",
+        repositoryKey: implementationRepositoryKey(root),
+        baseSha: baseCommit,
+        headSha,
+        sourceBranch: strictBinding.sourceBranch,
+        clean: true,
+        changedFiles,
+        diffDigest: result.diffDigest,
+        binaryDiffBytes,
+        capturedAt,
+      });
+    }
+    return result;
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Unable to capture the implementation Git diff: ${message}`);
@@ -9020,10 +9131,47 @@ export async function captureGitSnapshot(
 
 async function assertReviewPacketFresh(
   run: RunManifest,
+  artifactStore: ArtifactBlobStore,
   metrics: RuntimeMetricsSink = new NoopRuntimeMetrics(),
 ): Promise<void> {
   const packet = reviewPacketFromRun(run);
   if (packet === undefined) throw new Error("The implementation review packet is missing");
+  if (packet.snapshotArtifactId !== undefined && packet.snapshotDigest !== undefined) {
+    const artifact = run.artifacts.find(
+      (candidate) =>
+        candidate.id === packet.snapshotArtifactId &&
+        candidate.digest === packet.snapshotDigest &&
+        candidate.metadata["adapter"] === "implementation-snapshot-v1" &&
+        candidate.metadata["reviewPacketId"] === packet.id,
+    );
+    if (artifact !== undefined) {
+      try {
+        const snapshot = ImplementationSnapshotSchema.parse(
+          JSON.parse((await artifactStore.readContent(artifact.digest)).toString("utf8")),
+        );
+        if (
+          snapshot.baseSha === packet.baseSha &&
+          snapshot.headSha === packet.headSha &&
+          snapshot.diffDigest === packet.diffDigest &&
+          sameStrings(snapshot.changedFiles, packet.changedFiles)
+        ) {
+          const current = await captureImplementationSnapshotFence(
+            run.workspaceBinding?.repositoryRoot ?? run.projectRoot,
+            metrics,
+          );
+          if (reusableImplementationSnapshot(snapshot, current)) return;
+        }
+      } catch {
+        // A malformed or unreadable bound artifact must take the full stale path.
+      }
+    }
+    try {
+      await captureGitSnapshot(run, metrics);
+    } catch {
+      // The stale-packet error below is authoritative for all fence mismatches.
+    }
+    throw new Error("The implementation review packet is stale; current Git diff does not match");
+  }
   const snapshot = await captureGitSnapshot(run, metrics);
   if (
     snapshot.headSha !== packet.headSha ||
@@ -9032,6 +9180,35 @@ async function assertReviewPacketFresh(
   ) {
     throw new Error("The implementation review packet is stale; current Git diff does not match");
   }
+}
+
+async function captureImplementationSnapshotFence(
+  projectRoot: string,
+  metrics: RuntimeMetricsSink,
+): Promise<{ headSha: string; sourceBranch: string; clean: boolean }> {
+  metrics.increment("git.command_count", 3);
+  const [{ stdout: head }, { stdout: sourceBranch }, { stdout: status }] = await Promise.all([
+    execFileAsync("git", ["rev-parse", "--verify", "HEAD"], {
+      cwd: projectRoot,
+      encoding: "utf8",
+      maxBuffer: 1024 * 1024,
+    }),
+    execFileAsync("git", ["symbolic-ref", "--quiet", "--short", "HEAD"], {
+      cwd: projectRoot,
+      encoding: "utf8",
+      maxBuffer: 1024 * 1024,
+    }),
+    execFileAsync("git", ["status", "--porcelain=v1", "--untracked-files=no"], {
+      cwd: projectRoot,
+      encoding: "utf8",
+      maxBuffer: 5 * 1024 * 1024,
+    }),
+  ]);
+  return {
+    headSha: head.trim(),
+    sourceBranch: sourceBranch.trim(),
+    clean: status.trim() === "",
+  };
 }
 
 function assertChangedFilesMatch(declared: string[], actual: string[]): void {

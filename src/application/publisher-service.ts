@@ -130,6 +130,20 @@ type PublicationReportBinding = {
   visualReportArtifact?: ArtifactRef;
 };
 
+type PublicationExecutionFence = {
+  runRevision: number;
+  reportArtifactId: string;
+  reportDigest: string;
+  reviewPacketId?: string;
+  headSha?: string;
+  sourceBranch: string;
+  targetBranch: string;
+  remoteName: string;
+  remoteTargetKey: string;
+  credentialSource: "env" | "cli";
+  cleanStatusDigest: `sha256:${string}`;
+};
+
 type ReceiptPublishedAsset = {
   asset: PublishedReviewAsset;
   receiptArtifactId: string;
@@ -394,7 +408,13 @@ export class PublisherService {
           ...(input.remoteUrl === undefined ? {} : { remoteUrl: input.remoteUrl }),
           ...(binding.headSha === undefined ? {} : { reviewedHeadSha: binding.headSha }),
         },
-        { git: (cwd, args) => this.git(cwd, args) },
+        {
+          git: (cwd, args) => this.git(cwd, args),
+          authProbe: async () => ({
+            available: true,
+            source: "deferred-to-authoritative-publication-fence",
+          }),
+        },
       );
     }
     const timestamp = IsoDateTimeSchema.parse(this.now());
@@ -498,12 +518,14 @@ export class PublisherService {
       });
     }
 
+    let branchState: Awaited<ReturnType<PublisherService["assertPublishBranchReady"]>>;
     try {
-      await this.assertPublishBranchReady({
+      branchState = await this.assertPublishBranchReady({
         projectRoot: publicationProjectRoot(run),
         sourceBranch: input.sourceBranch,
         targetBranch: input.targetBranch,
         ...(plan.payload.headSha === undefined ? {} : { headSha: plan.payload.headSha }),
+        workspaceValidated: run.workspaceBinding !== undefined,
       });
     } catch (error: unknown) {
       if (!(error instanceof PublishNoDeltaError)) throw error;
@@ -527,9 +549,50 @@ export class PublisherService {
       });
     }
 
+    let credential: ReturnType<typeof readPublisherToken>;
+    try {
+      credential = readPublisherToken(plan.target.host, new URL(plan.target.webBaseUrl).hostname);
+    } catch (error: unknown) {
+      const result = failedPublishResult({
+        runId: plan.runId,
+        target: plan.target,
+        reportArtifactId: plan.payload.reportArtifactId,
+        error,
+        publishedAt: timestamp,
+      });
+      return this.recordPublishResult({
+        runId: run.id,
+        result,
+        payload: plan.payload,
+        timestamp,
+        remoteName: input.remoteName,
+        pushBranch: input.pushBranch,
+        addPublishingAgentResult: false,
+      });
+    }
+    const reportArtifact = requireArtifact(run.artifacts, plan.payload.reportArtifactId);
+    await this.assertPublicationBindingsCurrent(run, plan, reportArtifact, branchState.headSha);
+    const fence: PublicationExecutionFence = {
+      runRevision: run.revision,
+      reportArtifactId: reportArtifact.id,
+      reportDigest: reportArtifact.digest,
+      ...(plan.payload.reviewPacketId === undefined
+        ? {}
+        : { reviewPacketId: plan.payload.reviewPacketId }),
+      ...(branchState.headSha === undefined ? {} : { headSha: branchState.headSha }),
+      sourceBranch: input.sourceBranch,
+      targetBranch: input.targetBranch,
+      remoteName: input.remoteName,
+      remoteTargetKey: publicationRemoteTargetKey(plan.target),
+      credentialSource: publisherCredentialSource(credential.source),
+      cleanStatusDigest: branchState.cleanStatusDigest,
+    };
+
     const result = await this.executePublish({
       run,
       plan,
+      fence,
+      token: credential.token,
       timestamp,
       pushBranch: input.pushBranch,
       remoteName: input.remoteName,
@@ -790,36 +853,43 @@ export class PublisherService {
     sourceBranch: string;
     targetBranch: string;
     headSha?: string;
-  }): Promise<void> {
-    const status = (await this.git(input.projectRoot, ["status", "--porcelain"])).stdout.trim();
+    workspaceValidated?: boolean;
+  }): Promise<{ headSha?: string; cleanStatusDigest: `sha256:${string}` }> {
+    let checkedOutHead = input.headSha;
+    let status = "";
+    if (!input.workspaceValidated) {
+      status = (await this.git(input.projectRoot, ["status", "--porcelain"])).stdout.trim();
+    }
     if (status.length > 0) {
       throw new Error(
         "Draft publication requires a clean working tree; commit the intended implementation changes first",
       );
     }
 
-    const checkedOutBranch = (
-      await this.git(input.projectRoot, ["symbolic-ref", "--quiet", "--short", "HEAD"])
-    ).stdout.trim();
-    if (checkedOutBranch !== input.sourceBranch) {
-      throw new Error(
-        `Draft publication requires checked-out branch ${input.sourceBranch}; found ${checkedOutBranch || "detached HEAD"}`,
-      );
-    }
+    if (!input.workspaceValidated) {
+      const checkedOutBranch = (
+        await this.git(input.projectRoot, ["symbolic-ref", "--quiet", "--short", "HEAD"])
+      ).stdout.trim();
+      if (checkedOutBranch !== input.sourceBranch) {
+        throw new Error(
+          `Draft publication requires checked-out branch ${input.sourceBranch}; found ${checkedOutBranch || "detached HEAD"}`,
+        );
+      }
 
-    const checkedOutHead = (
-      await this.git(input.projectRoot, ["rev-parse", "--verify", "HEAD"])
-    ).stdout.trim();
-    const sourceHead = (
-      await this.git(input.projectRoot, ["rev-parse", "--verify", input.sourceBranch])
-    ).stdout.trim();
-    if (checkedOutHead !== sourceHead) {
-      throw new Error(`Checked-out HEAD does not match source branch ${input.sourceBranch}`);
-    }
-    if (input.headSha !== undefined && checkedOutHead !== input.headSha) {
-      throw new Error(
-        `Checked-out HEAD ${checkedOutHead} does not match the reviewed source SHA ${input.headSha}`,
-      );
+      checkedOutHead = (
+        await this.git(input.projectRoot, ["rev-parse", "--verify", "HEAD"])
+      ).stdout.trim();
+      const sourceHead = (
+        await this.git(input.projectRoot, ["rev-parse", "--verify", input.sourceBranch])
+      ).stdout.trim();
+      if (checkedOutHead !== sourceHead) {
+        throw new Error(`Checked-out HEAD does not match source branch ${input.sourceBranch}`);
+      }
+      if (input.headSha !== undefined && checkedOutHead !== input.headSha) {
+        throw new Error(
+          `Checked-out HEAD ${checkedOutHead} does not match the reviewed source SHA ${input.headSha}`,
+        );
+      }
     }
 
     const aheadText = (
@@ -833,6 +903,10 @@ export class PublisherService {
     if (!Number.isSafeInteger(ahead) || ahead < 1) {
       throw new PublishNoDeltaError(input.sourceBranch, input.targetBranch);
     }
+    return {
+      ...(checkedOutHead === undefined ? {} : { headSha: checkedOutHead }),
+      cleanStatusDigest: `sha256:${createHash("sha256").update(status).digest("hex")}`,
+    };
   }
 
   public async recordReview(rawInput: unknown) {
@@ -866,9 +940,38 @@ export class PublisherService {
     });
   }
 
+  private async assertPublicationBindingsCurrent(
+    sourceRun: Awaited<ReturnType<RunStore["get"]>>,
+    plan: z.infer<typeof PublishPlanSchema>,
+    reportArtifact: ArtifactRef,
+    headSha: string | undefined,
+  ): Promise<void> {
+    const current = await this.runStore.get(plan.runId);
+    const report = current.artifacts.find(
+      (artifact) => artifact.id === reportArtifact.id && artifact.digest === reportArtifact.digest,
+    );
+    if (current.revision !== sourceRun.revision || report === undefined) {
+      throw new Error("PUBLISH_EXECUTION_FENCE_STALE: Run or report binding changed");
+    }
+    if (plan.payload.reviewPacketId !== undefined) {
+      const implementation = current.stages.find((stage) => stage.name === "implementation");
+      const packet = implementation?.checkpoint?.data["reviewPacket"];
+      if (
+        typeof packet === "object" &&
+        packet !== null &&
+        ((packet as Record<string, unknown>)["id"] !== plan.payload.reviewPacketId ||
+          (packet as Record<string, unknown>)["headSha"] !== headSha)
+      ) {
+        throw new Error("PUBLISH_EXECUTION_FENCE_STALE: review packet or head binding changed");
+      }
+    }
+  }
+
   private async executePublish(input: {
     run: Awaited<ReturnType<RunStore["get"]>>;
     plan: z.infer<typeof PublishPlanSchema>;
+    fence: PublicationExecutionFence;
+    token: string;
     timestamp: string;
     pushBranch: boolean;
     remoteName: string;
@@ -877,17 +980,16 @@ export class PublisherService {
     try {
       this.metrics.increment("publisher.http_count", 1, { host: input.plan.target.host });
       input.signal?.throwIfAborted();
-      const token = readPublisherToken(
-        input.plan.target.host,
-        new URL(input.plan.target.webBaseUrl).hostname,
-      );
+      assertPublicationFenceMatchesPlan(input.fence, input.plan, input.remoteName);
 
       if (input.pushBranch) {
         await this.git(publicationProjectRoot(input.run), [
           "push",
           "--set-upstream",
           input.remoteName,
-          input.plan.payload.sourceBranch,
+          ...(input.fence.headSha === undefined
+            ? [input.plan.payload.sourceBranch]
+            : [`${input.fence.headSha}:refs/heads/${input.plan.payload.sourceBranch}`]),
         ]);
       }
       input.signal?.throwIfAborted();
@@ -897,7 +999,7 @@ export class PublisherService {
         run: input.run,
         plan: input.plan,
         publisher,
-        token: token.token,
+        token: input.token,
         timestamp: input.timestamp,
         signal: input.signal,
       });
@@ -920,7 +1022,7 @@ export class PublisherService {
       const existing = await publisher.findExisting({
         target: input.plan.target,
         payload: prepared.payload,
-        token: token.token,
+        token: input.token,
         ...(input.signal === undefined ? {} : { signal: input.signal }),
       });
       if (existing !== undefined && !existing.draft) {
@@ -931,14 +1033,14 @@ export class PublisherService {
           ? await publisher.create({
               target: input.plan.target,
               payload: prepared.payload,
-              token: token.token,
+              token: input.token,
               ...(input.signal === undefined ? {} : { signal: input.signal }),
             })
           : await publisher.update({
               target: input.plan.target,
               requestNumber: existing.number,
               update: reviewRequestUpdateFromPayload(prepared.payload),
-              token: token.token,
+              token: input.token,
               ...(input.signal === undefined ? {} : { signal: input.signal }),
             });
       if (!request.draft) {
@@ -952,7 +1054,7 @@ export class PublisherService {
           const remoteBody = await publisher.readBody({
             target: input.plan.target,
             requestNumber: request.number,
-            token: token.token,
+            token: input.token,
             ...(input.signal === undefined ? {} : { signal: input.signal }),
           });
           assertPublishedAssetUrlsInBody(remoteBody, prepared.publishedAssets);
@@ -2003,6 +2105,44 @@ async function defaultGitCommandRunner(
     stdout: Buffer.isBuffer(result.stdout) ? result.stdout.toString(encoding) : result.stdout,
     stderr: Buffer.isBuffer(result.stderr) ? result.stderr.toString(encoding) : result.stderr,
   };
+}
+
+function publicationRemoteTargetKey(target: PublishTarget): string {
+  return `sha256:${createHash("sha256")
+    .update(
+      JSON.stringify({
+        host: target.host,
+        webBaseUrl: target.webBaseUrl,
+        apiBaseUrl: target.apiBaseUrl,
+        owner: target.owner,
+        repo: target.repo,
+      }),
+    )
+    .digest("hex")}`;
+}
+
+function publisherCredentialSource(source: string): "env" | "cli" {
+  return /^(?:gh|glab)\s/.test(source) ? "cli" : "env";
+}
+
+function assertPublicationFenceMatchesPlan(
+  fence: PublicationExecutionFence,
+  plan: z.infer<typeof PublishPlanSchema>,
+  remoteName: string,
+): void {
+  if (
+    fence.reportArtifactId !== plan.payload.reportArtifactId ||
+    fence.reviewPacketId !== plan.payload.reviewPacketId ||
+    (plan.payload.headSha !== undefined && fence.headSha !== plan.payload.headSha) ||
+    fence.sourceBranch !== plan.payload.sourceBranch ||
+    fence.targetBranch !== plan.payload.targetBranch ||
+    fence.remoteName !== remoteName ||
+    fence.remoteTargetKey !== publicationRemoteTargetKey(plan.target)
+  ) {
+    throw new Error(
+      "PUBLISH_EXECUTION_FENCE_STALE: report, packet, head, branch, or remote binding changed",
+    );
+  }
 }
 
 function resolvePrReportArtifact(

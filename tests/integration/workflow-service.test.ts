@@ -36,6 +36,7 @@ import type {
 } from "../../src/publisher/index.js";
 import { ArtifactRefSchema } from "../../src/runtime/artifact.js";
 import { createArtifactId } from "../../src/runtime/id-factory.js";
+import { RuntimeMetricsRecorder } from "../../src/runtime/performance-instrumentation.js";
 import type { RunManifest } from "../../src/run/index.js";
 import { createDraftEvidenceBundle } from "../../src/workflow/draft-evidence-bundle.js";
 import { defaultVisualComparisonPool } from "../../src/visual/visual-comparison-pool.js";
@@ -5348,6 +5349,22 @@ describe("WorkflowService", () => {
       "compare-visuals",
       "review-functional",
     ]);
+    const functionalAction = implemented.nextActions.find(
+      (action) => action.kind === "review-functional",
+    );
+    expect(functionalAction).toMatchObject({
+      evidenceIndex: [
+        {
+          command: "playwright test e2e/checkout.spec.ts",
+          selector: "e2e/checkout.spec.ts",
+          resultDigest: expect.stringMatching(/^sha256:/),
+          artifactId: expect.stringMatching(/^art_/),
+          headSha: expect.stringMatching(/^[a-f0-9]{40}$/),
+          diffDigest: expect.stringMatching(/^sha256:/),
+          adapterVersion: "workflow-v2-evidence",
+        },
+      ],
+    });
     const visualAction = implemented.nextActions.find(
       (action) => action.kind === "compare-visuals",
     );
@@ -6428,6 +6445,141 @@ describe("WorkflowService", () => {
         { name: "design-review", status: "passed" },
       ]),
     );
+  });
+
+  it("captures one binary diff for two reviewers and the report on one clean packet", async () => {
+    const workspace = await prepareStrictWorkspace(directory);
+    const metrics = new RuntimeMetricsRecorder();
+    service = new WorkflowService({ ...dependencies, metrics });
+    const started = await service.start({
+      projectRoot: path.join(directory, "src/pages/shop"),
+      requestText: "Implement and independently review a responsive shop page.",
+      scope: "ui",
+      publication: "none",
+      workspace: {
+        sourceBranch: "codex/shop",
+        targetBranch: "release-qa",
+        remoteName: "origin",
+      },
+    });
+    const startedRun = await store.get(started.runId);
+    await store.save(
+      {
+        ...startedRun,
+        revision: startedRun.revision + 1,
+        stages: startedRun.stages.map((item) =>
+          item.name === "intake"
+            ? {
+                ...item,
+                checkpoint: {
+                  ...item.checkpoint!,
+                  data: {
+                    ...item.checkpoint!.data,
+                    workload: {
+                      size: "L",
+                      score: 51,
+                      confidence: "high",
+                      source: "contracts",
+                      tokenRange: { min: 160_000, max: 320_000 },
+                      budget: {
+                        checkpointPercent: 80,
+                        checkpointAtTokens: 256_000,
+                        hardLimitTokens: 320_000,
+                      },
+                      sampleCount: 1,
+                      reasons: ["parallel reviewer coverage"],
+                    },
+                  },
+                },
+              }
+            : item,
+        ),
+      },
+      startedRun.revision,
+    );
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "contracts",
+        status: "passed",
+        summary: "Shop contract ready.",
+        artifactPaths: ["contracts/requirements.json"],
+        requirementManifest: requirements("shop"),
+      },
+    });
+    await changeSource(
+      directory,
+      "src/pages/shop/App.ts",
+      "export const shop = 'packet-evidence';\n",
+    );
+    await execFileAsync("git", ["add", "src/pages/shop/App.ts"], { cwd: directory });
+    await execFileAsync("git", ["commit", "-qm", "implement shop"], { cwd: directory });
+    const implemented = await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "implementation",
+        status: "passed",
+        summary: "Shop implemented.",
+        apiReady: false,
+        uiChanged: true,
+        changedFiles: ["src/pages/shop/App.ts"],
+        artifactPaths: ["test-results/unit.json"],
+      },
+    });
+    const implementationMetrics = metrics.snapshot({
+      runId: started.runId,
+      fixtureDigest: `sha256:${"f".repeat(64)}`,
+      collectedAt: "2026-07-29T00:00:00.000Z",
+    });
+    const implementationDiffBytes = implementationMetrics.samples.find(
+      (sample) => sample.name === "git.binary_diff_bytes",
+    )?.value;
+    const packetId = reviewPacketId(implemented, "review-functional");
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "functional-review",
+        reviewPacketId: packetId,
+        verdict: "approved",
+        summary: "Functional behavior passed.",
+        findings: [],
+        requirements: [{ id: "shop", verdict: "accepted" }],
+        artifactPaths: ["test-results/unit.json"],
+        gateResults: [
+          { id: "functional", status: "passed", evidencePaths: ["test-results/unit.json"] },
+        ],
+      },
+    });
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "design-review",
+        reviewPacketId: packetId,
+        verdict: "approved",
+        summary: "Design and accessibility passed.",
+        findings: [],
+        requirements: [{ id: "shop", verdict: "accepted" }],
+        artifactPaths: ["visual/diff.png"],
+        gateResults: [
+          { id: "visual", status: "passed", evidencePaths: ["visual/diff.png"] },
+          { id: "accessibility", status: "passed", evidencePaths: ["visual/diff.png"] },
+        ],
+      },
+    });
+    await service.advance({ runId: started.runId, until: "report" });
+
+    const snapshot = metrics.snapshot({
+      runId: started.runId,
+      fixtureDigest: `sha256:${"f".repeat(64)}`,
+      collectedAt: "2026-07-29T00:00:00.000Z",
+    });
+    expect(snapshot.samples.find((sample) => sample.name === "git.binary_diff_bytes")?.value).toBe(
+      implementationDiffBytes,
+    );
+    expect(
+      snapshot.samples.find((sample) => sample.name === "git.command_count")?.value,
+    ).toBeLessThanOrEqual(14);
+    expect(workspace.releaseQaSha).toHaveLength(40);
   });
 
   it("enforces baseline isolation and renderer lineage, reuses baselines, and keeps full fresh coverage across three visual failures", async () => {

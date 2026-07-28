@@ -166,6 +166,102 @@ describe("PublisherService", () => {
     expect(githubPublisher.createdPayloads).toHaveLength(0);
   });
 
+  it("resolves bound Git and remote state once for one authoritative publish call", async () => {
+    gitCurrentBranch = "codex/pinned";
+    const run = await runService.createRun({
+      projectRoot,
+      workspaceBinding: {
+        repositoryRoot: projectRoot,
+        targetPaths: ["src/page/shop"],
+        supportingPaths: [],
+        sourceBranch: "codex/pinned",
+        targetBranch: "release-qa",
+        baseSha: gitHead,
+        initialHeadSha: gitHead,
+        remoteName: "origin",
+        remoteUrl: "https://github.com/acme/spec-to-pr.git",
+        remoteProvider: "github",
+        remoteHost: "github.com",
+        publicationTarget: {
+          host: "github",
+          webBaseUrl: "https://github.com",
+          apiBaseUrl: "https://api.github.com",
+          owner: "acme",
+          repo: "spec-to-pr",
+        },
+      },
+    });
+    await markRunReadyForPublish(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    gitCalls = [];
+
+    await publisherService.publish({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "codex/pinned",
+      targetBranch: "release-qa",
+      remoteName: "origin",
+      pushBranch: false,
+      confirm: true,
+    });
+
+    expect(gitCalls.filter((args) => args[0] === "status")).toHaveLength(1);
+    expect(gitCalls.filter((args) => args[0] === "symbolic-ref")).toHaveLength(1);
+    expect(
+      gitCalls.filter((args) => args[0] === "rev-parse" && args.at(-1) === "HEAD"),
+    ).toHaveLength(1);
+    expect(
+      gitCalls.filter((args) => args[0] === "rev-parse" && args.at(-1) === "codex/pinned"),
+    ).toHaveLength(1);
+    expect(gitCalls.filter((args) => args[0] === "remote")).toHaveLength(1);
+    expect(gitCalls.filter((args) => args[0] === "rev-list")).toHaveLength(1);
+  });
+
+  it("invalidates the private publication fence when the Run revision changes", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    let reads = 0;
+    const changingStore: RunStore = {
+      create: (manifest) => store.create(manifest),
+      get: async (runId) => {
+        const current = await store.get(runId);
+        reads += 1;
+        return reads < 3 ? current : { ...current, revision: current.revision + 1 };
+      },
+      list: (filter) => store.list(filter),
+      save: (manifest, expectedRevision) => store.save(manifest, expectedRevision),
+      close: async () => {},
+    };
+    const fencedService = new PublisherService(
+      changingStore,
+      artifactStore,
+      () => "2026-06-23T00:00:02.000Z",
+      { github: githubPublisher, gitlab: gitlabPublisher },
+      async (_cwd, args) => {
+        if (args[0] === "status") return { stdout: "", stderr: "" };
+        if (args[0] === "rev-list") return { stdout: "1\n", stderr: "" };
+        if (args[0] === "symbolic-ref") {
+          return { stdout: "spec-to-pr/run-1\n", stderr: "" };
+        }
+        if (args[0] === "rev-parse") return { stdout: `${gitHead}\n`, stderr: "" };
+        return { stdout: "https://github.com/acme/spec-to-pr.git\n", stderr: "" };
+      },
+    );
+
+    await expect(
+      fencedService.publish({
+        runId: run.id,
+        reportArtifactId: report.markdownArtifactId,
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        pushBranch: false,
+        confirm: true,
+      }),
+    ).rejects.toThrow(/PUBLISH_EXECUTION_FENCE_STALE/);
+    expect(githubPublisher.createdPayloads).toHaveLength(0);
+  });
+
   it("rejects a lookalike remote before any provider request", async () => {
     const previousHostOverride = process.env["SPEC_TO_PR_GIT_HOST"];
     delete process.env["SPEC_TO_PR_GIT_HOST"];
@@ -430,7 +526,7 @@ describe("PublisherService", () => {
       "push",
       "--set-upstream",
       "upstream",
-      "spec-to-pr/run-upstream",
+      `${gitHead}:refs/heads/spec-to-pr/run-upstream`,
     ]);
   });
 

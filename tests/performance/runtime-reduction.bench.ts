@@ -25,6 +25,14 @@ import { SourceSnapshotStore } from "../../src/source-registry/snapshot-store.js
 import { orderedConcurrentMap } from "../../src/source-ingestion/source-loader.js";
 import { SqliteRunStore } from "../../src/store/sqlite-run-store.js";
 import {
+  ImplementationSnapshotSchema,
+  reusableImplementationSnapshot,
+} from "../../src/workflow/implementation-snapshot.js";
+import {
+  PacketEvidenceEntrySchema,
+  reusablePacketEvidence,
+} from "../../src/workflow/packet-evidence-index.js";
+import {
   MAX_ACTIVE_VISUAL_PIXELS,
   MAX_VISUAL_COMPARISON_ACTIVE_ALLOCATION_BYTES,
   MAX_VISUAL_COMPARISON_BATCH_INPUT_BYTES,
@@ -70,6 +78,7 @@ const measuredMutatingInventoryReads: number[] = [];
 const measuredMutatingStartBytes: number[] = [];
 const measuredMutatingAdvanceBytes: number[] = [];
 const measuredMutatingSubmitBytes: number[] = [];
+const measuredPacketEvidenceReuseHits: number[] = [];
 type MeasuredVisualCounters = {
   mode: "cold" | "warm" | "total";
   cacheHits: number;
@@ -154,6 +163,11 @@ const fixtures = {
     views: ["start", "advance", "submit"],
     legacyFiles: 250,
     maximumInventoryReads: 0,
+  },
+  packetEvidence: {
+    lookupsPerIteration: 10_000,
+    expectedReuseHits: 10_000,
+    expectedStaleHits: 0,
   },
 } as const;
 
@@ -611,6 +625,67 @@ describe("runtime reduction fixtures", () => {
   );
 
   bench(
+    "packet evidence: reuse exact clean fences without recapturing binary diff",
+    async () => {
+      const rssBaseline = process.memoryUsage().rss;
+      const snapshot = ImplementationSnapshotSchema.parse({
+        schemaVersion: "implementation-snapshot-v1",
+        repositoryKey: `sha256:${"1".repeat(64)}`,
+        baseSha: "a".repeat(40),
+        headSha: "b".repeat(40),
+        sourceBranch: "codex/runtime-packet-fence",
+        clean: true,
+        changedFiles: ["src/parser.ts"],
+        diffDigest: `sha256:${"2".repeat(64)}`,
+        binaryDiffBytes: 512,
+        capturedAt: collectedAt,
+      });
+      const evidence = PacketEvidenceEntrySchema.parse({
+        command: "pnpm test -- parser",
+        selector: "parser",
+        resultDigest: `sha256:${"3".repeat(64)}`,
+        artifactId: `art_${"4".repeat(32)}`,
+        headSha: snapshot.headSha,
+        diffDigest: snapshot.diffDigest,
+        adapterVersion: "workflow-v2-evidence",
+      });
+      let reuseHits = 0;
+      let staleHits = 0;
+      const started = performance.now();
+      for (let index = 0; index < fixtures.packetEvidence.lookupsPerIteration; index += 1) {
+        if (
+          reusableImplementationSnapshot(snapshot, {
+            headSha: snapshot.headSha,
+            sourceBranch: snapshot.sourceBranch,
+            clean: true,
+          }) &&
+          reusablePacketEvidence([evidence], evidence) !== undefined
+        ) {
+          reuseHits += 1;
+        }
+        if (
+          reusablePacketEvidence([evidence], {
+            ...evidence,
+            diffDigest: `sha256:${"5".repeat(64)}`,
+          }) !== undefined
+        ) {
+          staleHits += 1;
+        }
+      }
+      recordFixtureSample("packet-evidence", performance.now() - started);
+      recordFixturePeakRss("packet-evidence", Math.max(rssBaseline, process.memoryUsage().rss));
+      if (
+        reuseHits !== fixtures.packetEvidence.expectedReuseHits ||
+        staleHits !== fixtures.packetEvidence.expectedStaleHits
+      ) {
+        throw new Error(`packet evidence fence mismatch: ${reuseHits}/${staleHits}`);
+      }
+      measuredPacketEvidenceReuseHits.push(reuseHits);
+    },
+    { iterations: 5, warmupIterations: 1, time: 0, warmupTime: 0 },
+  );
+
+  bench(
     "status action: compact projection for the 250-file legacy Run",
     async () => {
       const snapshot = await measureFixture(statusRunId, "status-action", async (recorder) => {
@@ -1027,9 +1102,11 @@ afterAll(async () => {
                   ? fixtures.status
                   : name === "mutating-action"
                     ? fixtures.mutatingStatus
-                    : name.startsWith("visual-paired-")
-                      ? { ...fixtures.pairedVisual, implementation: name }
-                      : { ...fixtures.visual, benchmarkMode: name },
+                    : name === "packet-evidence"
+                      ? fixtures.packetEvidence
+                      : name.startsWith("visual-paired-")
+                        ? { ...fixtures.pairedVisual, implementation: name }
+                        : { ...fixtures.visual, benchmarkMode: name },
           ),
         ),
       ),
@@ -1073,31 +1150,38 @@ afterAll(async () => {
                     advanceSerializedBytes: measuredMutatingAdvanceBytes[0]!,
                     submitSerializedBytes: measuredMutatingSubmitBytes[0]!,
                   }
-                : name.startsWith("visual-paired-")
+                : name === "packet-evidence"
                   ? {
-                      inputKind: fixtures.pairedVisual.inputKind,
-                      workloadDigest: sha256Digest(
-                        Buffer.from(JSON.stringify(fixtures.pairedVisual)),
-                      ),
-                      targets: fixtures.pairedVisual.targetOrder.length,
-                      comparisons: pairedComparisonCount,
-                      implementation:
-                        name === "visual-paired-serial" ? "serial" : "reused-worker-pool",
-                      throughputComparisonsPerSecond:
-                        name === "visual-paired-serial"
-                          ? pairedSerialThroughput
-                          : pairedPoolThroughput,
+                      lookupsPerIteration: fixtures.packetEvidence.lookupsPerIteration,
+                      reuseHits: measuredPacketEvidenceReuseHits[0]!,
+                      staleHits: fixtures.packetEvidence.expectedStaleHits,
+                      binaryDiffRecaptures: 0,
                     }
-                  : {
-                      targets: 2,
-                      comparisons: name === "visual-cold" ? 1 : name === "visual-warm" ? 2 : 3,
-                      pixelsPerTarget: 659160,
-                      ...(name === "visual-cold"
-                        ? coldVisual
-                        : name === "visual-warm"
-                          ? warmVisual
-                          : totalVisual),
-                    },
+                  : name.startsWith("visual-paired-")
+                    ? {
+                        inputKind: fixtures.pairedVisual.inputKind,
+                        workloadDigest: sha256Digest(
+                          Buffer.from(JSON.stringify(fixtures.pairedVisual)),
+                        ),
+                        targets: fixtures.pairedVisual.targetOrder.length,
+                        comparisons: pairedComparisonCount,
+                        implementation:
+                          name === "visual-paired-serial" ? "serial" : "reused-worker-pool",
+                        throughputComparisonsPerSecond:
+                          name === "visual-paired-serial"
+                            ? pairedSerialThroughput
+                            : pairedPoolThroughput,
+                      }
+                    : {
+                        targets: 2,
+                        comparisons: name === "visual-cold" ? 1 : name === "visual-warm" ? 2 : 3,
+                        pixelsPerTarget: 659160,
+                        ...(name === "visual-cold"
+                          ? coldVisual
+                          : name === "visual-warm"
+                            ? warmVisual
+                            : totalVisual),
+                      },
     };
   });
   const receipt = {
@@ -1130,6 +1214,9 @@ afterAll(async () => {
       mutatingStartSerializedBytes: measuredMutatingStartBytes[0]!,
       mutatingAdvanceSerializedBytes: measuredMutatingAdvanceBytes[0]!,
       mutatingSubmitSerializedBytes: measuredMutatingSubmitBytes[0]!,
+      packetEvidenceLookupsPerIteration: fixtures.packetEvidence.lookupsPerIteration,
+      packetEvidenceReuseHits: measuredPacketEvidenceReuseHits[0]!,
+      packetEvidenceBinaryDiffRecaptures: 0,
       visualPairedWorkloadDigest: sha256Digest(Buffer.from(JSON.stringify(fixtures.pairedVisual))),
       visualPairedSerialP95Ms: pairedSerialP95,
       visualPairedPoolP95Ms: pairedPoolP95,

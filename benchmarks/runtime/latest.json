@@ -10,9 +10,9 @@
     {
       "name": "mixed-intake",
       "fixtureDigest": "sha256:01f8dcbc7f6ad711167479dab0af3e4e6720d228f30d5f94b50fc74285cdc470",
-      "p50WallMs": 287.29850000000033,
-      "p95WallMs": 301.80954199999996,
-      "peakRssBytes": 443138048,
+      "p50WallMs": 303.87008300000025,
+      "p95WallMs": 311.76441699999987,
+      "peakRssBytes": 448839680,
       "environment": {
         "nodeVersion": "v24.12.0",
         "platform": "darwin",
@@ -30,9 +30,9 @@
     {
       "name": "legacy",
       "fixtureDigest": "sha256:34f75192ee4936af70d2b63387c004fd500252299099c0da221fc1fa2274d440",
-      "p50WallMs": 175.1321670000002,
-      "p95WallMs": 184.30795800000033,
-      "peakRssBytes": 509640704,
+      "p50WallMs": 178.6352909999996,
+      "p95WallMs": 184.9811669999999,
+      "peakRssBytes": 502644736,
       "environment": {
         "nodeVersion": "v24.12.0",
         "platform": "darwin",
@@ -54,11 +54,30 @@
       }
     },
     {
+      "name": "packet-evidence",
+      "fixtureDigest": "sha256:8f475f7e1daa34482383305933468bc2ea24753f92ecc5426df7b2cc6d972ff3",
+      "p50WallMs": 2.4072500000002037,
+      "p95WallMs": 2.6031670000002123,
+      "peakRssBytes": 500023296,
+      "environment": {
+        "nodeVersion": "v24.12.0",
+        "platform": "darwin",
+        "architecture": "arm64",
+        "cpuCount": 14
+      },
+      "metricCounters": {
+        "lookupsPerIteration": 10000,
+        "reuseHits": 10000,
+        "staleHits": 0,
+        "binaryDiffRecaptures": 0
+      }
+    },
+    {
       "name": "status-action",
       "fixtureDigest": "sha256:8c57658706741c9bb691092107bc1a5c5bbdfa938b070a4489eb0deedc70a59a",
-      "p50WallMs": 0.45533400000022084,
-      "p95WallMs": 0.5472920000001977,
-      "peakRssBytes": 509870080,
+      "p50WallMs": 0.30887500000062573,
+      "p95WallMs": 0.5390000000006694,
+      "peakRssBytes": 500203520,
       "environment": {
         "nodeVersion": "v24.12.0",
         "platform": "darwin",
@@ -75,9 +94,9 @@
     {
       "name": "mutating-action",
       "fixtureDigest": "sha256:7c7e79a685dd9ae96576e3c3f943f872ea7893f93a5c46df249dc25e1d569f13",
-      "p50WallMs": 101.21591700000045,
-      "p95WallMs": 104.35891700000047,
-      "peakRssBytes": 522731520,
+      "p50WallMs": 97.67200000000048,
+      "p95WallMs": 111.13066600000002,
+      "peakRssBytes": 501579776,
       "environment": {
         "nodeVersion": "v24.12.0",
         "platform": "darwin",
@@ -95,9 +114,9 @@
     {
       "name": "visual-paired-serial",
       "fixtureDigest": "sha256:438c2cdd00288d68ba8464fedade92b544223a7ddac6efef832667b93a15ad76",
-      "p50WallMs": 383.48545899999954,
-      "p95WallMs": 392.69545800000014,
-      "peakRssBytes": 839974912,
+      "p50WallMs": 377.52308300000004,
+      "p95WallMs": 379.99583299999995,
+      "peakRssBytes": 678772736,
       "environment": {
         "nodeVersion": "v24.12.0",
         "platform": "darwin",
@@ -110,15 +129,15 @@
         "targets": 2,
         "comparisons": 6,
         "implementation": "serial",
-        "throughputComparisonsPerSecond": 15.279015526581409
+        "throughputComparisonsPerSecond": 15.789646830153531
       }
     },
     {
       "name": "visual-paired-pool",
       "fixtureDigest": "sha256:a4b9b77e3bbc355bd07e8d2312e69e94367a578eab0da0653051acfea0748c0c",
-      "p50WallMs": 212.07483300000058,
-      "p95WallMs": 215.91370899999947,
-      "peakRssBytes": 848396288,
+      "p50WallMs": 204.91412499999933,
+      "p95WallMs": 208.20045800000025,
+      "peakRssBytes": 678772736,
       "environment": {
         "nodeVersion": "v24.12.0",
         "platform": "darwin",
@@ -131,15 +150,15 @@
         "targets": 2,
         "comparisons": 6,
         "implementation": "reused-worker-pool",
-        "throughputComparisonsPerSecond": 27.788879306408536
+        "throughputComparisonsPerSecond": 28.81838040913432
       }
     },
     {
       "name": "visual-cold",
       "fixtureDigest": "sha256:ea8587c5d7b5dfa8e45bb758d3590029e2b955c7d1c6ae30b098b11827cfdaec",
-      "p50WallMs": 334.96758299999965,
-      "p95WallMs": 340.4856660000005,
-      "peakRssBytes": 954335232,
+      "p50WallMs": 332.6678329999995,
+      "p95WallMs": 347.7147079999995,
+      "peakRssBytes": 866271232,
       "environment": {
         "nodeVersion": "v24.12.0",
         "platform": "darwin",
@@ -169,17 +188,17 @@
         "comparisonManagedMemoryBudgetBytes": 648524288,
         "peakManagedBytes": 35655306,
         "managedMemoryBudgetBytes": 782742016,
-        "rssBaselineBytes": 892436480,
-        "inFlightPeakRssBytes": 931921920,
-        "inFlightRssDeltaBytes": 39485440
+        "rssBaselineBytes": 755662848,
+        "inFlightPeakRssBytes": 800391168,
+        "inFlightRssDeltaBytes": 44728320
       }
     },
     {
       "name": "visual-warm",
       "fixtureDigest": "sha256:b8fcfb17bd329485972ddfbd82fd9fffdc5d158a6f66214c99b7d9a54e512e97",
-      "p50WallMs": 257.3625839999986,
-      "p95WallMs": 259.42725000000064,
-      "peakRssBytes": 953253888,
+      "p50WallMs": 248.77670900000157,
+      "p95WallMs": 255.16204199999993,
+      "peakRssBytes": 874201088,
       "environment": {
         "nodeVersion": "v24.12.0",
         "platform": "darwin",
@@ -209,17 +228,17 @@
         "comparisonManagedMemoryBudgetBytes": 648524288,
         "peakManagedBytes": 35655306,
         "managedMemoryBudgetBytes": 782742016,
-        "rssBaselineBytes": 896909312,
-        "inFlightPeakRssBytes": 929693696,
-        "inFlightRssDeltaBytes": 32784384
+        "rssBaselineBytes": 826933248,
+        "inFlightPeakRssBytes": 851984384,
+        "inFlightRssDeltaBytes": 25051136
       }
     },
     {
       "name": "visual",
       "fixtureDigest": "sha256:4e2efa1c8f3c35cfa2e590ae89e18d50f325bae3499e130c7018baa78860a288",
-      "p50WallMs": 592.3301669999983,
-      "p95WallMs": 599.9129160000011,
-      "peakRssBytes": 954335232,
+      "p50WallMs": 579.9761659999986,
+      "p95WallMs": 600.6407500000005,
+      "peakRssBytes": 874201088,
       "environment": {
         "nodeVersion": "v24.12.0",
         "platform": "darwin",
@@ -249,9 +268,9 @@
         "comparisonManagedMemoryBudgetBytes": 648524288,
         "peakManagedBytes": 35655306,
         "managedMemoryBudgetBytes": 782742016,
-        "rssBaselineBytes": 872202240,
-        "inFlightPeakRssBytes": 929693696,
-        "inFlightRssDeltaBytes": 57491456
+        "rssBaselineBytes": 801013760,
+        "inFlightPeakRssBytes": 851984384,
+        "inFlightRssDeltaBytes": 50970624
       }
     }
   ],
@@ -276,11 +295,14 @@
     "mutatingStartSerializedBytes": 1276,
     "mutatingAdvanceSerializedBytes": 1276,
     "mutatingSubmitSerializedBytes": 1761,
+    "packetEvidenceLookupsPerIteration": 10000,
+    "packetEvidenceReuseHits": 10000,
+    "packetEvidenceBinaryDiffRecaptures": 0,
     "visualPairedWorkloadDigest": "sha256:015ad7ce7efe59cdf281cf9edafbbf2045c66d02700472a1e671a6cd3a95fd17",
-    "visualPairedSerialP95Ms": 392.69545800000014,
-    "visualPairedPoolP95Ms": 215.91370899999947,
-    "visualPairedSerialThroughput": 15.279015526581409,
-    "visualPairedPoolThroughput": 27.788879306408536,
+    "visualPairedSerialP95Ms": 379.99583299999995,
+    "visualPairedPoolP95Ms": 208.20045800000025,
+    "visualPairedSerialThroughput": 15.789646830153531,
+    "visualPairedPoolThroughput": 28.81838040913432,
     "visualPairedMaximumRegressionRatio": 1.1,
     "visualComparisons": 3,
     "visualColdCacheHits": 1,
@@ -306,8 +328,8 @@
     "visualPeakManagedBytes": 35655306,
     "visualManagedMemoryBudgetBytes": 782742016,
     "visualManagedMemoryBudgetFormula": "128MiB cache + 320262144B batch caller+owned snapshots + 328262144B active decode/mask/raw/encoded/response allocations; transferred inputs remain in owned snapshots",
-    "visualInFlightPeakRssBytes": 929693696,
-    "visualInFlightRssDeltaBytes": 57491456,
+    "visualInFlightPeakRssBytes": 851984384,
+    "visualInFlightRssDeltaBytes": 50970624,
     "visualRssSamplePolicy": "maximum-delta-same-iteration"
   }
 }

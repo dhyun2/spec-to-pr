@@ -328,6 +328,7 @@ export function buildSpecToPrPrompt(input: SpecToPrCodexRunInput): string {
     "When submitting evidence, include an optional skill in guidanceTrace.appliedSkills only when it was actually applied. Do not copy unused skill hints or recommendations.",
     "Use workflow_advance until it returns an external action or terminal status. Fulfill external actions and return compact evidence with workflow_submit; use workflow_status to resume or inspect blockers.",
     "When workflow_status includes workspaceBinding, treat its repositoryRoot, sourceBranch, targetBranch, remoteName, remoteUrl, baseSha, and publicationTarget as immutable. Use those exact values for workflow_publish preview and execute; never infer or substitute a different branch, remote, host, or repository.",
+    "SDK publication preflight is advisory only and cannot authorize a later mutation; workflow_publish must resolve its own authoritative execution fence after all read-only checks.",
     buildCodexActionEnvelopeInstructions({
       publication,
       includeReviewAgents: input.enableReviewAgents !== false,

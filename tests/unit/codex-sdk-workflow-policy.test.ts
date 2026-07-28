@@ -284,6 +284,17 @@ describe("Codex SDK workflow policy", () => {
     }
   });
 
+  it("treats SDK publication preflight as advisory instead of mutation authority", () => {
+    const prompt = buildSpecToPrPrompt({
+      workingDirectory: "/tmp/project",
+      prompt: "Implement and publish the change.",
+      publication: "draft",
+    });
+
+    expect(prompt).toContain("SDK publication preflight is advisory only");
+    expect(prompt).toContain("workflow_publish must resolve its own authoritative execution fence");
+  });
+
   it("uses an exact-host GitLab credential command for blocked diagnostic preflight", async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-sdk-glab-"));
     const binDirectory = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-sdk-glab-bin-"));
