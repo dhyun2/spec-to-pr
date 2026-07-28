@@ -2,12 +2,10 @@ import { createHash } from "node:crypto";
 
 import { decodePng } from "./png-codec.js";
 import { assertBoundedPng } from "./png-decoder.js";
+import { emitVisualMemoryCheckpoint, type VisualMemoryCheckpointSink } from "./visual-memory.js";
 
 export const VISUAL_NORMALIZATION_CACHE_VERSION = "visual-normalization-cache-v1";
 export const MAX_VISUAL_NORMALIZATION_CACHE_BYTES = 128 * 1024 * 1024;
-export const VISUAL_NORMALIZATION_CACHE_TEST_SEAM: unique symbol = Symbol(
-  "visual-normalization-cache-test-seam",
-);
 
 export type VisualNormalizationCacheKey = {
   sourceDigest: `sha256:${string}`;
@@ -93,32 +91,51 @@ export class VisualNormalizationCache {
   public async getOrCompute(
     key: VisualNormalizationCacheKey,
     compute: () => Promise<VisualNormalizationCacheValue>,
+    onMemoryCheckpoint?: VisualMemoryCheckpointSink,
   ): Promise<VisualNormalizationCacheResult> {
     const cached = this.get(key);
     if (cached !== undefined) {
       this.hits += 1;
+      emitVisualMemoryCheckpoint(onMemoryCheckpoint, "cache-request-result", {
+        residentBytes: this.residentBytes,
+        requestClone: chargedBytes(cached),
+      });
       return { value: cached, disposition: "hit" };
     }
     const serialized = serializeVisualNormalizationCacheKey(key);
     const current = this.inFlight.get(serialized);
     if (current !== undefined) {
       this.singleFlights += 1;
+      const pendingValue = await current;
+      const requestClone = cloneValue(pendingValue);
+      emitVisualMemoryCheckpoint(onMemoryCheckpoint, "cache-request-result", {
+        residentBytes: this.residentBytes,
+        pendingValue: chargedBytes(pendingValue),
+        requestClone: chargedBytes(requestClone),
+      });
       return {
-        value: cloneValue(await current),
+        value: requestClone,
         disposition: "single-flight",
       };
     }
     this.misses += 1;
     const pending = compute().then((value) => {
-      if (!this.store(key, value)) {
+      if (!this.store(key, value, onMemoryCheckpoint)) {
         throw new Error("VISUAL_NORMALIZATION_CACHE_INVALID: computed entry is malformed");
       }
-      return cloneValue(value);
+      return value;
     });
     this.inFlight.set(serialized, pending);
     try {
+      const pendingValue = await pending;
+      const requestClone = cloneValue(pendingValue);
+      emitVisualMemoryCheckpoint(onMemoryCheckpoint, "cache-request-result", {
+        residentBytes: this.residentBytes,
+        pendingValue: chargedBytes(pendingValue),
+        requestClone: chargedBytes(requestClone),
+      });
       return {
-        value: cloneValue(await pending),
+        value: requestClone,
         disposition: "miss",
       };
     } finally {
@@ -156,27 +173,27 @@ export class VisualNormalizationCache {
     };
   }
 
-  public [VISUAL_NORMALIZATION_CACHE_TEST_SEAM](
+  private store(
     key: VisualNormalizationCacheKey,
-    mutate: (resident: VisualNormalizationCacheValue) => void,
-  ): void {
-    const entry = this.entries.get(serializeVisualNormalizationCacheKey(key));
-    if (entry === undefined) throw new Error("Visual normalization cache test resident is missing");
-    mutate(entry.value);
-  }
-
-  private store(key: VisualNormalizationCacheKey, value: VisualNormalizationCacheValue): boolean {
+    value: VisualNormalizationCacheValue,
+    onMemoryCheckpoint?: VisualMemoryCheckpointSink,
+  ): boolean {
     const serialized = serializeVisualNormalizationCacheKey(key);
-    if (!isCoherentValue(key, value)) {
+    if (!isCoherentValue(key, value, onMemoryCheckpoint, this.residentBytes)) {
       this.malformedEntries += 1;
       return false;
     }
     const owned = cloneValue(value);
-    const chargedBytes = owned.png.byteLength + owned.rgba.byteLength;
-    if (chargedBytes > this.maximumBytes) return true;
+    const ownedBytes = chargedBytes(owned);
+    emitVisualMemoryCheckpoint(onMemoryCheckpoint, "cache-resident-clone", {
+      incomingCacheValue: chargedBytes(value),
+      residentCacheClone: ownedBytes,
+      priorResidentBytes: this.residentBytes,
+    });
+    if (ownedBytes > this.maximumBytes) return true;
     const existing = this.entries.get(serialized);
     if (existing !== undefined) this.deleteEntry(serialized, existing);
-    while (this.residentBytes + chargedBytes > this.maximumBytes) {
+    while (this.residentBytes + ownedBytes > this.maximumBytes) {
       const oldest = this.entries.entries().next().value as [string, CacheEntry] | undefined;
       if (oldest === undefined) break;
       this.deleteEntry(oldest[0], oldest[1]);
@@ -184,11 +201,11 @@ export class VisualNormalizationCache {
     }
     this.entries.set(serialized, {
       value: owned,
-      chargedBytes,
+      chargedBytes: ownedBytes,
       pngDigest: sha256(owned.png),
       rgbaDigest: sha256(owned.rgba),
     });
-    this.residentBytes += chargedBytes;
+    this.residentBytes += ownedBytes;
     return true;
   }
 
@@ -230,6 +247,8 @@ function isValidValueShape(value: VisualNormalizationCacheValue): boolean {
 function isCoherentValue(
   key: VisualNormalizationCacheKey,
   value: VisualNormalizationCacheValue,
+  onMemoryCheckpoint?: VisualMemoryCheckpointSink,
+  residentBytes = 0,
 ): boolean {
   if (
     !isValidValueShape(value) ||
@@ -241,6 +260,11 @@ function isCoherentValue(
   try {
     assertBoundedPng(value.png, "visual normalization cache entry");
     const decoded = decodePng(value.png);
+    emitVisualMemoryCheckpoint(onMemoryCheckpoint, "cache-coherence-validation", {
+      incomingCacheValue: chargedBytes(value),
+      decodedValidationRgba: decoded.data.byteLength,
+      residentBytes,
+    });
     return (
       decoded.width === value.width &&
       decoded.height === value.height &&
@@ -264,6 +288,10 @@ function isValidResidentEntry(key: VisualNormalizationCacheKey, entry: CacheEntr
 
 function sha256(content: Buffer): string {
   return createHash("sha256").update(content).digest("hex");
+}
+
+function chargedBytes(value: VisualNormalizationCacheValue): number {
+  return value.png.byteLength + value.rgba.byteLength;
 }
 
 function cloneValue(value: VisualNormalizationCacheValue): VisualNormalizationCacheValue {

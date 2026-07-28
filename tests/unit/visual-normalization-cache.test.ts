@@ -2,10 +2,11 @@ import { PNG } from "pngjs";
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  VISUAL_NORMALIZATION_CACHE_TEST_SEAM,
   VISUAL_NORMALIZATION_CACHE_VERSION,
   VisualNormalizationCache,
+  serializeVisualNormalizationCacheKey,
   type VisualNormalizationCacheKey,
+  type VisualNormalizationCacheValue,
 } from "../../src/visual/visual-normalization-cache.js";
 
 const BASE_KEY: VisualNormalizationCacheKey = {
@@ -102,9 +103,7 @@ describe("visual normalization cache", () => {
   it("evicts a corrupt resident PNG and recomputes coherent PNG/RGBA bytes", async () => {
     const cache = new VisualNormalizationCache(1_024);
     await cache.getOrCompute(BASE_KEY, async () => value([2, 3, 4, 255]));
-    cache[VISUAL_NORMALIZATION_CACHE_TEST_SEAM](BASE_KEY, (resident) => {
-      resident.png[0] = 0;
-    });
+    corruptResidentForTest(cache, BASE_KEY).png[0] = 0;
     const compute = vi.fn(async () => value([7, 8, 9, 255]));
 
     const result = await cache.getOrCompute(BASE_KEY, compute);
@@ -158,6 +157,53 @@ describe("visual normalization cache", () => {
     });
   });
 
+  it("checkpoints incoming, resident, and request-owned cache buffers", async () => {
+    const cache = new VisualNormalizationCache(1_024);
+    const sample = value([1, 2, 3, 255]);
+    const chargedBytes = sample.png.byteLength + sample.rgba.byteLength;
+    const checkpoints: Array<{
+      stage: string;
+      managedBytes: number;
+      rssBytes: number;
+      ownership: Record<string, number>;
+    }> = [];
+
+    await cache.getOrCompute(
+      BASE_KEY,
+      async () => sample,
+      (checkpoint) => checkpoints.push(checkpoint),
+    );
+
+    expect(checkpoints).toContainEqual({
+      stage: "cache-coherence-validation",
+      managedBytes: chargedBytes + 4,
+      rssBytes: expect.any(Number),
+      ownership: {
+        incomingCacheValue: chargedBytes,
+        decodedValidationRgba: 4,
+        residentBytes: 0,
+      },
+    });
+    expect(checkpoints).toContainEqual({
+      stage: "cache-resident-clone",
+      managedBytes: chargedBytes * 2,
+      rssBytes: expect.any(Number),
+      ownership: {
+        incomingCacheValue: chargedBytes,
+        residentCacheClone: chargedBytes,
+        priorResidentBytes: 0,
+      },
+    });
+    expect(checkpoints.at(-1)).toMatchObject({
+      stage: "cache-request-result",
+      ownership: {
+        residentBytes: chargedBytes,
+        pendingValue: chargedBytes,
+        requestClone: chargedBytes,
+      },
+    });
+  });
+
   it("uses an explicit cache format version", () => {
     expect(VISUAL_NORMALIZATION_CACHE_VERSION).toBe("visual-normalization-cache-v1");
   });
@@ -168,6 +214,20 @@ function keyWithDigest(character: string): VisualNormalizationCacheKey {
     ...BASE_KEY,
     sourceDigest: `sha256:${character.repeat(64)}`,
   };
+}
+
+function corruptResidentForTest(
+  cache: VisualNormalizationCache,
+  key: VisualNormalizationCacheKey,
+): VisualNormalizationCacheValue {
+  const entries = (
+    cache as unknown as {
+      entries: Map<string, { value: VisualNormalizationCacheValue }>;
+    }
+  ).entries;
+  const resident = entries.get(serializeVisualNormalizationCacheKey(key));
+  if (resident === undefined) throw new Error("test resident is missing");
+  return resident.value;
 }
 
 function value(

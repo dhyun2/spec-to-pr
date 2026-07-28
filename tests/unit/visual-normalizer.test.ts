@@ -138,6 +138,46 @@ describe("visual normalizer", () => {
       singleFlights: 1,
     });
   });
+
+  it("checkpoints actual normalization buffer ownership synchronously", async () => {
+    const source = solidPng(2, 1, [10, 20, 30, 255]);
+    const checkpoints: Array<{
+      stage: string;
+      managedBytes: number;
+      rssBytes: number;
+      ownership: Record<string, number>;
+    }> = [];
+
+    await normalizeVisualPng({
+      content: source,
+      sourceSize: { width: 2, height: 1 },
+      logicalSize: { width: 2, height: 1 },
+      colorSpace: "srgb",
+      role: "measured normalization",
+      cache: false,
+      onMemoryCheckpoint: (checkpoint) => checkpoints.push(checkpoint),
+    });
+
+    expect(checkpoints).toContainEqual({
+      stage: "normalizer-rgba-output",
+      managedBytes: source.byteLength + 16,
+      rssBytes: expect.any(Number),
+      ownership: {
+        sourcePng: source.byteLength,
+        decodedSourceRgba: 8,
+        normalizedRgba: 8,
+      },
+    });
+    expect(checkpoints.at(-1)).toMatchObject({
+      stage: "normalizer-result",
+      ownership: {
+        sourcePng: source.byteLength,
+        decodedSourceRgba: 8,
+        normalizedRgba: 8,
+        returnedRgba: 8,
+      },
+    });
+  });
 });
 
 function solidPng(width: number, height: number, rgba: [number, number, number, number]): Buffer {

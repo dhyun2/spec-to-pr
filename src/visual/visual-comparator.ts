@@ -5,6 +5,7 @@ import { IsoDateTimeSchema, Sha256DigestSchema } from "../runtime/scalars.js";
 import { VISUAL_POLICY } from "../workflow/delivery-mode-policy.js";
 import { decodeBoundedPng } from "./png-decoder.js";
 import type { PngImage } from "./png-codec.js";
+import { emitVisualMemoryCheckpoint, type VisualMemoryCheckpointSink } from "./visual-memory.js";
 
 export const DEFAULT_VISUAL_REVIEW_THRESHOLD = VISUAL_POLICY.reviewThreshold;
 export const DEFAULT_VISUAL_PIXEL_TOLERANCE = 0.02;
@@ -183,11 +184,14 @@ export type VisualComparisonOutput = {
   overlay: Buffer;
 };
 
+export type { VisualMemoryCheckpoint, VisualMemoryCheckpointSink } from "./visual-memory.js";
+
 export async function compareVisualPngs(input: {
   baseline: Buffer;
   actual: Buffer;
   masks?: VisualMask[];
   pixelTolerance?: number;
+  onMemoryCheckpoint?: VisualMemoryCheckpointSink;
 }): Promise<VisualComparisonOutput> {
   const [{ createPng, encodePng }, baseline, actual] = await Promise.all([
     import("./png-codec.js"),
@@ -201,6 +205,13 @@ export async function compareVisualPngs(input: {
     encodePng,
     ...(input.masks === undefined ? {} : { masks: input.masks }),
     ...(input.pixelTolerance === undefined ? {} : { pixelTolerance: input.pixelTolerance }),
+    ...(input.onMemoryCheckpoint === undefined
+      ? {}
+      : { onMemoryCheckpoint: input.onMemoryCheckpoint }),
+    inputOwnership: {
+      encodedInputs: input.baseline.byteLength + input.actual.byteLength,
+      decodedInputs: baseline.data.byteLength + actual.data.byteLength,
+    },
     threshold: VISUAL_POLICY.reviewThreshold,
   });
 }
@@ -210,6 +221,7 @@ export async function compareVisualRgba(input: {
   actual: PngImage;
   masks?: VisualMask[];
   pixelTolerance?: number;
+  onMemoryCheckpoint?: VisualMemoryCheckpointSink;
 }): Promise<VisualComparisonOutput> {
   const { createPng, encodePng } = await import("./png-codec.js");
   const baseline = validateDecodedVisual(input.baseline, "baseline");
@@ -221,6 +233,12 @@ export async function compareVisualRgba(input: {
     encodePng,
     ...(input.masks === undefined ? {} : { masks: input.masks }),
     ...(input.pixelTolerance === undefined ? {} : { pixelTolerance: input.pixelTolerance }),
+    ...(input.onMemoryCheckpoint === undefined
+      ? {}
+      : { onMemoryCheckpoint: input.onMemoryCheckpoint }),
+    inputOwnership: {
+      decodedInputs: baseline.data.byteLength + actual.data.byteLength,
+    },
     threshold: VISUAL_POLICY.reviewThreshold,
   });
 }
@@ -232,6 +250,8 @@ function compareDecodedVisualPngs(input: {
   encodePng: (image: PngImage) => Buffer;
   masks?: VisualMask[];
   pixelTolerance?: number;
+  onMemoryCheckpoint?: VisualMemoryCheckpointSink;
+  inputOwnership: Record<string, number>;
   threshold: typeof VISUAL_POLICY.reviewThreshold;
 }): VisualComparisonOutput {
   const { baseline, actual, createPng, encodePng, threshold } = input;
@@ -246,6 +266,10 @@ function compareDecodedVisualPngs(input: {
     .max(50)
     .parse(input.masks ?? []);
   const masked = buildMaskBitmap(baseline.width, baseline.height, masks);
+  emitMemoryCheckpoint(input, "comparator-mask", {
+    ...input.inputOwnership,
+    mask: masked.byteLength,
+  });
   const totalPixelCount = baseline.width * baseline.height;
   const maskedPixelCount = masked.reduce((total, value) => total + value, 0);
   const comparedPixelCount = totalPixelCount - maskedPixelCount;
@@ -268,6 +292,13 @@ function compareDecodedVisualPngs(input: {
     .parse(input.pixelTolerance ?? DEFAULT_VISUAL_PIXEL_TOLERANCE);
   const diff = createPng(baseline.width, baseline.height);
   const overlay = createPng(baseline.width, baseline.height);
+  const rgbaOutputOwnership = {
+    ...input.inputOwnership,
+    mask: masked.byteLength,
+    diffRgba: diff.data.byteLength,
+    overlayRgba: overlay.data.byteLength,
+  };
+  emitMemoryCheckpoint(input, "comparator-rgba-outputs", rgbaOutputOwnership);
   let exactMatches = 0;
   let reviewMatches = 0;
   let distanceTotal = 0;
@@ -304,12 +335,18 @@ function compareDecodedVisualPngs(input: {
     threshold,
   });
 
+  const encodedDiff = encodePng(diff);
+  const encodedOverlay = encodePng(overlay);
+  emitMemoryCheckpoint(input, "comparator-encoded-outputs", {
+    ...rgbaOutputOwnership,
+    encodedOutputs: encodedDiff.byteLength + encodedOverlay.byteLength,
+  });
   return {
     status: metrics.reviewMatchRatio >= threshold ? "passed" : "failed",
     metrics,
     maskReasons: [...new Set(masks.map((mask) => mask.reason))],
-    diff: encodePng(diff),
-    overlay: encodePng(overlay),
+    diff: encodedDiff,
+    overlay: encodedOverlay,
   };
 }
 
@@ -328,8 +365,16 @@ function validateDecodedVisual(image: PngImage, role: string): PngImage {
   return {
     width: image.width,
     height: image.height,
-    data: Buffer.from(image.data),
+    data: image.data,
   };
+}
+
+function emitMemoryCheckpoint(
+  input: { onMemoryCheckpoint?: VisualMemoryCheckpointSink },
+  stage: string,
+  ownership: Record<string, number>,
+): void {
+  emitVisualMemoryCheckpoint(input.onMemoryCheckpoint, stage, ownership);
 }
 
 function readPng(content: Buffer, role: string) {

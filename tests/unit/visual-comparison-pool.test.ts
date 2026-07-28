@@ -3,8 +3,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   MAX_ACTIVE_VISUAL_PIXELS,
+  MAX_VISUAL_COMPARISON_LIVE_BYTES,
   MAX_VISUAL_COMPARISON_WORKERS,
-  VISUAL_COMPARISON_MANAGED_BYTES_PER_PIXEL,
   VisualComparisonPool,
 } from "../../src/visual/visual-comparison-pool.js";
 
@@ -44,11 +44,10 @@ describe("visual comparison worker pool", () => {
       maximumWorkers: 3,
       maximumActivePixels: 3,
       peakWorkers: 3,
+      currentManagedBytes: 0,
     });
     expect(pool.snapshotStats().peakActivePixels).toBeLessThanOrEqual(3);
-    expect(pool.snapshotStats().peakManagedBytes).toBe(
-      pool.snapshotStats().peakActivePixels * VISUAL_COMPARISON_MANAGED_BYTES_PER_PIXEL,
-    );
+    expect(pool.snapshotStats().peakManagedBytes).toBeGreaterThan(0);
   });
 
   it("reports a worker crash as an ordinary comparison failure", async () => {
@@ -78,11 +77,88 @@ describe("visual comparison worker pool", () => {
     );
   });
 
-  it("exports the production memory and concurrency budgets", () => {
-    expect(MAX_VISUAL_COMPARISON_WORKERS).toBe(3);
-    expect(MAX_ACTIVE_VISUAL_PIXELS).toBe(8_000_000);
-    expect(VISUAL_COMPARISON_MANAGED_BYTES_PER_PIXEL).toBe(16);
+  it("rejects encoded PNG ownership that exceeds the derived per-pixel ledger", async () => {
+    const pool = new VisualComparisonPool();
+    pools.push(pool);
+    const png = solidPng(1, 1);
+    const oversized = Buffer.concat([png, Buffer.alloc(66_000)]);
+
+    await expect(
+      pool.compare([
+        {
+          targetId: "encoded-overflow",
+          baseline: oversized,
+          actual: png,
+          masks: [],
+        },
+      ]),
+    ).rejects.toThrow(/VISUAL_ENCODED_BYTE_BUDGET/);
   });
+
+  it("returns same-iteration RSS and ownership checkpoints for a measured comparison", async () => {
+    const pool = new VisualComparisonPool();
+    pools.push(pool);
+    const png = solidPng(2, 1);
+
+    const measured = await pool.compareMeasured([
+      {
+        targetId: "measured",
+        baseline: png,
+        actual: png,
+        baselineRgba: { data: Buffer.alloc(8), width: 2, height: 1 },
+        actualRgba: { data: Buffer.alloc(8), width: 2, height: 1 },
+        masks: [],
+      },
+    ]);
+
+    expect(measured.results).toHaveLength(1);
+    expect(measured.measurement.inFlightPeakRssBytes).toBeGreaterThanOrEqual(
+      measured.measurement.rssBaselineBytes,
+    );
+    expect(measured.measurement.inFlightRssDeltaBytes).toBe(
+      measured.measurement.inFlightPeakRssBytes - measured.measurement.rssBaselineBytes,
+    );
+    expect(measured.measurement.peakManagedBytes).toBeGreaterThanOrEqual(34);
+    expect(measured.measurement.checkpoints.map((checkpoint) => checkpoint.stage)).toEqual(
+      expect.arrayContaining(["parent-validated-inputs", "comparator-rgba-outputs"]),
+    );
+    expect(pool.snapshotStats().currentManagedBytes).toBe(0);
+  });
+
+  it("measures a production worker comparison near the 8M-pixel gate under the derived budget", async () => {
+    const pool = new VisualComparisonPool();
+    pools.push(pool);
+    const width = 4_000;
+    const height = 1_999;
+    const pixels = width * height;
+    const png = solidPng(width, height);
+
+    const measured = await pool.compareMeasured([
+      {
+        targetId: "near-limit",
+        baseline: png,
+        actual: png,
+        baselineRgba: { data: Buffer.alloc(pixels * 4), width, height },
+        actualRgba: { data: Buffer.alloc(pixels * 4), width, height },
+        masks: [],
+      },
+    ]);
+
+    expect(measured.results[0]?.comparison.status).toBe("passed");
+    expect(pool.snapshotStats()).toMatchObject({
+      maximumWorkers: MAX_VISUAL_COMPARISON_WORKERS,
+      maximumActivePixels: MAX_ACTIVE_VISUAL_PIXELS,
+      peakActivePixels: pixels,
+      currentManagedBytes: 0,
+    });
+    expect(measured.measurement.peakManagedBytes).toBeLessThanOrEqual(
+      MAX_VISUAL_COMPARISON_LIVE_BYTES,
+    );
+    expect(measured.measurement.peakManagedBytes).toBeGreaterThanOrEqual(pixels * 25);
+    expect(measured.measurement.inFlightRssDeltaBytes).toBeLessThanOrEqual(
+      MAX_VISUAL_COMPARISON_LIVE_BYTES,
+    );
+  }, 30_000);
 });
 
 function job(targetId: string, width: number, height: number) {

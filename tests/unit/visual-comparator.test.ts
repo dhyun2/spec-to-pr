@@ -51,6 +51,41 @@ describe("visual comparator v2", () => {
     });
   });
 
+  it("checkpoints the actual comparator-owned input, mask, and output buffers", async () => {
+    const checkpoints: Array<{
+      stage: string;
+      managedBytes: number;
+      rssBytes: number;
+      ownership: Record<string, number>;
+    }> = [];
+    await compareVisualRgba({
+      baseline: { data: Buffer.alloc(8), width: 2, height: 1 },
+      actual: { data: Buffer.alloc(8), width: 2, height: 1 },
+      onMemoryCheckpoint: (checkpoint) => checkpoints.push(checkpoint),
+    });
+
+    expect(checkpoints).toContainEqual({
+      stage: "comparator-rgba-outputs",
+      managedBytes: 34,
+      rssBytes: expect.any(Number),
+      ownership: {
+        decodedInputs: 16,
+        mask: 2,
+        diffRgba: 8,
+        overlayRgba: 8,
+      },
+    });
+    expect(checkpoints.at(-1)).toMatchObject({
+      stage: "comparator-encoded-outputs",
+      ownership: {
+        decodedInputs: 16,
+        mask: 2,
+        diffRgba: 8,
+        overlayRgba: 8,
+      },
+    });
+  });
+
   it("rejects dimension mismatch instead of cropping or resizing", async () => {
     await expect(
       compareVisualPngs({

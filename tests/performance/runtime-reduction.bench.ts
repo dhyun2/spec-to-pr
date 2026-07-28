@@ -26,11 +26,15 @@ import { orderedConcurrentMap } from "../../src/source-ingestion/source-loader.j
 import { SqliteRunStore } from "../../src/store/sqlite-run-store.js";
 import {
   MAX_ACTIVE_VISUAL_PIXELS,
+  MAX_VISUAL_COMPARISON_LIVE_BYTES,
   MAX_VISUAL_COMPARISON_WORKERS,
-  VISUAL_COMPARISON_MANAGED_BYTES_PER_PIXEL,
   VisualComparisonPool,
   type VisualComparisonPoolJob,
 } from "../../src/visual/visual-comparison-pool.js";
+import {
+  compareVisualPngs,
+  type VisualMemoryCheckpoint,
+} from "../../src/visual/visual-comparator.js";
 import {
   MAX_VISUAL_NORMALIZATION_CACHE_BYTES,
   VisualNormalizationCache,
@@ -80,6 +84,7 @@ type MeasuredVisualCounters = {
   inFlightRssDeltaBytes: number;
 };
 const measuredVisualCounters: MeasuredVisualCounters[] = [];
+const pairedVisualPool = new VisualComparisonPool();
 let mutatingIteration = 0;
 const visualPng = PNG.sync.write(new PNG({ width: 360, height: 1831 }));
 
@@ -118,6 +123,15 @@ const fixtures = {
       interpolation: "nearest",
       actualCacheRead: false,
     },
+  },
+  pairedVisual: {
+    inputKind: "pre-normalized-png",
+    targetOrder: ["first", "second"],
+    comparisonOrder: ["default", "empty", "loaded"],
+    width: 360,
+    height: 1831,
+    baselineDigest: sha256Digest(visualPng),
+    actualDigest: sha256Digest(visualPng),
   },
   status: {
     view: "action",
@@ -163,6 +177,10 @@ function recordFixturePeakRss(fixtureName: string, peakRss: number): void {
   peakRssByFixture.set(fixtureName, peaks);
 }
 
+function percentile(sorted: readonly number[], percent: number): number {
+  return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * percent) - 1)] ?? 0;
+}
+
 function subtractLegacyStats(
   after: Readonly<LegacySourceCacheStats>,
   before: Readonly<LegacySourceCacheStats>,
@@ -184,8 +202,18 @@ async function runVisualPhase(
   const cacheBefore = cache.snapshotStats();
   const rssBaselineBytes = process.memoryUsage().rss;
   let inFlightPeakRssBytes = rssBaselineBytes;
+  let peakManagedBytes = cacheBefore.residentBytes;
   const sampleRss = () => {
     inFlightPeakRssBytes = Math.max(inFlightPeakRssBytes, process.memoryUsage().rss);
+  };
+  const recordNormalizationMemory = (checkpoint: VisualMemoryCheckpoint) => {
+    inFlightPeakRssBytes = Math.max(inFlightPeakRssBytes, checkpoint.rssBytes);
+    peakManagedBytes = Math.max(
+      peakManagedBytes,
+      checkpoint.stage.startsWith("cache-")
+        ? checkpoint.managedBytes
+        : cache.snapshotStats().residentBytes + checkpoint.managedBytes,
+    );
   };
   const sampler = setInterval(sampleRss, 1);
   sampler.unref();
@@ -203,6 +231,7 @@ async function runVisualPhase(
           colorSpace: "srgb",
           role: `${target.targetId} benchmark baseline`,
           cache,
+          onMemoryCheckpoint: recordNormalizationMemory,
         });
         sampleRss();
         const actual = await normalizeVisualPng({
@@ -216,6 +245,7 @@ async function runVisualPhase(
           role: `${target.targetId} benchmark actual`,
           cache,
           cacheRead: false,
+          onMemoryCheckpoint: recordNormalizationMemory,
         });
         sampleRss();
         recorder.increment(
@@ -249,8 +279,17 @@ async function runVisualPhase(
           masks: [],
         });
       }
-      const results = await pool.compare(jobs);
+      const measured = await pool.compareMeasured(jobs);
       sampleRss();
+      inFlightPeakRssBytes = Math.max(
+        inFlightPeakRssBytes,
+        measured.measurement.inFlightPeakRssBytes,
+      );
+      peakManagedBytes = Math.max(
+        peakManagedBytes,
+        cache.snapshotStats().residentBytes + measured.measurement.peakManagedBytes,
+      );
+      const { results } = measured;
       if (
         results.some((result) => result.comparison.status !== "passed") ||
         results.some(
@@ -268,8 +307,7 @@ async function runVisualPhase(
   const cacheAfter = cache.snapshotStats();
   const poolAfter = pool.snapshotStats();
   const managedMemoryBudgetBytes =
-    MAX_VISUAL_NORMALIZATION_CACHE_BYTES +
-    MAX_ACTIVE_VISUAL_PIXELS * VISUAL_COMPARISON_MANAGED_BYTES_PER_PIXEL;
+    MAX_VISUAL_NORMALIZATION_CACHE_BYTES + MAX_VISUAL_COMPARISON_LIVE_BYTES;
   return {
     elapsed,
     counters: {
@@ -281,13 +319,53 @@ async function runVisualPhase(
       cacheResidentBytes: cacheAfter.residentBytes,
       peakWorkers: poolAfter.peakActiveWorkers,
       peakActivePixels: poolAfter.peakActivePixels,
-      peakManagedBytes: cacheAfter.residentBytes + poolAfter.peakManagedBytes,
+      peakManagedBytes,
       managedMemoryBudgetBytes,
       rssBaselineBytes,
       inFlightPeakRssBytes,
       inFlightRssDeltaBytes: Math.max(0, inFlightPeakRssBytes - rssBaselineBytes),
     },
   };
+}
+
+function pairedVisualJobs(comparison: string): VisualComparisonPoolJob[] {
+  return fixtures.visual.targets.map((target) => ({
+    targetId: `${comparison}:${target.targetId}`,
+    baseline: visualPng,
+    actual: visualPng,
+    masks: [],
+  }));
+}
+
+async function runPairedSerialVisual(): Promise<number> {
+  const started = performance.now();
+  for (const comparison of fixtures.visual.comparisons) {
+    for (const target of fixtures.visual.targets) {
+      const result = await compareVisualPngs({
+        baseline: visualPng,
+        actual: visualPng,
+      });
+      if (result.status !== "passed") {
+        throw new Error(`paired serial comparison failed for ${comparison}:${target.targetId}`);
+      }
+    }
+  }
+  return performance.now() - started;
+}
+
+async function runPairedPoolVisual(): Promise<number> {
+  const started = performance.now();
+  for (const comparison of fixtures.visual.comparisons) {
+    const jobs = pairedVisualJobs(comparison);
+    const results = await pairedVisualPool.compare(jobs);
+    if (
+      results.some((result) => result.comparison.status !== "passed") ||
+      results.some((result, index) => result.targetId !== jobs[index]?.targetId)
+    ) {
+      throw new Error("paired worker comparison order or status mismatch");
+    }
+  }
+  return performance.now() - started;
 }
 
 beforeAll(async () => {
@@ -337,6 +415,8 @@ beforeAll(async () => {
   });
   statusRunId = statusDetail.runId as `run_${string}`;
   statusDetailBytes = Buffer.byteLength(JSON.stringify(statusDetail), "utf8");
+  await compareVisualPngs({ baseline: visualPng, actual: visualPng });
+  await pairedVisualPool.compare(pairedVisualJobs("warmup"));
 });
 
 describe("runtime reduction fixtures", () => {
@@ -629,6 +709,28 @@ describe("runtime reduction fixtures", () => {
   );
 
   bench(
+    "visual paired: serial comparator and reused worker pool on identical normalized PNGs",
+    async () => {
+      const serialRssBaseline = process.memoryUsage().rss;
+      const serialElapsed = await runPairedSerialVisual();
+      recordFixtureSample("visual-paired-serial", serialElapsed);
+      recordFixturePeakRss(
+        "visual-paired-serial",
+        Math.max(serialRssBaseline, process.memoryUsage().rss),
+      );
+
+      const poolRssBaseline = process.memoryUsage().rss;
+      const poolElapsed = await runPairedPoolVisual();
+      recordFixtureSample("visual-paired-pool", poolElapsed);
+      recordFixturePeakRss(
+        "visual-paired-pool",
+        Math.max(poolRssBaseline, process.memoryUsage().rss),
+      );
+    },
+    { iterations: 5, warmupIterations: 1, time: 0, warmupTime: 0 },
+  );
+
+  bench(
     "visual: cold startup plus warm reuse for two 360x1831 targets",
     async () => {
       const recorder = new RuntimeMetricsRecorder();
@@ -658,7 +760,25 @@ describe("runtime reduction fixtures", () => {
           "visual",
           Math.max(cold.counters.inFlightPeakRssBytes, warm.counters.inFlightPeakRssBytes),
         );
-        measuredVisualCounters.push(cold.counters, warm.counters);
+        const totalPeakRssBytes = Math.max(
+          cold.counters.inFlightPeakRssBytes,
+          warm.counters.inFlightPeakRssBytes,
+        );
+        measuredVisualCounters.push(cold.counters, warm.counters, {
+          ...warm.counters,
+          mode: "total",
+          cacheHits: cold.counters.cacheHits + warm.counters.cacheHits,
+          cacheMisses: cold.counters.cacheMisses + warm.counters.cacheMisses,
+          cacheSingleFlights: cold.counters.cacheSingleFlights + warm.counters.cacheSingleFlights,
+          cacheBypasses: cold.counters.cacheBypasses + warm.counters.cacheBypasses,
+          peakManagedBytes: Math.max(
+            cold.counters.peakManagedBytes,
+            warm.counters.peakManagedBytes,
+          ),
+          rssBaselineBytes: cold.counters.rssBaselineBytes,
+          inFlightPeakRssBytes: totalPeakRssBytes,
+          inFlightRssDeltaBytes: Math.max(0, totalPeakRssBytes - cold.counters.rssBaselineBytes),
+        });
         recorder.gauge("visual.peak_workers", warm.counters.peakWorkers, {
           stage: "implementation",
         });
@@ -671,6 +791,7 @@ describe("runtime reduction fixtures", () => {
 });
 
 afterAll(async () => {
+  await pairedVisualPool.close();
   const observedMixedIntakeMaxSourceConcurrency = [
     ...new Set(measuredMixedIntakeMaxSourceConcurrency),
   ];
@@ -732,20 +853,52 @@ afterAll(async () => {
       `status action read an inventory blob: ${JSON.stringify(measuredStatusArtifactReads)}`,
     );
   }
+  const pairedSerialSamples = (samplesByFixture.get("visual-paired-serial") ?? [])
+    .slice(-measuredIterations)
+    .sort((left, right) => left - right);
+  const pairedPoolSamples = (samplesByFixture.get("visual-paired-pool") ?? [])
+    .slice(-measuredIterations)
+    .sort((left, right) => left - right);
+  if (
+    pairedSerialSamples.length !== measuredIterations ||
+    pairedPoolSamples.length !== measuredIterations
+  ) {
+    throw new Error("paired visual serial and worker measurements are both required");
+  }
+  const pairedSerialP95 = percentile(pairedSerialSamples, 0.95);
+  const pairedPoolP95 = percentile(pairedPoolSamples, 0.95);
+  if (pairedPoolP95 > pairedSerialP95 * 1.1) {
+    throw new Error(
+      `reused worker pool p95 regressed against paired serial comparison: ${pairedPoolP95}/${pairedSerialP95}`,
+    );
+  }
+  const pairedComparisonCount =
+    fixtures.pairedVisual.targetOrder.length * fixtures.pairedVisual.comparisonOrder.length;
+  const pairedSerialThroughput = (pairedComparisonCount * 1_000) / pairedSerialP95;
+  const pairedPoolThroughput = (pairedComparisonCount * 1_000) / pairedPoolP95;
   const coldVisualCounters = measuredVisualCounters
     .filter((value) => value.mode === "cold")
     .slice(-measuredIterations);
   const warmVisualCounters = measuredVisualCounters
     .filter((value) => value.mode === "warm")
     .slice(-measuredIterations);
-  if (coldVisualCounters.length === 0 || warmVisualCounters.length === 0) {
-    throw new Error("visual cold and warm measurements are both required");
+  const totalVisualCounters = measuredVisualCounters
+    .filter((value) => value.mode === "total")
+    .slice(-measuredIterations);
+  if (
+    coldVisualCounters.length !== measuredIterations ||
+    warmVisualCounters.length !== measuredIterations ||
+    totalVisualCounters.length !== measuredIterations
+  ) {
+    throw new Error("visual cold, warm, and total measurements are required");
   }
   for (const counters of measuredVisualCounters) {
     const expected =
       counters.mode === "cold"
         ? { cacheHits: 1, cacheMisses: 1, cacheBypasses: 2 }
-        : { cacheHits: 4, cacheMisses: 0, cacheBypasses: 4 };
+        : counters.mode === "warm"
+          ? { cacheHits: 4, cacheMisses: 0, cacheBypasses: 4 }
+          : { cacheHits: 5, cacheMisses: 1, cacheBypasses: 6 };
     if (
       counters.cacheHits !== expected.cacheHits ||
       counters.cacheMisses !== expected.cacheMisses ||
@@ -764,35 +917,21 @@ afterAll(async () => {
   }
   const summarizeVisualCounters = (
     counters: readonly MeasuredVisualCounters[],
-  ): MeasuredVisualCounters => ({
-    ...counters[0]!,
-    cacheResidentBytes: Math.max(...counters.map((value) => value.cacheResidentBytes)),
-    peakWorkers: Math.max(...counters.map((value) => value.peakWorkers)),
-    peakActivePixels: Math.max(...counters.map((value) => value.peakActivePixels)),
-    peakManagedBytes: Math.max(...counters.map((value) => value.peakManagedBytes)),
-    rssBaselineBytes: Math.min(...counters.map((value) => value.rssBaselineBytes)),
-    inFlightPeakRssBytes: Math.max(...counters.map((value) => value.inFlightPeakRssBytes)),
-    inFlightRssDeltaBytes: Math.max(...counters.map((value) => value.inFlightRssDeltaBytes)),
-  });
+  ): MeasuredVisualCounters => {
+    const maximumRssDeltaSample = counters.reduce((maximum, current) =>
+      current.inFlightRssDeltaBytes > maximum.inFlightRssDeltaBytes ? current : maximum,
+    );
+    return {
+      ...maximumRssDeltaSample,
+      cacheResidentBytes: Math.max(...counters.map((value) => value.cacheResidentBytes)),
+      peakWorkers: Math.max(...counters.map((value) => value.peakWorkers)),
+      peakActivePixels: Math.max(...counters.map((value) => value.peakActivePixels)),
+      peakManagedBytes: Math.max(...counters.map((value) => value.peakManagedBytes)),
+    };
+  };
   const coldVisual = summarizeVisualCounters(coldVisualCounters);
   const warmVisual = summarizeVisualCounters(warmVisualCounters);
-  const totalVisual: MeasuredVisualCounters = {
-    ...warmVisual,
-    mode: "total",
-    cacheHits: coldVisual.cacheHits + warmVisual.cacheHits,
-    cacheMisses: coldVisual.cacheMisses + warmVisual.cacheMisses,
-    cacheSingleFlights: coldVisual.cacheSingleFlights + warmVisual.cacheSingleFlights,
-    cacheBypasses: coldVisual.cacheBypasses + warmVisual.cacheBypasses,
-    rssBaselineBytes: Math.min(coldVisual.rssBaselineBytes, warmVisual.rssBaselineBytes),
-    inFlightPeakRssBytes: Math.max(
-      coldVisual.inFlightPeakRssBytes,
-      warmVisual.inFlightPeakRssBytes,
-    ),
-    inFlightRssDeltaBytes: Math.max(
-      coldVisual.inFlightRssDeltaBytes,
-      warmVisual.inFlightRssDeltaBytes,
-    ),
-  };
+  const totalVisual = summarizeVisualCounters(totalVisualCounters);
   if (
     legacyCounters.coldReads !== 250 ||
     legacyCounters.coldParses !== 250 ||
@@ -807,8 +946,6 @@ afterAll(async () => {
       `legacy cold/warm/change counters were unexpected: ${JSON.stringify(legacyCounters)}`,
     );
   }
-  const percentile = (sorted: number[], percent: number) =>
-    sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * percent) - 1)] ?? 0;
   const records = [...samplesByFixture.entries()].map(([name, samples]) => {
     const sorted = samples.slice(-measuredIterations).sort((left, right) => left - right);
     const measuredRssPeaks = (peakRssByFixture.get(name) ?? []).slice(-measuredIterations);
@@ -825,7 +962,9 @@ afterAll(async () => {
                   ? fixtures.status
                   : name === "mutating-action"
                     ? fixtures.mutatingStatus
-                    : { ...fixtures.visual, benchmarkMode: name },
+                    : name.startsWith("visual-paired-")
+                      ? { ...fixtures.pairedVisual, implementation: name }
+                      : { ...fixtures.visual, benchmarkMode: name },
           ),
         ),
       ),
@@ -869,16 +1008,31 @@ afterAll(async () => {
                     advanceSerializedBytes: measuredMutatingAdvanceBytes[0]!,
                     submitSerializedBytes: measuredMutatingSubmitBytes[0]!,
                   }
-                : {
-                    targets: 2,
-                    comparisons: name === "visual-cold" ? 1 : name === "visual-warm" ? 2 : 3,
-                    pixelsPerTarget: 659160,
-                    ...(name === "visual-cold"
-                      ? coldVisual
-                      : name === "visual-warm"
-                        ? warmVisual
-                        : totalVisual),
-                  },
+                : name.startsWith("visual-paired-")
+                  ? {
+                      inputKind: fixtures.pairedVisual.inputKind,
+                      workloadDigest: sha256Digest(
+                        Buffer.from(JSON.stringify(fixtures.pairedVisual)),
+                      ),
+                      targets: fixtures.pairedVisual.targetOrder.length,
+                      comparisons: pairedComparisonCount,
+                      implementation:
+                        name === "visual-paired-serial" ? "serial" : "reused-worker-pool",
+                      throughputComparisonsPerSecond:
+                        name === "visual-paired-serial"
+                          ? pairedSerialThroughput
+                          : pairedPoolThroughput,
+                    }
+                  : {
+                      targets: 2,
+                      comparisons: name === "visual-cold" ? 1 : name === "visual-warm" ? 2 : 3,
+                      pixelsPerTarget: 659160,
+                      ...(name === "visual-cold"
+                        ? coldVisual
+                        : name === "visual-warm"
+                          ? warmVisual
+                          : totalVisual),
+                    },
     };
   });
   const receipt = {
@@ -911,6 +1065,12 @@ afterAll(async () => {
       mutatingStartSerializedBytes: measuredMutatingStartBytes[0]!,
       mutatingAdvanceSerializedBytes: measuredMutatingAdvanceBytes[0]!,
       mutatingSubmitSerializedBytes: measuredMutatingSubmitBytes[0]!,
+      visualPairedWorkloadDigest: sha256Digest(Buffer.from(JSON.stringify(fixtures.pairedVisual))),
+      visualPairedSerialP95Ms: pairedSerialP95,
+      visualPairedPoolP95Ms: pairedPoolP95,
+      visualPairedSerialThroughput: pairedSerialThroughput,
+      visualPairedPoolThroughput: pairedPoolThroughput,
+      visualPairedMaximumRegressionRatio: 1.1,
       visualComparisons: fixtures.visual.comparisons.length,
       visualColdCacheHits: coldVisual.cacheHits,
       visualColdCacheMisses: coldVisual.cacheMisses,
@@ -925,8 +1085,11 @@ afterAll(async () => {
       visualPeakActivePixels: totalVisual.peakActivePixels,
       visualPeakManagedBytes: totalVisual.peakManagedBytes,
       visualManagedMemoryBudgetBytes: totalVisual.managedMemoryBudgetBytes,
+      visualManagedMemoryBudgetFormula:
+        "128MiB cache + 8M active pixels * (8B source RGBA + 12B source PNG + 8B transferred input + 1B mask + 8B raw outputs + 12B encoded outputs) + 256KiB PNG overhead",
       visualInFlightPeakRssBytes: totalVisual.inFlightPeakRssBytes,
       visualInFlightRssDeltaBytes: totalVisual.inFlightRssDeltaBytes,
+      visualRssSamplePolicy: "maximum-delta-same-iteration",
     },
   };
   await writeFile(

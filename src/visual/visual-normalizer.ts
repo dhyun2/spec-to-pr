@@ -4,6 +4,7 @@ import type { VisualSize } from "../figma/figma-capture-contract.js";
 import { VisualSizeSchema } from "../figma/figma-capture-contract.js";
 import { createPng, encodePng } from "./png-codec.js";
 import { decodeBoundedPng, MAX_VISUAL_PIXEL_COUNT } from "./png-decoder.js";
+import { emitVisualMemoryCheckpoint, type VisualMemoryCheckpointSink } from "./visual-memory.js";
 import {
   VisualNormalizationCache,
   type VisualNormalizationCacheKey,
@@ -22,6 +23,7 @@ export async function normalizeVisualPng(input: {
   role: string;
   cache?: VisualNormalizationCache | false;
   cacheRead?: boolean;
+  onMemoryCheckpoint?: VisualMemoryCheckpointSink;
 }): Promise<{
   content: Buffer;
   rgba: Buffer;
@@ -61,11 +63,21 @@ export async function normalizeVisualPng(input: {
       sourceSize,
       logicalSize,
       input.role,
+      input.onMemoryCheckpoint,
     );
     return toResult(normalized, "bypassed");
   }
-  const cached = await cache.getOrCompute(key, () =>
-    computeNormalizedVisual(input.content, sourceSize, logicalSize, input.role),
+  const cached = await cache.getOrCompute(
+    key,
+    () =>
+      computeNormalizedVisual(
+        input.content,
+        sourceSize,
+        logicalSize,
+        input.role,
+        input.onMemoryCheckpoint,
+      ),
+    input.onMemoryCheckpoint,
   );
   return toResult(cached.value, cached.disposition);
 }
@@ -75,8 +87,13 @@ async function computeNormalizedVisual(
   sourceSize: VisualSize,
   logicalSize: VisualSize,
   role: string,
+  onMemoryCheckpoint?: VisualMemoryCheckpointSink,
 ): Promise<VisualNormalizationCacheValue> {
   const source = await decodeBoundedPng(content, role);
+  emitMemoryCheckpoint(onMemoryCheckpoint, "normalizer-decoded-source", {
+    sourcePng: content.byteLength,
+    decodedSourceRgba: source.data.byteLength,
+  });
   if (source.width !== sourceSize.width || source.height !== sourceSize.height) {
     throw new Error(
       `FIGMA_CAPTURE_GEOMETRY_INVALID: decoded ${role} is ${source.width}x${source.height}, expected ${sourceSize.width}x${sourceSize.height}`,
@@ -84,6 +101,12 @@ async function computeNormalizedVisual(
   }
 
   const output = createPng(logicalSize.width, logicalSize.height);
+  const rgbaOwnership = {
+    sourcePng: content.byteLength,
+    decodedSourceRgba: source.data.byteLength,
+    normalizedRgba: output.data.byteLength,
+  };
+  emitMemoryCheckpoint(onMemoryCheckpoint, "normalizer-rgba-output", rgbaOwnership);
   for (let y = 0; y < logicalSize.height; y += 1) {
     for (let x = 0; x < logicalSize.width; x += 1) {
       const sourceX = Math.min(
@@ -105,12 +128,27 @@ async function computeNormalizedVisual(
     }
   }
 
+  const png = encodePng(output);
+  const rgba = Buffer.from(output.data);
+  emitMemoryCheckpoint(onMemoryCheckpoint, "normalizer-result", {
+    ...rgbaOwnership,
+    normalizedPng: png.byteLength,
+    returnedRgba: rgba.byteLength,
+  });
   return {
-    png: encodePng(output),
-    rgba: Buffer.from(output.data),
+    png,
+    rgba,
     width: logicalSize.width,
     height: logicalSize.height,
   };
+}
+
+function emitMemoryCheckpoint(
+  sink: VisualMemoryCheckpointSink | undefined,
+  stage: string,
+  ownership: Record<string, number>,
+): void {
+  emitVisualMemoryCheckpoint(sink, stage, ownership);
 }
 
 function toResult(
@@ -118,8 +156,8 @@ function toResult(
   cacheStatus: "hit" | "miss" | "single-flight" | "bypassed",
 ) {
   return {
-    content: Buffer.from(value.png),
-    rgba: Buffer.from(value.rgba),
+    content: value.png,
+    rgba: value.rgba,
     width: value.width,
     height: value.height,
     version: VISUAL_NORMALIZER_VERSION,
