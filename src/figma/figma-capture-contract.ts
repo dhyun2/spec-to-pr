@@ -616,6 +616,8 @@ export function assertFigmaPublicApiCatalogEvidence(rawInput: {
   const packageDirectory = pathDirectory(catalog.packageManifest.path);
   const barrelsByModule = new Map(catalog.publicBarrels.map((barrel) => [barrel.module, barrel]));
   const exportedNamesByModule = new Map<string, Set<string>>();
+  const allowedBarrelPaths = new Set(catalog.publicBarrels.map((barrel) => barrel.path));
+  const exportedNamesByPath = new Map<string, Set<string>>();
   for (const barrel of catalog.publicBarrels) {
     const exportKey =
       barrel.module === "@frontend/ui" ? "." : `.${barrel.module.slice("@frontend/ui".length)}`;
@@ -633,7 +635,14 @@ export function assertFigmaPublicApiCatalogEvidence(rawInput: {
     }
     exportedNamesByModule.set(
       barrel.module,
-      namedModuleExports(evidence.get(barrel.path)!, barrel.path),
+      namedModuleExports({
+        content: evidence.get(barrel.path)!,
+        evidencePath: barrel.path,
+        evidence,
+        allowedBarrelPaths,
+        exportedNamesByPath,
+        visiting: new Set(),
+      }),
     );
   }
 
@@ -1459,59 +1468,156 @@ function normalizeRepositoryPath(directory: string, target: string): string {
   return RepositoryPathSchema.parse(normalized);
 }
 
-function namedModuleExports(content: Buffer, evidencePath: string): Set<string> {
+function namedModuleExports(input: {
+  content: Buffer;
+  evidencePath: string;
+  evidence: ReadonlyMap<string, Buffer>;
+  allowedBarrelPaths: ReadonlySet<string>;
+  exportedNamesByPath: Map<string, Set<string>>;
+  visiting: Set<string>;
+}): Set<string> {
+  const cached = input.exportedNamesByPath.get(input.evidencePath);
+  if (cached !== undefined) return cached;
+  if (input.visiting.has(input.evidencePath)) {
+    throw designMappingError(
+      `public barrels contain a cyclic named re-export: ${input.evidencePath}`,
+    );
+  }
+  input.visiting.add(input.evidencePath);
+
   let program: ReturnType<typeof parse>["program"];
   try {
-    program = parse(content.toString("utf8"), {
+    program = parse(input.content.toString("utf8"), {
       sourceType: "module",
       plugins: ["jsx", "typescript"],
     }).program;
   } catch {
     throw designMappingError(
-      `public barrel is not parseable JavaScript/TypeScript: ${evidencePath}`,
+      `public barrel is not parseable JavaScript/TypeScript: ${input.evidencePath}`,
     );
   }
+  const runtimeLocals = new Set<string>();
+  for (const rawStatement of program.body) {
+    const statement = rawStatement as unknown as Record<string, unknown>;
+    const declaration =
+      statement["type"] === "ExportNamedDeclaration"
+        ? asRecord(statement["declaration"])
+        : statement;
+    collectRuntimeDeclarationNames(declaration, runtimeLocals);
+  }
+
   const names = new Set<string>();
   for (const rawStatement of program.body) {
     const statement = rawStatement as unknown as Record<string, unknown>;
     if (statement["type"] === "ExportAllDeclaration") {
       throw designMappingError(
-        `public barrel ${evidencePath} must use bounded named exports, not export *`,
+        `public barrel ${input.evidencePath} must use bounded named exports, not export *`,
       );
     }
     if (statement["type"] !== "ExportNamedDeclaration") continue;
+    if (statement["exportKind"] === "type") continue;
     const declaration = asRecord(statement["declaration"]);
     if (declaration !== undefined) {
-      const declarationType = declaration["type"];
-      if (
-        (declarationType === "FunctionDeclaration" ||
-          declarationType === "ClassDeclaration" ||
-          declarationType === "TSTypeAliasDeclaration" ||
-          declarationType === "TSInterfaceDeclaration" ||
-          declarationType === "TSEnumDeclaration") &&
-        asRecord(declaration["id"])?.["type"] === "Identifier"
-      ) {
-        names.add(String(asRecord(declaration["id"])?.["name"]));
-      } else if (
-        declarationType === "VariableDeclaration" &&
-        Array.isArray(declaration["declarations"])
-      ) {
-        for (const item of declaration["declarations"]) {
-          collectBindingNames(asRecord(item)?.["id"], names);
-        }
-      }
+      collectRuntimeDeclarationNames(declaration, names);
     }
     if (Array.isArray(statement["specifiers"])) {
       for (const rawSpecifier of statement["specifiers"]) {
         const specifier = asRecord(rawSpecifier);
         if (specifier?.["type"] !== "ExportSpecifier") continue;
-        const exported = asRecord(specifier["exported"]);
-        if (exported?.["type"] === "Identifier") names.add(String(exported["name"]));
-        if (exported?.["type"] === "StringLiteral") names.add(String(exported["value"]));
+        if (specifier["exportKind"] === "type") continue;
+        const local = moduleExportName(specifier["local"]);
+        const exported = moduleExportName(specifier["exported"]);
+        if (local === undefined || exported === undefined) continue;
+        const source = moduleSourceValue(statement["source"]);
+        if (source === undefined) {
+          if (runtimeLocals.has(local)) names.add(exported);
+          continue;
+        }
+        const targetPath = resolveDigestBoundReExportPath({
+          evidencePath: input.evidencePath,
+          source,
+          allowedBarrelPaths: input.allowedBarrelPaths,
+        });
+        const targetContent = input.evidence.get(targetPath);
+        if (targetContent === undefined) {
+          throw designMappingError(
+            `public barrel ${input.evidencePath} re-exports from missing digest-bound evidence ${targetPath}`,
+          );
+        }
+        const targetExports = namedModuleExports({
+          ...input,
+          content: targetContent,
+          evidencePath: targetPath,
+          visiting: new Set(input.visiting),
+        });
+        if (targetExports.has(local)) names.add(exported);
       }
     }
   }
+  input.exportedNamesByPath.set(input.evidencePath, names);
+  input.visiting.delete(input.evidencePath);
   return names;
+}
+
+function collectRuntimeDeclarationNames(
+  declaration: Record<string, unknown> | undefined,
+  names: Set<string>,
+): void {
+  if (declaration === undefined || declaration["declare"] === true) return;
+  const declarationType = declaration["type"];
+  if (
+    (declarationType === "FunctionDeclaration" || declarationType === "ClassDeclaration") &&
+    asRecord(declaration["id"])?.["type"] === "Identifier"
+  ) {
+    names.add(String(asRecord(declaration["id"])?.["name"]));
+    return;
+  }
+  if (
+    declarationType === "TSEnumDeclaration" &&
+    declaration["const"] !== true &&
+    asRecord(declaration["id"])?.["type"] === "Identifier"
+  ) {
+    names.add(String(asRecord(declaration["id"])?.["name"]));
+    return;
+  }
+  if (declarationType === "VariableDeclaration" && Array.isArray(declaration["declarations"])) {
+    for (const item of declaration["declarations"]) {
+      collectBindingNames(asRecord(item)?.["id"], names);
+    }
+  }
+}
+
+function moduleExportName(rawName: unknown): string | undefined {
+  const name = asRecord(rawName);
+  if (name?.["type"] === "Identifier") return String(name["name"]);
+  if (name?.["type"] === "StringLiteral") return String(name["value"]);
+  return undefined;
+}
+
+function moduleSourceValue(rawSource: unknown): string | undefined {
+  const source = asRecord(rawSource);
+  return source?.["type"] === "StringLiteral" ? String(source["value"]) : undefined;
+}
+
+function resolveDigestBoundReExportPath(input: {
+  evidencePath: string;
+  source: string;
+  allowedBarrelPaths: ReadonlySet<string>;
+}): string {
+  if (!input.source.startsWith("./") && !input.source.startsWith("../")) {
+    throw designMappingError(
+      `public barrel ${input.evidencePath} re-export must target digest-bound relative evidence`,
+    );
+  }
+  const resolved = RepositoryPathSchema.parse(
+    path.posix.normalize(path.posix.join(path.posix.dirname(input.evidencePath), input.source)),
+  );
+  if (!input.allowedBarrelPaths.has(resolved)) {
+    throw designMappingError(
+      `public barrel ${input.evidencePath} re-export target is not digest-bound evidence: ${resolved}`,
+    );
+  }
+  return resolved;
 }
 
 function collectBindingNames(rawPattern: unknown, names: Set<string>): void {

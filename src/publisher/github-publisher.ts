@@ -276,12 +276,15 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
 
       // Public repos: pin the raw URL to the commit SHA so it survives branch
       // deletion after merge. Private repos: raw URLs 404 for unauthenticated
-      // camo fetches, so link to the viewable blob instead and mark it as
-      // non-embeddable for the review-body renderer.
-      const embeddable = !isPrivate && asset.role !== "e2e-video";
-      const url = isPrivate
-        ? `${target.webBaseUrl}/${target.owner}/${target.repo}/blob/${commitSha}/${assetPath}`
-        : `https://raw.githubusercontent.com/${target.owner}/${target.repo}/${commitSha}/${assetPath}`;
+      // camo fetches. GitHub Enterprise also has no raw.githubusercontent.com
+      // authority, so keep its evidence on the exact configured host as a
+      // non-embeddable, commit-pinned blob link.
+      const publicGitHubCom =
+        !isPrivate && new URL(target.webBaseUrl).hostname.toLowerCase() === "github.com";
+      const embeddable = publicGitHubCom && asset.role !== "e2e-video";
+      const url = publicGitHubCom
+        ? `https://raw.githubusercontent.com/${target.owner}/${target.repo}/${commitSha}/${assetPath}`
+        : `${target.webBaseUrl.replace(/\/+$/, "")}/${target.owner}/${target.repo}/blob/${commitSha}/${assetPath}`;
       return {
         status: "published",
         asset: PublishedReviewAssetSchema.parse({

@@ -166,7 +166,7 @@ describe("PublisherService", () => {
     expect(githubPublisher.createdPayloads).toHaveLength(0);
   });
 
-  it("resolves bound Git and remote state once for one authoritative publish call", async () => {
+  it("revalidates bound Git and remote state before an authoritative publish mutation", async () => {
     gitCurrentBranch = "codex/pinned";
     const run = await runService.createRun({
       projectRoot,
@@ -205,16 +205,16 @@ describe("PublisherService", () => {
       confirm: true,
     });
 
-    expect(gitCalls.filter((args) => args[0] === "status")).toHaveLength(1);
-    expect(gitCalls.filter((args) => args[0] === "symbolic-ref")).toHaveLength(1);
+    expect(gitCalls.filter((args) => args[0] === "status")).toHaveLength(2);
+    expect(gitCalls.filter((args) => args[0] === "symbolic-ref")).toHaveLength(2);
     expect(
       gitCalls.filter((args) => args[0] === "rev-parse" && args.at(-1) === "HEAD"),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
     expect(
       gitCalls.filter((args) => args[0] === "rev-parse" && args.at(-1) === "codex/pinned"),
-    ).toHaveLength(1);
-    expect(gitCalls.filter((args) => args[0] === "remote")).toHaveLength(1);
-    expect(gitCalls.filter((args) => args[0] === "rev-list")).toHaveLength(1);
+    ).toHaveLength(2);
+    expect(gitCalls.filter((args) => args[0] === "remote")).toHaveLength(2);
+    expect(gitCalls.filter((args) => args[0] === "rev-list")).toHaveLength(2);
   });
 
   it("invalidates the private publication fence when the Run revision changes", async () => {
@@ -260,6 +260,43 @@ describe("PublisherService", () => {
       }),
     ).rejects.toThrow(/PUBLISH_EXECUTION_FENCE_STALE/);
     expect(githubPublisher.createdPayloads).toHaveLength(0);
+  });
+
+  it("revalidates semantic bindings after a provider callback before draft mutation", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    githubPublisher.beforeFindExisting = async () => {
+      const current = await store.get(run.id);
+      await store.save(
+        {
+          ...current,
+          status: "blocked",
+          revision: current.revision + 1,
+          updatedAt: "2026-06-23T00:00:01.750Z",
+        },
+        current.revision,
+      );
+    };
+
+    await expect(
+      publisherService.publish({
+        runId: run.id,
+        reportArtifactId: report.markdownArtifactId,
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        pushBranch: false,
+        confirm: true,
+      }),
+    ).rejects.toThrow(/PUBLISH_EXECUTION_FENCE_STALE.*Run semantic binding/i);
+
+    expect(githubPublisher.createdPayloads).toHaveLength(0);
+    expect(githubPublisher.updatedMetadata).toHaveLength(0);
+    expect(
+      (await store.get(run.id)).artifacts.filter(
+        (artifact) => artifact.metadata["reportKind"] === "publish-result",
+      ),
+    ).toHaveLength(0);
   });
 
   it.each([
@@ -3233,6 +3270,7 @@ class FakePublisher implements ReviewRequestPublisher {
   public existingRequest: PublishedReviewRequest | undefined;
   public forceNonDraftResult = false;
   public remoteBodyOverride: string | undefined;
+  public beforeFindExisting: (() => Promise<void>) | undefined;
   public assetOutcomePlan:
     | ((input: { invocation: number; assets: ReviewRequestAsset[] }) => ReviewAssetPublishOutcome[])
     | undefined;
@@ -3243,6 +3281,7 @@ class FakePublisher implements ReviewRequestPublisher {
     signal?: AbortSignal;
   }): Promise<PublishedReviewRequest | undefined> {
     this.receivedSignals.push(input.signal);
+    await this.beforeFindExisting?.();
     return this.existingRequest;
   }
 

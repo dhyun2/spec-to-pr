@@ -336,6 +336,43 @@ describe("GitHubPublisherAdapter", () => {
     });
   });
 
+  it("keeps public GitHub Enterprise evidence on the exact configured host", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ private: false }))
+      .mockResolvedValueOnce(jsonResponse(evidenceRef()))
+      .mockResolvedValueOnce(new Response("not found", { status: 404 }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          content: { sha: "f".repeat(40) },
+          commit: { sha: EVIDENCE_COMMIT },
+        }),
+      );
+    const adapter = new GitHubPublisherAdapter(fetchMock);
+    const enterpriseTarget: PublishTarget = {
+      ...githubTarget(),
+      webBaseUrl: "https://github.corp.example",
+      apiBaseUrl: "https://github.corp.example/api/v3",
+    };
+
+    const result = await adapter.publishAssets({
+      target: enterpriseTarget,
+      payload: payload(),
+      token: "ghp_example",
+      maxConcurrency: 3,
+      assets: [asset()],
+    });
+
+    expect(result[0]).toMatchObject({
+      status: "published",
+      asset: {
+        embeddable: false,
+        url: `https://github.corp.example/acme/spec-to-pr/blob/${EVIDENCE_COMMIT}/.spec-to-pr/visual-assets/run_11111111111111111111111111111111/${PACKET_ID}/home/art_22222222222222222222222222222222/figma.png`,
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain("raw.githubusercontent.com");
+  });
+
   it("reuses the same managed branch across runs", async () => {
     const fetchMock = vi.fn();
     for (let index = 0; index < 2; index += 1) {

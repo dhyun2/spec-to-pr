@@ -202,6 +202,71 @@ function componentUsage(
   };
 }
 
+function publicApiAuthorityFixture(rootSource: string, iconSource: string) {
+  const packagePath = "tests/fixtures/case4-figma/ui-consumer/package.json";
+  const rootPath = "tests/fixtures/case4-figma/ui-consumer/index.js";
+  const iconPath = "tests/fixtures/case4-figma/ui-consumer/icons/vue.js";
+  const codeConnectPath = "tests/fixtures/case4-figma/ui-consumer/code-connect.manifest.json";
+  const packageBytes = Buffer.from(
+    JSON.stringify({
+      name: "@frontend/ui",
+      version: "1.2.3",
+      exports: { ".": "./index.js", "./icons/vue": "./icons/vue.js" },
+    }),
+  );
+  const rootBytes = Buffer.from(rootSource);
+  const iconBytes = Buffer.from(iconSource);
+  const codeConnectBytes = Buffer.from(
+    JSON.stringify({
+      packageName: "@frontend/ui",
+      packageVersion: "1.2.3",
+      mappings: publicApiCatalogFields.exports,
+    }),
+  );
+  const fields = {
+    ...publicApiCatalogFields,
+    packageManifest: {
+      path: packagePath,
+      digest: `sha256:${createHash("sha256").update(packageBytes).digest("hex")}` as const,
+    },
+    publicBarrels: [
+      {
+        module: "@frontend/ui" as const,
+        path: rootPath,
+        digest: `sha256:${createHash("sha256").update(rootBytes).digest("hex")}` as const,
+      },
+      {
+        module: "@frontend/ui/icons/vue" as const,
+        path: iconPath,
+        digest: `sha256:${createHash("sha256").update(iconBytes).digest("hex")}` as const,
+      },
+    ],
+    codeConnectManifest: {
+      path: codeConnectPath,
+      digest: `sha256:${createHash("sha256").update(codeConnectBytes).digest("hex")}` as const,
+    },
+  };
+  const catalog = {
+    ...fields,
+    digest: figmaContract.figmaPublicApiCatalogDigest(fields),
+  };
+  return {
+    mapping: {
+      designSystem: { ...designSystem, catalogDigest: catalog.digest },
+      publicApiCatalog: catalog,
+      components: [],
+      fonts: [],
+      tokens: [],
+    },
+    evidence: [
+      { path: packagePath, content: packageBytes },
+      { path: rootPath, content: rootBytes },
+      { path: iconPath, content: iconBytes },
+      { path: codeConnectPath, content: codeConnectBytes },
+    ],
+  };
+}
+
 describe("Figma design mapping", () => {
   it("requires every captured component to resolve explicitly", () => {
     expect(() =>
@@ -560,6 +625,41 @@ describe("Figma design mapping", () => {
         evidence,
       }),
     ).not.toThrow();
+  });
+
+  it.each([
+    "export interface Spot {}; export const Circle = {}; export const Close = {};",
+    "export type Spot = {}; export const Circle = {}; export const Close = {};",
+    "export type { Spot } from '../../index.js'; export const Circle = {}; export const Close = {};",
+    "export declare const Spot: {}; export const Circle = {}; export const Close = {};",
+    "export const enum Spot { Value }; export const Circle = {}; export const Close = {};",
+    "export { Spot } from './missing.js'; export const Circle = {}; export const Close = {};",
+  ])("rejects a non-runtime or unresolved public icon export: %s", (iconSource) => {
+    const fixture = publicApiAuthorityFixture(
+      "export const IconButton = {}; export const Spot = {};",
+      iconSource,
+    );
+
+    expect(() => figmaContract.assertFigmaPublicApiCatalogEvidence(fixture)).toThrow(
+      /FIGMA_DESIGN_MAPPING_INCOMPLETE|runtime|digest-bound|missing|real named barrel export/i,
+    );
+  });
+
+  it("resolves a named re-export only through another digest-bound runtime barrel", () => {
+    const fixture = publicApiAuthorityFixture(
+      "export const IconButton = {}; export const Spot = {};",
+      "export { Spot } from '../index.js'; export const Circle = {}; export const Close = {};",
+    );
+
+    expect(() => figmaContract.assertFigmaPublicApiCatalogEvidence(fixture)).not.toThrow();
+
+    const typeOnlyTarget = publicApiAuthorityFixture(
+      "export const IconButton = {}; export interface Spot {};",
+      "export { Spot } from '../index.js'; export const Circle = {}; export const Close = {};",
+    );
+    expect(() => figmaContract.assertFigmaPublicApiCatalogEvidence(typeOnlyTarget)).toThrow(
+      /real named barrel export/i,
+    );
   });
 
   it("KNOWN_SPOT_EXCEPTION_SUBSTITUTION_ACCEPTED", () => {
