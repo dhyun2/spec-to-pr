@@ -151,7 +151,10 @@ type SourceReadBudget = {
 type ExportInspection = {
   applicationRoot: string;
   candidatePaths: Set<string>;
+  featureRoot: string;
   readBudget: SourceReadBudget;
+  resolutionDecisions: Map<string, LegacyResolutionDecision>;
+  resolutionDecisionLimitSourcePath?: string;
   results: Map<string, boolean>;
 };
 
@@ -201,7 +204,9 @@ export async function discoverLegacySourceGraphFromSnapshot(
   const exportInspection: ExportInspection = {
     applicationRoot,
     candidatePaths: new Set(),
+    featureRoot: canonicalFeatureRoot,
     readBudget,
+    resolutionDecisions,
     results: new Map(),
   };
   let truncation: LegacySourceGraph["truncation"] =
@@ -292,10 +297,12 @@ export async function discoverLegacySourceGraphFromSnapshot(
           }))
         : discoverModuleReferences(parsed, requestedExports);
     for (const reference of references) {
-      const decisionKey = `${graphFile.sourcePath}\0${reference.specifier}`;
       if (
-        !resolutionDecisions.has(decisionKey) &&
-        resolutionDecisions.size >= MAX_LEGACY_RESOLUTION_DECISIONS
+        !collectLegacyResolutionDecision(resolutionDecisions, {
+          importer: graphFile.sourcePath,
+          specifier: reference.specifier,
+          resolvedPath: "@missing",
+        })
       ) {
         truncation = {
           limit: "maxResolutionDecisions",
@@ -309,16 +316,14 @@ export async function discoverLegacySourceGraphFromSnapshot(
         applicationRoot,
         aliases,
       });
-      if (!resolutionDecisions.has(decisionKey)) {
-        resolutionDecisions.set(decisionKey, {
-          importer: graphFile.sourcePath,
-          specifier: reference.specifier,
-          resolvedPath:
-            resolved === undefined
-              ? "@missing"
-              : path.relative(applicationRoot, resolved.absolutePath).split(path.sep).join("/"),
-        });
-      }
+      collectLegacyResolutionDecision(resolutionDecisions, {
+        importer: graphFile.sourcePath,
+        specifier: reference.specifier,
+        resolvedPath:
+          resolved === undefined
+            ? "@missing"
+            : path.relative(applicationRoot, resolved.absolutePath).split(path.sep).join("/"),
+      });
       if (resolved === undefined) continue;
       if (
         digestAlgorithm === LEGACY_SOURCE_DIGEST_ALGORITHM_V2 &&
@@ -329,6 +334,13 @@ export async function discoverLegacySourceGraphFromSnapshot(
           exportInspection,
         ))
       ) {
+        if (exportInspection.resolutionDecisionLimitSourcePath !== undefined) {
+          truncation = {
+            limit: "maxResolutionDecisions",
+            sourcePath: exportInspection.resolutionDecisionLimitSourcePath,
+          };
+          break traversal;
+        }
         if (readBudget.truncation !== undefined) {
           truncation = publicTruncation(
             readBudget.truncation,
@@ -929,19 +941,60 @@ async function sourceDirectlyExports(
       inspection.results.set(resultKey, true);
       return true;
     }
-    const target = await resolveSourceFile(path.resolve(path.dirname(absolutePath), source));
+    const importer = publicGraphPath(
+      absolutePath,
+      inspection.featureRoot,
+      inspection.applicationRoot,
+    );
     if (
-      target !== undefined &&
-      isWithin(inspection.applicationRoot, target) &&
-      (await sourceDirectlyExports(target, namedRequests, inspection, new Set(visited), depth + 1))
+      !collectLegacyResolutionDecision(inspection.resolutionDecisions, {
+        importer,
+        specifier: source,
+        resolvedPath: "@missing",
+      })
+    ) {
+      inspection.resolutionDecisionLimitSourcePath = importer;
+      return false;
+    }
+    const target = await resolveSourceFile(path.resolve(path.dirname(absolutePath), source));
+    const boundedTarget =
+      target !== undefined && isWithin(inspection.applicationRoot, target) ? target : undefined;
+    collectLegacyResolutionDecision(inspection.resolutionDecisions, {
+      importer,
+      specifier: source,
+      resolvedPath:
+        boundedTarget === undefined
+          ? "@missing"
+          : path.relative(inspection.applicationRoot, boundedTarget).split(path.sep).join("/"),
+    });
+    if (
+      boundedTarget !== undefined &&
+      (await sourceDirectlyExports(
+        boundedTarget,
+        namedRequests,
+        inspection,
+        new Set(visited),
+        depth + 1,
+      ))
     ) {
       inspection.results.set(resultKey, true);
       return true;
     }
+    if (inspection.resolutionDecisionLimitSourcePath !== undefined) return false;
     if (inspection.readBudget.truncation !== undefined) return false;
   }
   inspection.results.set(resultKey, false);
   return false;
+}
+
+function collectLegacyResolutionDecision(
+  decisions: Map<string, LegacyResolutionDecision>,
+  decision: LegacyResolutionDecision,
+): boolean {
+  const key = `${decision.importer}\0${decision.specifier}`;
+  if (!decisions.has(key) && decisions.size >= MAX_LEGACY_RESOLUTION_DECISIONS) return false;
+  decisions.set(key, decision);
+  return true;
 }
 
 function dependencyKind(

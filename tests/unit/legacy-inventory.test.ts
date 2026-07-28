@@ -240,6 +240,49 @@ describe("legacy inventory v3", () => {
     ).rejects.toThrow(/LEGACY_SOURCE_CHANGED/);
   });
 
+  it("persists missing recursive export decisions and invalidates when the target appears", async () => {
+    const root = await temporaryLegacyProject();
+    await writeFile(path.join(root, "package.json"), '{"name":"recursive-export-probe"}\n', "utf8");
+    const featureRoot = path.join(root, "src", "modules", "shop");
+    const apiRoot = path.join(root, "src", "api");
+    await mkdir(featureRoot, { recursive: true });
+    await mkdir(apiRoot, { recursive: true });
+    await writeFile(
+      path.join(featureRoot, "profile.ts"),
+      'import { loadProfile } from "../../api"; export const profile = loadProfile;\n',
+      "utf8",
+    );
+    await writeFile(path.join(apiRoot, "index.ts"), 'export * from "./candidate";\n', "utf8");
+    await writeFile(path.join(apiRoot, "candidate.ts"), 'export * from "./missing";\n', "utf8");
+    const cache = new LegacySourceCache();
+    const pinned = await buildLegacyInventory(featureRoot, {}, { sourceCache: cache });
+
+    expect(pinned.sourceResolutionDecisions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          importer: "@app/src/api/candidate.ts",
+          specifier: "./missing",
+          resolvedPath: "@missing",
+        }),
+      ]),
+    );
+    const parsesAfterBuild = cache.snapshotStats().astParses;
+    await expect(
+      assertLegacyInventoryFresh(featureRoot, pinned, { sourceCache: cache }),
+    ).resolves.toBe(pinned);
+    expect(cache.snapshotStats().astParses).toBe(parsesAfterBuild);
+
+    await writeFile(
+      path.join(apiRoot, "missing.ts"),
+      'export const loadProfile = () => fetch("/api/profile");\n',
+      "utf8",
+    );
+
+    await expect(
+      assertLegacyInventoryFresh(featureRoot, pinned, { sourceCache: cache }),
+    ).rejects.toThrow(/LEGACY_SOURCE_CHANGED/);
+  });
+
   it("truncates deterministically at the persisted resolver-decision bound", async () => {
     const root = await temporaryLegacyProject();
     await writeFile(
