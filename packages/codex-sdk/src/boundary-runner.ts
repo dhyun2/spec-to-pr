@@ -9,6 +9,7 @@ import {
 import { parallelReviewersForWorkload } from "./generated/delivery-mode-policy.js";
 
 export type BoundaryWorkflowStatus = {
+  view: "action" | "checkpoint" | "detail";
   runId: string;
   revision: number;
   status: "running" | "needs-external-action" | "blocked" | "publish-ready" | "completed";
@@ -35,11 +36,7 @@ export type BoundaryWorkflowStatus = {
     updated: boolean;
     publishResultArtifactId: string;
   };
-  resumeContext: {
-    goal: string;
-    evidencePaths: string[];
-    submissions: Array<{ kind: string; summary: string; outcome: string }>;
-  };
+  resumeContext?: BoundaryResumeContext;
   requiredValidations: string[];
   workload: {
     size: WorkloadSize;
@@ -52,6 +49,12 @@ export type BoundaryWorkflowStatus = {
       hardLimitTokens: number;
     };
   };
+};
+
+export type BoundaryResumeContext = {
+  goal: string;
+  evidencePaths: string[];
+  submissions: Array<{ kind: string; summary: string; outcome: string }>;
 };
 
 export type BoundaryWorkflowBlocker = {
@@ -350,7 +353,7 @@ export function buildCompactCheckpointPrompt(
 ): string {
   return [
     "Resume the installed spec-to-pr workflow from this compact context checkpoint.",
-    "Call workflow_status with the recorded runId first; durable workflow state and project files are authoritative.",
+    `Call workflow_status with ${JSON.stringify({ runId: status.runId, view: "checkpoint" })} first; durable workflow state and project files are authoritative.`,
     "Complete only the next external action group, then stop after the returned workflow status. Independent functional and design reviews in the same action group may run in parallel.",
     "Do not waive, skip, or reduce required validation because of token pressure. Keep API and UI implementation in one context.",
     `Checkpoint: ${JSON.stringify(compactStatus(status, requiredValidations, effectiveBudget))}`,
@@ -364,7 +367,12 @@ export function buildBoundaryContinuationPrompt(
 ): string {
   return [
     `Continue spec-to-pr Run ${status.runId}.`,
-    "Call workflow_status first, complete only the next external action group, and stop after its returned status. Independent functional and design reviews in the same group may run in parallel.",
+    `Call workflow_status with ${JSON.stringify({ runId: status.runId, view: "action" })} first, complete only the next external action group, and stop after its returned status. Independent functional and design reviews in the same group may run in parallel.`,
+    ...(requiresImmutableDetail(status)
+      ? [
+          `Before preparing immutable reviewer evidence or report evidence, call workflow_status with ${JSON.stringify({ runId: status.runId, view: "detail" })} and use that detail snapshot with accepted contracts, diff, and evidence handles.`,
+        ]
+      : []),
     "Preserve every required validation; budget pressure never authorizes a waiver.",
     `Boundary: ${JSON.stringify(compactStatus(status, requiredValidations, effectiveBudget))}`,
   ].join("\n");
@@ -390,7 +398,7 @@ export function buildBlockedDiagnosticFinalizationPrompt(
       ? 'Only when every precondition is already true, call workflow_publish once with intent: "blocked-diagnostic", mode: "execute", confirm: true, and the actual non-target sourceBranch and targetBranch.'
       : `The SDK preflight already passed. Call workflow_publish once with intent: "blocked-diagnostic", mode: "execute", confirm: true, sourceBranch: ${JSON.stringify(preflight.sourceBranch)}, targetBranch: ${JSON.stringify(preflight.targetBranch)}, and remoteName: ${JSON.stringify(preflight.remoteName)}.`,
     "If any precondition is absent, do not create commits, branches, credentials, issues, or another recovery loop; preserve the local diagnostic report.",
-    "Call workflow_status once after the publish attempt or local-only decision, then stop even when the Run remains blocked.",
+    `Call workflow_status once with ${JSON.stringify({ runId: status.runId, view: "action" })} after the publish attempt or local-only decision, then stop even when the Run remains blocked.`,
     `Blocked action envelope: ${JSON.stringify({
       runId: status.runId,
       publication: status.deliveryProfile.publication,
@@ -433,7 +441,7 @@ function compactStatus(
       recommendedSkills: status.deliveryProfile.recommendedSkills,
       delegationPolicy: status.delegationPolicy,
       diagnosticPublication: status.diagnosticPublication ?? null,
-      resumeContext: status.resumeContext,
+      ...(status.resumeContext === undefined ? {} : { resumeContext: status.resumeContext }),
       requiredValidations: [...requiredValidations],
     },
     ...(effectiveBudget === undefined
@@ -450,6 +458,15 @@ function compactStatus(
           },
         }),
   };
+}
+
+function requiresImmutableDetail(status: BoundaryWorkflowStatus): boolean {
+  if (status.currentStage === "report") return true;
+  return status.nextActions.some((action) => {
+    if (typeof action !== "object" || action === null || Array.isArray(action)) return false;
+    const kind = (action as Record<string, unknown>)["kind"];
+    return kind === "review-functional" || kind === "review-design";
+  });
 }
 
 function canAttemptBlockedDiagnosticFinalization(status: BoundaryWorkflowStatus): boolean {
@@ -481,6 +498,7 @@ function parseWorkflowStatusCandidate(value: unknown): BoundaryWorkflowStatus | 
   const runId = record["runId"];
   const revision = record["revision"];
   const status = record["status"];
+  const view = record["view"] ?? "action";
   const allowedStatuses = new Set([
     "running",
     "needs-external-action",
@@ -494,7 +512,8 @@ function parseWorkflowStatusCandidate(value: unknown): BoundaryWorkflowStatus | 
     !Number.isInteger(revision) ||
     revision < 0 ||
     typeof status !== "string" ||
-    !allowedStatuses.has(status)
+    !allowedStatuses.has(status) ||
+    (view !== "action" && view !== "checkpoint" && view !== "detail")
   ) {
     return null;
   }
@@ -510,7 +529,13 @@ function parseWorkflowStatusCandidate(value: unknown): BoundaryWorkflowStatus | 
   if (currentStage !== undefined && typeof currentStage !== "string") return null;
   const workload = parseWorkload(record["workload"]);
   const resumeContext = parseResumeContext(record["resumeContext"]);
-  if (workload === null || resumeContext === null) return null;
+  if (
+    workload === null ||
+    resumeContext === null ||
+    (view !== "action" && resumeContext === undefined)
+  ) {
+    return null;
+  }
   const deliveryProfile = parseDeliveryProfile(record["deliveryProfile"]);
   const delegationPolicy = parseDelegationPolicy(record["delegationPolicy"], workload.size);
   const blockerDetails = parseBlockerDetails(record["blockerDetails"]);
@@ -525,6 +550,7 @@ function parseWorkflowStatusCandidate(value: unknown): BoundaryWorkflowStatus | 
   }
 
   return {
+    view,
     runId,
     revision,
     status: status as BoundaryWorkflowStatus["status"],
@@ -536,7 +562,7 @@ function parseWorkflowStatusCandidate(value: unknown): BoundaryWorkflowStatus | 
     deliveryProfile,
     delegationPolicy,
     ...(diagnosticPublication === undefined ? {} : { diagnosticPublication }),
-    resumeContext,
+    ...(resumeContext === undefined ? {} : { resumeContext }),
     requiredValidations: record["requiredValidations"],
     workload,
   };
@@ -662,7 +688,8 @@ function parseDiagnosticPublication(
   };
 }
 
-function parseResumeContext(value: unknown): BoundaryWorkflowStatus["resumeContext"] | null {
+function parseResumeContext(value: unknown): BoundaryResumeContext | null | undefined {
+  if (value === undefined) return undefined;
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
   const goal = record["goal"];

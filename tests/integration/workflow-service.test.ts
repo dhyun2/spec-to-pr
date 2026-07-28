@@ -1834,7 +1834,7 @@ describe("WorkflowService", () => {
       },
     });
 
-    const status = await service.status({ runId: started.runId });
+    const status = await service.status({ runId: started.runId, view: "detail" });
     expect(status.resumeContext.evidencePaths).toContain(safePath);
     expect(status.blockerDetails[0]?.evidencePaths).toContain(safePath);
     expect(JSON.stringify(status)).not.toContain(secretPath);
@@ -3162,6 +3162,130 @@ describe("WorkflowService", () => {
     }
   });
 
+  it("projects action and checkpoint status without reading the 250-file legacy inventory", async () => {
+    const legacyRoot = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-status-legacy-"));
+    try {
+      await Promise.all(
+        Array.from({ length: 250 }, async (_, index) => {
+          const relativePath = path.join(
+            "src",
+            index % 2 === 0 ? "components" : "views",
+            `feature-${String(index + 1).padStart(3, "0")}.${index % 2 === 0 ? "vue" : "js"}`,
+          );
+          const absolutePath = path.join(legacyRoot, relativePath);
+          await mkdir(path.dirname(absolutePath), { recursive: true });
+          await writeFile(
+            absolutePath,
+            relativePath.endsWith(".vue")
+              ? `<script>export const feature${index} = ${index};</script><template />\n`
+              : `export const feature${index} = ${index};\n`,
+            "utf8",
+          );
+        }),
+      );
+
+      const started = await service.start({
+        projectRoot: directory,
+        legacyProjectRoot: legacyRoot,
+        requestText: "Migrate the bounded legacy feature inventory",
+        mode: "legacy",
+        changeKind: "migration",
+        publication: "none",
+      });
+      const originalRun = await store.get(started.runId);
+      const inventoryArtifact = originalRun.artifacts.find(
+        (artifact) => artifact.kind === "legacy-feature-inventory",
+      );
+      if (inventoryArtifact === undefined) throw new Error("Missing legacy inventory artifact");
+      const template = originalRun.artifacts[0]!;
+      const appendedArtifacts = Array.from({ length: 20 }, (_, index) =>
+        ArtifactRefSchema.parse({
+          ...template,
+          id: createArtifactId(),
+          kind: "agent-result-report",
+          metadata: {
+            adapter: "workflow-v2",
+            workflowSubmissionKind: `status-${String(index + 1).padStart(2, "0")}`,
+            summary: `Status submission ${index + 1}`,
+            status: "passed",
+            projectRelativePath: `test-results/status-${String(index + 1).padStart(2, "0")}.json`,
+          },
+        }),
+      );
+      await store.save(
+        {
+          ...originalRun,
+          revision: originalRun.revision + 1,
+          artifacts: [...originalRun.artifacts, ...appendedArtifacts],
+        },
+        originalRun.revision,
+      );
+
+      const readContent = vi.spyOn(artifactStore, "readContent");
+      const action = await service.status({ runId: started.runId, view: "action" });
+      expect(action).toMatchObject({
+        view: "action",
+        runId: started.runId,
+        deliveryProfile: { publication: "none", recommendedSkills: expect.any(Array) },
+        workload: { size: expect.stringMatching(/^(XS|S|M|L|XL)$/) },
+        delegationPolicy: { singleWriter: true, allowNested: false },
+        nextActions: expect.any(Array),
+        blockerDetails: expect.any(Array),
+      });
+      expect(action).not.toHaveProperty("scope");
+      expect(action).not.toHaveProperty("resumeContext");
+      expect(action).not.toHaveProperty("legacyInventory");
+      expect(action.stages.every((item) => !("checkpoint" in item))).toBe(true);
+      expect(readContent.mock.calls.some(([digest]) => digest === inventoryArtifact.digest)).toBe(
+        false,
+      );
+
+      readContent.mockClear();
+      const checkpoint = await service.status({ runId: started.runId, view: "checkpoint" });
+      expect(checkpoint).toMatchObject({
+        view: "checkpoint",
+        resumeContext: {
+          goal: "Migrate the bounded legacy feature inventory",
+          evidencePaths: expect.any(Array),
+        },
+      });
+      expect(checkpoint.resumeContext.submissions).toHaveLength(16);
+      expect(checkpoint.resumeContext.submissions.map((item) => item.kind)).toEqual(
+        Array.from({ length: 16 }, (_, index) => `status-${String(index + 5).padStart(2, "0")}`),
+      );
+      expect(checkpoint.stages.find((item) => item.name === "intake")?.checkpoint).toEqual(
+        expect.any(String),
+      );
+      expect(checkpoint).not.toHaveProperty("scope");
+      expect(checkpoint).not.toHaveProperty("legacyInventory");
+      expect(readContent.mock.calls.some(([digest]) => digest === inventoryArtifact.digest)).toBe(
+        false,
+      );
+
+      readContent.mockClear();
+      const detail = await service.status({ runId: started.runId, view: "detail" });
+      expect(detail).toMatchObject({
+        view: "detail",
+        scope: { ui: true, hasVisualBaseline: true },
+        deliveryProfile: { mode: "legacy", publication: "none" },
+        legacyInventory: {
+          artifactId: inventoryArtifact.id,
+          version: 3,
+          entries: expect.any(Array),
+        },
+      });
+      expect(detail.resumeContext.submissions).toHaveLength(16);
+      expect(readContent.mock.calls.some(([digest]) => digest === inventoryArtifact.digest)).toBe(
+        true,
+      );
+      expect(Buffer.byteLength(JSON.stringify(action), "utf8")).toBeLessThanOrEqual(
+        Buffer.byteLength(JSON.stringify(detail), "utf8") * 0.25,
+      );
+    } finally {
+      await rm(legacyRoot, { recursive: true, force: true });
+    }
+  });
+
   it("derives legacy API operations without requiring a separate OpenAPI source", async () => {
     const legacyRoot = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-legacy-api-"));
     try {
@@ -4210,7 +4334,7 @@ describe("WorkflowService", () => {
       run.revision,
     );
 
-    await expect(service.status({ runId: started.runId })).resolves.toMatchObject({
+    await expect(service.status({ runId: started.runId, view: "detail" })).resolves.toMatchObject({
       deliveryProfile: { mode: "auto", publication: "draft" },
     });
   });
@@ -4286,7 +4410,7 @@ describe("WorkflowService", () => {
         run.revision,
       );
 
-      const resumed = await service.status({ runId: started.runId });
+      const resumed = await service.status({ runId: started.runId, view: "detail" });
       expect(resumed.deliveryProfile.publication).toBe("none");
       expect(resumed.deliveryProfile.draftEvidenceBundle).toBeUndefined();
 

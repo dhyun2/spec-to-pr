@@ -1816,6 +1816,10 @@ export const WorkflowStageSummarySchema = z
   })
   .strict();
 
+export const WorkflowActionStageSummarySchema = WorkflowStageSummarySchema.omit({
+  checkpoint: true,
+});
+
 export const WorkflowResumeContextSchema = z
   .object({
     goal: z.string().trim().min(1).max(4_000),
@@ -1848,27 +1852,74 @@ export const DiagnosticPublicationSchema = z
     message: "Diagnostic publication evidence must record a created or updated request",
   });
 
-export const WorkflowStatusSchema = z
+export const WorkflowStatusViewSchema = z.enum(["action", "checkpoint", "detail"]);
+
+export const WorkflowStatusInputSchema = z
   .object({
     runId: RunIdSchema,
-    revision: z.number().int().nonnegative(),
-    status: z.enum(["running", "needs-external-action", "blocked", "publish-ready", "completed"]),
-    currentStage: z.string().trim().min(1).optional(),
+    view: WorkflowStatusViewSchema.default("action"),
+  })
+  .strict();
+
+const WorkflowStatusStateSchema = z.enum([
+  "running",
+  "needs-external-action",
+  "blocked",
+  "publish-ready",
+  "completed",
+]);
+
+const WorkflowActionDeliveryProfileSchema = z
+  .object({
+    publication: PublicationIntentSchema,
+    recommendedSkills: NormalizedSkillHintsSchema.default([]),
+  })
+  .strict();
+
+const WorkflowActionStatusFields = {
+  runId: RunIdSchema,
+  revision: z.number().int().nonnegative(),
+  status: WorkflowStatusStateSchema,
+  currentStage: z.string().trim().min(1).optional(),
+  deliveryProfile: WorkflowActionDeliveryProfileSchema,
+  workspaceBinding: WorkspaceBindingSchema.optional(),
+  workload: WorkloadEstimateSchema,
+  delegationPolicy: DelegationPolicySchema,
+  requiredValidations: z.array(z.string().trim().min(1)).superRefine((items, context) => {
+    if (new Set(items).size !== items.length) {
+      context.addIssue({ code: "custom", message: "Required validations must be unique" });
+    }
+  }),
+  nextActions: z.array(WorkflowActionSchema),
+  blockers: z.array(z.string().trim().min(1)),
+  blockerDetails: z.array(WorkflowBlockerSchema),
+  diagnosticPublication: DiagnosticPublicationSchema.optional(),
+} as const;
+
+export const WorkflowActionStatusSchema = z
+  .object({
+    view: z.literal("action"),
+    ...WorkflowActionStatusFields,
+    stages: z.array(WorkflowActionStageSummarySchema),
+  })
+  .strict();
+
+export const WorkflowCheckpointStatusSchema = z
+  .object({
+    view: z.literal("checkpoint"),
+    ...WorkflowActionStatusFields,
+    stages: z.array(WorkflowStageSummarySchema),
+    resumeContext: WorkflowResumeContextSchema,
+  })
+  .strict();
+
+export const WorkflowDetailStatusSchema = z
+  .object({
+    view: z.literal("detail"),
+    ...WorkflowActionStatusFields,
     scope: WorkflowScopeSchema,
     deliveryProfile: DeliveryProfileSchema,
-    workspaceBinding: WorkspaceBindingSchema.optional(),
-    workload: WorkloadEstimateSchema,
-    delegationPolicy: DelegationPolicySchema,
-    requiredValidations: z.array(z.string().trim().min(1)).superRefine((items, context) => {
-      if (new Set(items).size !== items.length) {
-        context.addIssue({ code: "custom", message: "Required validations must be unique" });
-      }
-    }),
     stages: z.array(WorkflowStageSummarySchema),
-    nextActions: z.array(WorkflowActionSchema),
-    blockers: z.array(z.string().trim().min(1)),
-    blockerDetails: z.array(WorkflowBlockerSchema),
-    diagnosticPublication: DiagnosticPublicationSchema.optional(),
     legacyInventory: z
       .object({
         artifactId: ArtifactIdSchema,
@@ -1911,6 +1962,12 @@ export const WorkflowStatusSchema = z
   })
   .strict();
 
+export const WorkflowStatusSchema = z.discriminatedUnion("view", [
+  WorkflowActionStatusSchema,
+  WorkflowCheckpointStatusSchema,
+  WorkflowDetailStatusSchema,
+]);
+
 export type WorkflowScope = z.infer<typeof WorkflowScopeSchema>;
 export type DeliveryMode = z.infer<typeof DeliveryModeSchema>;
 export type ChangeKind = z.infer<typeof ChangeKindSchema>;
@@ -1923,6 +1980,10 @@ export type ReviewVerdict = z.infer<typeof ReviewVerdictSchema>;
 export type ImplementationReviewPacket = z.infer<typeof ImplementationReviewPacketSchema>;
 export type WorkflowSubmission = z.infer<typeof WorkflowSubmissionSchema>;
 export type WorkflowAction = z.infer<typeof WorkflowActionSchema>;
+export type WorkflowResumeContext = z.infer<typeof WorkflowResumeContextSchema>;
+export type WorkflowActionStatus = z.infer<typeof WorkflowActionStatusSchema>;
+export type WorkflowCheckpointStatus = z.infer<typeof WorkflowCheckpointStatusSchema>;
+export type WorkflowDetailStatus = z.infer<typeof WorkflowDetailStatusSchema>;
 export type WorkflowStatus = z.infer<typeof WorkflowStatusSchema>;
 
 function isTargetedPlaywrightCommand(command: string, selector: string): boolean {

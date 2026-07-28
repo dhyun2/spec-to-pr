@@ -9,6 +9,8 @@ import { PNG } from "pngjs";
 import { ArtifactBlobStore } from "../../src/artifact-registry/artifact-blob-store.js";
 import { IntakeRequestService } from "../../src/application/intake-request-service.js";
 import { RunService } from "../../src/application/run-service.js";
+import { StageService } from "../../src/application/stage-service.js";
+import { WorkflowService } from "../../src/application/workflow-service.js";
 import {
   assertLegacyInventoryFresh,
   buildLegacyInventory,
@@ -40,6 +42,12 @@ const measuredLegacyCounters: Array<{
 }> = [];
 let peakRss = process.memoryUsage().rss;
 let legacyDirectory = "";
+let statusDirectory = "";
+let statusStore: SqliteRunStore;
+let statusRunId: `run_${string}`;
+let statusDetailBytes = 0;
+const measuredStatusActionBytes: number[] = [];
+const measuredStatusArtifactReads: number[] = [];
 const visualPng = PNG.sync.write(new PNG({ width: 360, height: 1831 }));
 
 const fixtures = {
@@ -70,6 +78,12 @@ const fixtures = {
   visual: {
     targets: ["first", "second"].map((targetId) => ({ targetId, width: 360, height: 1831 })),
     comparisons: ["default", "empty", "loaded"],
+  },
+  status: {
+    view: "action",
+    legacyFiles: 250,
+    maximumDetailRatio: 0.25,
+    maximumInventoryReads: 0,
   },
 } as const;
 
@@ -120,6 +134,35 @@ beforeAll(async () => {
       );
     }),
   );
+  statusDirectory = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-status-bench-"));
+  statusStore = new SqliteRunStore(path.join(statusDirectory, "runs.sqlite3"));
+  const statusArtifactStore = new ArtifactBlobStore(path.join(statusDirectory, "artifacts"));
+  const statusService = new WorkflowService({
+    runStore: statusStore,
+    artifactStore: statusArtifactStore,
+    runService: new RunService(statusStore, {
+      pluginVersion: "benchmark",
+      now: () => collectedAt,
+    }),
+    intakeRequestService: new IntakeRequestService(
+      statusStore,
+      new SourceSnapshotStore(path.join(statusDirectory, "source-snapshots")),
+      statusArtifactStore,
+      () => collectedAt,
+    ),
+    stageService: new StageService(statusStore, () => collectedAt),
+    now: () => collectedAt,
+  });
+  const statusDetail = await statusService.start({
+    projectRoot: statusDirectory,
+    legacyProjectRoot: legacyDirectory,
+    requestText: "Measure compact status for the deterministic legacy fixture.",
+    mode: "legacy",
+    changeKind: "migration",
+    publication: "none",
+  });
+  statusRunId = statusDetail.runId as `run_${string}`;
+  statusDetailBytes = Buffer.byteLength(JSON.stringify(statusDetail), "utf8");
 });
 
 describe("runtime reduction fixtures", () => {
@@ -280,6 +323,43 @@ describe("runtime reduction fixtures", () => {
   );
 
   bench(
+    "status action: compact projection for the 250-file legacy Run",
+    async () => {
+      const snapshot = await measureFixture(statusRunId, "status-action", async (recorder) => {
+        const artifactStore = new ArtifactBlobStore(
+          path.join(statusDirectory, "artifacts"),
+          recorder,
+        );
+        const service = new WorkflowService({
+          runStore: statusStore,
+          artifactStore,
+          runService: new RunService(statusStore, {
+            pluginVersion: "benchmark",
+            now: () => collectedAt,
+          }),
+          intakeRequestService: new IntakeRequestService(
+            statusStore,
+            new SourceSnapshotStore(path.join(statusDirectory, "source-snapshots")),
+            artifactStore,
+            () => collectedAt,
+          ),
+          stageService: new StageService(statusStore, () => collectedAt),
+          now: () => collectedAt,
+          metrics: recorder,
+        });
+        const action = await service.status({ runId: statusRunId, view: "action" });
+        measuredStatusActionBytes.push(Buffer.byteLength(JSON.stringify(action), "utf8"));
+      });
+      measuredStatusArtifactReads.push(
+        snapshot.samples.find(
+          (sample) => sample.kind === "counter" && sample.name === "artifact.read_count",
+        )?.value ?? 0,
+      );
+    },
+    { iterations: 5, warmupIterations: 1, time: 0, warmupTime: 0 },
+  );
+
+  bench(
     "visual: two 360x1831 targets across three valid comparisons",
     async () => {
       await measureFixture("run_33333333333333333333333333333333", "visual", async (recorder) => {
@@ -331,6 +411,22 @@ afterAll(async () => {
   ) {
     throw new Error("legacy cold/warm/change counters must be stable");
   }
+  const statusActionBytes = [...new Set(measuredStatusActionBytes)];
+  if (statusActionBytes.length !== 1 || statusActionBytes[0] === undefined) {
+    throw new Error("status action serialized bytes must be deterministic");
+  }
+  if (statusActionBytes[0] > statusDetailBytes * fixtures.status.maximumDetailRatio) {
+    throw new Error(
+      `status action exceeded 25% of detail: ${statusActionBytes[0]}/${statusDetailBytes}`,
+    );
+  }
+  if (
+    measuredStatusArtifactReads.some((reads) => reads !== fixtures.status.maximumInventoryReads)
+  ) {
+    throw new Error(
+      `status action read an inventory blob: ${JSON.stringify(measuredStatusArtifactReads)}`,
+    );
+  }
   if (
     legacyCounters.coldReads !== 250 ||
     legacyCounters.coldParses !== 250 ||
@@ -358,7 +454,9 @@ afterAll(async () => {
               ? fixtures.mixedIntake
               : name === "legacy"
                 ? fixtures.legacy
-                : fixtures.visual,
+                : name === "status-action"
+                  ? fixtures.status
+                  : fixtures.visual,
           ),
         ),
       ),
@@ -387,7 +485,14 @@ afterAll(async () => {
                 sharedAdapters: 5,
                 ...legacyCounters,
               }
-            : { targets: 2, comparisons: 3, pixelsPerTarget: 659160 },
+            : name === "status-action"
+              ? {
+                  legacyFiles: fixtures.status.legacyFiles,
+                  artifactReads: measuredStatusArtifactReads[0]!,
+                  actionSerializedBytes: statusActionBytes[0],
+                  detailSerializedBytes: statusDetailBytes,
+                }
+              : { targets: 2, comparisons: 3, pixelsPerTarget: 659160 },
     };
   });
   const receipt = {
@@ -413,6 +518,9 @@ afterAll(async () => {
       legacyChangeReads: legacyCounters.changeReads,
       legacyChangeParses: legacyCounters.changeParses,
       legacyChangeRebuilds: legacyCounters.changeRebuilds,
+      statusActionArtifactReads: measuredStatusArtifactReads[0]!,
+      statusActionSerializedBytes: statusActionBytes[0],
+      statusDetailSerializedBytes: statusDetailBytes,
       visualComparisons: fixtures.visual.comparisons.length,
     },
   };
@@ -421,5 +529,7 @@ afterAll(async () => {
     `${JSON.stringify(receipt, null, 2)}\n`,
   );
   console.info(JSON.stringify(receipt));
+  await statusStore.close();
+  await rm(statusDirectory, { recursive: true, force: true });
   await rm(legacyDirectory, { recursive: true, force: true });
 });

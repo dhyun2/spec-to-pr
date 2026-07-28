@@ -72,11 +72,15 @@ import {
   WorkflowSourcePathSchema,
   WorkflowSourceUrlSchema,
   WorkflowActionSchema,
+  WorkflowActionStatusSchema,
+  WorkflowCheckpointStatusSchema,
+  WorkflowDetailStatusSchema,
+  WorkflowResumeContextSchema,
+  WorkflowStatusInputSchema,
   CompactFailedVisualTargetsSchema,
   VisualLineageOutcomeV2Schema,
   VisualRepairEvidenceV2Schema,
   WorkflowScopeSchema,
-  WorkflowStatusSchema,
   WorkflowSubmissionSchema,
   WorkloadEstimateSchema,
   OpenApiOperationContractSchema,
@@ -94,6 +98,10 @@ import {
   type WorkloadEstimate,
   type WorkloadSignals,
   type WorkflowStatus,
+  type WorkflowActionStatus,
+  type WorkflowCheckpointStatus,
+  type WorkflowDetailStatus,
+  type WorkflowResumeContext,
   type WorkflowSubmission,
   DraftEvidenceManifestSchema,
 } from "../workflow/index.js";
@@ -423,7 +431,7 @@ export const WorkflowSubmitInputSchema = z
   })
   .strict();
 
-export const WorkflowStatusInputSchema = z.object({ runId: RunIdSchema }).strict();
+export { WorkflowStatusInputSchema };
 
 export const WorkflowPublishInputSchema = z
   .object({
@@ -559,7 +567,7 @@ export class WorkflowService {
     return measured();
   }
 
-  public async start(rawInput: unknown): Promise<WorkflowStatus> {
+  public async start(rawInput: unknown): Promise<WorkflowDetailStatus> {
     if (this.metrics instanceof RuntimeMetricsRecorder) {
       const recorder = this.metrics;
       const pending = recorder.beginRun();
@@ -574,7 +582,7 @@ export class WorkflowService {
     return this.measureWorkflowAction(rawInput, "start", () => this.startUninstrumented(rawInput));
   }
 
-  private async startUninstrumented(rawInput: unknown): Promise<WorkflowStatus> {
+  private async startUninstrumented(rawInput: unknown): Promise<WorkflowDetailStatus> {
     const input = WorkflowStartInputSchema.parse(rawInput);
     const workspaceBinding =
       input.workspace === undefined
@@ -832,7 +840,7 @@ export class WorkflowService {
           },
         },
       });
-      return this.status({ runId: created.id });
+      return this.status({ runId: created.id, view: "detail" });
     }
 
     await this.dependencies.stageService.complete({
@@ -856,7 +864,7 @@ export class WorkflowService {
       },
     });
 
-    return this.status({ runId: created.id });
+    return this.status({ runId: created.id, view: "detail" });
   }
 
   private async recordLegacyInventory(
@@ -919,13 +927,13 @@ export class WorkflowService {
     return { artifact, inventory };
   }
 
-  public async advance(rawInput: unknown): Promise<WorkflowStatus> {
+  public async advance(rawInput: unknown): Promise<WorkflowDetailStatus> {
     return this.measureWorkflowAction(rawInput, "advance", () =>
       this.advanceUninstrumented(rawInput),
     );
   }
 
-  private async advanceUninstrumented(rawInput: unknown): Promise<WorkflowStatus> {
+  private async advanceUninstrumented(rawInput: unknown): Promise<WorkflowDetailStatus> {
     const input = WorkflowAdvanceInputSchema.parse(rawInput);
 
     for (let step = 0; step < 8; step += 1) {
@@ -948,7 +956,7 @@ export class WorkflowService {
       ) {
         await this.generateReport(run.id);
         if (input.until === "report") {
-          return this.status({ runId: run.id });
+          return this.status({ runId: run.id, view: "detail" });
         }
         continue;
       }
@@ -963,19 +971,19 @@ export class WorkflowService {
         continue;
       }
 
-      return this.status({ runId: input.runId });
+      return this.status({ runId: input.runId, view: "detail" });
     }
 
     throw new Error(`Workflow ${input.runId} exceeded the deterministic advance limit`);
   }
 
-  public async submit(rawInput: unknown): Promise<WorkflowStatus> {
+  public async submit(rawInput: unknown): Promise<WorkflowDetailStatus> {
     return this.measureWorkflowAction(rawInput, "submit", () =>
       this.submitUninstrumented(rawInput),
     );
   }
 
-  private async submitUninstrumented(rawInput: unknown): Promise<WorkflowStatus> {
+  private async submitUninstrumented(rawInput: unknown): Promise<WorkflowDetailStatus> {
     const input = WorkflowSubmitInputSchema.parse(rawInput);
     const run = await this.dependencies.runStore.get(input.runId);
     const submission = input.submission;
@@ -991,7 +999,7 @@ export class WorkflowService {
     }
     if (submission.kind === "visual-comparison") {
       await this.recordVisualComparison(run, submission);
-      return this.status({ runId: run.id });
+      return this.status({ runId: run.id, view: "detail" });
     }
     assertSubmissionPrerequisites(run, submission, this.now());
     await assertDraftBundleIntegrity(run, submission);
@@ -1026,7 +1034,7 @@ export class WorkflowService {
 
     if (submission.kind === "figma-bundle") {
       await this.recordSubmissionArtifact(run, submission, evidenceArtifacts);
-      return this.status({ runId: run.id });
+      return this.status({ runId: run.id, view: "detail" });
     }
 
     if (submission.kind === "api-ready") {
@@ -1037,7 +1045,7 @@ export class WorkflowService {
         submission.implementationContextId,
         submission.operations,
       );
-      return this.status({ runId: run.id });
+      return this.status({ runId: run.id, view: "detail" });
     }
 
     const stageName = stageForSubmission(submission);
@@ -1089,7 +1097,7 @@ export class WorkflowService {
         },
         current.revision,
       );
-      return this.status({ runId: run.id });
+      return this.status({ runId: run.id, view: "detail" });
     }
 
     if (outcome === "passed") {
@@ -1137,7 +1145,7 @@ export class WorkflowService {
       });
     }
 
-    return this.status({ runId: run.id });
+    return this.status({ runId: run.id, view: "detail" });
   }
 
   private async startFencedReviewStage(
@@ -1165,7 +1173,7 @@ export class WorkflowService {
   private async submitLegacyNetworkEvidence(
     run: RunManifest,
     evidencePath: string,
-  ): Promise<WorkflowStatus> {
+  ): Promise<WorkflowDetailStatus> {
     const intake = stage(run, "intake");
     const profile = deliveryProfileFromRun(run);
     if (
@@ -1228,7 +1236,7 @@ export class WorkflowService {
               },
             }),
       });
-      return this.status({ runId: run.id });
+      return this.status({ runId: run.id, view: "detail" });
     }
     const scope = scopeFromRun(run);
     const updatedProfile = DeliveryProfileSchema.parse({
@@ -1283,9 +1291,17 @@ export class WorkflowService {
         },
       },
     });
-    return this.status({ runId: run.id });
+    return this.status({ runId: run.id, view: "detail" });
   }
 
+  public async status(input: { runId: string; view: "action" }): Promise<WorkflowActionStatus>;
+  public async status(input: {
+    runId: string;
+    view: "checkpoint";
+  }): Promise<WorkflowCheckpointStatus>;
+  public async status(input: { runId: string; view: "detail" }): Promise<WorkflowDetailStatus>;
+  public async status(input: { runId: string }): Promise<WorkflowActionStatus>;
+  public async status(rawInput: unknown): Promise<WorkflowStatus>;
   public async status(rawInput: unknown): Promise<WorkflowStatus> {
     return this.measureWorkflowAction(rawInput, "status", () =>
       this.statusUninstrumented(rawInput),
@@ -1332,33 +1348,32 @@ export class WorkflowService {
       status === "blocked" && currentBlocker !== undefined
         ? await this.diagnosticPublicationForRun(run, currentBlocker)
         : undefined;
-    const legacyInventory = await this.legacyInventorySummaryForRun(run);
-
-    return WorkflowStatusSchema.parse({
+    const common = buildCommonStatusProjection({
       runId: run.id,
       revision: run.revision,
       status,
       ...(currentStage === undefined ? {} : { currentStage: currentStage.name }),
-      scope,
-      deliveryProfile,
+      deliveryProfile: {
+        publication: deliveryProfile.publication,
+        recommendedSkills: deliveryProfile.recommendedSkills,
+      },
       ...(run.workspaceBinding === undefined ? {} : { workspaceBinding: run.workspaceBinding }),
       workload,
       delegationPolicy: buildDelegationPolicy(workload.size),
       requiredValidations,
-      stages: run.stages.map((item) => ({
-        name: item.name,
-        status: item.status,
-        ...(item.name === "implementation" && item.checkpoint !== undefined
-          ? { checkpoint: item.checkpoint.name }
-          : {}),
-      })),
       nextActions,
       blockers,
       blockerDetails,
       ...(diagnosticPublication === undefined ? {} : { diagnosticPublication }),
-      ...(legacyInventory === undefined ? {} : { legacyInventory }),
-      resumeContext: resumeContextForRun(run),
     });
+    if (input.view === "action") {
+      return buildActionStatusProjection(common, run);
+    }
+    if (input.view === "checkpoint") {
+      return buildCheckpointStatusProjection(common, run);
+    }
+    const legacyInventory = await this.legacyInventorySummaryForRun(run);
+    return buildDetailStatusProjection(common, run, scope, deliveryProfile, legacyInventory);
   }
 
   private async legacyInventorySummaryForRun(run: RunManifest) {
@@ -1697,7 +1712,7 @@ export class WorkflowService {
       });
     }
 
-    return { result, status: await this.status({ runId: run.id }) };
+    return { result, status: await this.status({ runId: run.id, view: "detail" }) };
   }
 
   private async publishBlockedDiagnostic(
@@ -1705,7 +1720,7 @@ export class WorkflowService {
     run: RunManifest,
     publisher: PublisherService,
   ): Promise<unknown> {
-    const workflowStatus = await this.status({ runId: run.id });
+    const workflowStatus = await this.status({ runId: run.id, view: "detail" });
     const blocker = workflowStatus.blockerDetails.find((item) => !item.retryable);
     if (workflowStatus.status !== "blocked" || blocker === undefined) {
       throw new Error("Blocked diagnostic publication requires a currently blocked Run");
@@ -1771,7 +1786,7 @@ export class WorkflowService {
         expectedReportKey: executionIdentity.reportKey,
         actualReportKey: typeof actualReportKey === "string" ? actualReportKey : null,
         diagnosticReport: { artifactId: reportArtifact.id, path: reportArtifact.uri },
-        status: await this.status({ runId: run.id }),
+        status: await this.status({ runId: run.id, view: "detail" }),
       };
       return stopped;
     }
@@ -1807,7 +1822,7 @@ export class WorkflowService {
         localReportPath: reportArtifact.uri,
         diagnosticReport: { artifactId: reportArtifact.id, path: reportArtifact.uri },
         exactUnblockAction: blocker.exactUnblockAction,
-        status: await this.status({ runId: run.id }),
+        status: await this.status({ runId: run.id, view: "detail" }),
       };
     }
     const synchronized = await this.synchronizedDiagnosticPublishResultForRun(
@@ -1816,7 +1831,10 @@ export class WorkflowService {
       executionIdentity,
     );
     if (synchronized !== undefined) {
-      return { result: synchronized, status: await this.status({ runId: run.id }) };
+      return {
+        result: synchronized,
+        status: await this.status({ runId: run.id, view: "detail" }),
+      };
     }
     const claim = await this.acquireDiagnosticPublishClaim(
       run.id,
@@ -1825,7 +1843,10 @@ export class WorkflowService {
       input.recoverUncertain,
     );
     if (claim.state === "synchronized") {
-      return { result: claim.result, status: await this.status({ runId: run.id }) };
+      return {
+        result: claim.result,
+        status: await this.status({ runId: run.id, view: "detail" }),
+      };
     }
     if (claim.state === "in-progress") {
       return {
@@ -1835,13 +1856,13 @@ export class WorkflowService {
         retryable: true,
         retryAfter: claim.expiresAt,
         diagnosticReport: { artifactId: reportArtifact.id, path: reportArtifact.uri },
-        status: await this.status({ runId: run.id }),
+        status: await this.status({ runId: run.id, view: "detail" }),
       };
     }
     if (claim.state === "uncertain") {
       return diagnosticPublicationUncertainResult(
         reportArtifact,
-        await this.status({ runId: run.id }),
+        await this.status({ runId: run.id, view: "detail" }),
       );
     }
     const baseInput = {
@@ -1871,7 +1892,7 @@ export class WorkflowService {
         (signal) => publisher.publish({ ...baseInput, confirm: true }, { signal }),
       );
       await this.releaseDiagnosticPublishClaim(run.id, claim.executionKey, claim.ownerClaimId);
-      return { result, status: await this.status({ runId: run.id }) };
+      return { result, status: await this.status({ runId: run.id, view: "detail" }) };
     } catch (error: unknown) {
       if (error instanceof DiagnosticPublishClaimUncertainError) {
         await this.markDiagnosticPublishClaimUncertainBestEffort(
@@ -1881,7 +1902,7 @@ export class WorkflowService {
         );
         return diagnosticPublicationUncertainResult(
           reportArtifact,
-          await this.status({ runId: run.id }),
+          await this.status({ runId: run.id, view: "detail" }),
         );
       }
       await this.releaseDiagnosticPublishClaim(run.id, claim.executionKey, claim.ownerClaimId);
@@ -1972,7 +1993,7 @@ export class WorkflowService {
       });
     }
 
-    return { result, status: await this.status({ runId }) };
+    return { result, status: await this.status({ runId, view: "detail" }) };
   }
 
   private async recordSubmissionArtifact(
@@ -5869,7 +5890,110 @@ function requiredValidationsForRun(scope: WorkflowScope, profile: DeliveryProfil
   return [...validations];
 }
 
-function resumeContextForRun(run: RunManifest): WorkflowStatus["resumeContext"] {
+type WorkflowActionStatusCommon = Omit<WorkflowActionStatus, "view" | "stages">;
+
+function buildCommonStatusProjection(
+  common: WorkflowActionStatusCommon,
+): WorkflowActionStatusCommon {
+  return common;
+}
+
+function buildActionStatusProjection(
+  common: WorkflowActionStatusCommon,
+  run: RunManifest,
+): WorkflowActionStatus {
+  return WorkflowActionStatusSchema.parse({
+    view: "action",
+    ...common,
+    stages: run.stages.map((item) => ({ name: item.name, status: item.status })),
+  });
+}
+
+function buildCheckpointStatusProjection(
+  common: WorkflowActionStatusCommon,
+  run: RunManifest,
+): WorkflowCheckpointStatus {
+  return WorkflowCheckpointStatusSchema.parse({
+    view: "checkpoint",
+    ...common,
+    stages: run.stages.map((item) => ({
+      name: item.name,
+      status: item.status,
+      ...(item.checkpoint === undefined ? {} : { checkpoint: item.checkpoint.name }),
+    })),
+    resumeContext: boundedResumeContextForRun(run),
+  });
+}
+
+function buildDetailStatusProjection(
+  common: WorkflowActionStatusCommon,
+  run: RunManifest,
+  scope: WorkflowScope,
+  deliveryProfile: DeliveryProfile,
+  legacyInventory: WorkflowDetailStatus["legacyInventory"],
+): WorkflowDetailStatus {
+  const { deliveryProfile: _deliverySummary, ...shared } = common;
+  return WorkflowDetailStatusSchema.parse({
+    view: "detail",
+    ...shared,
+    scope,
+    deliveryProfile,
+    stages: run.stages.map((item) => ({
+      name: item.name,
+      status: item.status,
+      ...(item.name === "implementation" && item.checkpoint !== undefined
+        ? { checkpoint: item.checkpoint.name }
+        : {}),
+    })),
+    ...(legacyInventory === undefined ? {} : { legacyInventory }),
+    resumeContext: resumeContextForRun(run),
+  });
+}
+
+function boundedResumeContextForRun(run: RunManifest): WorkflowResumeContext {
+  const goal = run.evidence
+    .slice(0, 32)
+    .filter((item) => item.metadata["itemType"] === "instruction")
+    .flatMap((item) => (item.excerpt === undefined ? [] : [item.excerpt]))
+    .join("\n\n")
+    .slice(0, 4_000)
+    .trim();
+  const artifactWindow =
+    run.artifacts.length <= 200
+      ? run.artifacts
+      : [...run.artifacts.slice(0, 50), ...run.artifacts.slice(-150)];
+  const evidencePaths = [
+    ...new Set(
+      artifactWindow.flatMap((artifact) => {
+        const projectPath = artifact.metadata["projectRelativePath"];
+        return typeof projectPath === "string" &&
+          projectPath.length <= 1_000 &&
+          isSafeDurableEvidencePath(projectPath)
+          ? [projectPath]
+          : [];
+      }),
+    ),
+  ].slice(-200);
+  const submissions: WorkflowResumeContext["submissions"] = [];
+  for (let index = run.artifacts.length - 1; index >= 0 && submissions.length < 16; index -= 1) {
+    const artifact = run.artifacts[index];
+    const kind = artifact?.metadata["workflowSubmissionKind"];
+    const summary = artifact?.metadata["summary"];
+    const outcome = artifact?.metadata["status"] ?? artifact?.metadata["verdict"];
+    if (typeof kind === "string" && typeof summary === "string" && typeof outcome === "string") {
+      submissions.push({ kind, summary: summary.slice(0, 500), outcome });
+    }
+  }
+  submissions.reverse();
+
+  return WorkflowResumeContextSchema.parse({
+    goal: goal === "" ? "Continue the recorded spec-to-pr Run." : goal,
+    evidencePaths,
+    submissions,
+  });
+}
+
+function resumeContextForRun(run: RunManifest): WorkflowResumeContext {
   const goal = run.evidence
     .filter((item) => item.metadata["itemType"] === "instruction")
     .map((item) => item.excerpt)
@@ -5891,10 +6015,7 @@ function resumeContextForRun(run: RunManifest): WorkflowStatus["resumeContext"] 
     allEvidencePaths.length <= 200
       ? allEvidencePaths
       : [...allEvidencePaths.slice(0, 50), ...allEvidencePaths.slice(-150)];
-  const submissionsByKind = new Map<
-    string,
-    WorkflowStatus["resumeContext"]["submissions"][number]
-  >();
+  const submissionsByKind = new Map<string, WorkflowResumeContext["submissions"][number]>();
   run.artifacts.forEach((artifact) => {
     const kind = artifact.metadata["workflowSubmissionKind"];
     const summary = artifact.metadata["summary"];

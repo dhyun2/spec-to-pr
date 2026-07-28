@@ -61,6 +61,15 @@ describe("spec-to-pr MCP workflow facade", () => {
 
     expect(listed.tools.map((tool) => tool.name).sort()).toEqual(EXPECTED_TOOLS);
     expect(Buffer.byteLength(JSON.stringify(listed.tools), "utf8")).toBeLessThan(40_000);
+    const statusTool = listed.tools.find((tool) => tool.name === "workflow_status");
+    expect(statusTool?.description).toContain("action");
+    expect(statusTool?.description).toContain("checkpoint");
+    expect(statusTool?.description).toContain("detail");
+    expect(statusTool?.inputSchema).toMatchObject({
+      properties: {
+        view: { default: "action", enum: ["action", "checkpoint", "detail"] },
+      },
+    });
 
     const info = await client.callTool({ name: "workflow_info", arguments: {} });
     expect(info.structuredContent).toMatchObject({
@@ -119,9 +128,37 @@ describe("spec-to-pr MCP workflow facade", () => {
     });
 
     const status = await client.callTool({ name: "workflow_status", arguments: { runId } });
-    expect(status.structuredContent).toMatchObject({ runId, status: "needs-external-action" });
+    expect(status.structuredContent).toMatchObject({
+      view: "action",
+      runId,
+      status: "needs-external-action",
+    });
+    expect(status.structuredContent).not.toHaveProperty("scope");
+    expect(status.structuredContent).not.toHaveProperty("resumeContext");
+    expect(status.structuredContent).not.toHaveProperty("legacyInventory");
     expect(status.structuredContent).not.toHaveProperty("evidence");
     expect(status.structuredContent).not.toHaveProperty("sources");
+
+    const checkpoint = await client.callTool({
+      name: "workflow_status",
+      arguments: { runId, view: "checkpoint" },
+    });
+    expect(checkpoint.structuredContent).toMatchObject({
+      view: "checkpoint",
+      runId,
+      resumeContext: { goal: expect.any(String), evidencePaths: [], submissions: [] },
+    });
+
+    const detail = await client.callTool({
+      name: "workflow_status",
+      arguments: { runId, view: "detail" },
+    });
+    expect(detail.structuredContent).toMatchObject({
+      view: "detail",
+      runId,
+      scope: { code: true },
+      deliveryProfile: { mode: "auto", publication: "draft" },
+    });
 
     await mkdir(path.join(projectDirectory, "docs"), { recursive: true });
     await writeFile(

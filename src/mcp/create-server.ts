@@ -7,13 +7,13 @@ import {
   WorkflowArchiveInputSchema,
   WorkflowPublishInputSchema,
   WorkflowStartInputSchema,
-  WorkflowStatusInputSchema,
 } from "../application/workflow-service.js";
 import type { WorkflowService } from "../application/workflow-service.js";
 import {
   RuntimeMetricsRecorder,
   type RuntimeMetricsSink,
 } from "../runtime/performance-instrumentation.js";
+import { WorkflowStatusInputSchema } from "../workflow/index.js";
 import type { ServicesProvider } from "./run-service-provider.js";
 
 const CONTRACT_VERSION = "2.0.0" as const;
@@ -145,7 +145,7 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
     {
       title: "Workflow status",
       description:
-        "Return compact stage, workload, scope, blocker, action, and submission-evidence status.",
+        "Return action (default), checkpoint, or detail workflow status. Use action after external actions, checkpoint for continuation, and detail only for immutable reviewer or report evidence.",
       inputSchema: WorkflowStatusInputSchema.shape,
       annotations: { readOnlyHint: true },
     },

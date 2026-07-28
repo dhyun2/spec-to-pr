@@ -27,8 +27,13 @@ import {
   VisualLineageOutcomeV2Schema,
   VisualRepairEvidenceV2Schema,
   WorkflowActionSchema,
+  WorkflowActionStatusSchema,
   WorkflowBlockerSchema,
+  WorkflowCheckpointStatusSchema,
+  WorkflowDetailStatusSchema,
   WorkflowResumeContextSchema,
+  WorkflowStatusInputSchema,
+  WorkflowStatusSchema,
   WorkflowSubmissionSchema,
 } from "../../src/workflow/index.js";
 
@@ -801,6 +806,118 @@ describe("workflow v2 contracts", () => {
         submissions: [],
       }).success,
     ).toBe(false);
+  });
+
+  it("discriminates strict action, checkpoint, and detail status projections", () => {
+    const common = {
+      runId: `run_${"a".repeat(32)}`,
+      revision: 3,
+      status: "needs-external-action" as const,
+      currentStage: "contracts",
+      deliveryProfile: {
+        publication: "draft" as const,
+        recommendedSkills: ["test-driven-development"],
+      },
+      workload: {
+        size: "S" as const,
+        score: 5,
+        confidence: "high" as const,
+        source: "contracts" as const,
+        sampleCount: 1,
+        reasons: ["One bounded contract."],
+        tokenRange: { min: 24_000, max: 48_000 },
+        budget: {
+          checkpointPercent: 80 as const,
+          checkpointAtTokens: 38_400,
+          hardLimitTokens: 48_000,
+        },
+      },
+      delegationPolicy: {
+        singleWriter: true as const,
+        allowNested: false as const,
+        maxReadOnlyScouts: 0 as const,
+        parallelReviewers: false,
+      },
+      requiredValidations: ["functional"],
+      stages: [
+        { name: "intake", status: "passed" as const },
+        { name: "contracts", status: "pending" as const },
+      ],
+      nextActions: [
+        {
+          kind: "prepare-contracts" as const,
+          runId: `run_${"a".repeat(32)}`,
+        },
+      ],
+      blockers: [],
+      blockerDetails: [],
+    };
+    const action = { view: "action" as const, ...common };
+    const checkpoint = {
+      ...common,
+      view: "checkpoint" as const,
+      stages: [
+        { name: "intake", status: "passed" as const, checkpoint: "intake-ready" },
+        { name: "contracts", status: "pending" as const },
+      ],
+      resumeContext: {
+        goal: "Implement the accepted contract.",
+        evidencePaths: ["contracts/requirements.json"],
+        submissions: [{ kind: "contracts", summary: "Accepted.", outcome: "passed" }],
+      },
+    };
+    const detail = {
+      ...checkpoint,
+      view: "detail" as const,
+      scope: {
+        code: true,
+        ui: false,
+        api: false,
+        specification: false,
+        hasVisualBaseline: false,
+        securitySensitive: false,
+        performanceSensitive: false,
+        observabilityRequested: false,
+      },
+      deliveryProfile: {
+        mode: "auto" as const,
+        changeKind: "feature" as const,
+        publication: "draft" as const,
+        requirements: {
+          brief: false,
+          legacyBaseline: false,
+          legacyInventory: false,
+          targetedFeatureE2E: false,
+          featureVideo: false,
+          figmaBundle: false,
+          visualComparison: false,
+          apiCoverage: false,
+          performanceEvidence: false,
+          mockData: false,
+        },
+        recommendedSkills: ["test-driven-development"],
+        openApiPaths: [],
+        openApiUrls: [],
+        openApiOperations: [],
+        sourceProvenance: [],
+      },
+    };
+
+    expect(WorkflowStatusInputSchema.parse({ runId: common.runId })).toEqual({
+      runId: common.runId,
+      view: "action",
+    });
+    expect(
+      WorkflowStatusInputSchema.safeParse({ runId: common.runId, view: "action", extra: true })
+        .success,
+    ).toBe(false);
+    expect(WorkflowActionStatusSchema.parse(action)).toEqual(action);
+    expect(WorkflowCheckpointStatusSchema.parse(checkpoint)).toEqual(checkpoint);
+    expect(WorkflowDetailStatusSchema.parse(detail)).toMatchObject(detail);
+    expect(WorkflowStatusSchema.parse(action).view).toBe("action");
+    expect(WorkflowStatusSchema.parse(checkpoint).view).toBe("checkpoint");
+    expect(WorkflowStatusSchema.parse(detail).view).toBe("detail");
+    expect(WorkflowStatusSchema.safeParse({ ...action, scope: detail.scope }).success).toBe(false);
   });
 
   it("requires executable artifacts for passed implementation submissions", () => {

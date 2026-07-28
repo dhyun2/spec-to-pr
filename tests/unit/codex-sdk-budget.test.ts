@@ -20,6 +20,7 @@ import {
 } from "../../packages/codex-sdk/src/usage-calibration.js";
 import {
   buildBlockedDiagnosticFinalizationPrompt,
+  buildBoundaryContinuationPrompt,
   buildCompactCheckpointPrompt,
   executeBudgetedBoundaryTurns,
   extractWorkflowStatus,
@@ -592,7 +593,7 @@ describe("Codex SDK workload budget", () => {
       { usedTokens: 144_000, hardLimitTokens: 180_000 },
     );
 
-    expect(prompt).toContain("workflow_status");
+    expect(prompt).toContain('workflow_status with {"runId":"run_12345678","view":"checkpoint"}');
     expect(prompt).toContain("review-functional");
     expect(prompt).toContain("requiredValidations");
     expect(prompt).toContain("Implement the checkout selector");
@@ -602,6 +603,33 @@ describe("Codex SDK workload budget", () => {
     expect(prompt).toContain('"checkpointAtTokens":144000');
     expect(prompt).toContain('"hardLimitTokens":180000');
     expect(prompt).not.toContain("promptText");
+  });
+
+  it("requests the smallest status view needed at each SDK boundary", () => {
+    const implementation = buildBoundaryContinuationPrompt(
+      workflowStatus("running", "implement"),
+      ["functional"],
+      { usedTokens: 12_000, hardLimitTokens: 48_000 },
+    );
+    const reviewer = buildBoundaryContinuationPrompt(
+      workflowStatus("running", "review-functional"),
+      ["functional"],
+      { usedTokens: 12_000, hardLimitTokens: 48_000 },
+    );
+    const report = buildBoundaryContinuationPrompt(
+      { ...workflowStatus("running"), currentStage: "report" },
+      ["functional"],
+      { usedTokens: 12_000, hardLimitTokens: 48_000 },
+    );
+
+    expect(implementation).toContain(
+      'workflow_status with {"runId":"run_12345678","view":"action"}',
+    );
+    expect(implementation).not.toContain('"view":"detail"');
+    expect(reviewer).toContain('workflow_status with {"runId":"run_12345678","view":"action"}');
+    expect(reviewer).toContain('workflow_status with {"runId":"run_12345678","view":"detail"}');
+    expect(reviewer).toContain("immutable reviewer evidence");
+    expect(report).toContain('workflow_status with {"runId":"run_12345678","view":"detail"}');
   });
 
   it("projects blocker, publication, delegation, and diagnostic publication status", () => {
@@ -1504,6 +1532,7 @@ function workflowStatus(
   const size = options.size ?? "M";
   const hardLimitTokens = options.hardLimitTokens ?? 180_000;
   return {
+    view: "action",
     runId: options.runId ?? "run_12345678",
     revision: 7,
     status,
