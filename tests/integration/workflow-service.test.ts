@@ -4986,6 +4986,8 @@ describe("WorkflowService", () => {
       guidancePaths: ["docs/architecture/ARCHITECTURE.md", markdownBearingGuidancePath],
       skillHints: ["react-best-practices", "api-generator", "not-installed"],
     });
+    expect(started.workload.size).toBe("L");
+    expect(started.delegationPolicy.parallelReviewers).toBe(true);
     await service.submit({
       runId: started.runId,
       submission: {

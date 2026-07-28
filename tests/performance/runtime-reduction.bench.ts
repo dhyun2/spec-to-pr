@@ -6,18 +6,18 @@ import { performance } from "node:perf_hooks";
 import { afterAll, beforeAll, bench, describe } from "vitest";
 import { PNG } from "pngjs";
 
-import { buildParserSafeChunks } from "../../src/application/workflow-service.js";
+import { ArtifactBlobStore } from "../../src/artifact-registry/artifact-blob-store.js";
+import { IntakeRequestService } from "../../src/application/intake-request-service.js";
+import { RunService } from "../../src/application/run-service.js";
 import { RuntimeMetricsRecorder } from "../../src/runtime/performance-instrumentation.js";
 import { sha256Digest } from "../../src/source-registry/content-hash.js";
-import { orderedConcurrentMap } from "../../src/source-ingestion/source-loader.js";
-import {
-  inventoryOpenApiOperations,
-  openApiClassificationSummary,
-} from "../../src/source-ingestion/openapi-inventory.js";
+import { SourceSnapshotStore } from "../../src/source-registry/snapshot-store.js";
+import { SqliteRunStore } from "../../src/store/sqlite-run-store.js";
 import { compareVisualPngs } from "../../src/visual/visual-comparator.js";
 
 const collectedAt = "2026-07-28T00:00:00.000Z";
 const samplesByFixture = new Map<string, number[]>();
+const measuredMixedIntakeRunSaves: number[] = [];
 let peakRss = process.memoryUsage().rss;
 let legacyDirectory = "";
 const visualPng = PNG.sync.write(new PNG({ width: 360, height: 1831 }));
@@ -86,40 +86,79 @@ describe("runtime reduction fixtures", () => {
   bench(
     "mixed intake: 20 local documents, 4 parser-safe chunks, 4 OpenAPI sources",
     async () => {
-      await measureFixture(
+      const metricRunId = "run_11111111111111111111111111111111";
+      const snapshot = await measureFixture(
         "run_11111111111111111111111111111111",
         "mixed-intake",
-        async (recorder) => {
-          let active = 0;
-          let maxActive = 0;
-          await orderedConcurrentMap(fixtures.mixedIntake.localDocuments, 4, async (document) => {
-            active += 1;
-            maxActive = Math.max(maxActive, active);
-            await Promise.resolve();
-            const content = Buffer.from(document.content);
-            recorder.increment("artifact.read_count");
-            recorder.increment("artifact.read_bytes", content.byteLength);
-            JSON.parse(JSON.stringify({ path: document.path, content: document.content }));
-            active -= 1;
-          });
-          if (maxActive !== 4) throw new Error("mixed intake concurrency fixture mismatch");
-          for (const chunk of fixtures.mixedIntake.parserSafeChunks) {
-            buildParserSafeChunks(chunk);
-          }
-          const openApi = fixtures.mixedIntake.openApiSources.map((source) => ({
-            path: source.path,
-            text: JSON.stringify({
-              openapi: "3.0.0",
-              paths: { [`/${source.operationId}`]: { get: { operationId: source.operationId } } },
-            }),
-          }));
-          const summary = openApiClassificationSummary(inventoryOpenApiOperations(openApi));
-          if (summary.split("\n").length !== fixtures.mixedIntake.openApiSources.length) {
-            throw new Error("mixed intake OpenAPI summary fixture mismatch");
-          }
-          recorder.increment("run_store.save_count", 2, { stage: "intake" });
-        },
+        async (recorder) =>
+          recorder.withRun(metricRunId, async () => {
+            const directory = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-intake-bench-"));
+            const databasePath = path.join(directory, "runs.sqlite3");
+            const setupStore = new SqliteRunStore(databasePath);
+            const runService = new RunService(setupStore, {
+              pluginVersion: "benchmark",
+              now: () => collectedAt,
+              newRunId: () => metricRunId,
+            });
+            const run = await runService.createRun({ projectRoot: directory });
+            await setupStore.close();
+            const store = new SqliteRunStore(databasePath, recorder);
+            try {
+              const intakeService = new IntakeRequestService(
+                store,
+                new SourceSnapshotStore(path.join(directory, "source-snapshots")),
+                new ArtifactBlobStore(path.join(directory, "artifacts"), recorder),
+                () => collectedAt,
+              );
+              await intakeService.parseIntakeRequest({
+                runId: run.id,
+                requestText: "Process the deterministic mixed intake fixture.",
+                label: "user-request",
+              });
+              const requests = [
+                ...fixtures.mixedIntake.localDocuments.map((document) => ({
+                  requestText: document.content,
+                  label: `docs:${document.path}`,
+                })),
+                ...fixtures.mixedIntake.parserSafeChunks.map((chunk, index) => ({
+                  requestText: chunk,
+                  label: `docs:chunk-${index + 1}`,
+                })),
+                ...fixtures.mixedIntake.openApiSources.map((source) => ({
+                  requestText: `\`\`\`json\n${JSON.stringify({
+                    openapi: "3.0.0",
+                    paths: {
+                      [`/${source.operationId}`]: {
+                        get: { operationId: source.operationId },
+                      },
+                    },
+                  })}\n\`\`\``,
+                  label: `openapi:${source.path}`,
+                })),
+              ];
+              const results = await intakeService.parseIntakeRequests({
+                runId: run.id,
+                requests,
+              });
+              const resultLabels = results.map((result) =>
+                result.source.locator.type === "inline" ? result.source.locator.label : "",
+              );
+              if (resultLabels.some((label, index) => label !== requests[index]?.label)) {
+                throw new Error("mixed intake result order mismatch");
+              }
+            } finally {
+              await store.close();
+              await rm(directory, { recursive: true, force: true });
+            }
+          }),
       );
+      const totalRunSaves = snapshot.samples.find(
+        (sample) => sample.kind === "counter" && sample.name === "run_store.save_count",
+      )?.value;
+      if (totalRunSaves === undefined) {
+        throw new Error("mixed intake benchmark did not record actual Run saves");
+      }
+      measuredMixedIntakeRunSaves.push(totalRunSaves);
     },
     { iterations: 5, warmupIterations: 1, time: 0, warmupTime: 0 },
   );
@@ -174,6 +213,14 @@ describe("runtime reduction fixtures", () => {
 });
 
 afterAll(async () => {
+  const observedMixedIntakeRunSaves = [...new Set(measuredMixedIntakeRunSaves)];
+  if (observedMixedIntakeRunSaves.length !== 1) {
+    throw new Error("mixed intake Run saves must be stable and derived from measured services");
+  }
+  const mixedIntakeRunSaves = observedMixedIntakeRunSaves[0]!;
+  if (mixedIntakeRunSaves > 2) {
+    throw new Error(`mixed intake exceeded two bounded Run saves: ${mixedIntakeRunSaves}`);
+  }
   const percentile = (sorted: number[], percent: number) =>
     sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * percent) - 1)] ?? 0;
   const records = [...samplesByFixture.entries()].map(([name, samples]) => {
@@ -207,7 +254,7 @@ afterAll(async () => {
               parserSafeChunks: 4,
               openApiSources: 4,
               maxSourceConcurrency: 4,
-              intakeRunSaves: 2,
+              intakeRunSaves: mixedIntakeRunSaves,
             }
           : name === "legacy"
             ? { files: 250, terminalApiCalls: 40, sharedAdapters: 5 }
@@ -226,7 +273,7 @@ afterAll(async () => {
     metricCounters: {
       mixedIntakeDocuments: fixtures.mixedIntake.localDocuments.length,
       mixedIntakeMaxSourceConcurrency: 4,
-      mixedIntakeRunSaves: 2,
+      mixedIntakeRunSaves,
       legacyFiles: fixtures.legacy.files.length,
       legacyTerminalApiCalls: fixtures.legacy.terminalApiCalls.length,
       visualComparisons: fixtures.visual.comparisons.length,

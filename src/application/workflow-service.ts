@@ -690,6 +690,12 @@ export class WorkflowService {
       ...sources.docs.map((file) => file.text),
       openApiClassificationSummary(sourceOpenApiOperations),
     ].join("\n\n");
+    const workloadRequirementCount = countIntakeRequirementsFromTexts([
+      input.requestText,
+      ...(sources.brief === undefined ? [] : [sources.brief.text]),
+      ...sources.docs.map((file) => file.text),
+      ...sources.openApi.map((file) => file.text),
+    ]);
     const classifiedScope = classifyWorkflowScope({
       requestText: classificationText,
       explicitScope,
@@ -753,7 +759,7 @@ export class WorkflowService {
       mode: deliveryProfile.mode,
       scope,
       signals: {
-        requirements: countIntakeRequirements(classificationText),
+        requirements: workloadRequirementCount,
         apiOperations: sources.openApi.length > 0 ? openApiOperations.length : scope.api ? 1 : 0,
         uiSurfaces: scope.ui ? 1 : 0,
         figmaNodes: figmaUrls.length,
@@ -5816,17 +5822,31 @@ function deliveryPolicyForRun(
 }
 
 function countIntakeRequirements(text: string): number {
-  const explicitLines = text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => /^(?:[-*+] |\d+[.)] )/.test(line)).length;
-  if (explicitLines > 0) return Math.min(explicitLines, 50);
+  return countIntakeRequirementsFromTexts([text]);
+}
 
-  const sentences = text
-    .split(/[.!?\n]+/)
-    .map((sentence) => sentence.trim())
-    .filter((sentence) => sentence.length >= 3).length;
-  return Math.max(1, Math.min(sentences, 50));
+function countIntakeRequirementsFromTexts(texts: readonly string[]): number {
+  let explicitLines = 0;
+  for (const text of texts) {
+    for (const line of text.split(/\r?\n/)) {
+      if (/^(?:[-*+] |\d+[.)] )/.test(line.trim())) {
+        explicitLines += 1;
+        if (explicitLines === 50) return 50;
+      }
+    }
+  }
+  if (explicitLines > 0) return explicitLines;
+
+  let sentences = 0;
+  for (const text of texts) {
+    for (const sentence of text.split(/[.!?\n]+/)) {
+      if (sentence.trim().length >= 3) {
+        sentences += 1;
+        if (sentences === 50) return 50;
+      }
+    }
+  }
+  return Math.max(1, sentences);
 }
 
 function requiredValidationsForRun(scope: WorkflowScope, profile: DeliveryProfile): string[] {
