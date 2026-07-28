@@ -206,7 +206,7 @@ afterAll(async () => {
     },
   };
   await writeFile(
-    path.join(process.cwd(), "benchmarks", "runtime", "latest.json"),
+    path.join(process.cwd(), "benchmarks", "runtime", "latest-receipt.json"),
     `${JSON.stringify(receipt, null, 2)}\n`,
   );
   console.info(JSON.stringify(receipt));
