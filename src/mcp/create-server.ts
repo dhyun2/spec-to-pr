@@ -148,7 +148,7 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
     {
       title: "Workflow status",
       description:
-        "Return action (default), checkpoint, or detail workflow status. Use action after external actions, checkpoint for continuation, and detail only for immutable reviewer or report evidence.",
+        "Return action (default), checkpoint, or detail workflow status. Use action after external actions, checkpoint for bounded submission-evidence status when resuming, and detail only for immutable reviewer or report evidence.",
       inputSchema: WorkflowStatusInputSchema,
       annotations: { readOnlyHint: true },
     },
