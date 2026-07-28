@@ -1003,6 +1003,26 @@ describe("v2 documentation", () => {
     }
   });
 
+  it("requires design review to reject circular, drifted, and focused Figma defects", () => {
+    const reviewDesign = readFileSync(
+      path.join(root, "skills", "review-design", "SKILL.md"),
+      "utf8",
+    );
+
+    for (const marker of [
+      "92%",
+      "baseline overlay",
+      "renderer lineage",
+      "focused UI assertions",
+      "design-system",
+      "semantic-token",
+      "third valid failure",
+      "Do not run design review",
+    ]) {
+      expect(reviewDesign, `review-design:${marker}`).toContain(marker);
+    }
+  });
+
   it("documents composable sources, guidance precedence, and the zero-to-100 feature recipe", () => {
     const readmes = ["README.md", "README.ko.md", "packages/codex-sdk/README.md"].map((file) =>
       readFileSync(path.join(root, file), "utf8"),
