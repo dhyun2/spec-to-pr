@@ -121,9 +121,9 @@ import {
   VisualTargetManifestCompatibilitySchema,
   VisualTargetManifestSchema,
   VisualRendererLineageBindingSchema,
-  compareVisualPngs,
   type VisualTargetManifest,
 } from "../visual/visual-comparator.js";
+import { defaultVisualComparisonPool } from "../visual/visual-comparison-pool.js";
 import { decodeBoundedPng } from "../visual/png-decoder.js";
 import { normalizeVisualPng } from "../visual/visual-normalizer.js";
 import {
@@ -3387,7 +3387,18 @@ export class WorkflowService {
       const timestamp = this.now();
       const generatedArtifacts: ArtifactRef[] = [];
       const results: Array<Record<string, unknown>> = [];
-
+      type NormalizedVisual = Awaited<ReturnType<typeof normalizeVisualPng>>;
+      const preparedTargets: Array<{
+        target: VisualTargetManifest;
+        capture: (typeof submission.captures)[number];
+        receipt: z.infer<typeof VisualCaptureReceiptV2Schema> | undefined;
+        actualArtifact: ArtifactRef;
+        baselineArtifact: ArtifactRef;
+        comparisonBaseline: Buffer;
+        comparisonActual: Buffer;
+        normalizedBaseline?: NormalizedVisual;
+        normalizedActual?: NormalizedVisual;
+      }> = [];
       for (const target of targets) {
         const capture = captures.get(target.targetId)!;
         const receiptArtifact = attemptEvidenceArtifacts.find(
@@ -3429,7 +3440,6 @@ export class WorkflowService {
           );
         }
 
-        const artifactBase = `visual/${target.targetId}`;
         const baselineContent = await this.dependencies.artifactStore.readContent(
           baselineArtifact.digest,
         );
@@ -3438,19 +3448,21 @@ export class WorkflowService {
         );
         let comparisonBaseline = baselineContent;
         let comparisonActual = actualContent;
-        let comparedActualArtifact = actualArtifact;
-        let baselineRef: ArtifactRef;
+        let normalizedBaseline: NormalizedVisual | undefined;
+        let normalizedActual: NormalizedVisual | undefined;
 
         if (target.figmaCapture !== undefined) {
-          const normalizedBaseline = await normalizeVisualPng({
+          normalizedBaseline = await normalizeVisualPng({
             content: baselineContent,
+            sourceDigest: baselineArtifact.digest as `sha256:${string}`,
             sourceSize: target.figmaCapture.bitmapSize,
             logicalSize: target.figmaCapture.logicalSize,
             colorSpace: target.figmaCapture.colorSpace,
             role: `${target.targetId} Figma baseline`,
           });
-          const normalizedActual = await normalizeVisualPng({
+          normalizedActual = await normalizeVisualPng({
             content: actualContent,
+            sourceDigest: actualArtifact.digest as `sha256:${string}`,
             sourceSize: {
               width: Math.round(target.viewport.width * target.deviceScaleFactor),
               height: Math.round(target.viewport.height * target.deviceScaleFactor),
@@ -3458,22 +3470,83 @@ export class WorkflowService {
             logicalSize: target.figmaCapture.logicalSize,
             colorSpace: target.figmaCapture.colorSpace,
             role: `${target.targetId} browser capture`,
+            cacheRead: false,
           });
           this.metrics.increment(
+            normalizedBaseline.cacheStatus === "hit"
+              ? "visual.normalization_cache_hit"
+              : "visual.normalization_cache_miss",
+          );
+          this.metrics.increment("visual.normalization_cache_miss");
+          this.metrics.increment(
             "visual.decode_pixels",
-            target.figmaCapture.bitmapSize.width * target.figmaCapture.bitmapSize.height +
+            (normalizedBaseline.cacheStatus === "hit"
+              ? 0
+              : target.figmaCapture.bitmapSize.width * target.figmaCapture.bitmapSize.height) +
               Math.round(target.viewport.width * target.deviceScaleFactor) *
                 Math.round(target.viewport.height * target.deviceScaleFactor),
           );
           this.metrics.increment(
             "visual.encode_pixels",
-            normalizedBaseline.width * normalizedBaseline.height +
+            (normalizedBaseline.cacheStatus === "hit"
+              ? 0
+              : normalizedBaseline.width * normalizedBaseline.height) +
               normalizedActual.width * normalizedActual.height,
           );
           comparisonBaseline = normalizedBaseline.content;
           comparisonActual = normalizedActual.content;
+        }
+        preparedTargets.push({
+          target,
+          capture,
+          receipt,
+          actualArtifact,
+          baselineArtifact,
+          comparisonBaseline,
+          comparisonActual,
+          ...(normalizedBaseline === undefined ? {} : { normalizedBaseline }),
+          ...(normalizedActual === undefined ? {} : { normalizedActual }),
+        });
+      }
+
+      const comparisonResults = await defaultVisualComparisonPool.compare(
+        preparedTargets.map((prepared) => ({
+          targetId: prepared.target.targetId,
+          baseline: prepared.comparisonBaseline,
+          actual: prepared.comparisonActual,
+          ...(prepared.normalizedBaseline === undefined || prepared.normalizedActual === undefined
+            ? {}
+            : {
+                baselineRgba: {
+                  data: prepared.normalizedBaseline.rgba,
+                  width: prepared.normalizedBaseline.width,
+                  height: prepared.normalizedBaseline.height,
+                },
+                actualRgba: {
+                  data: prepared.normalizedActual.rgba,
+                  width: prepared.normalizedActual.width,
+                  height: prepared.normalizedActual.height,
+                },
+              }),
+          masks: prepared.target.masks,
+        })),
+      );
+      const poolAfter = defaultVisualComparisonPool.snapshotStats();
+      this.metrics.gauge("visual.active_workers", poolAfter.activeWorkers, {
+        stage: "implementation",
+      });
+      this.metrics.gauge("visual.peak_workers", poolAfter.peakActiveWorkers, {
+        stage: "implementation",
+      });
+
+      for (const [index, prepared] of preparedTargets.entries()) {
+        const { target, capture, receipt, actualArtifact, baselineArtifact } = prepared;
+        const artifactBase = `visual/${target.targetId}`;
+        let comparedActualArtifact = actualArtifact;
+        let baselineRef: ArtifactRef;
+        if (prepared.normalizedBaseline !== undefined && prepared.normalizedActual !== undefined) {
           baselineRef = await this.writeVisualArtifact({
-            content: normalizedBaseline.content,
+            content: prepared.normalizedBaseline.content,
             kind: "screenshot",
             projectRelativePath: `${artifactBase}.baseline.normalized.png`,
             targetId: target.targetId,
@@ -3482,10 +3555,10 @@ export class WorkflowService {
             attempt,
             timestamp,
             sourceArtifactId: baselineArtifact.id,
-            normalizerVersion: normalizedBaseline.version,
+            normalizerVersion: prepared.normalizedBaseline.version,
           });
           comparedActualArtifact = await this.writeVisualArtifact({
-            content: normalizedActual.content,
+            content: prepared.normalizedActual.content,
             kind: "screenshot",
             projectRelativePath: `${artifactBase}.actual.normalized.png`,
             targetId: target.targetId,
@@ -3494,7 +3567,7 @@ export class WorkflowService {
             attempt,
             timestamp,
             sourceArtifactId: actualArtifact.id,
-            normalizerVersion: normalizedActual.version,
+            normalizerVersion: prepared.normalizedActual.version,
           });
           generatedArtifacts.push(baselineRef, comparedActualArtifact);
         } else {
@@ -3518,12 +3591,10 @@ export class WorkflowService {
           });
           generatedArtifacts.push(baselineRef);
         }
-
-        const comparison = await compareVisualPngs({
-          baseline: comparisonBaseline,
-          actual: comparisonActual,
-          masks: target.masks,
-        });
+        const comparison = comparisonResults[index]?.comparison;
+        if (comparison === undefined) {
+          throw new Error(`VISUAL_COMPARISON_INCOMPLETE: missing result for ${target.targetId}`);
+        }
         const diffArtifact = await this.writeVisualArtifact({
           content: comparison.diff,
           kind: "visual-diff",
@@ -3575,7 +3646,7 @@ export class WorkflowService {
           actualArtifactId: comparedActualArtifact.id,
           sourceBaselineArtifactId: baselineArtifact.id,
           sourceActualArtifactId: actualArtifact.id,
-          ...(target.figmaCapture === undefined
+          ...(prepared.normalizedBaseline === undefined
             ? {}
             : {
                 normalizerVersion: "visual-normalizer-v1",

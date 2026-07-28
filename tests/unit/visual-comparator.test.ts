@@ -2,6 +2,7 @@ import { PNG } from "pngjs";
 import { describe, expect, it } from "vitest";
 
 import {
+  compareVisualRgba,
   compareVisualPngs,
   normalizeVisualTargetManifest,
   VisualTargetManifestSchema,
@@ -30,6 +31,24 @@ describe("visual comparator v2", () => {
     expect(() => VisualComparisonMetricsSchema.parse(comparison.metrics)).not.toThrow();
     expect(() => PNG.sync.read(comparison.diff)).not.toThrow();
     expect(() => PNG.sync.read(comparison.overlay)).not.toThrow();
+  });
+
+  it("compares validated decoded RGBA without decoding normalized PNGs again", async () => {
+    const baseline = Buffer.from([0, 0, 0, 255, 0, 0, 0, 255]);
+    const actual = Buffer.from(baseline);
+    actual[4] = 255;
+
+    const comparison = await compareVisualRgba({
+      baseline: { data: baseline, width: 2, height: 1 },
+      actual: { data: actual, width: 2, height: 1 },
+    });
+
+    expect(comparison.metrics).toMatchObject({
+      width: 2,
+      height: 1,
+      exactMatchRatio: 0.5,
+      reviewMatchRatio: 0.5,
+    });
   });
 
   it("rejects dimension mismatch instead of cropping or resizing", async () => {

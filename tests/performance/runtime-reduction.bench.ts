@@ -24,7 +24,13 @@ import { sha256Digest } from "../../src/source-registry/content-hash.js";
 import { SourceSnapshotStore } from "../../src/source-registry/snapshot-store.js";
 import { orderedConcurrentMap } from "../../src/source-ingestion/source-loader.js";
 import { SqliteRunStore } from "../../src/store/sqlite-run-store.js";
-import { compareVisualPngs } from "../../src/visual/visual-comparator.js";
+import {
+  MAX_ACTIVE_VISUAL_PIXELS,
+  MAX_VISUAL_COMPARISON_WORKERS,
+  VisualComparisonPool,
+} from "../../src/visual/visual-comparison-pool.js";
+import { VisualNormalizationCache } from "../../src/visual/visual-normalization-cache.js";
+import { normalizeVisualPng } from "../../src/visual/visual-normalizer.js";
 
 const collectedAt = "2026-07-28T00:00:00.000Z";
 const samplesByFixture = new Map<string, number[]>();
@@ -52,6 +58,14 @@ const measuredMutatingInventoryReads: number[] = [];
 const measuredMutatingStartBytes: number[] = [];
 const measuredMutatingAdvanceBytes: number[] = [];
 const measuredMutatingSubmitBytes: number[] = [];
+const measuredVisualCounters: Array<{
+  cacheHits: number;
+  cacheMisses: number;
+  cacheBypasses: number;
+  cacheResidentBytes: number;
+  peakWorkers: number;
+  peakActivePixels: number;
+}> = [];
 let mutatingIteration = 0;
 const visualPng = PNG.sync.write(new PNG({ width: 360, height: 1831 }));
 
@@ -468,20 +482,95 @@ describe("runtime reduction fixtures", () => {
     "visual: two 360x1831 targets across three valid comparisons",
     async () => {
       await measureFixture("run_33333333333333333333333333333333", "visual", async (recorder) => {
-        for (const comparison of fixtures.visual.comparisons) {
-          for (const target of fixtures.visual.targets) {
-            const result = await compareVisualPngs({ baseline: visualPng, actual: visualPng });
-            if (result.status !== "passed") {
-              throw new Error("visual fixture geometry mismatch");
+        const cache = new VisualNormalizationCache();
+        const pool = new VisualComparisonPool();
+        try {
+          for (const comparison of fixtures.visual.comparisons) {
+            const jobs = [];
+            for (const target of fixtures.visual.targets) {
+              const sourceSize = { width: target.width, height: target.height };
+              const baseline = await normalizeVisualPng({
+                content: visualPng,
+                sourceDigest: `sha256:${"1".repeat(64)}`,
+                sourceSize,
+                logicalSize: sourceSize,
+                colorSpace: "srgb",
+                role: `${target.targetId} benchmark baseline`,
+                cache,
+              });
+              const actual = await normalizeVisualPng({
+                content: visualPng,
+                sourceDigest: sha256Digest(
+                  Buffer.from(`${comparison}:${target.targetId}`, "utf8"),
+                ) as `sha256:${string}`,
+                sourceSize,
+                logicalSize: sourceSize,
+                colorSpace: "srgb",
+                role: `${target.targetId} benchmark actual`,
+                cache,
+                cacheRead: false,
+              });
+              recorder.increment(
+                baseline.cacheStatus === "hit"
+                  ? "visual.normalization_cache_hit"
+                  : "visual.normalization_cache_miss",
+              );
+              recorder.increment("visual.normalization_cache_miss");
+              recorder.increment(
+                "visual.decode_pixels",
+                target.width * target.height * (baseline.cacheStatus === "hit" ? 1 : 2),
+              );
+              recorder.increment(
+                "visual.encode_pixels",
+                target.width * target.height * (baseline.cacheStatus === "hit" ? 1 : 2),
+              );
+              jobs.push({
+                targetId: target.targetId,
+                baseline: baseline.content,
+                actual: actual.content,
+                baselineRgba: {
+                  data: baseline.rgba,
+                  width: baseline.width,
+                  height: baseline.height,
+                },
+                actualRgba: {
+                  data: actual.rgba,
+                  width: actual.width,
+                  height: actual.height,
+                },
+                masks: [],
+              });
             }
-            recorder.increment("visual.decode_pixels", target.width * target.height * 2);
-            recorder.increment("visual.encode_pixels", target.width * target.height * 2);
+            const results = await pool.compare(jobs);
+            if (
+              results.some((result) => result.comparison.status !== "passed") ||
+              results.some(
+                (result, index) => result.targetId !== fixtures.visual.targets[index]?.targetId,
+              )
+            ) {
+              throw new Error("visual fixture comparison order or geometry mismatch");
+            }
           }
+          const cacheStats = cache.snapshotStats();
+          const poolStats = pool.snapshotStats();
+          measuredVisualCounters.push({
+            cacheHits: cacheStats.hits,
+            cacheMisses: cacheStats.misses,
+            cacheBypasses: cacheStats.bypasses,
+            cacheResidentBytes: cacheStats.residentBytes,
+            peakWorkers: poolStats.peakActiveWorkers,
+            peakActivePixels: poolStats.peakActivePixels,
+          });
+          peakRss = Math.max(peakRss, process.memoryUsage().rss);
+          recorder.gauge("visual.active_workers", poolStats.activeWorkers, {
+            stage: "implementation",
+          });
+          recorder.gauge("visual.peak_workers", poolStats.peakActiveWorkers, {
+            stage: "implementation",
+          });
+        } finally {
+          await pool.close();
         }
-        recorder.gauge("visual.active_workers", 0, { stage: "implementation" });
-        recorder.gauge("visual.peak_workers", fixtures.visual.comparisons.length, {
-          stage: "implementation",
-        });
       });
     },
     { iterations: 5, warmupIterations: 1, time: 0, warmupTime: 0 },
@@ -548,6 +637,25 @@ afterAll(async () => {
   ) {
     throw new Error(
       `status action read an inventory blob: ${JSON.stringify(measuredStatusArtifactReads)}`,
+    );
+  }
+  const visualCounters = measuredVisualCounters[0];
+  if (
+    visualCounters === undefined ||
+    measuredVisualCounters.some((value) => JSON.stringify(value) !== JSON.stringify(visualCounters))
+  ) {
+    throw new Error("visual cold/warm cache and pool counters must be stable");
+  }
+  if (
+    visualCounters.cacheHits !== 5 ||
+    visualCounters.cacheMisses !== 1 ||
+    visualCounters.cacheBypasses !== 6 ||
+    visualCounters.cacheResidentBytes > 128 * 1024 * 1024 ||
+    visualCounters.peakWorkers > MAX_VISUAL_COMPARISON_WORKERS ||
+    visualCounters.peakActivePixels > MAX_ACTIVE_VISUAL_PIXELS
+  ) {
+    throw new Error(
+      `visual cold/warm cache or pool budgets were unexpected: ${JSON.stringify(visualCounters)}`,
     );
   }
   if (
@@ -625,7 +733,12 @@ afterAll(async () => {
                     advanceSerializedBytes: measuredMutatingAdvanceBytes[0]!,
                     submitSerializedBytes: measuredMutatingSubmitBytes[0]!,
                   }
-                : { targets: 2, comparisons: 3, pixelsPerTarget: 659160 },
+                : {
+                    targets: 2,
+                    comparisons: 3,
+                    pixelsPerTarget: 659160,
+                    ...visualCounters,
+                  },
     };
   });
   const receipt = {
@@ -659,6 +772,12 @@ afterAll(async () => {
       mutatingAdvanceSerializedBytes: measuredMutatingAdvanceBytes[0]!,
       mutatingSubmitSerializedBytes: measuredMutatingSubmitBytes[0]!,
       visualComparisons: fixtures.visual.comparisons.length,
+      visualCacheHits: visualCounters.cacheHits,
+      visualCacheMisses: visualCounters.cacheMisses,
+      visualCacheBypasses: visualCounters.cacheBypasses,
+      visualCacheResidentBytes: visualCounters.cacheResidentBytes,
+      visualPeakWorkers: visualCounters.peakWorkers,
+      visualPeakActivePixels: visualCounters.peakActivePixels,
     },
   };
   await writeFile(

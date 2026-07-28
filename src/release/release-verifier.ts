@@ -66,6 +66,7 @@ export const REQUIRED_RELEASE_FILES = [
   ".mcp.json",
   "CHANGELOG.md",
   "dist/mcp/server.js",
+  "dist/mcp/visual-comparison-worker.js",
   "package.json",
   "packages/codex-sdk/package.json",
   "schemas/runtime/index.json",

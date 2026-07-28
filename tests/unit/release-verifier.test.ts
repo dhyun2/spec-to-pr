@@ -38,6 +38,16 @@ describe("release verifier", () => {
     expect(result.status).toBe("passed");
   });
 
+  it("requires the visual comparison worker beside the MCP server entry", () => {
+    const withoutWorker = requiredReleaseInventory().filter(
+      (file) => file !== "dist/mcp/visual-comparison-worker.js",
+    );
+
+    expect(verifyReleasePackageFiles(withoutWorker).failures).toContain(
+      "Required file missing: dist/mcp/visual-comparison-worker.js",
+    );
+  });
+
   it("requires the exact skill and reviewer inventory", () => {
     const withoutSkill = requiredReleaseInventory().filter(
       (file) => file !== "skills/review-design/SKILL.md",
@@ -265,6 +275,7 @@ function requiredReleaseInventory(): string[] {
     "agents/functional-reviewer.md",
     "dist/mcp/chunk-TEST1234.js",
     "dist/mcp/server.js",
+    "dist/mcp/visual-comparison-worker.js",
     "package.json",
     "packages/codex-sdk/dist/boundary-runner.d.ts",
     "packages/codex-sdk/dist/boundary-runner.js",
@@ -320,6 +331,7 @@ async function createArchiveFixture(): Promise<string> {
     ["CHANGELOG.md", "# Changelog\n"],
     ["dist/mcp/server.js", 'import "./chunk-TEST1234.js";\n'],
     ["dist/mcp/chunk-TEST1234.js", "export {};\n"],
+    ["dist/mcp/visual-comparison-worker.js", "export {};\n"],
   ]);
 
   for (const [file, content] of files) {

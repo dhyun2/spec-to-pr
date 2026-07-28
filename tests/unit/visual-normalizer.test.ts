@@ -1,6 +1,10 @@
 import { PNG } from "pngjs";
 import { describe, expect, it } from "vitest";
 
+import {
+  VisualNormalizationCache,
+  type VisualNormalizationCacheKey,
+} from "../../src/visual/visual-normalization-cache.js";
 import { normalizeVisualPng } from "../../src/visual/visual-normalizer.js";
 
 describe("visual normalizer", () => {
@@ -42,6 +46,71 @@ describe("visual normalizer", () => {
         role: "Figma baseline",
       }),
     ).rejects.toThrow(/FIGMA_CAPTURE_GEOMETRY_INVALID.*decoded/);
+  });
+
+  it("reuses unchanged baseline PNG and RGBA bytes while allowing actuals to stay fresh", async () => {
+    const cache = new VisualNormalizationCache();
+    const source = solidPng(2, 2, [10, 20, 30, 255]);
+    const input = {
+      content: source,
+      sourceDigest: `sha256:${"1".repeat(64)}` as const,
+      sourceSize: { width: 2, height: 2 },
+      logicalSize: { width: 2, height: 2 },
+      colorSpace: "srgb" as const,
+      role: "Figma baseline",
+      cache,
+    };
+
+    const cold = await normalizeVisualPng(input);
+    cold.content[0] = 0;
+    cold.rgba[0] = 0;
+    const warm = await normalizeVisualPng(input);
+    const freshActual = await normalizeVisualPng({
+      ...input,
+      role: "browser actual",
+      cacheRead: false,
+    });
+
+    expect(cold.cacheStatus).toBe("miss");
+    expect(warm.cacheStatus).toBe("hit");
+    expect(freshActual.cacheStatus).toBe("bypassed");
+    expect(warm.content[0]).not.toBe(0);
+    expect(warm.rgba[0]).toBe(10);
+    expect(cache.snapshotStats()).toMatchObject({
+      hits: 1,
+      misses: 1,
+      bypasses: 1,
+    });
+  });
+
+  it("includes every normalization option in the cache key", async () => {
+    const cache = new VisualNormalizationCache();
+    const source = solidPng(1, 1, [10, 20, 30, 255]);
+    const keys: VisualNormalizationCacheKey[] = [];
+    const getOrCompute = cache.getOrCompute.bind(cache);
+    cache.getOrCompute = async (key, compute) => {
+      keys.push(key);
+      return getOrCompute(key, compute);
+    };
+
+    await normalizeVisualPng({
+      content: source,
+      sourceSize: { width: 1, height: 1 },
+      logicalSize: { width: 1, height: 1 },
+      colorSpace: "srgb",
+      role: "baseline",
+      cache,
+    });
+
+    expect(keys).toEqual([
+      expect.objectContaining({
+        normalizerVersion: "visual-normalizer-v1",
+        options: {
+          alphaMode: "premultiplied",
+          interpolation: "nearest",
+        },
+      }),
+    ]);
   });
 });
 

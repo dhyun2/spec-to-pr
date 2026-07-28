@@ -38,6 +38,7 @@ import { ArtifactRefSchema } from "../../src/runtime/artifact.js";
 import { createArtifactId } from "../../src/runtime/id-factory.js";
 import type { RunManifest } from "../../src/run/index.js";
 import { createDraftEvidenceBundle } from "../../src/workflow/draft-evidence-bundle.js";
+import { defaultVisualNormalizationCache } from "../../src/visual/visual-normalizer.js";
 
 const FIGMA_URL = "https://www.figma.com/design/abc/file?node-id=1-2";
 const FIGMA_URL_SECOND_STATE = "https://www.figma.com/design/abc/file?node-id=3-4";
@@ -6428,7 +6429,8 @@ describe("WorkflowService", () => {
     );
   });
 
-  it("enforces baseline isolation and renderer lineage before reservations while blocking after three visual comparison failures", async () => {
+  it("enforces baseline isolation and renderer lineage, reuses baselines, and keeps full fresh coverage across three visual failures", async () => {
+    defaultVisualNormalizationCache.clear();
     const baseline = new PNG({ width: 1, height: 1 });
     baseline.data.set([0, 0, 0, 255]);
     await writeFile(path.join(directory, "visual/diff.png"), PNG.sync.write(baseline));
@@ -7823,6 +7825,10 @@ describe("WorkflowService", () => {
       runId: started.runId,
       submission: firstAttempt,
     });
+    const cacheAfterFirst = defaultVisualNormalizationCache.snapshotStats();
+    expect(cacheAfterFirst.misses).toBe(1);
+    expect(cacheAfterFirst.hits).toBeGreaterThanOrEqual(3);
+    expect(cacheAfterFirst.bypasses).toBe(4);
     const afterCommittedAttempt = await store.get(started.runId);
     const revisionBeforeReplay = afterCommittedAttempt.revision;
     const reportCountBeforeReplay = afterCommittedAttempt.artifacts.filter(
@@ -8168,6 +8174,9 @@ describe("WorkflowService", () => {
       runId: started.runId,
       submission: secondAttempt,
     });
+    const cacheAfterSecond = defaultVisualNormalizationCache.snapshotStats();
+    expect(cacheAfterSecond.hits - cacheAfterFirst.hits).toBe(2);
+    expect(cacheAfterSecond.bypasses - cacheAfterFirst.bypasses).toBe(2);
     expect(
       afterSecondFailure.nextActions.find((action) => action.kind === "implementation-repair"),
     ).toMatchObject({ nextAttempt: 3, lineageId: firstRepair?.lineageId });
@@ -8196,6 +8205,9 @@ describe("WorkflowService", () => {
       runId: started.runId,
       submission: thirdAttempt,
     });
+    const cacheAfterThird = defaultVisualNormalizationCache.snapshotStats();
+    expect(cacheAfterThird.hits - cacheAfterSecond.hits).toBe(2);
+    expect(cacheAfterThird.bypasses - cacheAfterSecond.bypasses).toBe(2);
     expect(afterThirdFailure.revision).toBe(beforeThirdFailure.revision + 2);
     expect(afterThirdFailure.status).toBe("blocked");
     expect(afterThirdFailure.blockerDetails).toEqual(

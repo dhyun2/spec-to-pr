@@ -205,6 +205,26 @@ export async function compareVisualPngs(input: {
   });
 }
 
+export async function compareVisualRgba(input: {
+  baseline: PngImage;
+  actual: PngImage;
+  masks?: VisualMask[];
+  pixelTolerance?: number;
+}): Promise<VisualComparisonOutput> {
+  const { createPng, encodePng } = await import("./png-codec.js");
+  const baseline = validateDecodedVisual(input.baseline, "baseline");
+  const actual = validateDecodedVisual(input.actual, "actual");
+  return compareDecodedVisualPngs({
+    baseline,
+    actual,
+    createPng,
+    encodePng,
+    ...(input.masks === undefined ? {} : { masks: input.masks }),
+    ...(input.pixelTolerance === undefined ? {} : { pixelTolerance: input.pixelTolerance }),
+    threshold: VISUAL_POLICY.reviewThreshold,
+  });
+}
+
 function compareDecodedVisualPngs(input: {
   baseline: PngImage;
   actual: PngImage;
@@ -290,6 +310,25 @@ function compareDecodedVisualPngs(input: {
     maskReasons: [...new Set(masks.map((mask) => mask.reason))],
     diff: encodePng(diff),
     overlay: encodePng(overlay),
+  };
+}
+
+function validateDecodedVisual(image: PngImage, role: string): PngImage {
+  if (
+    !Number.isSafeInteger(image.width) ||
+    image.width < 1 ||
+    !Number.isSafeInteger(image.height) ||
+    image.height < 1 ||
+    image.width > Math.floor(Number.MAX_SAFE_INTEGER / image.height / 4) ||
+    !Buffer.isBuffer(image.data) ||
+    image.data.byteLength !== image.width * image.height * 4
+  ) {
+    throw new Error(`VISUAL_INVALID_RGBA: ${role} must contain width x height x 4 decoded bytes`);
+  }
+  return {
+    width: image.width,
+    height: image.height,
+    data: Buffer.from(image.data),
   };
 }
 
