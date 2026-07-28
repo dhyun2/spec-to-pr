@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 import { promisify } from "node:util";
 
 import { parse as parseYaml } from "yaml";
@@ -529,6 +530,7 @@ export type WorkflowServiceDependencies = {
   archiveService?: OpenSpecArchiveService;
   metrics?: RuntimeMetricsSink;
   now?: () => string;
+  monotonicNow?: () => number;
   externalLeaseTtlMs?: number;
   externalHeartbeatMs?: number;
 };
@@ -546,16 +548,25 @@ type PreparedVisualEvidence = {
 
 type MutatingStatusView = "action" | "detail";
 type MutatingWorkflowStatus = WorkflowActionStatus | WorkflowDetailStatus;
+type ReviewerStageName = "functional-review" | "design-review";
+type ReviewerTiming = {
+  startedAt: number;
+  visualStableAtStart: boolean;
+  completedWallMs?: number;
+};
 
 export class WorkflowService {
   private readonly now: () => string;
+  private readonly monotonicNow: () => number;
   private readonly externalLeaseTtlMs: number;
   private readonly externalHeartbeatMs: number;
   private readonly metrics: RuntimeMetricsSink;
   private readonly diagnosticPublishFlights = new Map<string, Promise<unknown>>();
+  private readonly reviewerTimings = new Map<string, Map<ReviewerStageName, ReviewerTiming>>();
 
   public constructor(private readonly dependencies: WorkflowServiceDependencies) {
     this.now = dependencies.now ?? (() => new Date().toISOString());
+    this.monotonicNow = dependencies.monotonicNow ?? performance.now.bind(performance);
     this.externalLeaseTtlMs = dependencies.externalLeaseTtlMs ?? DEFAULT_EXTERNAL_LEASE_TTL_MS;
     this.externalHeartbeatMs = dependencies.externalHeartbeatMs ?? DEFAULT_EXTERNAL_HEARTBEAT_MS;
     this.metrics = dependencies.metrics ?? new NoopRuntimeMetrics();
@@ -1158,6 +1169,7 @@ export class WorkflowService {
         },
         current.revision,
       );
+      this.completeReviewerTiming(submission.reviewPacketId, submission.kind);
       return this.mutatingStatus(run.id, view);
     }
 
@@ -1204,6 +1216,11 @@ export class WorkflowService {
           retryable: typedBlocker?.retryable ?? outcome !== "blocked",
         },
       });
+    }
+
+    if (submission.kind === "functional-review" || submission.kind === "design-review") {
+      this.completeReviewerTiming(submission.reviewPacketId, submission.kind);
+      await this.cleanupReviewerTimingIfTerminal(run.id, submission.reviewPacketId);
     }
 
     return this.mutatingStatus(run.id, view);
@@ -1392,6 +1409,7 @@ export class WorkflowService {
       this.now(),
       this.dependencies.artifactStore,
     );
+    this.startExposedReviewerTimings(run, deliveryProfile, nextActions);
     const requiredValidations = requiredValidationsForRun(scope, deliveryProfile);
     const currentStage = run.stages.find(
       (item) => !["passed", "skipped", "waived"].includes(item.status),
@@ -1445,6 +1463,80 @@ export class WorkflowService {
     }
     const legacyInventory = await this.legacyInventorySummaryForRun(run);
     return buildDetailStatusProjection(common, run, scope, deliveryProfile, legacyInventory);
+  }
+
+  private startExposedReviewerTimings(
+    run: RunManifest,
+    profile: DeliveryProfile,
+    actions: WorkflowStatus["nextActions"],
+  ): void {
+    const packet = reviewPacketFromRun(run);
+    if (packet === undefined) return;
+    const visualStable =
+      !profile.requirements.visualComparison ||
+      currentVisualReport(run, packet.id)?.metadata["visualStatus"] === "passed";
+    for (const action of actions) {
+      if (action.kind !== "review-functional" && action.kind !== "review-design") continue;
+      if (action.reviewPacketId !== packet.id) continue;
+      const stageName = action.kind === "review-functional" ? "functional-review" : "design-review";
+      let timings = this.reviewerTimings.get(packet.id);
+      if (timings === undefined) {
+        timings = new Map();
+        this.reviewerTimings.set(packet.id, timings);
+      }
+      if (!timings.has(stageName)) {
+        timings.set(stageName, {
+          startedAt: this.monotonicNow(),
+          visualStableAtStart: visualStable,
+        });
+      }
+    }
+  }
+
+  private completeReviewerTiming(packetId: string, stageName: ReviewerStageName): void {
+    let timings = this.reviewerTimings.get(packetId);
+    if (timings === undefined) {
+      timings = new Map();
+      this.reviewerTimings.set(packetId, timings);
+    }
+    let timing = timings.get(stageName);
+    if (timing === undefined) {
+      timing = { startedAt: this.monotonicNow(), visualStableAtStart: true };
+      timings.set(stageName, timing);
+    }
+    if (timing.completedWallMs !== undefined) return;
+    const wallMs = Math.max(0, this.monotonicNow() - timing.startedAt);
+    timing.completedWallMs = wallMs;
+    this.metrics.increment("review.wall_ms", wallMs, { stage: stageName });
+  }
+
+  private invalidateReviewerTimings(packetId: string): void {
+    const timings = this.reviewerTimings.get(packetId);
+    if (timings === undefined) return;
+    const invalidatedAt = this.monotonicNow();
+    for (const [stageName, timing] of timings) {
+      const wallMs = timing.completedWallMs ?? Math.max(0, invalidatedAt - timing.startedAt);
+      if (timing.completedWallMs === undefined) {
+        this.metrics.increment("review.wall_ms", wallMs, { stage: stageName });
+      }
+      this.metrics.increment("review.invalidated_wall_ms", wallMs, { stage: stageName });
+    }
+    this.reviewerTimings.delete(packetId);
+  }
+
+  private async cleanupReviewerTimingIfTerminal(runId: string, packetId: string): Promise<void> {
+    const run = await this.dependencies.runStore.get(runId);
+    const profile = deliveryProfileFromRun(run);
+    const visualStable =
+      !profile.requirements.visualComparison ||
+      currentVisualReport(run, packetId)?.metadata["visualStatus"] === "passed";
+    if (
+      visualStable &&
+      stage(run, "functional-review").status === "passed" &&
+      ["passed", "skipped", "waived"].includes(stage(run, "design-review").status)
+    ) {
+      this.reviewerTimings.delete(packetId);
+    }
   }
 
   private async legacyInventorySummaryForRun(run: RunManifest) {
@@ -4088,6 +4180,9 @@ export class WorkflowService {
         await this.dependencies.runStore.save(next, current.revision);
         this.metrics.increment("visual.reservation_committed", 1, { outcome: "committed" });
         this.metrics.gauge("visual.active_workers", 0, { stage: "implementation" });
+        if (input.status === "failed") {
+          this.invalidateReviewerTimings(input.packet.id);
+        }
         return;
       } catch (error: unknown) {
         if (!(error instanceof RevisionConflictError)) throw error;

@@ -1,0 +1,98 @@
+{
+  "schemaVersion": "reviewer-scheduling-decision-v2",
+  "collectedAt": "2026-07-28T16:00:42.000Z",
+  "provenance": {
+    "sourceType": "controlled-deterministic-workflow-service-executions",
+    "productionTelemetry": false,
+    "sourceFixture": "Task 1 runtime metrics plus production WorkflowService visual comparison",
+    "method": "Thirty distinct controlled UI deliveries execute real WorkflowService status, reviewer submission, visual comparison, repair, and reviewer invalidation paths. Five deterministic first failures repair to new packets and pass. A manual monotonic clock supplies reviewer event durations; host wall time is not a decision input.",
+    "sanitization": "Only aggregate counts, rates, deterministic wall durations, bounded fixture metadata, and SHA-256 aggregate digests are persisted."
+  },
+  "digests": {
+    "fixtureRoot": "sha256:c775248a7e3b2127e02926f0f0f231098e16eff6407ad7196c80b1e04abe6316",
+    "controlledEnvironment": "sha256:ed1dc8d93efc2add1127fecaf9fc65ccb9105e88421b07ed7526b5dbf78283b7",
+    "dependencyLockfile": "sha256:cb30cef98f530c19b2b725ccc7e6f0547652ba7ffa2d1d24ff4256f12f412baf",
+    "fixtureDigestAggregate": "sha256:b815ff9837eccd9e946b2e6fe3d6e09fd6cd56e22f11f65b0a5a985ab0db9763",
+    "packetDigestAggregate": "sha256:38843e8ea980a119f39eccf415c7e2b4b8138bed894e501889bf15d4aa53ed05"
+  },
+  "controlledEnvironment": {
+    "schemaVersion": "reviewer-scheduling-environment-v1",
+    "monotonicClock": "manual-milliseconds-v1",
+    "nodeEngine": ">=22.0.0",
+    "packageManager": "pnpm@10.34.4",
+    "dependencyLockfileDigest": "sha256:cb30cef98f530c19b2b725ccc7e6f0547652ba7ffa2d1d24ff4256f12f412baf"
+  },
+  "fixture": {
+    "deliverySampleCount": 30,
+    "sampleSize": 35,
+    "distinctPacketDigestCount": 35,
+    "distinctFixtureDigestCount": 35,
+    "targetCountPerPacket": 1,
+    "logicalSize": {
+      "width": 1,
+      "height": 1
+    },
+    "firstFailureRule": "Every sixth delivery fails its first packet; one failure per workload.",
+    "repairRule": "Each first failure changes implementation source and produces a new passing packet.",
+    "fixtureDigestSerialization": "sha256(JSON.stringify({schemaVersion,sampleId,attempt,expectedVisualStatus,baselineRgba,actualRgba}))",
+    "aggregateDigestSerialization": "sha256(JSON.stringify(sortedDigestArray))"
+  },
+  "aggregates": {
+    "sampleSize": 35,
+    "deliverySampleCount": 30,
+    "numericVisualResultCount": 35,
+    "firstAttemptVisualFailures": 5,
+    "firstAttemptVisualFailureRate": 0.16666666666666666,
+    "reviewerWallStartedBeforeVisualStabilityMs": 850,
+    "totalReviewerWallMs": 1390,
+    "invalidatedReviewerWallMs": 100,
+    "invalidationRatio": 0.07194244604316546,
+    "workloadDistribution": {
+      "XS": 7,
+      "S": 7,
+      "M": 7,
+      "L": 7,
+      "XL": 7
+    },
+    "numericVisualStatuses": {
+      "passed": 30,
+      "failed": 5
+    },
+    "visualReviewMatchRatio": {
+      "minimum": 0,
+      "mean": 0.8571428571428571,
+      "maximum": 1
+    },
+    "passToBothReviewsWallMs": {
+      "total": 900,
+      "mean": 30,
+      "p50": 30,
+      "p95": 30
+    },
+    "task1MetricTotals": {
+      "review.wall_ms": {
+        "functional-review": 850,
+        "design-review": 540
+      },
+      "review.invalidated_wall_ms": {
+        "functional-review": 100
+      }
+    }
+  },
+  "measurementDefinitions": {
+    "reviewerWallStartedBeforeVisualStabilityMs": "Sum of functional reviewer action wall time because every measured functional action was exposed by current status before its packet had a numeric visual pass.",
+    "totalReviewerWallMs": "Sum of review.wall_ms emitted by real functional and design review completion or invalidation events.",
+    "invalidatedReviewerWallMs": "Sum of review.invalidated_wall_ms emitted when a real repairable visual failure reopened implementation and reset exposed reviewer work.",
+    "passToBothReviewsWallMs": "Manual-clock elapsed duration from real visual pass completion until both applicable real reviewer submissions completed."
+  },
+  "decisionRule": {
+    "formula": "invalidatedReviewerWallMs / Math.max(1, totalReviewerWallMs)",
+    "minimumSampleSize": 30,
+    "minimumInvalidationRatio": 0.15,
+    "sampleSizeGatePassed": true,
+    "invalidationRatioGatePassed": false,
+    "selectedStablePacketScheduling": false,
+    "decision": "retain-current-parallel-scheduling",
+    "speedupClaim": "none"
+  }
+}
