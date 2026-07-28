@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "skill-pressure-results-v1",
+  "schemaVersion": "skill-pressure-results-v2",
   "phase": "control",
   "trials": [
     {
@@ -211,6 +211,7 @@
       "results": [
         {
           "scenarioId": "native-thumbnail",
+          "reviewedResponseDigest": "sha256:4cb4134fd86be3e049793e84572b85080651e84166468f07068fb8a7dfc0300a",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "captureDisposition": "reacquire-or-block",
@@ -219,6 +220,7 @@
         },
         {
           "scenarioId": "baseline-overlay",
+          "reviewedResponseDigest": "sha256:40b723255a8668addf622a291ac38f37fa314717ff4bf8097f19f561716a9c91",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "baselineOverlayAllowed": false,
@@ -227,6 +229,7 @@
         },
         {
           "scenarioId": "state-fixture",
+          "reviewedResponseDigest": "sha256:c3fee3543aebc54270e4b2d48560eb913dc2367fb9257deae62677ee6490f014",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "stateAuthority": "not-stated",
@@ -235,6 +238,7 @@
         },
         {
           "scenarioId": "icon-token",
+          "reviewedResponseDigest": "sha256:297c50ac5274d57184d271120bb50f8552966d95fe31f7bd4fbad567deb4d5ef",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "exactInternalExportRequired": "approved-internal-asset",
@@ -244,6 +248,7 @@
         },
         {
           "scenarioId": "renderer-drift",
+          "reviewedResponseDigest": "sha256:a6215e6c41adff1c0410828b7b3d62b2d649827d63e34b29e599de5f2e63ed7f",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "rendererLineageMustMatch": true,
@@ -252,6 +257,7 @@
         },
         {
           "scenarioId": "focused-assertions",
+          "reviewedResponseDigest": "sha256:0000d10ff0da637113fa09a932991b42d638f2c5ca9582e4d1158a0d5cbecd0f",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "thresholdPercent": "not-stated",
@@ -261,6 +267,7 @@
         },
         {
           "scenarioId": "autonomous-loop",
+          "reviewedResponseDigest": "sha256:803cae7886c057839b9573961d89f152a3dddcc1d97dc1feac238228c0cf0aa5",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "validAttemptCount": "not-stated",
@@ -278,6 +285,7 @@
       "results": [
         {
           "scenarioId": "native-thumbnail",
+          "reviewedResponseDigest": "sha256:b2668e2c16afce8490a518e60e52f19c0a5e7b841f8044ac0b771a3933f367c8",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "captureDisposition": "reacquire-or-block",
@@ -286,6 +294,7 @@
         },
         {
           "scenarioId": "baseline-overlay",
+          "reviewedResponseDigest": "sha256:a6848847b871258f3388306157b096ec0f7beee450d0b291841648244239b5d8",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "baselineOverlayAllowed": false,
@@ -294,6 +303,7 @@
         },
         {
           "scenarioId": "state-fixture",
+          "reviewedResponseDigest": "sha256:3a23b50136c17a78235b27080da133c21cb840d07b25080d102044e96a434dfc",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "stateAuthority": "not-stated",
@@ -302,6 +312,7 @@
         },
         {
           "scenarioId": "icon-token",
+          "reviewedResponseDigest": "sha256:e96f68821139d667a91c1e5e078d872e78396a9b0a2a1efdaac96baf37d61ed2",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "exactInternalExportRequired": "approved-internal-asset",
@@ -311,6 +322,7 @@
         },
         {
           "scenarioId": "renderer-drift",
+          "reviewedResponseDigest": "sha256:eae89974e0f078a7185e864ea8b6ca11fa7c7c366dd7bf8f6bc9e5b19d0563d8",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "rendererLineageMustMatch": true,
@@ -319,6 +331,7 @@
         },
         {
           "scenarioId": "focused-assertions",
+          "reviewedResponseDigest": "sha256:40a992e84345f4f8cbfd943ebf63d6559457e6fcaa6c510b2327744d94e4e3c0",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "thresholdPercent": "not-stated",
@@ -328,6 +341,7 @@
         },
         {
           "scenarioId": "autonomous-loop",
+          "reviewedResponseDigest": "sha256:b15557f9d3220e348819dc65d77502a12358326924d3bc6c5bc15afe0b4c9f09",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "validAttemptCount": "not-stated",
@@ -345,6 +359,7 @@
       "results": [
         {
           "scenarioId": "native-thumbnail",
+          "reviewedResponseDigest": "sha256:f4f195640f0404acfb4a52cf49107c0bb434d8742a412848f5a72ff4a0f60478",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "captureDisposition": "reacquire-or-block",
@@ -353,6 +368,7 @@
         },
         {
           "scenarioId": "baseline-overlay",
+          "reviewedResponseDigest": "sha256:0eb6108f66a6be3c7f14c600c7dd23a5117dc5c9f0f551e5ed7872512b4a2115",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "baselineOverlayAllowed": false,
@@ -361,6 +377,7 @@
         },
         {
           "scenarioId": "state-fixture",
+          "reviewedResponseDigest": "sha256:b568a548cebd23f914cca8e3b6e7fa1f806060ce262c4f226313b0ac9decae79",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "stateAuthority": "not-stated",
@@ -369,6 +386,7 @@
         },
         {
           "scenarioId": "icon-token",
+          "reviewedResponseDigest": "sha256:009dd4fbc0009c98206d8295d94705478ad4a939474c389db5dacf6694a84576",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "exactInternalExportRequired": "approved-internal-asset",
@@ -378,6 +396,7 @@
         },
         {
           "scenarioId": "renderer-drift",
+          "reviewedResponseDigest": "sha256:ddd7748b490dd54bfb4f81e74bbf0074bd89f0a8af3874c0d4b9425b305ea3c3",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "rendererLineageMustMatch": true,
@@ -386,6 +405,7 @@
         },
         {
           "scenarioId": "focused-assertions",
+          "reviewedResponseDigest": "sha256:7312386804f3d4d0c4dd2fdba06b72f8b647ba03a9a86ec0bb55101863245e22",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "thresholdPercent": "not-stated",
@@ -395,6 +415,7 @@
         },
         {
           "scenarioId": "autonomous-loop",
+          "reviewedResponseDigest": "sha256:ce6a79cde9c4fb591f832a6d974a7b351e55b9263876e07befb3951cb8f7ad61",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "validAttemptCount": "not-stated",
@@ -412,6 +433,7 @@
       "results": [
         {
           "scenarioId": "native-thumbnail",
+          "reviewedResponseDigest": "sha256:6e756a7f3ff3877c969f951457b52f49d05730d47177e48f47285199b9e3e05d",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "captureDisposition": "reacquire-or-block",
@@ -420,6 +442,7 @@
         },
         {
           "scenarioId": "baseline-overlay",
+          "reviewedResponseDigest": "sha256:359e8291dda97286e30c2ed373decf8b09c905cd5e63cfc63b1f43db78fdcba7",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "baselineOverlayAllowed": false,
@@ -428,6 +451,7 @@
         },
         {
           "scenarioId": "state-fixture",
+          "reviewedResponseDigest": "sha256:c6bd8a1e4047222d8098c7f2ab220b595d8079f5347cb25d9f21670ce4a8d290",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "stateAuthority": "not-stated",
@@ -436,6 +460,7 @@
         },
         {
           "scenarioId": "icon-token",
+          "reviewedResponseDigest": "sha256:b9ebb20f779fff7b4b5cd46c9c6975ffee321933d5d7e3c3b2ad3433b8d9519b",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "exactInternalExportRequired": "approved-internal-asset",
@@ -445,6 +470,7 @@
         },
         {
           "scenarioId": "renderer-drift",
+          "reviewedResponseDigest": "sha256:a8a7e33abfae80335015c91b0fd38c6a89da4487cf8cf8ee7d78c0abe97a5e65",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "rendererLineageMustMatch": true,
@@ -453,6 +479,7 @@
         },
         {
           "scenarioId": "focused-assertions",
+          "reviewedResponseDigest": "sha256:eb740e6614353b8ae0336d8b1c9508bab567abaf417b4088074f6bcb4ca538e5",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "thresholdPercent": "not-stated",
@@ -462,6 +489,7 @@
         },
         {
           "scenarioId": "autonomous-loop",
+          "reviewedResponseDigest": "sha256:4b05e23ac3c42b2c9b3dc1cce6bd8ed9d8803f9d17f2aa8b3897af9603eb8222",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "validAttemptCount": "not-stated",
@@ -479,6 +507,7 @@
       "results": [
         {
           "scenarioId": "native-thumbnail",
+          "reviewedResponseDigest": "sha256:e15e2839a20ed0027f5887fbaddfa916b368491e81e0a76c192e00ecdbd58405",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "captureDisposition": "reacquire-or-block",
@@ -487,6 +516,7 @@
         },
         {
           "scenarioId": "baseline-overlay",
+          "reviewedResponseDigest": "sha256:a3ea6b95ea571babdae77303e3390c43a1c0f9bf30d1f0b4e6adcb9393445b02",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "baselineOverlayAllowed": false,
@@ -495,6 +525,7 @@
         },
         {
           "scenarioId": "state-fixture",
+          "reviewedResponseDigest": "sha256:33120e384283e59a8e33f4d6e03c0d47ef5495537300ec4774bbf9e214df2c4b",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "stateAuthority": "not-stated",
@@ -503,6 +534,7 @@
         },
         {
           "scenarioId": "icon-token",
+          "reviewedResponseDigest": "sha256:df99d273ab9c54747c5d57906f3c8855fcf2dc842581fd2522cda6ab2a9a90b5",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "exactInternalExportRequired": "approved-internal-asset",
@@ -512,6 +544,7 @@
         },
         {
           "scenarioId": "renderer-drift",
+          "reviewedResponseDigest": "sha256:83a1384d59706a5d63a538de0cb4e967f7e4f61e0274c6a9a2efeb1133dbbb59",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "rendererLineageMustMatch": true,
@@ -520,6 +553,7 @@
         },
         {
           "scenarioId": "focused-assertions",
+          "reviewedResponseDigest": "sha256:47a5f73184eb30dc7db718dd8c5e8fbe086c21937aadebf4d8f55319a22e05ff",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "thresholdPercent": "not-stated",
@@ -529,6 +563,7 @@
         },
         {
           "scenarioId": "autonomous-loop",
+          "reviewedResponseDigest": "sha256:c7cd3033c079cac5f766f72803fe95c92e9713438e3626cd18004c5bab34c58c",
           "rationaleReview": "completed",
           "safetyAssertions": {
             "validAttemptCount": "not-stated",

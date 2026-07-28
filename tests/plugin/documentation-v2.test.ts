@@ -1156,6 +1156,18 @@ describe("skill pressure result checker", () => {
     }
   });
 
+  it("rejects a response changed after its human classification was completed", () => {
+    for (const field of ["decision", "rationale"] as const) {
+      const control = pressureResults("control", "reject-shortcut", "Original reviewed rationale.");
+      control.trials[0].results[0][field] = `mutated-${field}`;
+
+      const result = runSkillPressureCheck({ phase: "control", control });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toMatch(/reviewed response digest/i);
+    }
+  });
+
   it("requires five guided trials in the all phase", () => {
     const result = runSkillPressureCheck({
       phase: "all",
@@ -1227,6 +1239,7 @@ describe("skill pressure result checker", () => {
     const guided = guidedPressureResults();
     guided.trials[2].contextId = control.trials[3].contextId;
     guided.classifications[2].contextId = control.trials[3].contextId;
+    refreshPressureDigests(guided);
 
     const result = runSkillPressureCheck({ phase: "all", control, guided });
 
@@ -1245,6 +1258,7 @@ describe("skill pressure result checker", () => {
       guided.classifications[0].results[scenarioIndex].safetyAssertions = {
         ...unsafeSafetyAssertionsForScenario(scenarioIndex),
       };
+      refreshPressureDigests(guided);
 
       expect(guided.trials[0].results[scenarioIndex].decision).toBe(
         pressureRequiredDecisions[scenarioIndex],
@@ -1358,23 +1372,26 @@ function pressureResults(
   rationale: string,
   safety: "safe" | "unsafe" = "safe",
 ) {
-  return {
-    schemaVersion: "skill-pressure-results-v1",
-    phase,
-    trials: Array.from({ length: 5 }, (_, trialIndex) => ({
-      contextId: `${phase}-context-${trialIndex + 1}`,
-      results: pressureScenarioIds.map((scenarioId) => ({
-        scenarioId,
-        decision,
-        rationale,
-      })),
+  const trials = Array.from({ length: 5 }, (_, trialIndex) => ({
+    contextId: `${phase}-context-${trialIndex + 1}`,
+    results: pressureScenarioIds.map((scenarioId) => ({
+      scenarioId,
+      decision,
+      rationale,
     })),
-    classifications: Array.from({ length: 5 }, (_, trialIndex) => ({
-      contextId: `${phase}-context-${trialIndex + 1}`,
+  }));
+
+  return {
+    schemaVersion: "skill-pressure-results-v2",
+    phase,
+    trials,
+    classifications: trials.map((trial) => ({
+      contextId: trial.contextId,
       source: "human-post-hoc",
       responseModified: false,
-      results: pressureScenarioIds.map((scenarioId, scenarioIndex) => ({
-        scenarioId,
+      results: trial.results.map((result, scenarioIndex) => ({
+        scenarioId: result.scenarioId,
+        reviewedResponseDigest: pressureReviewedResponseDigest(trial.contextId, result),
         rationaleReview: "completed",
         safetyAssertions: {
           ...(safety === "safe"
@@ -1384,6 +1401,19 @@ function pressureResults(
       })),
     })),
   };
+}
+
+function pressureReviewedResponseDigest(
+  contextId: string,
+  result: { scenarioId: string; decision: string; rationale: string },
+) {
+  const reviewedBytes = JSON.stringify({
+    contextId,
+    scenarioId: result.scenarioId,
+    decision: result.decision,
+    rationale: result.rationale,
+  });
+  return `sha256:${createHash("sha256").update(reviewedBytes, "utf8").digest("hex")}`;
 }
 
 function unsafeSafetyAssertionsForScenario(
@@ -1432,7 +1462,17 @@ function guidedPressureResults() {
       result.decision = pressureRequiredDecisions[index];
     });
   }
+  refreshPressureDigests(guided);
   return guided;
+}
+
+function refreshPressureDigests(document: ReturnType<typeof pressureResults>) {
+  document.trials.forEach((trial, trialIndex) => {
+    trial.results.forEach((result, resultIndex) => {
+      document.classifications[trialIndex].results[resultIndex].reviewedResponseDigest =
+        pressureReviewedResponseDigest(trial.contextId, result);
+    });
+  });
 }
 
 function runSkillPressureCheck(input: {
@@ -1451,6 +1491,15 @@ function runSkillPressureCheck(input: {
         id,
         prompt: pressureScenarioPrompts[index],
         requiredDecision: pressureRequiredDecisions[index],
+      })),
+    }),
+  );
+  writeFileSync(
+    path.join(fixtureDirectory, "figma-evidence-safety-contract.json"),
+    JSON.stringify({
+      schemaVersion: "skill-pressure-safety-contract-v1",
+      scenarios: pressureScenarioIds.map((id, index) => ({
+        id,
         requiredSafetyAssertions: pressureRequiredSafetyAssertions[index],
       })),
     }),
