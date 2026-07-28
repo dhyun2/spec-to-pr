@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -116,6 +116,12 @@ import {
   resolveWorkspaceBinding,
 } from "../workspace/workspace-binding.js";
 import { createVisualLineage } from "../workflow/visual-repair-lineage.js";
+import {
+  nextCommittedVisualAttempt,
+  reduceVisualReservations,
+  type VisualAttemptReservation,
+  type VisualAttemptReservationEvent,
+} from "../workflow/visual-attempt-reservation.js";
 
 const WORKER_ID = "workflow-orchestrator" as const;
 const execFileAsync = promisify(execFile);
@@ -461,6 +467,11 @@ export type WorkflowServiceDependencies = {
   externalLeaseTtlMs?: number;
   externalHeartbeatMs?: number;
 };
+
+type VisualAttemptReservationResult =
+  | { kind: "reserved"; reservation: VisualAttemptReservation }
+  | { kind: "committed-replay"; reservation: VisualAttemptReservation }
+  | { kind: "busy"; reservation: VisualAttemptReservation };
 
 export class WorkflowService {
   private readonly now: () => string;
@@ -866,6 +877,9 @@ export class WorkflowService {
     if (submission.kind === "legacy-network-evidence") {
       return this.submitLegacyNetworkEvidence(run, submission.evidencePath);
     }
+    if (submission.kind === "visual-comparison" && this.isCommittedVisualReplay(run, submission)) {
+      return this.status({ runId: run.id });
+    }
     if (
       submission.kind === "visual-comparison" ||
       ((submission.kind === "contracts" || submission.kind === "implementation") &&
@@ -873,7 +887,7 @@ export class WorkflowService {
     ) {
       await this.assertLegacyReferenceFresh(run);
     }
-    assertSubmissionPrerequisites(run, submission);
+    assertSubmissionPrerequisites(run, submission, this.now());
     await assertDraftBundleIntegrity(run, submission);
     if (
       (submission.kind === "functional-review" || submission.kind === "design-review") &&
@@ -1141,7 +1155,7 @@ export class WorkflowService {
     const scope = scopeFromRun(run);
     const deliveryProfile = deliveryProfileFromRun(run);
     const workload = workloadFromRun(run, scope, deliveryProfile);
-    const nextActions = actionsForRun(run, scope, deliveryProfile);
+    const nextActions = actionsForRun(run, scope, deliveryProfile, this.now());
     const requiredValidations = requiredValidationsForRun(scope, deliveryProfile);
     const currentStage = run.stages.find(
       (item) => !["passed", "skipped", "waived"].includes(item.status),
@@ -2553,13 +2567,6 @@ export class WorkflowService {
     const boundActualArtifacts = boundEvidenceArtifacts.filter(
       (artifact) => artifact.metadata["visualRole"] === "actual",
     );
-    await this.assertVisualCaptureAcquisition(
-      run,
-      packet,
-      submission,
-      targets,
-      boundEvidenceArtifacts,
-    );
     const submissionIdentity = visualSubmissionIdentity(
       packet.id,
       boundActualArtifacts.map((artifact) => ({
@@ -2567,8 +2574,14 @@ export class WorkflowService {
         digest: artifact.digest,
       })),
     );
-    const reservation = await this.reserveVisualAttempt(run.id, packet, submissionIdentity);
-    if (reservation.duplicate) return;
+    const reservationResult = await this.reserveVisualAttempt(run.id, packet, submissionIdentity);
+    if (reservationResult.kind === "committed-replay") return;
+    if (reservationResult.kind === "busy") {
+      throw new Error(
+        "VISUAL_ATTEMPT_IN_PROGRESS: a visual comparison lease is active; refresh workflow_status and retry",
+      );
+    }
+    const reservation = reservationResult.reservation;
     const attempt = reservation.attempt;
     const lineageId = visualLineageId(packet);
     const attemptEvidenceArtifacts = boundEvidenceArtifacts.map((artifact) =>
@@ -2582,6 +2595,13 @@ export class WorkflowService {
     );
 
     try {
+      await this.assertVisualCaptureAcquisition(
+        run,
+        packet,
+        submission,
+        targets,
+        boundEvidenceArtifacts,
+      );
       const timestamp = this.now();
       const generatedArtifacts: ArtifactRef[] = [];
       const results: Array<Record<string, unknown>> = [];
@@ -2807,10 +2827,13 @@ export class WorkflowService {
       const completionArtifact = await this.visualAttemptStatusArtifact({
         runId: run.id,
         packet,
-        submissionIdentity,
-        attempt,
-        status: "completed",
-        timestamp,
+        reservation: {
+          ...reservation,
+          status: "committed",
+          updatedAt: timestamp,
+          reportArtifactId: reportArtifact.id,
+          reportDigest: reportArtifact.digest,
+        },
       });
       await this.appendVisualAttemptArtifacts(
         run.id,
@@ -2832,10 +2855,11 @@ export class WorkflowService {
       const failureArtifact = await this.visualAttemptStatusArtifact({
         runId: run.id,
         packet,
-        submissionIdentity,
-        attempt,
-        status: "failed",
-        timestamp,
+        reservation: {
+          ...reservation,
+          status: "aborted",
+          updatedAt: timestamp,
+        },
       });
       await this.appendVisualAttemptArtifacts(
         run.id,
@@ -2967,11 +2991,30 @@ export class WorkflowService {
     throw new Error("VISUAL_REPAIR_REFRESH_REQUIRED: refresh workflow_status and retry");
   }
 
+  private isCommittedVisualReplay(
+    run: RunManifest,
+    submission: Extract<WorkflowSubmission, { kind: "visual-comparison" }>,
+  ): boolean {
+    const packet = reviewPacketFromRun(run);
+    if (packet === undefined || packet.id !== submission.reviewPacketId) return false;
+    const submissionIdentity = visualSubmissionIdentity(
+      submission.reviewPacketId,
+      submission.captures.map((capture) => ({
+        targetId: capture.targetId,
+        digest: capture.actualDigest,
+      })),
+    );
+    return reduceVisualReservations(
+      visualAttemptReservations(run, visualLineageId(packet), "v3"),
+      this.now(),
+    ).committed.some((reservation) => reservation.submissionIdentity === submissionIdentity);
+  }
+
   private async reserveVisualAttempt(
     runId: string,
     packet: ImplementationReviewPacket,
     submissionIdentity: string,
-  ): Promise<{ attempt: 1 | 2 | 3; duplicate: boolean }> {
+  ): Promise<VisualAttemptReservationResult> {
     for (let retry = 0; retry < 12; retry += 1) {
       const current = await this.dependencies.runStore.get(runId);
       const currentPacket = reviewPacketFromRun(current);
@@ -2980,28 +3023,72 @@ export class WorkflowService {
           "Visual comparison must reference the current implementation review packet",
         );
       }
+      const events = visualAttemptReservations(current, visualLineageId(packet));
+      const summary = reduceVisualReservations(events, this.now());
+      const committedReplay = summary.committed.find(
+        (candidate) => candidate.submissionIdentity === submissionIdentity,
+      );
+      if (committedReplay !== undefined) {
+        return { kind: "committed-replay", reservation: committedReplay };
+      }
       if (currentVisualReport(current, packet.id)?.metadata["visualStatus"] === "passed") {
         throw new Error("The current review packet already has a passing visual comparison");
       }
-      const reservations = visualAttemptReservations(current, visualLineageId(packet));
-      const duplicate = reservations.find(
-        (candidate) => candidate.submissionIdentity === submissionIdentity,
-      );
-      if (duplicate !== undefined) return { attempt: duplicate.attempt, duplicate: true };
-      if (reservations.length >= MAX_VISUAL_REPAIR_ATTEMPTS) {
+      if (summary.active !== undefined) {
+        return { kind: "busy", reservation: summary.active };
+      }
+      if (summary.recoverable !== undefined) {
+        const latestRecoverableEvent = [...events]
+          .reverse()
+          .find((candidate) => candidate.ownerToken === summary.recoverable?.ownerToken);
+        if (latestRecoverableEvent?.status === "in-progress") {
+          const timestamp = this.now();
+          const staleReservation: VisualAttemptReservation = {
+            ...summary.recoverable,
+            status: "stale",
+            updatedAt: timestamp,
+          };
+          const staleArtifact = await this.visualAttemptStatusArtifact({
+            runId,
+            packet,
+            reservation: staleReservation,
+          });
+          try {
+            await this.dependencies.runStore.save(
+              {
+                ...current,
+                revision: current.revision + 1,
+                updatedAt: timestamp,
+                artifacts: [...current.artifacts, staleArtifact],
+              },
+              current.revision,
+            );
+            continue;
+          } catch (error: unknown) {
+            if (!(error instanceof RevisionConflictError)) throw error;
+            continue;
+          }
+        }
+      }
+      const attempt = nextCommittedVisualAttempt(summary);
+      if (attempt === undefined) {
         throw new Error(
           `VISUAL_ATTEMPT_LIMIT_REACHED: the active visual lineage already used ${MAX_VISUAL_REPAIR_ATTEMPTS} attempts`,
         );
       }
-      const attempt = (reservations.length + 1) as 1 | 2 | 3;
       const timestamp = this.now();
-      const artifact = await this.visualAttemptStatusArtifact({
-        runId,
-        packet,
+      const reservation: VisualAttemptReservation = {
         submissionIdentity,
         attempt,
         status: "in-progress",
-        timestamp,
+        ownerToken: randomUUID(),
+        reservedAt: timestamp,
+        updatedAt: timestamp,
+      };
+      const artifact = await this.visualAttemptStatusArtifact({
+        runId,
+        packet,
+        reservation,
       });
       try {
         await this.dependencies.runStore.save(
@@ -3013,7 +3100,7 @@ export class WorkflowService {
           },
           current.revision,
         );
-        return { attempt, duplicate: false };
+        return { kind: "reserved", reservation };
       } catch (error: unknown) {
         if (!(error instanceof RevisionConflictError)) throw error;
       }
@@ -3024,26 +3111,22 @@ export class WorkflowService {
   private async visualAttemptStatusArtifact(input: {
     runId: string;
     packet: ImplementationReviewPacket;
-    submissionIdentity: string;
-    attempt: 1 | 2 | 3;
-    status: "in-progress" | "completed" | "failed";
-    timestamp: string;
+    reservation: VisualAttemptReservation;
   }): Promise<ArtifactRef> {
+    const { reservation } = input;
     const content = Buffer.from(
       `${JSON.stringify({
         reviewPacketId: input.packet.id,
         visualLineageId: visualLineageId(input.packet),
-        submissionIdentity: input.submissionIdentity,
-        attempt: input.attempt,
-        status: input.status,
+        ...reservation,
       })}\n`,
       "utf8",
     );
     const blob = await this.dependencies.artifactStore.writeBlob({
       content,
       mediaType: "application/json",
-      storedAt: input.timestamp,
-      label: `visual-attempt-${String(input.attempt)}-${input.status}.json`,
+      storedAt: reservation.updatedAt,
+      label: `visual-attempt-${String(reservation.attempt)}-${reservation.status}.json`,
     });
     return ArtifactRefSchema.parse({
       id: createArtifactId(),
@@ -3053,16 +3136,25 @@ export class WorkflowService {
       digest: blob.digest,
       producedBy: "orchestrator",
       evidenceIds: [],
-      createdAt: input.timestamp,
+      createdAt: reservation.updatedAt,
       metadata: {
-        adapter: "visual-attempt-reservation-v2",
+        adapter: "visual-attempt-reservation-v3",
         reviewPacketId: input.packet.id,
         visualLineageId: visualLineageId(input.packet),
         headSha: input.packet.headSha,
         diffDigest: input.packet.diffDigest,
-        submissionIdentity: input.submissionIdentity,
-        visualComparisonAttempt: input.attempt,
-        reservationStatus: input.status,
+        submissionIdentity: reservation.submissionIdentity,
+        visualComparisonAttempt: reservation.attempt,
+        reservationStatus: reservation.status,
+        ownerToken: reservation.ownerToken,
+        reservedAt: reservation.reservedAt,
+        updatedAt: reservation.updatedAt,
+        ...(reservation.reportArtifactId === undefined
+          ? {}
+          : { reportArtifactId: reservation.reportArtifactId }),
+        ...(reservation.reportDigest === undefined
+          ? {}
+          : { reportDigest: reservation.reportDigest }),
       },
     });
   }
@@ -4769,7 +4861,12 @@ function stage(run: RunManifest, name: RunStageName): StageState {
   return value;
 }
 
-function actionsForRun(run: RunManifest, scope: WorkflowScope, profile: DeliveryProfile) {
+function actionsForRun(
+  run: RunManifest,
+  scope: WorkflowScope,
+  profile: DeliveryProfile,
+  nowIso: string,
+) {
   const intake = stage(run, "intake");
   if (intake.status !== "passed") {
     return intake.status === "blocked" && intake.error?.code === "LEGACY_API_METHOD_UNKNOWN"
@@ -4826,15 +4923,15 @@ function actionsForRun(run: RunManifest, scope: WorkflowScope, profile: Delivery
   if (
     profile.requirements.visualComparison &&
     currentVisual?.metadata["visualStatus"] !== "passed" &&
-    !hasInProgressVisualAttempt(run, packet) &&
-    visualComparisonAttemptCount(run, packet) < MAX_VISUAL_REPAIR_ATTEMPTS
+    !hasInProgressVisualAttempt(run, packet, nowIso) &&
+    committedVisualComparisonAttemptCount(run, packet, nowIso) < MAX_VISUAL_REPAIR_ATTEMPTS
   ) {
     actions.push(
       WorkflowActionSchema.parse({
         kind: "compare-visuals",
         runId: run.id,
         reviewPacketId: packet.id,
-        attempt: visualComparisonAttemptCount(run, packet) + 1,
+        attempt: committedVisualComparisonAttemptCount(run, packet, nowIso) + 1,
       }),
     );
   }
@@ -4853,7 +4950,7 @@ function actionsForRun(run: RunManifest, scope: WorkflowScope, profile: Delivery
     (parallelReviewers || stage(run, "functional-review").status === "passed") &&
     (!profile.requirements.visualComparison ||
       currentVisual?.metadata["visualStatus"] === "passed" ||
-      visualComparisonAttemptCount(run, packet) >= MAX_VISUAL_REPAIR_ATTEMPTS)
+      committedVisualComparisonAttemptCount(run, packet, nowIso) >= MAX_VISUAL_REPAIR_ATTEMPTS)
   ) {
     actions.push(
       WorkflowActionSchema.parse({
@@ -4897,6 +4994,7 @@ function stageForSubmission(
 function assertSubmissionPrerequisites(
   run: RunManifest,
   submission: StandardWorkflowSubmission,
+  nowIso: string,
 ): void {
   if (stage(run, "intake").status !== "passed") {
     throw new Error("The intake stage must pass before downstream evidence can be submitted");
@@ -4904,7 +5002,7 @@ function assertSubmissionPrerequisites(
   const profile = deliveryProfileFromRun(run);
   if (submission.kind === "design-review") {
     if (submission.verdict === "approved" && profile.requirements.visualComparison) {
-      assertCurrentVisualComparisonPassed(run, submission.reviewPacketId);
+      assertCurrentVisualComparisonPassed(run, submission.reviewPacketId, nowIso);
     }
     const scope = scopeFromRun(run);
     const parallelReviewers =
@@ -5514,19 +5612,33 @@ function activeVisualRepairAction(run: RunManifest):
   return undefined;
 }
 
-function visualComparisonAttemptCount(
+function committedVisualComparisonAttemptCount(
   run: RunManifest,
   packet: ImplementationReviewPacket,
+  nowIso: string,
 ): number {
   const reservations = visualAttemptReservations(run, visualLineageId(packet));
-  if (reservations.length > 0) return reservations.length;
-  return run.artifacts.filter(
-    (artifact) =>
-      artifact.kind === "visual-report" &&
-      (artifact.metadata["visualLineageId"] === visualLineageId(packet) ||
-        (artifact.metadata["visualLineageId"] === undefined &&
-          artifact.metadata["reviewPacketId"] === packet.id)),
-  ).length;
+  if (reservations.length > 0) {
+    return reduceVisualReservations(reservations, nowIso).committed.length;
+  }
+  const completedAttempts = new Set(
+    run.artifacts.flatMap((artifact) => {
+      const attempt = artifact.metadata["visualComparisonAttempt"];
+      return artifact.kind === "visual-report" &&
+        (artifact.metadata["visualLineageId"] === visualLineageId(packet) ||
+          (artifact.metadata["visualLineageId"] === undefined &&
+            artifact.metadata["reviewPacketId"] === packet.id)) &&
+        (attempt === 1 || attempt === 2 || attempt === 3)
+        ? [attempt]
+        : [];
+    }),
+  );
+  let count = 0;
+  for (const attempt of [1, 2, 3] as const) {
+    if (!completedAttempts.has(attempt)) break;
+    count += 1;
+  }
+  return count;
 }
 
 function currentVisualReport(run: RunManifest, reviewPacketId: string): ArtifactRef | undefined {
@@ -5544,42 +5656,91 @@ function currentVisualReport(run: RunManifest, reviewPacketId: string): Artifact
   );
 }
 
-type VisualAttemptReservationState = {
-  submissionIdentity: string;
-  attempt: 1 | 2 | 3;
-  status: "in-progress" | "completed" | "failed";
-};
-
 function visualAttemptReservations(
   run: RunManifest,
   lineageId: string,
-): VisualAttemptReservationState[] {
-  const byIdentity = new Map<string, VisualAttemptReservationState>();
+  adapter: "all" | "v3" = "all",
+): VisualAttemptReservationEvent[] {
+  const reservations: VisualAttemptReservationEvent[] = [];
+  const reportsByIdentity = new Map(
+    run.artifacts.flatMap((artifact) => {
+      const submissionIdentity = artifact.metadata["submissionIdentity"];
+      return artifact.kind === "visual-report" && typeof submissionIdentity === "string"
+        ? [[submissionIdentity, artifact] as const]
+        : [];
+    }),
+  );
   for (const artifact of run.artifacts) {
-    if (
-      artifact.metadata["adapter"] !== "visual-attempt-reservation-v2" ||
-      (artifact.metadata["visualLineageId"] ?? artifact.metadata["reviewPacketId"]) !== lineageId
-    ) {
-      continue;
+    const artifactAdapter = artifact.metadata["adapter"];
+    if (artifactAdapter !== "visual-attempt-reservation-v3") {
+      if (adapter === "v3" || artifactAdapter !== "visual-attempt-reservation-v2") continue;
     }
+    if ((artifact.metadata["visualLineageId"] ?? artifact.metadata["reviewPacketId"]) !== lineageId)
+      continue;
     const submissionIdentity = artifact.metadata["submissionIdentity"];
     const attempt = artifact.metadata["visualComparisonAttempt"];
     const status = artifact.metadata["reservationStatus"];
     if (
       typeof submissionIdentity !== "string" ||
       (attempt !== 1 && attempt !== 2 && attempt !== 3) ||
-      (status !== "in-progress" && status !== "completed" && status !== "failed")
+      (status !== "in-progress" &&
+        status !== "committed" &&
+        status !== "aborted" &&
+        status !== "stale" &&
+        status !== "completed" &&
+        status !== "failed")
     ) {
       continue;
     }
-    byIdentity.set(submissionIdentity, { submissionIdentity, attempt, status });
+    if (artifactAdapter === "visual-attempt-reservation-v3") {
+      const ownerToken = artifact.metadata["ownerToken"];
+      const reservedAt = artifact.metadata["reservedAt"];
+      const updatedAt = artifact.metadata["updatedAt"];
+      if (
+        typeof ownerToken !== "string" ||
+        typeof reservedAt !== "string" ||
+        typeof updatedAt !== "string"
+      ) {
+        continue;
+      }
+      const reportArtifactId = artifact.metadata["reportArtifactId"];
+      const reportDigest = artifact.metadata["reportDigest"];
+      reservations.push({
+        submissionIdentity,
+        attempt,
+        status,
+        ownerToken,
+        reservedAt,
+        updatedAt,
+        ...(typeof reportArtifactId === "string" ? { reportArtifactId } : {}),
+        ...(typeof reportDigest === "string" ? { reportDigest } : {}),
+      });
+      continue;
+    }
+    const report = reportsByIdentity.get(submissionIdentity);
+    reservations.push({
+      submissionIdentity,
+      attempt,
+      status,
+      ownerToken: `legacy-v2:${submissionIdentity}:${String(attempt)}`,
+      reservedAt: artifact.createdAt,
+      updatedAt: artifact.createdAt,
+      ...(status === "completed" && report !== undefined
+        ? { reportArtifactId: report.id, reportDigest: report.digest }
+        : {}),
+    });
   }
-  return [...byIdentity.values()].sort((left, right) => left.attempt - right.attempt);
+  return reservations;
 }
 
-function hasInProgressVisualAttempt(run: RunManifest, packet: ImplementationReviewPacket): boolean {
-  return visualAttemptReservations(run, visualLineageId(packet)).some(
-    (reservation) => reservation.status === "in-progress",
+function hasInProgressVisualAttempt(
+  run: RunManifest,
+  packet: ImplementationReviewPacket,
+  nowIso: string,
+): boolean {
+  return (
+    reduceVisualReservations(visualAttemptReservations(run, visualLineageId(packet)), nowIso)
+      .active !== undefined
   );
 }
 
@@ -5595,11 +5756,16 @@ function visualSubmissionIdentity(
     .digest("hex")}`;
 }
 
-function assertCurrentVisualComparisonPassed(run: RunManifest, reviewPacketId: string): void {
+function assertCurrentVisualComparisonPassed(
+  run: RunManifest,
+  reviewPacketId: string,
+  nowIso: string,
+): void {
   const report = currentVisualReport(run, reviewPacketId);
   if (report?.metadata["visualStatus"] === "passed") return;
   const packet = reviewPacketFromRun(run);
-  const attempts = packet?.id === reviewPacketId ? visualComparisonAttemptCount(run, packet) : 0;
+  const attempts =
+    packet?.id === reviewPacketId ? committedVisualComparisonAttemptCount(run, packet, nowIso) : 0;
   if (attempts >= MAX_VISUAL_REPAIR_ATTEMPTS) {
     throw new Error(
       `VISUAL_ATTEMPT_LIMIT_REACHED: design approval is blocked after ${MAX_VISUAL_REPAIR_ATTEMPTS} failed comparisons`,

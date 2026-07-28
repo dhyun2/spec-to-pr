@@ -4943,17 +4943,25 @@ describe("WorkflowService", () => {
       "review-design",
       "review-functional",
     ]);
-    await expect(
-      service.submit({
-        runId: started.runId,
-        submission: {
-          kind: "visual-comparison",
-          reviewPacketId: visualAction.reviewPacketId,
-          captures: [featureCapture],
-          artifactPaths: [featureActualPath, featureReceiptPath],
-        },
-      }),
-    ).rejects.toThrow(/already has a passing visual comparison/);
+    const beforePassingReplay = await store.get(started.runId);
+    const passingReportCount = beforePassingReplay.artifacts.filter(
+      (artifact) => artifact.kind === "visual-report",
+    ).length;
+    const passingReplay = await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "visual-comparison",
+        reviewPacketId: visualAction.reviewPacketId,
+        captures: [featureCapture],
+        artifactPaths: [featureActualPath, featureReceiptPath],
+      },
+    });
+    const afterPassingReplay = await store.get(started.runId);
+    expect(passingReplay.revision).toBe(beforePassingReplay.revision);
+    expect(afterPassingReplay.revision).toBe(beforePassingReplay.revision);
+    expect(
+      afterPassingReplay.artifacts.filter((artifact) => artifact.kind === "visual-report"),
+    ).toHaveLength(passingReportCount);
     await service.submit({
       runId: started.runId,
       submission: {
@@ -5224,7 +5232,7 @@ describe("WorkflowService", () => {
     ).toHaveLength(1);
   });
 
-  it("repairs implementation across visual packets and caps valid comparisons at three", async () => {
+  it("repairs implementation across visual comparison packets and caps valid comparisons at three", async () => {
     const baseline = new PNG({ width: 1, height: 1 });
     baseline.data.set([0, 0, 0, 255]);
     await writeFile(path.join(directory, "visual/diff.png"), PNG.sync.write(baseline));
@@ -5481,11 +5489,18 @@ describe("WorkflowService", () => {
       /VISUAL_CAPTURE_PROVENANCE_INVALID/,
     );
     const beforeValidCapture = await store.get(started.runId);
+    const receiptlessReservations = beforeValidCapture.artifacts.filter(
+      (artifact) => artifact.metadata["adapter"] === "visual-attempt-reservation-v3",
+    );
     expect(
-      beforeValidCapture.artifacts.filter(
-        (artifact) => artifact.metadata["adapter"] === "visual-attempt-reservation-v2",
-      ),
-    ).toHaveLength(0);
+      receiptlessReservations.map((artifact) => ({
+        attempt: artifact.metadata["visualComparisonAttempt"],
+        status: artifact.metadata["reservationStatus"],
+      })),
+    ).toEqual([
+      { attempt: 1, status: "in-progress" },
+      { attempt: 1, status: "aborted" },
+    ]);
     const wrongFixtureReceipt = await visualSubmission(
       compareAction,
       implementationPacket.headSha,
@@ -5498,11 +5513,18 @@ describe("WorkflowService", () => {
       service.submit({ runId: started.runId, submission: wrongFixtureReceipt }),
     ).rejects.toThrow(/MOCK_FIXTURE_NOT_CONSUMED/);
     const afterWrongFixture = await store.get(started.runId);
+    const wrongFixtureReservations = afterWrongFixture.artifacts.filter(
+      (artifact) => artifact.metadata["adapter"] === "visual-attempt-reservation-v3",
+    );
     expect(
-      afterWrongFixture.artifacts.filter(
-        (artifact) => artifact.metadata["adapter"] === "visual-attempt-reservation-v2",
-      ),
-    ).toHaveLength(0);
+      wrongFixtureReservations.slice(-2).map((artifact) => ({
+        attempt: artifact.metadata["visualComparisonAttempt"],
+        status: artifact.metadata["reservationStatus"],
+      })),
+    ).toEqual([
+      { attempt: 1, status: "in-progress" },
+      { attempt: 1, status: "aborted" },
+    ]);
 
     const packetHeadFor = async (reviewPacketId: string) => {
       const current = await store.get(started.runId);
@@ -5521,7 +5543,9 @@ describe("WorkflowService", () => {
     const persistedTargets = await store.get(started.runId);
     let figmaBundleIndex = -1;
     for (let index = persistedTargets.artifacts.length - 1; index >= 0; index -= 1) {
-      if (persistedTargets.artifacts[index]?.metadata["workflowSubmissionKind"] === "figma-bundle") {
+      if (
+        persistedTargets.artifacts[index]?.metadata["workflowSubmissionKind"] === "figma-bundle"
+      ) {
         figmaBundleIndex = index;
         break;
       }
@@ -5553,10 +5577,59 @@ describe("WorkflowService", () => {
       "attempt-1",
       [255, 255, 255, 255],
     );
+    const originalWriteBlob = artifactStore.writeBlob.bind(artifactStore);
+    let failVisualDiffWrite = true;
+    const writeBlobSpy = vi.spyOn(artifactStore, "writeBlob").mockImplementation(async (input) => {
+      if (failVisualDiffWrite && input.label === "checkout-default.diff.png") {
+        failVisualDiffWrite = false;
+        throw new Error("injected visual diff blob failure");
+      }
+      return originalWriteBlob(input);
+    });
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: firstAttempt,
+      }),
+    ).rejects.toThrow(/injected visual diff blob failure/);
+    writeBlobSpy.mockRestore();
+    const afterAbortedAttempt = await store.get(started.runId);
+    expect(
+      afterAbortedAttempt.artifacts
+        .filter((artifact) => artifact.metadata["adapter"] === "visual-attempt-reservation-v3")
+        .slice(-2)
+        .map((artifact) => ({
+          attempt: artifact.metadata["visualComparisonAttempt"],
+          status: artifact.metadata["reservationStatus"],
+        })),
+    ).toEqual([
+      { attempt: 1, status: "in-progress" },
+      { attempt: 1, status: "aborted" },
+    ]);
+    expect(
+      (await service.status({ runId: started.runId })).nextActions.find(
+        (action) => action.kind === "compare-visuals",
+      ),
+    ).toMatchObject({ attempt: 1 });
+
     const afterFirstFailure = await service.submit({
       runId: started.runId,
       submission: firstAttempt,
     });
+    const afterCommittedAttempt = await store.get(started.runId);
+    const revisionBeforeReplay = afterCommittedAttempt.revision;
+    const reportCountBeforeReplay = afterCommittedAttempt.artifacts.filter(
+      (artifact) => artifact.kind === "visual-report",
+    ).length;
+    await service.submit({
+      runId: started.runId,
+      submission: firstAttempt,
+    });
+    const afterReplay = await store.get(started.runId);
+    expect(afterReplay.revision).toBe(revisionBeforeReplay);
+    expect(
+      afterReplay.artifacts.filter((artifact) => artifact.kind === "visual-report"),
+    ).toHaveLength(reportCountBeforeReplay);
     const firstRepair = afterFirstFailure.nextActions.find(
       (action) => action.kind === "implementation-repair",
     );

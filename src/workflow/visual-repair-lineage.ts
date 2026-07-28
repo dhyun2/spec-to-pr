@@ -41,6 +41,8 @@ export function nextVisualAttempt(input: {
       .map((attempt) => attempt.attempt)
       .filter((attempt): attempt is 1 | 2 | 3 => attempt === 1 || attempt === 2 || attempt === 3),
   );
-  if (completedAttempts.size >= MAX_VISUAL_LINEAGE_ATTEMPTS) return undefined;
-  return (completedAttempts.size + 1) as 1 | 2 | 3;
+  for (const attempt of [1, 2, 3] as const) {
+    if (!completedAttempts.has(attempt)) return attempt;
+  }
+  return undefined;
 }

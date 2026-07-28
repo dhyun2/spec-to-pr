@@ -41,4 +41,13 @@ describe("visual repair lineage", () => {
       }),
     ).toBeUndefined();
   });
+
+  it("uses the first missing contiguous numeric attempt", () => {
+    expect(
+      nextVisualAttempt({
+        attempts: [{ attempt: 2 }, { attempt: 2 }],
+        acquisitionValid: true,
+      }),
+    ).toBe(1);
+  });
 });
