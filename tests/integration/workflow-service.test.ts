@@ -19,6 +19,7 @@ import { PublisherService } from "../../src/application/publisher-service.js";
 import { RunService } from "../../src/application/run-service.js";
 import { StageService } from "../../src/application/stage-service.js";
 import {
+  buildParserSafeChunks,
   WorkflowPublishInputSchema,
   WorkflowService,
   type WorkflowServiceDependencies,
@@ -3803,6 +3804,89 @@ describe("WorkflowService", () => {
     expect(labels.filter((label) => label === "docs:docs/business-rules.md")).toHaveLength(1);
   });
 
+  it("composes HTTPS OpenAPI operation sources with four-way loading and two intake saves", async () => {
+    let active = 0;
+    let maxActive = 0;
+    let intakeSaveCount = 0;
+    const intakeStore: RunStore = {
+      create: (run) => store.create(run),
+      get: (runId) => store.get(runId),
+      save: async (run, expectedRevision) => {
+        intakeSaveCount += 1;
+        await store.save(run, expectedRevision);
+      },
+      list: (filter) => store.list(filter),
+      close: async () => {},
+    };
+    dependencies.intakeRequestService = new IntakeRequestService(
+      intakeStore,
+      new SourceSnapshotStore(path.join(directory, "bounded-sources")),
+      artifactStore,
+    );
+    dependencies.fetchOpenApiSource = async ({ url }) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      active -= 1;
+      const index = Number(new URL(url).pathname.match(/\d+/u)?.[0]);
+      const text = `openapi: 3.1.0\npaths:\n  /shops/${index}:\n    get:\n      operationId: getShop${index}\n`;
+      return {
+        originalUrl: url,
+        resolvedUrl: url,
+        mediaType: "application/yaml",
+        text,
+        sha256: `sha256:${createHash("sha256").update(text).digest("hex")}`,
+      };
+    };
+    service = new WorkflowService(dependencies);
+    const openApiUrls = Array.from(
+      { length: 20 },
+      (_unused, index) => `https://api.example.com/openapi-${index + 1}.yaml`,
+    );
+
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Implement the declared shop operations",
+      openApiUrls,
+    });
+
+    expect(maxActive).toBe(4);
+    expect(started.deliveryProfile.openApiUrls).toEqual(openApiUrls);
+    expect(
+      started.deliveryProfile.openApiOperations.map((operation) => operation.operationKey),
+    ).toEqual(Array.from({ length: 20 }, (_unused, index) => `GET /shops/${index + 1}`));
+    expect(intakeSaveCount).toBeLessThanOrEqual(2);
+  });
+
+  it("classifies from compact OpenAPI operation summaries instead of full descriptions", async () => {
+    await mkdir(path.join(directory, "docs"), { recursive: true });
+    const description = "authentication security performance telemetry ".repeat(500);
+    await writeFile(
+      path.join(directory, "docs", "compact-classification.yaml"),
+      `openapi: 3.1.0\npaths:\n  /shops/{shopId}:\n    get:\n      operationId: getShop\n      description: ${description}\n`,
+      "utf8",
+    );
+
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Document the declared shop operation",
+      openApiPaths: ["docs/compact-classification.yaml"],
+    });
+
+    expect(started.deliveryProfile.openApiOperations).toEqual([
+      expect.objectContaining({
+        operationKey: "GET /shops/{shopId}",
+        operationId: "getShop",
+      }),
+    ]);
+    expect(started.scope).toMatchObject({
+      api: true,
+      securitySensitive: false,
+      performanceSensitive: false,
+      observabilityRequested: false,
+    });
+  });
+
   it("discovers only fixed project guidance without activating unrelated gates", async () => {
     await mkdir(path.join(directory, "docs", "etc"), { recursive: true });
     await writeFile(
@@ -4075,6 +4159,12 @@ describe("WorkflowService", () => {
     ).resolves.toMatchObject({
       deliveryProfile: { docsPaths: ["docs/whitespace-span.md"] },
     });
+  });
+
+  it("rejects a parser-safe chunk plan when one grapheme exceeds the parser limit", () => {
+    const oversizedGrapheme = `a${"\u0301".repeat(200_000)}`;
+
+    expect(() => buildParserSafeChunks(oversizedGrapheme)).toThrow(/grapheme.*parser limit/i);
   });
 
   it("rejects invalid chunk plans before creating a durable Run", async () => {

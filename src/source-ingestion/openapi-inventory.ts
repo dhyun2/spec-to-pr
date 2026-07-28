@@ -9,6 +9,14 @@ export type OpenApiInventoryOperation = {
   serverOrigins?: string[];
 };
 
+export function openApiClassificationSummary(operations: OpenApiInventoryOperation[]): string {
+  return operations
+    .map(({ method, path, operationId, sourceLocator }) =>
+      JSON.stringify({ method, path, operationId, sourceLocator }),
+    )
+    .join("\n");
+}
+
 export function inventoryOpenApiOperations(
   files: readonly OpenApiInventorySource[],
 ): OpenApiInventoryOperation[] {

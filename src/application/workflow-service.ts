@@ -47,9 +47,13 @@ import { summarizeRun, type RunManifest } from "../run/index.js";
 import {
   extractPdfText,
   fetchOpenApiDocument,
+  orderedConcurrentMap,
   type RemoteOpenApiSource,
 } from "../source-ingestion/source-loader.js";
-import { inventoryOpenApiOperations } from "../source-ingestion/openapi-inventory.js";
+import {
+  inventoryOpenApiOperations,
+  openApiClassificationSummary,
+} from "../source-ingestion/openapi-inventory.js";
 import type { RunStageName, StageState } from "../run/stages.js";
 import type { RunStore } from "../store/run-store.js";
 import { RevisionConflictError } from "../store/errors.js";
@@ -631,6 +635,7 @@ export class WorkflowService {
       requestText: input.requestText,
     });
     const intakeArtifactIds = [parsed.artifact.id];
+    const sourceIntakeRequests: Array<{ requestText: string; label: string }> = [];
     for (const [kind, files] of [
       ["brief", sources.brief === undefined ? [] : [sources.brief]],
       ["docs", sources.docs],
@@ -638,14 +643,15 @@ export class WorkflowService {
       ["guidance", [...sources.guidance, ...sources.discoveredGuidance]],
     ] as const) {
       for (const file of files) {
-        const artifactIds = await ingestProjectTextSource({
-          service: this.dependencies.intakeRequestService,
-          runId: created.id,
-          kind,
-          file,
-        });
-        intakeArtifactIds.push(...artifactIds);
+        sourceIntakeRequests.push(...projectTextSourceIntakeRequests({ kind, file }));
       }
+    }
+    for (let start = 0; start < sourceIntakeRequests.length; start += 200) {
+      const results = await this.dependencies.intakeRequestService.parseIntakeRequests({
+        runId: created.id,
+        requests: sourceIntakeRequests.slice(start, start + 200),
+      });
+      intakeArtifactIds.push(...results.map((result) => result.artifact.id));
     }
     const legacyInventoryResult =
       canonicalLegacyProjectRoot === undefined
@@ -682,7 +688,7 @@ export class WorkflowService {
       input.requestText,
       ...(sources.brief === undefined ? [] : [sources.brief.text]),
       ...sources.docs.map((file) => file.text),
-      ...sources.openApi.map((file) => file.text),
+      openApiClassificationSummary(sourceOpenApiOperations),
     ].join("\n\n");
     const classifiedScope = classifyWorkflowScope({
       requestText: classificationText,
@@ -1177,6 +1183,7 @@ export class WorkflowService {
     const source: ProjectTextSource = {
       ...file,
       origin: "file",
+      rawContent,
       text,
       chunks: buildParserSafeChunks(text),
       mediaType: mediaTypeForPath(file.path),
@@ -7730,6 +7737,7 @@ type ProjectTextFile = {
 
 type ProjectTextSource = ProjectTextFile & {
   origin: "file" | "url";
+  rawContent: Buffer;
   text: string;
   chunks: string[];
   mediaType: string;
@@ -8263,55 +8271,69 @@ async function prepareComposableSources(
     }
   }
 
-  const loaded = new Map<string, ProjectTextSource>();
-  const load = async (file: ProjectTextFile): Promise<ProjectTextSource> => {
-    const existing = loaded.get(file.resolvedPath);
-    if (existing !== undefined) return existing;
-    const rawContent = await readFile(file.resolvedPath);
+  const localFiles = [
+    ...(brief === undefined ? [] : [brief]),
+    ...(legacyNetwork === undefined ? [] : [legacyNetwork]),
+    ...docs,
+    ...openApiFiles,
+    ...guidance,
+    ...discoveredGuidance,
+  ];
+  const loadTasks = [
+    ...localFiles.map((file) => ({ kind: "file" as const, file })),
+    ...openApiUrlInput.map((url) => ({ kind: "url" as const, url })),
+  ];
+  const loadedSources = await orderedConcurrentMap(loadTasks, 4, async (task) => {
+    if (task.kind === "url") {
+      const remote = await fetchOpenApiSource({ url: task.url });
+      const rawContent = Buffer.from(remote.text, "utf8");
+      return {
+        origin: "url",
+        path: remote.originalUrl,
+        resolvedPath: remote.resolvedUrl,
+        rawContent,
+        text: remote.text,
+        chunks: buildParserSafeChunks(remote.text),
+        mediaType: remote.mediaType,
+        rawDigest: remote.sha256,
+      } satisfies ProjectTextSource;
+    }
+    const rawContent = await readFile(task.file.resolvedPath);
     const pdf =
-      path.extname(file.path).toLowerCase() === ".pdf"
+      path.extname(task.file.path).toLowerCase() === ".pdf"
         ? await extractPdfText(rawContent)
         : undefined;
     const text = pdf?.text ?? rawContent.toString("utf8");
-    const source: ProjectTextSource = {
-      ...file,
+    return {
+      ...task.file,
       origin: "file",
+      rawContent,
       text,
       chunks: buildParserSafeChunks(text),
-      mediaType: pdf?.mediaType ?? mediaTypeForPath(file.path),
+      mediaType: pdf?.mediaType ?? mediaTypeForPath(task.file.path),
       rawDigest:
         pdf?.sha256 ?? (`sha256:${createHash("sha256").update(rawContent).digest("hex")}` as const),
-    };
-    loaded.set(file.resolvedPath, source);
+    } satisfies ProjectTextSource;
+  });
+  const localByResolvedPath = new Map(
+    loadedSources
+      .filter((source) => source.origin === "file")
+      .map((source) => [source.resolvedPath, source]),
+  );
+  const loadedLocal = (file: ProjectTextFile): ProjectTextSource => {
+    const source = localByResolvedPath.get(file.resolvedPath);
+    if (source === undefined) throw new Error(`Prepared source was not loaded: ${file.path}`);
     return source;
   };
-  const loadAll = async (files: ProjectTextFile[]): Promise<ProjectTextSource[]> => {
-    const sources: ProjectTextSource[] = [];
-    for (const file of files) sources.push(await load(file));
-    return sources;
-  };
-
-  const remoteOpenApi: ProjectTextSource[] = [];
-  for (const sourceUrl of openApiUrlInput) {
-    const remote = await fetchOpenApiSource({ url: sourceUrl });
-    remoteOpenApi.push({
-      origin: "url",
-      path: remote.originalUrl,
-      resolvedPath: remote.resolvedUrl,
-      text: remote.text,
-      chunks: buildParserSafeChunks(remote.text),
-      mediaType: remote.mediaType,
-      rawDigest: remote.sha256,
-    });
-  }
+  const remoteOpenApi = loadedSources.filter((source) => source.origin === "url");
 
   return {
-    ...(brief === undefined ? {} : { brief: await load(brief) }),
-    ...(legacyNetwork === undefined ? {} : { legacyNetwork: await load(legacyNetwork) }),
-    docs: await loadAll(docs),
-    openApi: [...(await loadAll(openApiFiles)), ...remoteOpenApi],
-    guidance: await loadAll(guidance),
-    discoveredGuidance: await loadAll(discoveredGuidance),
+    ...(brief === undefined ? {} : { brief: loadedLocal(brief) }),
+    ...(legacyNetwork === undefined ? {} : { legacyNetwork: loadedLocal(legacyNetwork) }),
+    docs: docs.map(loadedLocal),
+    openApi: [...openApiFiles.map(loadedLocal), ...remoteOpenApi],
+    guidance: guidance.map(loadedLocal),
+    discoveredGuidance: discoveredGuidance.map(loadedLocal),
     skillHints,
   };
 }
@@ -8333,22 +8355,18 @@ async function readDistinctProjectTextFiles(
   return files;
 }
 
-async function ingestProjectTextSource(input: {
-  service: IntakeRequestService;
-  runId: string;
+function projectTextSourceIntakeRequests(input: {
   kind: "brief" | "docs" | "openapi" | "guidance";
   file: ProjectTextSource;
-}): Promise<string[]> {
-  const artifactIds: string[] = [];
+}): Array<{ requestText: string; label: string }> {
+  const requests: Array<{ requestText: string; label: string }> = [];
   for (let index = 0; index < input.file.chunks.length; index += 1) {
-    const result = await input.service.parseIntakeRequest({
-      runId: input.runId,
-      requestText: input.file.chunks[index],
+    requests.push({
+      requestText: input.file.chunks[index]!,
       label: intakeSourceLabel(input.kind, input.file.path, index, input.file.chunks.length),
     });
-    artifactIds.push(result.artifact.id);
   }
-  return artifactIds;
+  return requests;
 }
 
 export function buildParserSafeChunks(text: string): string[] {

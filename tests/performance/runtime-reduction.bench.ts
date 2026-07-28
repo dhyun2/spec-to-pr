@@ -9,6 +9,11 @@ import { PNG } from "pngjs";
 import { buildParserSafeChunks } from "../../src/application/workflow-service.js";
 import { RuntimeMetricsRecorder } from "../../src/runtime/performance-instrumentation.js";
 import { sha256Digest } from "../../src/source-registry/content-hash.js";
+import { orderedConcurrentMap } from "../../src/source-ingestion/source-loader.js";
+import {
+  inventoryOpenApiOperations,
+  openApiClassificationSummary,
+} from "../../src/source-ingestion/openapi-inventory.js";
 import { compareVisualPngs } from "../../src/visual/visual-comparator.js";
 
 const collectedAt = "2026-07-28T00:00:00.000Z";
@@ -85,20 +90,34 @@ describe("runtime reduction fixtures", () => {
         "run_11111111111111111111111111111111",
         "mixed-intake",
         async (recorder) => {
-          for (const document of fixtures.mixedIntake.localDocuments) {
+          let active = 0;
+          let maxActive = 0;
+          await orderedConcurrentMap(fixtures.mixedIntake.localDocuments, 4, async (document) => {
+            active += 1;
+            maxActive = Math.max(maxActive, active);
+            await Promise.resolve();
             const content = Buffer.from(document.content);
             recorder.increment("artifact.read_count");
             recorder.increment("artifact.read_bytes", content.byteLength);
             JSON.parse(JSON.stringify({ path: document.path, content: document.content }));
-          }
+            active -= 1;
+          });
+          if (maxActive !== 4) throw new Error("mixed intake concurrency fixture mismatch");
           for (const chunk of fixtures.mixedIntake.parserSafeChunks) {
             buildParserSafeChunks(chunk);
           }
-          for (const source of fixtures.mixedIntake.openApiSources) {
-            JSON.parse(
-              JSON.stringify({ openapi: "3.0.0", paths: { [`/${source.operationId}`]: {} } }),
-            );
+          const openApi = fixtures.mixedIntake.openApiSources.map((source) => ({
+            path: source.path,
+            text: JSON.stringify({
+              openapi: "3.0.0",
+              paths: { [`/${source.operationId}`]: { get: { operationId: source.operationId } } },
+            }),
+          }));
+          const summary = openApiClassificationSummary(inventoryOpenApiOperations(openApi));
+          if (summary.split("\n").length !== fixtures.mixedIntake.openApiSources.length) {
+            throw new Error("mixed intake OpenAPI summary fixture mismatch");
           }
+          recorder.increment("run_store.save_count", 2, { stage: "intake" });
         },
       );
     },
@@ -183,7 +202,13 @@ afterAll(async () => {
       },
       metricCounters:
         name === "mixed-intake"
-          ? { localDocuments: 20, parserSafeChunks: 4, openApiSources: 4 }
+          ? {
+              localDocuments: 20,
+              parserSafeChunks: 4,
+              openApiSources: 4,
+              maxSourceConcurrency: 4,
+              intakeRunSaves: 2,
+            }
           : name === "legacy"
             ? { files: 250, terminalApiCalls: 40, sharedAdapters: 5 }
             : { targets: 2, comparisons: 3, pixelsPerTarget: 659160 },
@@ -200,6 +225,8 @@ afterAll(async () => {
     fixtures: records,
     metricCounters: {
       mixedIntakeDocuments: fixtures.mixedIntake.localDocuments.length,
+      mixedIntakeMaxSourceConcurrency: 4,
+      mixedIntakeRunSaves: 2,
       legacyFiles: fixtures.legacy.files.length,
       legacyTerminalApiCalls: fixtures.legacy.terminalApiCalls.length,
       visualComparisons: fixtures.visual.comparisons.length,

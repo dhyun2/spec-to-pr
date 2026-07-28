@@ -1,6 +1,9 @@
 import { z } from "zod";
 
-import { ArtifactBlobStore } from "../artifact-registry/artifact-blob-store.js";
+import {
+  ArtifactBlobStore,
+  type StoredArtifactBlob,
+} from "../artifact-registry/artifact-blob-store.js";
 import { RunManifestSchema, RunSummarySchema, summarizeRun } from "../run/index.js";
 import {
   ArtifactRefSchema,
@@ -13,8 +16,14 @@ import {
 import { createArtifactId, createEvidenceId, createSourceId } from "../runtime/id-factory.js";
 import { RunIdSchema } from "../runtime/ids.js";
 import { IsoDateTimeSchema } from "../runtime/scalars.js";
-import { canonicalizeFileContent, SourceSnapshotStore } from "../source-registry/index.js";
+import {
+  canonicalizeFileContent,
+  SourceSnapshotStore,
+  type CanonicalContent,
+} from "../source-registry/index.js";
 import { sha256Digest } from "../source-registry/content-hash.js";
+import { orderedConcurrentMap } from "../source-ingestion/source-loader.js";
+import { RevisionConflictError } from "../store/errors.js";
 import type { RunStore } from "../store/run-store.js";
 
 const DEFAULT_MEDIA_TYPE = "text/plain; charset=utf-8" as const;
@@ -31,6 +40,16 @@ export const ParseIntakeRequestInputSchema = z
         message: "requestText must contain non-whitespace content",
       }),
     label: z.string().trim().min(1).max(200).default("user-request"),
+  })
+  .strict();
+
+export const ParseIntakeRequestsInputSchema = z
+  .object({
+    runId: RunIdSchema,
+    requests: z
+      .array(ParseIntakeRequestInputSchema.omit({ runId: true }))
+      .min(1)
+      .max(200),
   })
   .strict();
 
@@ -105,8 +124,25 @@ export const ParseIntakeRequestResultSchema = z
   .strict();
 
 export type ParseIntakeRequestInput = z.infer<typeof ParseIntakeRequestInputSchema>;
+export type ParseIntakeRequestsInput = z.infer<typeof ParseIntakeRequestsInputSchema>;
 export type ParsedIntakeRequest = z.infer<typeof ParsedIntakeRequestSchema>;
 export type ParseIntakeRequestResult = z.infer<typeof ParseIntakeRequestResultSchema>;
+
+type PreparedIntakeRequest = {
+  requestText: string;
+  label: string;
+  parsed: ParsedIntakeRequest;
+  canonical: CanonicalContent;
+  sourceId: string;
+  inlineOpenApi?: {
+    label: string;
+    document: InlineOpenApiSourceDocument;
+    canonical: CanonicalContent;
+    sourceId: string;
+  };
+  artifactId: string;
+  artifactBlob: StoredArtifactBlob;
+};
 
 export class IntakeRequestService {
   public constructor(
@@ -118,212 +154,291 @@ export class IntakeRequestService {
 
   public async parseIntakeRequest(rawInput: unknown): Promise<ParseIntakeRequestResult> {
     const input = ParseIntakeRequestInputSchema.parse(rawInput);
-    const run = await this.runStore.get(input.runId);
-    const capturedAt = IsoDateTimeSchema.parse(this.now());
-    const canonical = canonicalizeFileContent({
-      path: `${input.label}.txt`,
-      mediaType: DEFAULT_MEDIA_TYPE,
-      rawContent: Buffer.from(input.requestText, "utf8"),
-    });
-
-    const existingSource = run.sources.find(
-      (source) =>
-        source.kind === "instruction" &&
-        source.locator.type === "inline" &&
-        source.locator.label === input.label &&
-        source.digest === canonical.canonicalDigest,
-    );
-
-    const source =
-      existingSource ??
-      SourceRefSchema.parse({
-        id: createSourceId(),
-        kind: "instruction",
-        locator: {
-          type: "inline",
-          label: input.label,
-          mediaType: DEFAULT_MEDIA_TYPE,
-        },
-        digest: canonical.canonicalDigest,
-        capturedAt,
-        metadata: {
-          parserVersion: PARSER_VERSION,
-          rawDigest: canonical.rawDigest,
-          mode: canonical.mode,
-          rawByteLength: canonical.rawByteLength,
-          canonicalByteLength: canonical.canonicalByteLength,
-          ...(canonical.lineCount === undefined ? {} : { lineCount: canonical.lineCount }),
-        },
-      });
-
-    await this.snapshotStore.writeSnapshot({
-      source,
-      canonical,
-      storedAt: capturedAt,
-    });
-
-    const parsed = parseRequestText(input.requestText);
-    const evidence = createInstructionEvidence({
-      source,
-      label: input.label,
-      requestText: input.requestText,
-      digest: canonical.canonicalDigest,
-      capturedAt,
-    });
-    const derivedEvidence = createStructuredInstructionEvidence({
-      source,
-      label: input.label,
-      requestText: input.requestText,
-      parsed,
-      capturedAt,
-    });
-    const inlineOpenApiSource = await this.createInlineOpenApiSource({
-      run,
-      label: input.label,
-      parsed,
-      capturedAt,
-    });
-    const evidenceToAdd = [evidence, ...derivedEvidence];
-    const sourcesToAdd = [
-      ...(existingSource === undefined ? [source] : []),
-      ...(inlineOpenApiSource !== undefined && !inlineOpenApiSource.duplicate
-        ? [inlineOpenApiSource.source]
-        : []),
-    ];
-    const artifact = await this.createParsedArtifact({
+    const [result] = await this.parseIntakeRequests({
       runId: input.runId,
-      evidence: evidenceToAdd,
-      parsed,
-      capturedAt,
+      requests: [
+        {
+          requestText: input.requestText,
+          label: input.label,
+        },
+      ],
     });
-
-    const nextRun = RunManifestSchema.parse({
-      ...run,
-      revision: run.revision + 1,
-      updatedAt: capturedAt,
-      sources: [...run.sources, ...sourcesToAdd],
-      evidence: [...run.evidence, ...evidenceToAdd],
-      artifacts: [...run.artifacts, artifact],
-    });
-
-    await this.runStore.save(nextRun, run.revision);
-
-    return ParseIntakeRequestResultSchema.parse({
-      run: summarizeRun(nextRun),
-      source,
-      evidence,
-      derivedSources: inlineOpenApiSource === undefined ? [] : [inlineOpenApiSource.source],
-      artifact,
-      parsed,
-      duplicateSource: existingSource !== undefined,
-    });
+    return result!;
   }
 
-  private async createInlineOpenApiSource(input: {
-    run: { sources: SourceRef[] };
-    label: string;
-    parsed: ParsedIntakeRequest;
-    capturedAt: string;
-  }): Promise<{ source: SourceRef; duplicate: boolean } | undefined> {
-    const document = buildInlineOpenApiSourceDocument(input.parsed);
-
-    if (document === undefined) {
-      return undefined;
-    }
-
-    const sourceLabel = `${input.label}-inline-openapi`;
-    const canonical = canonicalizeFileContent({
-      path: document.path,
-      mediaType: document.mediaType,
-      rawContent: document.content,
+  public async parseIntakeRequests(rawInput: unknown): Promise<ParseIntakeRequestResult[]> {
+    const input = ParseIntakeRequestsInputSchema.parse(rawInput);
+    const capturedAt = IsoDateTimeSchema.parse(this.now());
+    const prepared = await orderedConcurrentMap(input.requests, 4, async (request) => {
+      const canonical = canonicalizeFileContent({
+        path: `${request.label}.txt`,
+        mediaType: DEFAULT_MEDIA_TYPE,
+        rawContent: Buffer.from(request.requestText, "utf8"),
+      });
+      const parsed = parseRequestText(request.requestText);
+      const inlineDocument = buildInlineOpenApiSourceDocument(parsed);
+      const inlineOpenApi =
+        inlineDocument === undefined
+          ? undefined
+          : {
+              label: `${request.label}-inline-openapi`,
+              document: inlineDocument,
+              canonical: canonicalizeFileContent({
+                path: inlineDocument.path,
+                mediaType: inlineDocument.mediaType,
+                rawContent: inlineDocument.content,
+              }),
+              sourceId: createSourceId(),
+            };
+      const artifactContent = parsedIntakeArtifactContent({
+        runId: input.runId,
+        parsed,
+        capturedAt,
+      });
+      const artifactBlob = await this.artifactStore.writeBlob({
+        content: artifactContent,
+        mediaType: "application/json",
+        storedAt: capturedAt,
+        label: "parsed-intake-request",
+      });
+      return {
+        requestText: request.requestText,
+        label: request.label,
+        parsed,
+        canonical,
+        sourceId: createSourceId(),
+        ...(inlineOpenApi === undefined ? {} : { inlineOpenApi }),
+        artifactId: createArtifactId(),
+        artifactBlob,
+      } satisfies PreparedIntakeRequest;
     });
 
-    const existingSource = input.run.sources.find(
-      (source) =>
-        source.kind === "openapi" &&
-        source.locator.type === "inline" &&
-        source.locator.label === sourceLabel &&
-        source.digest === canonical.canonicalDigest,
-    );
-    const source =
-      existingSource ??
-      SourceRefSchema.parse({
-        id: createSourceId(),
-        kind: "openapi",
-        locator: {
-          type: "inline",
-          label: sourceLabel,
-          mediaType: document.mediaType,
-        },
-        digest: canonical.canonicalDigest,
-        capturedAt: input.capturedAt,
-        metadata: {
-          parserVersion: PARSER_VERSION,
-          generatedFrom: "instruction-inline-api",
-          rawDigest: canonical.rawDigest,
-          mode: canonical.mode,
-          rawByteLength: canonical.rawByteLength,
-          canonicalByteLength: canonical.canonicalByteLength,
-          operationCount: document.operationCount,
-          ...(document.sourceRole === undefined ? {} : { sourceRole: document.sourceRole }),
-          ...(canonical.lineCount === undefined ? {} : { lineCount: canonical.lineCount }),
-        },
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const run = await this.runStore.get(input.runId);
+      const knownSources = [...run.sources];
+      const sourcesToAdd: SourceRef[] = [];
+      const evidenceToAdd: EvidenceRef[] = [];
+      const artifactsToAdd: ArtifactRef[] = [];
+      const pendingSnapshots: Array<{ source: SourceRef; canonical: CanonicalContent }> = [];
+      const attemptResults: Array<Omit<ParseIntakeRequestResult, "run">> = [];
+
+      for (const request of prepared) {
+        const existingSource = knownSources.find(
+          (source) =>
+            source.kind === "instruction" &&
+            source.locator.type === "inline" &&
+            source.locator.label === request.label &&
+            source.digest === request.canonical.canonicalDigest,
+        );
+        const source =
+          existingSource ??
+          instructionSourceRef({
+            id: request.sourceId,
+            label: request.label,
+            canonical: request.canonical,
+            capturedAt,
+          });
+        if (existingSource === undefined) {
+          knownSources.push(source);
+          sourcesToAdd.push(source);
+        }
+        pendingSnapshots.push({ source, canonical: request.canonical });
+
+        const evidence = createInstructionEvidence({
+          source,
+          label: request.label,
+          requestText: request.requestText,
+          digest: request.canonical.canonicalDigest,
+          capturedAt,
+        });
+        const requestEvidence = [
+          evidence,
+          ...createStructuredInstructionEvidence({
+            source,
+            label: request.label,
+            requestText: request.requestText,
+            parsed: request.parsed,
+            capturedAt,
+          }),
+        ];
+        evidenceToAdd.push(...requestEvidence);
+
+        let inlineOpenApiSource: { source: SourceRef; duplicate: boolean } | undefined;
+        if (request.inlineOpenApi !== undefined) {
+          const inline = request.inlineOpenApi;
+          const existingInline = knownSources.find(
+            (candidate) =>
+              candidate.kind === "openapi" &&
+              candidate.locator.type === "inline" &&
+              candidate.locator.label === inline.label &&
+              candidate.digest === inline.canonical.canonicalDigest,
+          );
+          const inlineSource =
+            existingInline ??
+            inlineOpenApiSourceRef({
+              id: inline.sourceId,
+              label: inline.label,
+              document: inline.document,
+              canonical: inline.canonical,
+              capturedAt,
+            });
+          if (existingInline === undefined) {
+            knownSources.push(inlineSource);
+            sourcesToAdd.push(inlineSource);
+          }
+          pendingSnapshots.push({ source: inlineSource, canonical: inline.canonical });
+          inlineOpenApiSource = {
+            source: inlineSource,
+            duplicate: existingInline !== undefined,
+          };
+        }
+
+        const artifact = parsedIntakeArtifactRef({
+          id: request.artifactId,
+          blob: request.artifactBlob,
+          evidence: requestEvidence,
+          parsed: request.parsed,
+          capturedAt,
+        });
+        artifactsToAdd.push(artifact);
+        attemptResults.push({
+          source,
+          evidence,
+          derivedSources: inlineOpenApiSource === undefined ? [] : [inlineOpenApiSource.source],
+          artifact,
+          parsed: request.parsed,
+          duplicateSource: existingSource !== undefined,
+        });
+      }
+
+      await orderedConcurrentMap(pendingSnapshots, 4, async ({ source, canonical }) => {
+        await this.snapshotStore.writeSnapshot({ source, canonical, storedAt: capturedAt });
       });
 
-    await this.snapshotStore.writeSnapshot({
-      source,
-      canonical,
-      storedAt: input.capturedAt,
-    });
+      const nextRun = RunManifestSchema.parse({
+        ...run,
+        revision: run.revision + 1,
+        updatedAt: capturedAt >= run.updatedAt ? capturedAt : run.updatedAt,
+        sources: [...run.sources, ...sourcesToAdd],
+        evidence: [...run.evidence, ...evidenceToAdd],
+        artifacts: [...run.artifacts, ...artifactsToAdd],
+      });
 
-    return {
-      source,
-      duplicate: existingSource !== undefined,
-    };
+      try {
+        await this.runStore.save(nextRun, run.revision);
+        return attemptResults.map((result) =>
+          ParseIntakeRequestResultSchema.parse({
+            ...result,
+            run: summarizeRun(nextRun),
+          }),
+        );
+      } catch (error) {
+        if (!(error instanceof RevisionConflictError) || attempt === 7) throw error;
+      }
+    }
+    throw new Error("Intake batch revision retries exhausted");
   }
+}
 
-  private async createParsedArtifact(input: {
-    runId: string;
-    evidence: EvidenceRef[];
-    parsed: ParsedIntakeRequest;
-    capturedAt: string;
-  }): Promise<ArtifactRef> {
-    const content = Buffer.from(
-      `${JSON.stringify(
-        {
-          runId: input.runId,
-          generatedAt: input.capturedAt,
-          parsed: input.parsed,
-        },
-        null,
-        2,
-      )}\n`,
-      "utf8",
-    );
+function instructionSourceRef(input: {
+  id: string;
+  label: string;
+  canonical: CanonicalContent;
+  capturedAt: string;
+}): SourceRef {
+  return SourceRefSchema.parse({
+    id: input.id,
+    kind: "instruction",
+    locator: {
+      type: "inline",
+      label: input.label,
+      mediaType: DEFAULT_MEDIA_TYPE,
+    },
+    digest: input.canonical.canonicalDigest,
+    capturedAt: input.capturedAt,
+    metadata: {
+      parserVersion: PARSER_VERSION,
+      rawDigest: input.canonical.rawDigest,
+      mode: input.canonical.mode,
+      rawByteLength: input.canonical.rawByteLength,
+      canonicalByteLength: input.canonical.canonicalByteLength,
+      ...(input.canonical.lineCount === undefined ? {} : { lineCount: input.canonical.lineCount }),
+    },
+  });
+}
 
-    const blob = await this.artifactStore.writeBlob({
-      content,
-      mediaType: "application/json",
-      storedAt: input.capturedAt,
-      label: "parsed-intake-request",
-    });
+function inlineOpenApiSourceRef(input: {
+  id: string;
+  label: string;
+  document: InlineOpenApiSourceDocument;
+  canonical: CanonicalContent;
+  capturedAt: string;
+}): SourceRef {
+  return SourceRefSchema.parse({
+    id: input.id,
+    kind: "openapi",
+    locator: {
+      type: "inline",
+      label: input.label,
+      mediaType: input.document.mediaType,
+    },
+    digest: input.canonical.canonicalDigest,
+    capturedAt: input.capturedAt,
+    metadata: {
+      parserVersion: PARSER_VERSION,
+      generatedFrom: "instruction-inline-api",
+      rawDigest: input.canonical.rawDigest,
+      mode: input.canonical.mode,
+      rawByteLength: input.canonical.rawByteLength,
+      canonicalByteLength: input.canonical.canonicalByteLength,
+      operationCount: input.document.operationCount,
+      ...(input.document.sourceRole === undefined ? {} : { sourceRole: input.document.sourceRole }),
+      ...(input.canonical.lineCount === undefined ? {} : { lineCount: input.canonical.lineCount }),
+    },
+  });
+}
 
-    return ArtifactRefSchema.parse({
-      id: createArtifactId(),
-      kind: "parsed-intake-request",
-      uri: blob.uri,
-      mediaType: "application/json",
-      digest: blob.digest,
-      producedBy: "orchestrator",
-      evidenceIds: input.evidence.map((evidence) => evidence.id),
-      createdAt: input.capturedAt,
-      metadata: {
-        parserVersion: PARSER_VERSION,
-        gatePolicy: input.parsed.gatePolicy,
-        visualPreviewPolicy: input.parsed.visualPreviewPolicy,
+function parsedIntakeArtifactContent(input: {
+  runId: string;
+  parsed: ParsedIntakeRequest;
+  capturedAt: string;
+}): Buffer {
+  return Buffer.from(
+    `${JSON.stringify(
+      {
+        runId: input.runId,
+        generatedAt: input.capturedAt,
+        parsed: input.parsed,
       },
-    });
-  }
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+}
+
+function parsedIntakeArtifactRef(input: {
+  id: string;
+  blob: StoredArtifactBlob;
+  evidence: EvidenceRef[];
+  parsed: ParsedIntakeRequest;
+  capturedAt: string;
+}): ArtifactRef {
+  return ArtifactRefSchema.parse({
+    id: input.id,
+    kind: "parsed-intake-request",
+    uri: input.blob.uri,
+    mediaType: "application/json",
+    digest: input.blob.digest,
+    producedBy: "orchestrator",
+    evidenceIds: input.evidence.map((evidence) => evidence.id),
+    createdAt: input.capturedAt,
+    metadata: {
+      parserVersion: PARSER_VERSION,
+      gatePolicy: input.parsed.gatePolicy,
+      visualPreviewPolicy: input.parsed.visualPreviewPolicy,
+    },
+  });
 }
 
 function createInstructionEvidence(input: {
