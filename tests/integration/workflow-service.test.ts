@@ -5262,6 +5262,31 @@ describe("WorkflowService", () => {
         artifactPaths: ["figma/design-context.json", "visual/diff.png"],
       },
     });
+    const secondTarget = {
+      ...figmaVisualTargets()[0]!,
+      targetId: "checkout-summary",
+      name: "Checkout summary",
+    };
+    const runWithTwoTargets = await store.get(started.runId);
+    const figmaBundleArtifactIndex = runWithTwoTargets.artifacts.findIndex(
+      (artifact) =>
+        artifact.metadata["workflowSubmissionKind"] === "figma-bundle" &&
+        Array.isArray(artifact.metadata["visualTargets"]),
+    );
+    if (figmaBundleArtifactIndex < 0) throw new Error("Missing persisted Figma bundle");
+    const originalFigmaBundleArtifact = runWithTwoTargets.artifacts[figmaBundleArtifactIndex]!;
+    const originalVisualTargets = originalFigmaBundleArtifact.metadata["visualTargets"];
+    if (!Array.isArray(originalVisualTargets)) throw new Error("Missing persisted visual targets");
+    runWithTwoTargets.artifacts[figmaBundleArtifactIndex] = ArtifactRefSchema.parse({
+      ...originalFigmaBundleArtifact,
+      metadata: {
+        ...originalFigmaBundleArtifact.metadata,
+        visualTargets: [...originalVisualTargets, secondTarget],
+      },
+    });
+    runWithTwoTargets.revision += 1;
+    runWithTwoTargets.updatedAt = new Date().toISOString();
+    await store.save(runWithTwoTargets, runWithTwoTargets.revision - 1);
     await service.submit({
       runId: started.runId,
       submission: {
@@ -5401,80 +5426,93 @@ describe("WorkflowService", () => {
       rgba: [number, number, number, number],
       withReceipt = true,
       fixtureDigestOverride?: string,
+      secondRgba: [number, number, number, number] = rgba,
     ) => {
-      const image = new PNG({ width: 1, height: 1 });
-      image.data.set(rgba);
-      const actualPath = `visual/actual/${action.reviewPacketId}/${name}.png`;
-      const bytes = PNG.sync.write(image);
-      await mkdir(path.dirname(path.join(directory, actualPath)), { recursive: true });
-      await writeFile(path.join(directory, actualPath), bytes);
-      const actualDigest = `sha256:${createHash("sha256").update(bytes).digest("hex")}` as const;
-      const receiptPath = `visual/actual/${action.reviewPacketId}/${name}.json`;
-      const receiptBytes = Buffer.from(
-        JSON.stringify({
-          reviewPacketId: action.reviewPacketId,
-          headSha: packetHeadSha,
-          targetId: "checkout-default",
+      const captureFor = async (
+        targetId: string,
+        suffix: string,
+        pixels: [number, number, number, number],
+      ) => {
+        const image = new PNG({ width: 1, height: 1 });
+        image.data.set(pixels);
+        const actualPath = `visual/actual/${action.reviewPacketId}/${name}-${suffix}.png`;
+        const bytes = PNG.sync.write(image);
+        await mkdir(path.dirname(path.join(directory, actualPath)), { recursive: true });
+        await writeFile(path.join(directory, actualPath), bytes);
+        const actualDigest = `sha256:${createHash("sha256").update(bytes).digest("hex")}` as const;
+        const receiptPath = `visual/actual/${action.reviewPacketId}/${name}-${suffix}.json`;
+        const receiptBytes = Buffer.from(
+          JSON.stringify({
+            reviewPacketId: action.reviewPacketId,
+            headSha: packetHeadSha,
+            targetId,
+            route: "/checkout",
+            state: "default",
+            captureKind: "viewport",
+            logicalSize: { width: 1, height: 1 },
+            deviceScaleFactor: 1,
+            playwrightVersion: "1.54.1",
+            browserName: "chromium",
+            browserVersion: "138.0.7204.168",
+            locale: "ko-KR",
+            colorScheme: "light",
+            timezone: "Asia/Seoul",
+            userAgent: "Mozilla/5.0 Chromium",
+            fonts: [],
+            fixture: {
+              id: "mock:checkout",
+              digest:
+                fixtureDigestOverride ??
+                `sha256:${createHash("sha256").update(validFixture).digest("hex")}`,
+            },
+            assets: [],
+            assetsComplete: true,
+            actual: {
+              path: actualPath,
+              digest: actualDigest,
+              bitmapSize: { width: 1, height: 1 },
+            },
+            runnerVersion: "capture-runner-v1",
+            normalizerVersion: "visual-normalizer-v1",
+            capturedAt: "2026-07-20T00:00:00.000Z",
+          }),
+          "utf8",
+        );
+        if (withReceipt) {
+          await writeFile(path.join(directory, receiptPath), receiptBytes);
+        }
+        return {
+          targetId,
           route: "/checkout",
           state: "default",
-          captureKind: "viewport",
-          logicalSize: { width: 1, height: 1 },
+          viewport: { width: 1, height: 1 },
           deviceScaleFactor: 1,
-          playwrightVersion: "1.54.1",
-          browserName: "chromium",
-          browserVersion: "138.0.7204.168",
-          locale: "ko-KR",
-          colorScheme: "light",
-          timezone: "Asia/Seoul",
-          userAgent: "Mozilla/5.0 Chromium",
-          fonts: [],
-          fixture: {
-            id: "mock:checkout",
-            digest:
-              fixtureDigestOverride ??
-              `sha256:${createHash("sha256").update(validFixture).digest("hex")}`,
-          },
-          assets: [],
-          assetsComplete: true,
-          actual: {
-            path: actualPath,
-            digest: actualDigest,
-            bitmapSize: { width: 1, height: 1 },
-          },
-          runnerVersion: "capture-runner-v1",
-          normalizerVersion: "visual-normalizer-v1",
+          fixture: "mock:checkout",
+          provider: "playwright",
           capturedAt: "2026-07-20T00:00:00.000Z",
-        }),
-        "utf8",
-      );
-      if (withReceipt) {
-        await writeFile(path.join(directory, receiptPath), receiptBytes);
-      }
+          actualPath,
+          actualDigest,
+          ...(withReceipt
+            ? {
+                receiptPath,
+                receiptDigest:
+                  `sha256:${createHash("sha256").update(receiptBytes).digest("hex")}` as const,
+              }
+            : {}),
+        };
+      };
+      const captures = [
+        await captureFor("checkout-default", "default", rgba),
+        await captureFor("checkout-summary", "summary", secondRgba),
+      ];
       return {
         kind: "visual-comparison" as const,
         reviewPacketId: action.reviewPacketId,
-        captures: [
-          {
-            targetId: "checkout-default",
-            route: "/checkout",
-            state: "default",
-            viewport: { width: 1, height: 1 },
-            deviceScaleFactor: 1,
-            fixture: "mock:checkout",
-            provider: "playwright",
-            capturedAt: "2026-07-20T00:00:00.000Z",
-            actualPath,
-            actualDigest,
-            ...(withReceipt
-              ? {
-                  receiptPath,
-                  receiptDigest:
-                    `sha256:${createHash("sha256").update(receiptBytes).digest("hex")}` as const,
-                }
-              : {}),
-          },
-        ],
-        artifactPaths: withReceipt ? [actualPath, receiptPath] : [actualPath],
+        captures,
+        artifactPaths: captures.flatMap((capture) => [
+          capture.actualPath,
+          ...(capture.receiptPath === undefined ? [] : [capture.receiptPath]),
+        ]),
       };
     };
 
@@ -5670,6 +5708,7 @@ describe("WorkflowService", () => {
     const figmaBundleArtifact = persistedTargets.artifacts[figmaBundleIndex]!;
     expect(figmaBundleArtifact.metadata["visualTargets"]).toEqual([
       expect.objectContaining({ reviewThreshold: 0.92 }),
+      expect.objectContaining({ targetId: "checkout-summary" }),
     ]);
     const storedTargets = figmaBundleArtifact.metadata["visualTargets"];
     if (!Array.isArray(storedTargets)) throw new Error("Missing persisted visual targets");
@@ -5692,6 +5731,9 @@ describe("WorkflowService", () => {
       implementationPacket.headSha,
       "attempt-1",
       [255, 255, 255, 255],
+      true,
+      undefined,
+      [0, 0, 0, 255],
     );
     const originalWriteBlob = artifactStore.writeBlob.bind(artifactStore);
     let failVisualDiffWrite = true;
@@ -5766,12 +5808,81 @@ describe("WorkflowService", () => {
       (action) => action.kind === "implementation-repair",
     );
     expect(firstRepair).toMatchObject({
+      repairEvidenceVersion: "v2",
       reviewPacketId: compareAction.reviewPacketId,
       nextAttempt: 2,
       failedTargets: [
         expect.objectContaining({ targetId: "checkout-default", reviewMatchRatio: 0 }),
       ],
+      repairEvidenceArtifactId: expect.stringMatching(/^art_[a-f0-9]{32}$/),
     });
+    if (
+      firstRepair === undefined ||
+      firstRepair.kind !== "implementation-repair" ||
+      firstRepair.repairEvidenceVersion !== "v2"
+    ) {
+      throw new Error("Missing v2 repair evidence action");
+    }
+    const afterFirstFailureRun = await store.get(started.runId);
+    const repairEvidenceArtifact = afterFirstFailureRun.artifacts.find(
+      (artifact) => artifact.id === firstRepair.repairEvidenceArtifactId,
+    );
+    if (repairEvidenceArtifact === undefined) throw new Error("Missing rich repair evidence");
+    expect(
+      JSON.parse((await artifactStore.readContent(repairEvidenceArtifact.digest)).toString("utf8")),
+    ).toMatchObject({
+      schemaVersion: "visual-repair-evidence-v2",
+      lineageId: firstRepair.lineageId,
+      reviewPacketId: firstRepair.reviewPacketId,
+      attempt: 1,
+      failedTargets: [
+        {
+          targetId: "checkout-default",
+          metrics: expect.objectContaining({ reviewMatchRatio: 0, threshold: 0.92 }),
+          diffArtifactId: expect.stringMatching(/^art_[a-f0-9]{32}$/),
+          overlayArtifactId: expect.stringMatching(/^art_[a-f0-9]{32}$/),
+          captureSummary: {
+            provider: "playwright",
+            browser: "chromium 138.0.7204.168",
+            fontsReady: true,
+            assetsReady: true,
+          },
+          causeHints: ["implementation"],
+        },
+      ],
+    });
+    const originalRepairEvidenceArtifact = repairEvidenceArtifact;
+    const {
+      repairEvidenceArtifactId: _repairEvidenceArtifactId,
+      schemaVersion: _schemaVersion,
+      ...legacyMetadata
+    } = repairEvidenceArtifact.metadata;
+    afterFirstFailureRun.artifacts = afterFirstFailureRun.artifacts.map((artifact) =>
+      artifact.id === repairEvidenceArtifact.id
+        ? ArtifactRefSchema.parse({
+            ...artifact,
+            metadata: {
+              ...legacyMetadata,
+              adapter: "visual-repair-lineage-v1",
+            },
+          })
+        : artifact,
+    );
+    afterFirstFailureRun.revision += 1;
+    afterFirstFailureRun.updatedAt = new Date().toISOString();
+    await store.save(afterFirstFailureRun, afterFirstFailureRun.revision - 1);
+    const legacyRepair = (await service.status({ runId: started.runId })).nextActions.find(
+      (action) => action.kind === "implementation-repair",
+    );
+    expect(legacyRepair).toMatchObject({ repairEvidenceVersion: "legacy-v1" });
+    expect(legacyRepair).not.toHaveProperty("repairEvidenceArtifactId");
+    const legacyRun = await store.get(started.runId);
+    legacyRun.artifacts = legacyRun.artifacts.map((artifact) =>
+      artifact.id === originalRepairEvidenceArtifact.id ? originalRepairEvidenceArtifact : artifact,
+    );
+    legacyRun.revision += 1;
+    legacyRun.updatedAt = new Date().toISOString();
+    await store.save(legacyRun, legacyRun.revision - 1);
     expect(afterFirstFailure.nextActions.map((action) => action.kind)).not.toContain(
       "compare-visuals",
     );
@@ -5794,6 +5905,16 @@ describe("WorkflowService", () => {
       "attempt-2",
       [192, 192, 192, 255],
     );
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: {
+          ...secondAttempt,
+          captures: secondAttempt.captures.slice(0, 1),
+          artifactPaths: secondAttempt.artifactPaths.slice(0, 2),
+        },
+      }),
+    ).rejects.toThrow(/missing: checkout-summary/);
     const afterSecondFailure = await service.submit({
       runId: started.runId,
       submission: secondAttempt,
@@ -5850,7 +5971,7 @@ describe("WorkflowService", () => {
           artifact.metadata["visualRole"] === "baseline-normalized" ||
           artifact.metadata["visualRole"] === "actual-normalized",
       ),
-    ).toHaveLength(6);
+    ).toHaveLength(12);
     expect(
       reports.every(
         (artifact) =>
@@ -5870,12 +5991,12 @@ describe("WorkflowService", () => {
       status: "failed",
       reviewPacketId: compareThird.reviewPacketId,
       visualLineageId: firstRepair?.lineageId,
-      results: [
+      results: expect.arrayContaining([
         expect.objectContaining({
           targetId: "checkout-default",
           metrics: expect.objectContaining({ reviewMatchRatio: 0, threshold: 0.92 }),
         }),
-      ],
+      ]),
     });
 
     await expect(

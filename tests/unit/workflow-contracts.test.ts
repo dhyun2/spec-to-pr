@@ -18,12 +18,45 @@ import {
   DeliveryProfileSchema,
   GuidanceTraceSchema,
   ImplementationReviewPacketSchema,
+  WorkflowActionSchema,
   WorkflowBlockerSchema,
   WorkflowResumeContextSchema,
   WorkflowSubmissionSchema,
 } from "../../src/workflow/index.js";
 
 describe("workflow v2 contracts", () => {
+  it("versions rich visual repair actions without fabricating legacy artifact evidence", () => {
+    const runId = `run_${"a".repeat(32)}`;
+    const reviewPacketId = `packet_${"b".repeat(64)}`;
+    const lineageId = `packet_${"c".repeat(64)}`;
+    const repairEvidenceArtifactId = `art_${"d".repeat(32)}`;
+
+    expect(
+      WorkflowActionSchema.parse({
+        kind: "implementation-repair",
+        repairEvidenceVersion: "v2",
+        runId,
+        reviewPacketId,
+        lineageId,
+        nextAttempt: 2,
+        failedTargets: [{ targetId: "shop-default", reviewMatchRatio: 0.87 }],
+        repairEvidenceArtifactId,
+      }),
+    ).toMatchObject({ repairEvidenceVersion: "v2", repairEvidenceArtifactId });
+
+    const legacy = WorkflowActionSchema.parse({
+      kind: "implementation-repair",
+      repairEvidenceVersion: "legacy-v1",
+      runId,
+      reviewPacketId,
+      lineageId,
+      nextAttempt: 2,
+      failedTargets: [{ targetId: "shop-default", reviewMatchRatio: 0.87 }],
+    });
+    expect(legacy).toMatchObject({ repairEvidenceVersion: "legacy-v1" });
+    expect(legacy).not.toHaveProperty("repairEvidenceArtifactId");
+  });
+
   it("defines the bounded strict workflow blocker contract", () => {
     const blocker = {
       stage: "implementation",

@@ -2,10 +2,14 @@ import { z } from "zod";
 
 import { RunStageNameSchema } from "../run/stages.js";
 import { ArtifactIdSchema, RunIdSchema } from "../runtime/ids.js";
-import { GitObjectIdSchema, Sha256DigestSchema } from "../runtime/scalars.js";
+import { GitObjectIdSchema, IsoDateTimeSchema, Sha256DigestSchema } from "../runtime/scalars.js";
 import { OpenSpecChangeNameSchema } from "../openspec/openspec-paths.js";
 import { WorkloadEstimateSchema, WorkloadSignalsSchema } from "./workload-policy.js";
-import { VisualCaptureSchema, VisualTargetManifestSchema } from "../visual/visual-comparator.js";
+import {
+  VisualCaptureSchema,
+  VisualComparisonMetricsV2Schema,
+  VisualTargetManifestSchema,
+} from "../visual/visual-comparator.js";
 import { WorkspaceBindingSchema } from "../workspace/workspace-binding.js";
 import { DraftEvidenceBundleSchema } from "./draft-evidence-bundle.js";
 import {
@@ -1572,7 +1576,96 @@ export const WorkflowSubmissionSchema = z.union([
   VisualComparisonSubmissionSchema,
 ]);
 
-export const WorkflowActionSchema = z.discriminatedUnion("kind", [
+export const CompactFailedVisualTargetsSchema = z
+  .array(
+    z
+      .object({
+        targetId: VisualTargetManifestSchema.shape.targetId,
+        reviewMatchRatio: z.number().min(0).max(1),
+      })
+      .strict(),
+  )
+  .min(1)
+  .max(50);
+
+export const VisualRepairEvidenceV2Schema = z
+  .object({
+    schemaVersion: z.literal("visual-repair-evidence-v2"),
+    runId: RunIdSchema,
+    lineageId: ReviewPacketIdSchema,
+    reviewPacketId: ReviewPacketIdSchema,
+    attempt: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+    generatedAt: IsoDateTimeSchema,
+    failedTargets: z
+      .array(
+        z
+          .object({
+            targetId: VisualTargetManifestSchema.shape.targetId,
+            name: z.string(),
+            route: z.string(),
+            state: z.string(),
+            fixture: z.string(),
+            viewport: VisualTargetManifestSchema.shape.viewport,
+            deviceScaleFactor: z.number(),
+            metrics: VisualComparisonMetricsV2Schema,
+            diffArtifactId: ArtifactIdSchema,
+            overlayArtifactId: ArtifactIdSchema,
+            captureSummary: z
+              .object({
+                provider: z.string(),
+                browser: z.string(),
+                fontsReady: z.boolean(),
+                assetsReady: z.boolean(),
+              })
+              .strict(),
+            causeHints: z.array(
+              z.enum([
+                "implementation",
+                "acquisition",
+                "fixture",
+                "design-mapping",
+                "baseline-isolation",
+              ]),
+            ),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(50),
+  })
+  .strict();
+
+export const CurrentImplementationRepairActionSchema = z
+  .object({
+    kind: z.literal("implementation-repair"),
+    repairEvidenceVersion: z.literal("v2"),
+    runId: RunIdSchema,
+    reviewPacketId: ReviewPacketIdSchema,
+    lineageId: ReviewPacketIdSchema,
+    nextAttempt: z.union([z.literal(2), z.literal(3)]),
+    failedTargets: CompactFailedVisualTargetsSchema,
+    repairEvidenceArtifactId: ArtifactIdSchema,
+  })
+  .strict();
+
+export const LegacyImplementationRepairActionSchema = z
+  .object({
+    kind: z.literal("implementation-repair"),
+    repairEvidenceVersion: z.literal("legacy-v1"),
+    runId: RunIdSchema,
+    reviewPacketId: ReviewPacketIdSchema,
+    lineageId: ReviewPacketIdSchema,
+    nextAttempt: z.union([z.literal(2), z.literal(3)]),
+    failedTargets: CompactFailedVisualTargetsSchema,
+  })
+  .strict();
+
+const ImplementationRepairActionSchema = z.discriminatedUnion("repairEvidenceVersion", [
+  CurrentImplementationRepairActionSchema,
+  LegacyImplementationRepairActionSchema,
+]);
+
+export const WorkflowActionSchema = z.union([
   z
     .object({
       kind: z.literal("collect-legacy-network-evidence"),
@@ -1597,26 +1690,7 @@ export const WorkflowActionSchema = z.discriminatedUnion("kind", [
       attempt: z.number().int().min(1).max(3),
     })
     .strict(),
-  z
-    .object({
-      kind: z.literal("implementation-repair"),
-      runId: RunIdSchema,
-      reviewPacketId: ReviewPacketIdSchema,
-      lineageId: ReviewPacketIdSchema,
-      nextAttempt: z.union([z.literal(2), z.literal(3)]),
-      failedTargets: z
-        .array(
-          z
-            .object({
-              targetId: VisualTargetManifestSchema.shape.targetId,
-              reviewMatchRatio: z.number().min(0).max(1),
-            })
-            .strict(),
-        )
-        .min(1)
-        .max(50),
-    })
-    .strict(),
+  ImplementationRepairActionSchema,
   z
     .object({
       kind: z.literal("review-functional"),
