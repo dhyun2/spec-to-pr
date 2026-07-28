@@ -473,6 +473,12 @@ type VisualAttemptReservationResult =
   | { kind: "committed-replay"; reservation: VisualAttemptReservation }
   | { kind: "busy"; reservation: VisualAttemptReservation };
 
+type PreparedVisualEvidence = {
+  artifact: ArtifactRef;
+  content: Buffer;
+  label: string;
+};
+
 export class WorkflowService {
   private readonly now: () => string;
   private readonly externalLeaseTtlMs: number;
@@ -877,15 +883,16 @@ export class WorkflowService {
     if (submission.kind === "legacy-network-evidence") {
       return this.submitLegacyNetworkEvidence(run, submission.evidencePath);
     }
-    if (submission.kind === "visual-comparison" && this.isCommittedVisualReplay(run, submission)) {
-      return this.status({ runId: run.id });
-    }
     if (
       submission.kind === "visual-comparison" ||
       ((submission.kind === "contracts" || submission.kind === "implementation") &&
         submission.status === "passed")
     ) {
       await this.assertLegacyReferenceFresh(run);
+    }
+    if (submission.kind === "visual-comparison") {
+      await this.recordVisualComparison(run, submission);
+      return this.status({ runId: run.id });
     }
     assertSubmissionPrerequisites(run, submission, this.now());
     await assertDraftBundleIntegrity(run, submission);
@@ -921,11 +928,6 @@ export class WorkflowService {
         submission.implementationContextId,
         submission.operations,
       );
-      return this.status({ runId: run.id });
-    }
-
-    if (submission.kind === "visual-comparison") {
-      await this.recordVisualComparison(run, submission, evidenceArtifacts);
       return this.status({ runId: run.id });
     }
 
@@ -2352,12 +2354,132 @@ export class WorkflowService {
     return artifacts;
   }
 
+  private async prepareVisualSubmissionEvidence(
+    run: RunManifest,
+    submission: Extract<WorkflowSubmission, { kind: "visual-comparison" }>,
+  ): Promise<PreparedVisualEvidence[]> {
+    const root = await realpath(run.projectRoot);
+    const timestamp = this.now();
+    const prepared: PreparedVisualEvidence[] = [];
+
+    for (const evidencePath of submission.artifactPaths) {
+      if (path.isAbsolute(evidencePath)) {
+        throw new Error(
+          "Evidence path must be a project-relative durable evidence path within the project root",
+        );
+      }
+      if (!isSafeDurableEvidencePath(evidencePath)) {
+        throw new Error("Evidence path must be a safe durable evidence path");
+      }
+      const requestedPath = path.resolve(root, evidencePath);
+      assertWithinProjectRoot(root, requestedPath, evidencePath);
+
+      let resolvedPath: string;
+      try {
+        resolvedPath = await realpath(requestedPath);
+      } catch {
+        throw new Error(`Evidence file does not exist: ${evidencePath}`);
+      }
+      assertWithinProjectRoot(root, resolvedPath, evidencePath);
+      const projectRelativePath = path.relative(root, resolvedPath).split(path.sep).join("/");
+      if (!isSafeDurableEvidencePath(projectRelativePath)) {
+        throw new Error("Evidence path must be a safe durable evidence path");
+      }
+
+      const details = await stat(resolvedPath);
+      if (!details.isFile()) {
+        throw new Error(`Evidence path must reference a file: ${evidencePath}`);
+      }
+      if (details.size > 50 * 1024 * 1024) {
+        throw new Error(`Evidence file exceeds the 50 MB limit: ${evidencePath}`);
+      }
+      if (details.size === 0) {
+        throw new Error(`Evidence file is empty: ${evidencePath}`);
+      }
+
+      const content = await readFile(resolvedPath);
+      const visualCapture = submission.captures.find(
+        (capture) => capture.actualPath === evidencePath,
+      );
+      const visualReceipt = submission.captures.find(
+        (capture) => capture.receiptPath === evidencePath,
+      );
+      if (visualReceipt !== undefined) {
+        let rawReceipt: unknown;
+        try {
+          rawReceipt = JSON.parse(content.toString("utf8"));
+        } catch {
+          throw new Error(
+            `VISUAL_CAPTURE_PROVENANCE_INVALID: receipt must be strict JSON: ${evidencePath}`,
+          );
+        }
+        if (!VisualCaptureReceiptSchema.safeParse(rawReceipt).success) {
+          throw new Error(
+            `VISUAL_CAPTURE_PROVENANCE_INVALID: receipt schema is invalid: ${evidencePath}`,
+          );
+        }
+      } else if (visualCapture !== undefined) {
+        await assertPng(content, evidencePath);
+      } else {
+        throw new Error(
+          `VISUAL_CAPTURE_PROVENANCE_INVALID: unbound visual artifact: ${evidencePath}`,
+        );
+      }
+
+      const mediaType = mediaTypeForPath(resolvedPath);
+      const digest = `sha256:${createHash("sha256").update(content).digest("hex")}` as const;
+      prepared.push({
+        content,
+        label: path.posix.basename(projectRelativePath),
+        artifact: ArtifactRefSchema.parse({
+          id: createArtifactId(),
+          kind: visualCapture === undefined ? "other" : "screenshot",
+          uri: `artifact://sha256/${digest.slice("sha256:".length)}`,
+          mediaType,
+          digest,
+          producedBy: producerForSubmission(submission),
+          evidenceIds: [],
+          createdAt: timestamp,
+          metadata: {
+            adapter: "workflow-v2-evidence",
+            projectRelativePath,
+            byteLength: details.size,
+            workflowSubmissionKind: submission.kind,
+            reviewPacketId: submission.reviewPacketId,
+            headSha: reviewPacketFromRun(run)?.headSha,
+            diffDigest: reviewPacketFromRun(run)?.diffDigest,
+            visualRole: visualCapture === undefined ? "capture-receipt" : "actual",
+            ...(visualCapture === undefined ? {} : { targetId: visualCapture.targetId }),
+            ...(visualReceipt === undefined ? {} : { targetId: visualReceipt.targetId }),
+          },
+        }),
+      });
+    }
+
+    return prepared;
+  }
+
+  private async persistPreparedVisualEvidence(prepared: PreparedVisualEvidence[]): Promise<void> {
+    for (const item of prepared) {
+      const blob = await this.dependencies.artifactStore.writeBlob({
+        content: item.content,
+        mediaType: item.artifact.mediaType,
+        storedAt: item.artifact.createdAt,
+        label: item.label,
+      });
+      if (blob.digest !== item.artifact.digest || blob.uri !== item.artifact.uri) {
+        throw new Error("Prepared visual evidence changed while being persisted");
+      }
+    }
+  }
+
   private async assertVisualCaptureAcquisition(
     run: RunManifest,
     packet: ImplementationReviewPacket,
     submission: Extract<WorkflowSubmission, { kind: "visual-comparison" }>,
     targets: VisualTargetManifest[],
     evidenceArtifacts: ArtifactRef[],
+    preparedContent: ReadonlyMap<string, Buffer>,
   ): Promise<void> {
     const mapping = figmaDesignMappingFromRun(run);
     const expectedFonts =
@@ -2436,9 +2558,9 @@ export class WorkflowService {
           `MOCK_FIXTURE_NOT_CONSUMED: no immutable fixture digest exists for ${target.fixture}`,
         );
       }
-      const actualContent = await this.dependencies.artifactStore.readContent(
-        actualArtifact.digest,
-      );
+      const actualContent =
+        preparedContent.get(actualArtifact.digest) ??
+        (await this.dependencies.artifactStore.readContent(actualArtifact.digest));
       const decodedActual = await decodeBoundedPng(
         actualContent,
         `${target.targetId} browser capture`,
@@ -2452,11 +2574,10 @@ export class WorkflowService {
       }
       let receipt: unknown;
       try {
-        receipt = JSON.parse(
-          (await this.dependencies.artifactStore.readContent(receiptArtifact.digest)).toString(
-            "utf8",
-          ),
-        );
+        const receiptContent =
+          preparedContent.get(receiptArtifact.digest) ??
+          (await this.dependencies.artifactStore.readContent(receiptArtifact.digest));
+        receipt = JSON.parse(receiptContent.toString("utf8"));
       } catch {
         throw new Error(
           `VISUAL_CAPTURE_PROVENANCE_INVALID: receipt must be strict JSON for ${target.targetId}`,
@@ -2483,8 +2604,14 @@ export class WorkflowService {
   private async recordVisualComparison(
     run: RunManifest,
     submission: Extract<WorkflowSubmission, { kind: "visual-comparison" }>,
-    actualArtifacts: ArtifactRef[],
   ): Promise<void> {
+    if (stage(run, "intake").status !== "passed") {
+      throw new Error("The intake stage must pass before downstream evidence can be submitted");
+    }
+    const profile = deliveryProfileFromRun(run);
+    if (!profile.requirements.visualComparison) {
+      throw new Error("Visual comparison is not applicable to this delivery profile");
+    }
     const packet = reviewPacketFromRun(run);
     if (packet === undefined || packet.id !== submission.reviewPacketId) {
       throw new Error("Visual comparison must reference the current implementation review packet");
@@ -2530,52 +2657,12 @@ export class WorkflowService {
         `VISUAL_CAPTURE_REPLAY: ${replayedBaseline.actualPath} is a declared baseline path`,
       );
     }
-    const boundEvidenceArtifacts = actualArtifacts.map((artifact) => {
-      const capture = submission.captures.find(
-        (capture) => capture.actualPath === artifact.metadata["projectRelativePath"],
-      );
-      const receiptCapture = submission.captures.find(
-        (capture) => capture.receiptPath === artifact.metadata["projectRelativePath"],
-      );
-      if (capture !== undefined && capture.actualDigest !== artifact.digest) {
-        throw new Error(
-          `VISUAL_CAPTURE_DIGEST_MISMATCH: ${capture.actualPath} does not match its declared digest`,
-        );
-      }
-      if (receiptCapture !== undefined && receiptCapture.receiptDigest !== artifact.digest) {
-        throw new Error(
-          `VISUAL_CAPTURE_PROVENANCE_INVALID: ${receiptCapture.receiptPath} does not match its declared digest`,
-        );
-      }
-      return ArtifactRefSchema.parse({
-        ...artifact,
-        metadata: {
-          ...artifact.metadata,
-          ...(capture === undefined && receiptCapture === undefined
-            ? {}
-            : {
-                targetId: (capture ?? receiptCapture)!.targetId,
-                captureProvider: (capture ?? receiptCapture)!.provider,
-                visualCapturedAt: (capture ?? receiptCapture)!.capturedAt,
-                ...(capture === undefined
-                  ? { declaredReceiptDigest: receiptCapture!.receiptDigest }
-                  : { declaredCaptureDigest: capture.actualDigest }),
-              }),
-        },
-      });
-    });
-    const boundActualArtifacts = boundEvidenceArtifacts.filter(
-      (artifact) => artifact.metadata["visualRole"] === "actual",
-    );
-    const submissionIdentity = visualSubmissionIdentity(
-      packet.id,
-      boundActualArtifacts.map((artifact) => ({
-        targetId: String(artifact.metadata["targetId"]),
-        digest: artifact.digest,
-      })),
-    );
+    const submissionIdentity = visualSubmissionIdentity(packet.id, submission.captures);
+    const committedReplay = this.isCommittedVisualReplay(run, submission);
+    if (stage(run, "implementation").status !== "passed" && !committedReplay) {
+      throw new Error("Implementation must pass before visual comparison");
+    }
     const reservationResult = await this.reserveVisualAttempt(run.id, packet, submissionIdentity);
-    if (reservationResult.kind === "committed-replay") return;
     if (reservationResult.kind === "busy") {
       throw new Error(
         "VISUAL_ATTEMPT_IN_PROGRESS: a visual comparison lease is active; refresh workflow_status and retry",
@@ -2584,23 +2671,65 @@ export class WorkflowService {
     const reservation = reservationResult.reservation;
     const attempt = reservation.attempt;
     const lineageId = visualLineageId(packet);
-    const attemptEvidenceArtifacts = boundEvidenceArtifacts.map((artifact) =>
-      ArtifactRefSchema.parse({
-        ...artifact,
-        metadata: { ...artifact.metadata, visualComparisonAttempt: attempt, submissionIdentity },
-      }),
-    );
-    const attemptActualArtifacts = attemptEvidenceArtifacts.filter(
-      (artifact) => artifact.metadata["visualRole"] === "actual",
-    );
 
     try {
+      const preparedEvidence = await this.prepareVisualSubmissionEvidence(run, submission);
+      const actualArtifacts = preparedEvidence.map((item) => item.artifact);
+      const boundEvidenceArtifacts = actualArtifacts.map((artifact) => {
+        const capture = submission.captures.find(
+          (capture) => capture.actualPath === artifact.metadata["projectRelativePath"],
+        );
+        const receiptCapture = submission.captures.find(
+          (capture) => capture.receiptPath === artifact.metadata["projectRelativePath"],
+        );
+        if (capture !== undefined && capture.actualDigest !== artifact.digest) {
+          throw new Error(
+            `VISUAL_CAPTURE_DIGEST_MISMATCH: ${capture.actualPath} does not match its declared digest`,
+          );
+        }
+        if (receiptCapture !== undefined && receiptCapture.receiptDigest !== artifact.digest) {
+          throw new Error(
+            `VISUAL_CAPTURE_PROVENANCE_INVALID: ${receiptCapture.receiptPath} does not match its declared digest`,
+          );
+        }
+        return ArtifactRefSchema.parse({
+          ...artifact,
+          metadata: {
+            ...artifact.metadata,
+            ...(capture === undefined && receiptCapture === undefined
+              ? {}
+              : {
+                  targetId: (capture ?? receiptCapture)!.targetId,
+                  captureProvider: (capture ?? receiptCapture)!.provider,
+                  visualCapturedAt: (capture ?? receiptCapture)!.capturedAt,
+                  ...(capture === undefined
+                    ? { declaredReceiptDigest: receiptCapture!.receiptDigest }
+                    : { declaredCaptureDigest: capture.actualDigest }),
+                }),
+          },
+        });
+      });
+      const preparedContent = new Map(
+        preparedEvidence.map((item) => [item.artifact.digest, item.content] as const),
+      );
       await this.assertVisualCaptureAcquisition(
         run,
         packet,
         submission,
         targets,
         boundEvidenceArtifacts,
+        preparedContent,
+      );
+      if (reservationResult.kind === "committed-replay") return;
+      await this.persistPreparedVisualEvidence(preparedEvidence);
+      const attemptEvidenceArtifacts = boundEvidenceArtifacts.map((artifact) =>
+        ArtifactRefSchema.parse({
+          ...artifact,
+          metadata: { ...artifact.metadata, visualComparisonAttempt: attempt, submissionIdentity },
+        }),
+      );
+      const attemptActualArtifacts = attemptEvidenceArtifacts.filter(
+        (artifact) => artifact.metadata["visualRole"] === "actual",
       );
       const timestamp = this.now();
       const generatedArtifacts: ArtifactRef[] = [];
@@ -2851,6 +2980,7 @@ export class WorkflowService {
         timestamp,
       });
     } catch (error: unknown) {
+      if (reservationResult.kind === "committed-replay") throw error;
       const timestamp = this.now();
       const failureArtifact = await this.visualAttemptStatusArtifact({
         runId: run.id,
@@ -2999,10 +3129,7 @@ export class WorkflowService {
     if (packet === undefined || packet.id !== submission.reviewPacketId) return false;
     const submissionIdentity = visualSubmissionIdentity(
       submission.reviewPacketId,
-      submission.captures.map((capture) => ({
-        targetId: capture.targetId,
-        digest: capture.actualDigest,
-      })),
+      submission.captures,
     );
     return reduceVisualReservations(
       visualAttemptReservations(run, visualLineageId(packet), "v3"),
@@ -5746,11 +5873,40 @@ function hasInProgressVisualAttempt(
 
 function visualSubmissionIdentity(
   reviewPacketId: string,
-  captures: Array<{ targetId: string; digest: string }>,
+  captures: Array<{
+    targetId: string;
+    route: string;
+    state: string;
+    viewport: { width: number; height: number };
+    deviceScaleFactor: number;
+    fixture: string;
+    provider: string;
+    capturedAt: string;
+    actualPath: string;
+    actualDigest: string;
+    receiptPath?: string | undefined;
+    receiptDigest?: string | undefined;
+  }>,
 ): string {
-  const canonical = [...captures].sort((left, right) =>
-    left.targetId.localeCompare(right.targetId),
-  );
+  const canonical = captures
+    .map((capture) => ({
+      targetId: capture.targetId,
+      route: capture.route,
+      state: capture.state,
+      viewport: {
+        width: capture.viewport.width,
+        height: capture.viewport.height,
+      },
+      deviceScaleFactor: capture.deviceScaleFactor,
+      fixture: capture.fixture,
+      provider: capture.provider,
+      capturedAt: capture.capturedAt,
+      actualPath: capture.actualPath,
+      actualDigest: capture.actualDigest,
+      ...(capture.receiptPath === undefined ? {} : { receiptPath: capture.receiptPath }),
+      ...(capture.receiptDigest === undefined ? {} : { receiptDigest: capture.receiptDigest }),
+    }))
+    .sort((left, right) => left.targetId.localeCompare(right.targetId));
   return `sha256:${createHash("sha256")
     .update(JSON.stringify({ reviewPacketId, captures: canonical }))
     .digest("hex")}`;

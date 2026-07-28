@@ -5478,6 +5478,122 @@ describe("WorkflowService", () => {
       };
     };
 
+    const appendVisualReservation = async (input: {
+      submissionIdentity: string;
+      ownerToken: string;
+      status: "in-progress" | "aborted";
+    }) => {
+      const timestamp = new Date().toISOString();
+      const reservation = {
+        reviewPacketId: compareAction.reviewPacketId,
+        visualLineageId: compareAction.reviewPacketId,
+        submissionIdentity: input.submissionIdentity,
+        attempt: 1,
+        status: input.status,
+        ownerToken: input.ownerToken,
+        reservedAt: timestamp,
+        updatedAt: timestamp,
+      };
+      const blob = await artifactStore.writeBlob({
+        content: Buffer.from(`${JSON.stringify(reservation)}\n`, "utf8"),
+        mediaType: "application/json",
+        storedAt: timestamp,
+        label: `manual-${input.status}.json`,
+      });
+      const current = await store.get(started.runId);
+      await store.save(
+        {
+          ...current,
+          revision: current.revision + 1,
+          updatedAt: timestamp,
+          artifacts: [
+            ...current.artifacts,
+            ArtifactRefSchema.parse({
+              id: createArtifactId(),
+              kind: "other",
+              uri: blob.uri,
+              mediaType: "application/json",
+              digest: blob.digest,
+              producedBy: "orchestrator",
+              evidenceIds: [],
+              createdAt: timestamp,
+              metadata: {
+                adapter: "visual-attempt-reservation-v3",
+                reviewPacketId: compareAction.reviewPacketId,
+                visualLineageId: compareAction.reviewPacketId,
+                submissionIdentity: input.submissionIdentity,
+                visualComparisonAttempt: 1,
+                reservationStatus: input.status,
+                ownerToken: input.ownerToken,
+                reservedAt: timestamp,
+                updatedAt: timestamp,
+              },
+            }),
+          ],
+        },
+        current.revision,
+      );
+    };
+
+    const busySubmission = await visualSubmission(
+      compareAction,
+      implementationPacket.headSha,
+      "busy",
+      [255, 255, 255, 255],
+    );
+    await appendVisualReservation({
+      submissionIdentity: "manual-active-submission",
+      ownerToken: "manual-active-owner",
+      status: "in-progress",
+    });
+    const busyWriteSpy = vi.spyOn(artifactStore, "writeBlob");
+    await expect(
+      service.submit({ runId: started.runId, submission: busySubmission }),
+    ).rejects.toThrow(/VISUAL_ATTEMPT_IN_PROGRESS/);
+    expect(busyWriteSpy).not.toHaveBeenCalled();
+    busyWriteSpy.mockRestore();
+    await appendVisualReservation({
+      submissionIdentity: "manual-active-submission",
+      ownerToken: "manual-active-owner",
+      status: "aborted",
+    });
+
+    const invalidPng = await visualSubmission(
+      compareAction,
+      implementationPacket.headSha,
+      "invalid-png",
+      [255, 255, 255, 255],
+    );
+    const invalidPngBytes = Buffer.from("not a png", "utf8");
+    await writeFile(path.join(directory, invalidPng.captures[0]!.actualPath), invalidPngBytes);
+    invalidPng.captures[0]!.actualDigest =
+      `sha256:${createHash("sha256").update(invalidPngBytes).digest("hex")}` as const;
+    const beforeInvalidPng = await store.get(started.runId);
+    const reservationCountBeforeInvalidPng = beforeInvalidPng.artifacts.filter(
+      (artifact) => artifact.metadata["adapter"] === "visual-attempt-reservation-v3",
+    ).length;
+    await expect(service.submit({ runId: started.runId, submission: invalidPng })).rejects.toThrow(
+      /PNG/i,
+    );
+    const afterInvalidPng = await store.get(started.runId);
+    expect(
+      afterInvalidPng.artifacts
+        .filter((artifact) => artifact.metadata["adapter"] === "visual-attempt-reservation-v3")
+        .slice(reservationCountBeforeInvalidPng)
+        .map((artifact) => ({
+          attempt: artifact.metadata["visualComparisonAttempt"],
+          status: artifact.metadata["reservationStatus"],
+        })),
+    ).toEqual([
+      { attempt: 1, status: "in-progress" },
+      { attempt: 1, status: "aborted" },
+    ]);
+    expect(
+      (await service.status({ runId: started.runId })).nextActions.find(
+        (action) => action.kind === "compare-visuals",
+      ),
+    ).toMatchObject({ attempt: 1 });
+
     const receiptless = await visualSubmission(
       compareAction,
       implementationPacket.headSha,
@@ -5493,7 +5609,7 @@ describe("WorkflowService", () => {
       (artifact) => artifact.metadata["adapter"] === "visual-attempt-reservation-v3",
     );
     expect(
-      receiptlessReservations.map((artifact) => ({
+      receiptlessReservations.slice(-2).map((artifact) => ({
         attempt: artifact.metadata["visualComparisonAttempt"],
         status: artifact.metadata["reservationStatus"],
       })),
@@ -5621,6 +5737,22 @@ describe("WorkflowService", () => {
     const reportCountBeforeReplay = afterCommittedAttempt.artifacts.filter(
       (artifact) => artifact.kind === "visual-report",
     ).length;
+    const malformedCommittedReplay = {
+      ...firstAttempt,
+      captures: firstAttempt.captures.map((capture) => ({
+        ...capture,
+        route: "/wrong",
+      })),
+    };
+    const replayWriteSpy = vi.spyOn(artifactStore, "writeBlob");
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: malformedCommittedReplay,
+      }),
+    ).rejects.toThrow(/capture manifest.*target/i);
+    expect(replayWriteSpy).not.toHaveBeenCalled();
+    replayWriteSpy.mockRestore();
     await service.submit({
       runId: started.runId,
       submission: firstAttempt,
