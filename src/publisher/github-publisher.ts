@@ -260,11 +260,9 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
       }
       const content = uploaded["content"];
       const commit = uploaded["commit"] as Record<string, unknown> | undefined;
-      const contentSha = isPlainRecord(content)
-        ? GitObjectIdSchema.safeParse(content["sha"])
-        : undefined;
-      const commitSha = GitObjectIdSchema.safeParse(commit?.["sha"]);
-      if (contentSha === undefined || !contentSha.success || !commitSha.success) {
+      const contentSha = isPlainRecord(content) ? fullGitHubObjectId(content["sha"]) : undefined;
+      const commitSha = fullGitHubObjectId(commit?.["sha"]);
+      if (contentSha === undefined || commitSha === undefined) {
         return {
           status: "failed",
           artifactId: asset.artifactId,
@@ -279,8 +277,8 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
       // non-embeddable for the review-body renderer.
       const embeddable = !isPrivate && asset.role !== "e2e-video";
       const url = isPrivate
-        ? `${target.webBaseUrl}/${target.owner}/${target.repo}/blob/${commitSha.data}/${assetPath}`
-        : `https://raw.githubusercontent.com/${target.owner}/${target.repo}/${commitSha.data}/${assetPath}`;
+        ? `${target.webBaseUrl}/${target.owner}/${target.repo}/blob/${commitSha}/${assetPath}`
+        : `https://raw.githubusercontent.com/${target.owner}/${target.repo}/${commitSha}/${assetPath}`;
       return {
         status: "published",
         asset: PublishedReviewAssetSchema.parse({
@@ -596,4 +594,10 @@ function validateEvidenceRef(raw: unknown): ValidatedEvidenceRef {
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function fullGitHubObjectId(value: unknown): string | undefined {
+  return typeof value === "string" && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(value)
+    ? value
+    : undefined;
 }

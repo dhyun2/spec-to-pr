@@ -571,6 +571,82 @@ describe("GitHubPublisherAdapter", () => {
   );
 
   it.each([
+    {
+      contentSha: "f".repeat(7),
+      commitSha: EVIDENCE_COMMIT,
+      malformedField: "content.sha",
+    },
+    {
+      contentSha: "f".repeat(40),
+      commitSha: "c".repeat(7),
+      malformedField: "commit.sha",
+    },
+  ])("settles abbreviated $malformedField as uncertain", async ({ contentSha, commitSha }) => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ private: false }))
+      .mockResolvedValueOnce(jsonResponse(evidenceRef()))
+      .mockResolvedValueOnce(new Response("missing asset", { status: 404 }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          content: { sha: contentSha },
+          commit: { sha: commitSha },
+        }),
+      );
+    const adapter = new GitHubPublisherAdapter(fetchMock);
+
+    await expect(
+      adapter.publishAssets({
+        target: githubTarget(),
+        payload: payload(),
+        token: "ghp_example",
+        maxConcurrency: 3,
+        assets: [asset()],
+      }),
+    ).resolves.toEqual([
+      {
+        status: "failed",
+        artifactId: "art_22222222222222222222222222222222",
+        failure: "uncertain",
+        message: "GitHub upload review asset returned a malformed response",
+      },
+    ]);
+  });
+
+  it("accepts full 64-character GitHub content and commit object IDs", async () => {
+    const fullObjectId = "e".repeat(64);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ private: false }))
+      .mockResolvedValueOnce(jsonResponse(evidenceRef()))
+      .mockResolvedValueOnce(new Response("missing asset", { status: 404 }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          content: { sha: fullObjectId },
+          commit: { sha: fullObjectId },
+        }),
+      );
+    const adapter = new GitHubPublisherAdapter(fetchMock);
+
+    await expect(
+      adapter.publishAssets({
+        target: githubTarget(),
+        payload: payload(),
+        token: "ghp_example",
+        maxConcurrency: 3,
+        assets: [asset()],
+      }),
+    ).resolves.toMatchObject([
+      {
+        status: "published",
+        asset: {
+          url: expect.stringContaining(fullObjectId),
+        },
+      },
+    ]);
+  });
+
+  it.each([
     { headSha: undefined },
     { reviewPacketId: undefined },
     { headSha: undefined, reviewPacketId: undefined },
