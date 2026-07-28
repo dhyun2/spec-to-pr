@@ -10,7 +10,10 @@ import {
   WorkflowStatusInputSchema,
 } from "../application/workflow-service.js";
 import type { WorkflowService } from "../application/workflow-service.js";
-import type { RuntimeMetricsSink } from "../runtime/performance-instrumentation.js";
+import {
+  RuntimeMetricsRecorder,
+  type RuntimeMetricsSink,
+} from "../runtime/performance-instrumentation.js";
 import type { ServicesProvider } from "./run-service-provider.js";
 
 const CONTRACT_VERSION = "2.0.0" as const;
@@ -183,7 +186,22 @@ async function workflowToolResult(
 function toolResult(value: unknown, metrics?: RuntimeMetricsSink) {
   const structuredContent = asStructuredContent(value);
   const text = JSON.stringify(structuredContent);
-  metrics?.increment("status.serialized_bytes", Buffer.byteLength(text), { view: "tool-result" });
+  const runId = structuredContent["run"];
+  if (
+    metrics instanceof RuntimeMetricsRecorder &&
+    typeof runId === "object" &&
+    runId !== null &&
+    typeof (runId as Record<string, unknown>)["id"] === "string"
+  ) {
+    metrics.incrementForRun(
+      (runId as { id: `run_${string}` }).id,
+      "status.serialized_bytes",
+      Buffer.byteLength(text),
+      { view: "tool-result" },
+    );
+  } else {
+    metrics?.increment("status.serialized_bytes", Buffer.byteLength(text), { view: "tool-result" });
+  }
 
   return {
     content: [{ type: "text" as const, text }],

@@ -43,7 +43,7 @@ describe("WorkflowService Git performance instrumentation", () => {
     );
     const recorder = new RuntimeMetricsRecorder();
 
-    await captureGitSnapshot(run, recorder);
+    await recorder.withRun(run.id, () => captureGitSnapshot(run, recorder));
 
     const snapshot = recorder.snapshot({
       runId: run.id,

@@ -16,18 +16,20 @@ describe("RuntimeMetricsRecorder", () => {
     let tick = 0;
     const recorder = new RuntimeMetricsRecorder({ now: () => ++tick * 10 });
 
-    recorder.increment("artifact.read_count", 2, { stage: "intake" });
-    recorder.increment("artifact.read_bytes", 64, { stage: "intake" });
-    await recorder.time("stage.wall_ms", { stage: "intake", outcome: "success" }, async () => {
-      await recorder.time(
-        "external_action.wall_ms",
-        { action: "external", outcome: "success" },
-        async () => undefined,
-      );
+    await recorder.withRun(runId, async () => {
+      recorder.increment("artifact.read_count", 2, { stage: "intake" });
+      recorder.increment("artifact.read_bytes", 64, { stage: "intake" });
+      await recorder.time("stage.wall_ms", { stage: "intake", outcome: "success" }, async () => {
+        await recorder.time(
+          "external_action.wall_ms",
+          { action: "external", outcome: "success" },
+          async () => undefined,
+        );
+      });
+      recorder.gauge("visual.active_workers", 1, { stage: "report" });
+      recorder.gauge("visual.peak_workers", 1, { stage: "report" });
+      recorder.gauge("visual.active_workers", 0, { stage: "report" });
     });
-    recorder.gauge("visual.active_workers", 1, { stage: "report" });
-    recorder.gauge("visual.peak_workers", 1, { stage: "report" });
-    recorder.gauge("visual.active_workers", 0, { stage: "report" });
 
     const snapshot = recorder.snapshot({ runId, fixtureDigest, collectedAt });
 

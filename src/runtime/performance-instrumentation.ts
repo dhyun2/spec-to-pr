@@ -141,8 +141,8 @@ type RuntimeMetricsRecorderOptions = {
 
 export class RuntimeMetricsRecorder implements RuntimeMetricsSink {
   private readonly samplesByRun = new Map<string, Map<string, RuntimePerformanceSample>>();
-  private readonly unscopedSamples = new Map<string, RuntimePerformanceSample>();
-  private readonly runScope = new AsyncLocalStorage<RunId>();
+  private readonly samplesByScope = new Map<symbol, Map<string, RuntimePerformanceSample>>();
+  private readonly runScope = new AsyncLocalStorage<RunId | symbol>();
   private readonly now: () => number;
 
   public constructor(options: RuntimeMetricsRecorderOptions = {}) {
@@ -183,6 +183,35 @@ export class RuntimeMetricsRecorder implements RuntimeMetricsSink {
     return this.runScope.run(parsedRunId, operation);
   }
 
+  public beginRun(): symbol {
+    return Symbol("runtime-run");
+  }
+
+  public async withPendingRun<T>(scope: symbol, operation: () => Promise<T>): Promise<T> {
+    return this.runScope.run(scope, operation);
+  }
+
+  public bindPendingRun(scope: symbol, runId: RunId): void {
+    const samples = this.samplesByScope.get(scope);
+    if (samples === undefined) return;
+    const target = this.samplesByRun.get(runId) ?? new Map<string, RuntimePerformanceSample>();
+    for (const [key, sample] of samples) {
+      const existing = target.get(key);
+      target.set(key, { ...sample, value: (existing?.value ?? 0) + sample.value });
+    }
+    this.samplesByRun.set(runId, target);
+    this.samplesByScope.delete(scope);
+  }
+
+  public incrementForRun(
+    runId: RunId,
+    name: RuntimeMetricName,
+    value?: number,
+    tags?: RuntimeMetricTags,
+  ): void {
+    this.runScope.run(RunIdSchema.parse(runId), () => this.increment(name, value, tags));
+  }
+
   public async time<T>(
     name: RuntimeMetricName,
     tags: RuntimeMetricTags,
@@ -206,18 +235,25 @@ export class RuntimeMetricsRecorder implements RuntimeMetricsSink {
       runId: input.runId,
       fixtureDigest: input.fixtureDigest,
       collectedAt: input.collectedAt,
-      samples: [...(this.samplesByRun.get(input.runId) ?? this.unscopedSamples).values()].sort(
-        (left, right) =>
-          sampleKey(left.kind, left.name, left.tags).localeCompare(
-            sampleKey(right.kind, right.name, right.tags),
-          ),
+      samples: [...(this.samplesByRun.get(input.runId) ?? []).values()].sort((left, right) =>
+        sampleKey(left.kind, left.name, left.tags).localeCompare(
+          sampleKey(right.kind, right.name, right.tags),
+        ),
       ),
     });
   }
 
   private currentSamples(): Map<string, RuntimePerformanceSample> {
     const runId = this.runScope.getStore();
-    if (runId === undefined) return this.unscopedSamples;
+    if (typeof runId === "symbol") {
+      let samples = this.samplesByScope.get(runId);
+      if (samples === undefined) {
+        samples = new Map();
+        this.samplesByScope.set(runId, samples);
+      }
+      return samples;
+    }
+    if (runId === undefined) return new Map();
     let samples = this.samplesByRun.get(runId);
     if (samples === undefined) {
       samples = new Map();

@@ -9,7 +9,7 @@ import { PNG } from "pngjs";
 import { buildParserSafeChunks } from "../../src/application/workflow-service.js";
 import { RuntimeMetricsRecorder } from "../../src/runtime/performance-instrumentation.js";
 import { sha256Digest } from "../../src/source-registry/content-hash.js";
-import { decodeBoundedPng } from "../../src/visual/png-decoder.js";
+import { compareVisualPngs } from "../../src/visual/visual-comparator.js";
 
 const collectedAt = "2026-07-28T00:00:00.000Z";
 const samplesByFixture = new Map<string, number[]>();
@@ -136,14 +136,14 @@ describe("runtime reduction fixtures", () => {
       await measureFixture("run_33333333333333333333333333333333", "visual", async (recorder) => {
         for (const comparison of fixtures.visual.comparisons) {
           for (const target of fixtures.visual.targets) {
-            const decoded = await decodeBoundedPng(visualPng, `${target.targetId}-${comparison}`);
-            if (decoded.width !== target.width || decoded.height !== target.height) {
+            const result = await compareVisualPngs({ baseline: visualPng, actual: visualPng });
+            if (result.status !== "passed") {
               throw new Error("visual fixture geometry mismatch");
             }
-            recorder.increment("visual.decode_pixels", decoded.width * decoded.height);
+            recorder.increment("visual.decode_pixels", target.width * target.height * 2);
+            recorder.increment("visual.encode_pixels", target.width * target.height * 2);
           }
         }
-        recorder.increment("visual.encode_pixels", 360 * 1831 * 2 * 3);
         recorder.gauge("visual.active_workers", 0, { stage: "implementation" });
         recorder.gauge("visual.peak_workers", fixtures.visual.comparisons.length, {
           stage: "implementation",
@@ -175,6 +175,18 @@ afterAll(() => {
       p50WallMs: percentile(sorted, 0.5),
       p95WallMs: percentile(sorted, 0.95),
       peakRssBytes: peakRss,
+      environment: {
+        nodeVersion: process.version,
+        platform: process.platform,
+        architecture: process.arch,
+        cpuCount: os.cpus().length,
+      },
+      metricCounters:
+        name === "mixed-intake"
+          ? { localDocuments: 20, parserSafeChunks: 4, openApiSources: 4 }
+          : name === "legacy"
+            ? { files: 250, terminalApiCalls: 40, sharedAdapters: 5 }
+            : { targets: 2, comparisons: 3, pixelsPerTarget: 659160 },
     };
   });
   console.info(

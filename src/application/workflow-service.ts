@@ -556,6 +556,17 @@ export class WorkflowService {
   }
 
   public async start(rawInput: unknown): Promise<WorkflowStatus> {
+    if (this.metrics instanceof RuntimeMetricsRecorder) {
+      const recorder = this.metrics;
+      const pending = recorder.beginRun();
+      return recorder.withPendingRun(pending, async () => {
+        const status = await this.measureWorkflowAction(rawInput, "start", () =>
+          this.startUninstrumented(rawInput),
+        );
+        recorder.bindPendingRun(pending, status.runId);
+        return status;
+      });
+    }
     return this.measureWorkflowAction(rawInput, "start", () => this.startUninstrumented(rawInput));
   }
 
