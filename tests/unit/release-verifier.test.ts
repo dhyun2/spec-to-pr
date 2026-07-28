@@ -152,6 +152,30 @@ describe("release verifier", () => {
     );
   });
 
+  it("requires strict visual evidence markers in every reviewer profile pair", () => {
+    const shared =
+      "immutable review packet token pressure scope split every reviewed requirement visual baseline read-only never edit implementation workflow mcp playwright 25 mb 92% focused ui assertions baseline references renderer lineage";
+    const files = new Map<string, Buffer>([
+      ["agents/design-reviewer.md", Buffer.from(`${shared} every required design gate`)],
+      [
+        ".codex/agents/spec-to-pr-design-reviewer.toml",
+        Buffer.from(`${shared} every required design gate mcp_servers = {}`),
+      ],
+      ["agents/functional-reviewer.md", Buffer.from(`${shared} every required functional gate`)],
+      [
+        ".codex/agents/spec-to-pr-functional-reviewer.toml",
+        Buffer.from(`${shared} every required functional gate mcp_servers = {}`),
+      ],
+    ]);
+
+    expect(verifyReviewerProfileParity(files)).toContain(
+      "Reviewer profile parity missing 'third valid failure' for functional reviewer.",
+    );
+    expect(verifyReviewerProfileParity(files)).toContain(
+      "Reviewer profile parity missing 'third valid failure' for design reviewer.",
+    );
+  });
+
   it("requires both Codex reviewers to disable inherited MCP servers", () => {
     const functionalMarkers =
       "immutable review packet token pressure scope split every required functional gate every reviewed requirement playwright 25 mb read-only never edit implementation workflow mcp mcp_servers = {}";

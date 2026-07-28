@@ -722,6 +722,26 @@ describe("plugin layout", () => {
 
     expect(verifyReviewerProfileParity(reviewerFiles)).toEqual([]);
   });
+
+  it("ships the strict visual evidence contract in every reviewer profile", () => {
+    for (const file of [
+      "agents/design-reviewer.md",
+      "agents/functional-reviewer.md",
+      ".codex/agents/spec-to-pr-design-reviewer.toml",
+      ".codex/agents/spec-to-pr-functional-reviewer.toml",
+    ]) {
+      const contents = readFileSync(path.join(root, file), "utf8").toLowerCase();
+      for (const marker of [
+        "92%",
+        "focused ui assertions",
+        "baseline references",
+        "renderer lineage",
+        "third valid failure",
+      ]) {
+        expect(contents, `${file}:${marker}`).toContain(marker);
+      }
+    }
+  });
 });
 
 function parseEmptyTomlTable(contents: string, key: string): Record<string, never> {
