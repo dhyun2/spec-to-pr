@@ -21,6 +21,7 @@ const RelativePathSchema = z
 const PRODUCT_SOURCE_EXTENSION = /\.(?:js|jsx|ts|tsx|vue|svelte|css|scss)$/i;
 const BROWSER_BUNDLE_EXTENSION = /\.(?:js|mjs|cjs|css)$/i;
 const MAX_PERCENT_DECODE_ROUNDS = 4;
+const MAX_NESTED_URL_LEVELS = 3;
 
 export const BaselineIsolationEvidenceSchema = z
   .object({
@@ -318,21 +319,51 @@ function matchesBaselineUrl(url: string, baselines: CanonicalBaseline[]): boolea
   const decoded = canonicalReferenceText(url);
   let parsed: URL;
   try {
-    parsed = new URL(decoded);
+    parsed = new URL(url);
   } catch {
     return false;
   }
-  const requestedPath = canonicalUrlPath(parsed.pathname);
-  const queryValues = [...parsed.searchParams.values()].map(canonicalUrlPath);
+  const candidatePaths = [
+    canonicalUrlPath(parsed.pathname),
+    ...[...parsed.searchParams.values()].flatMap((value) => canonicalQueryValuePaths(value, 0)),
+  ];
   return baselines.some((baseline) => {
     const baselinePath = canonicalUrlPath(baseline.path);
     return (
       decoded === canonicalReferenceText(baseline.uri) ||
       decoded.includes(baseline.digest.toLowerCase()) ||
-      hasSegmentBoundSuffix(requestedPath, baselinePath) ||
-      queryValues.some((value) => hasSegmentBoundSuffix(value, baselinePath))
+      candidatePaths.some((value) => hasSegmentBoundSuffix(value, baselinePath))
     );
   });
+}
+
+function canonicalQueryValuePaths(value: string, nestedUrlDepth: number): string[] {
+  const decoded = canonicalReferenceText(value);
+  const nestedUrl = parseNestedUrl(value, decoded);
+  if (nestedUrl !== undefined) {
+    if (nestedUrlDepth >= MAX_NESTED_URL_LEVELS) {
+      invalid(`nested URL query values exceed ${String(MAX_NESTED_URL_LEVELS)} levels`);
+    }
+    return [
+      canonicalUrlPath(nestedUrl.pathname),
+      ...[...nestedUrl.searchParams.values()].flatMap((queryValue) =>
+        canonicalQueryValuePaths(queryValue, nestedUrlDepth + 1),
+      ),
+    ];
+  }
+  const [pathValue = ""] = decoded.split(/[?#]/u, 1);
+  return pathValue === "" ? [] : [canonicalUrlPath(pathValue)];
+}
+
+function parseNestedUrl(value: string, decoded: string): URL | undefined {
+  for (const candidate of new Set([value, decoded])) {
+    try {
+      return new URL(candidate);
+    } catch {
+      // Plain path-shaped query values are handled without a URL base.
+    }
+  }
+  return undefined;
 }
 
 function hasSegmentBoundSuffix(value: string, suffix: string): boolean {

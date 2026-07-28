@@ -439,6 +439,107 @@ describe("visual baseline isolation", () => {
     ).rejects.toThrow(/VISUAL_BASELINE_ISOLATION_INVALID/);
   });
 
+  it.each([
+    [
+      "requested nested URL query suffix",
+      {
+        requestedResources: [
+          {
+            url: "https://app.example/proxy?asset=https%3A%2F%2Fcdn.example%2Fvisual%2Fshop-baseline.png%3Fv%3D1",
+          },
+        ],
+      },
+    ],
+    [
+      "rendered nested URL query suffix",
+      {
+        renderedMedia: [
+          {
+            selector: "img#nested-url",
+            sourceUrl:
+              "https://app.example/proxy?asset=https%3A%2F%2Fcdn.example%2Fvisual%2Fshop-baseline.png%3Fv%3D1",
+          },
+        ],
+      },
+    ],
+    [
+      "requested plain path query suffix",
+      {
+        requestedResources: [
+          {
+            url: "https://app.example/proxy?asset=%2Fproxy%2Fvisual%2Fshop-baseline.png%3Fv%3D1",
+          },
+        ],
+      },
+    ],
+    [
+      "rendered plain path query suffix",
+      {
+        renderedMedia: [
+          {
+            selector: "img#nested-path",
+            sourceUrl:
+              "https://app.example/proxy?asset=%2Fproxy%2Fvisual%2Fshop-baseline.png%3Fv%3D1",
+          },
+        ],
+      },
+    ],
+    [
+      "requested nested URL fragment suffix",
+      {
+        requestedResources: [
+          {
+            url: "https://app.example/proxy?asset=https%3A%2F%2Fcdn.example%2Fvisual%2Fshop-baseline.png%23preview",
+          },
+        ],
+      },
+    ],
+    [
+      "rendered plain path fragment suffix",
+      {
+        renderedMedia: [
+          {
+            selector: "img#nested-path-fragment",
+            sourceUrl:
+              "https://app.example/proxy?asset=%2Fproxy%2Fvisual%2Fshop-baseline.png%23preview",
+          },
+        ],
+      },
+    ],
+  ])("rejects a baseline path in a %s", async (_name, override) => {
+    const source = await writeProductFile("src/shop.tsx", "export const Shop = 'semantic';\n");
+
+    await expect(
+      assertBaselineIsolation({
+        projectRoot,
+        packet,
+        baselineArtifacts: [baseline],
+        evidence: evidence([source], override),
+        excludedPaths: registeredExcludedPaths,
+      }),
+    ).rejects.toThrow(/VISUAL_BASELINE_ISOLATION_INVALID/);
+  });
+
+  it("fails closed when nested URL query values exceed the recursion cap", async () => {
+    const source = await writeProductFile("src/shop.tsx", "export const Shop = 'semantic';\n");
+
+    await expect(
+      assertBaselineIsolation({
+        projectRoot,
+        packet,
+        baselineArtifacts: [baseline],
+        evidence: evidence([source], {
+          requestedResources: [
+            {
+              url: "https://app.example/proxy?asset=https://a.example/one?next=https://b.example/two?next=https://c.example/three?next=https://d.example/four",
+            },
+          ],
+        }),
+        excludedPaths: registeredExcludedPaths,
+      }),
+    ).rejects.toThrow(/VISUAL_BASELINE_ISOLATION_INVALID/);
+  });
+
   it("rejects production source that remains percent-decodable after the bounded limit", async () => {
     await assertInvalid(
       "export const hiddenBaseline = '%252525252Fvisual%252525252Fshop-baseline.png';\n",
@@ -496,6 +597,9 @@ describe("visual baseline isolation", () => {
         {
           url: "https://app.example/proxy?asset=assets%2Fshop-baseline.png",
         },
+        {
+          url: "https://app.example/proxy?asset=https%3A%2F%2Fcdn.example%2Fassets%2Fshop-baseline.png%3Fv%3D1",
+        },
       ],
       renderedMedia: [
         {
@@ -505,6 +609,11 @@ describe("visual baseline isolation", () => {
         {
           selector: "img#unrelated-query",
           sourceUrl: "https://app.example/proxy?asset=assets%2Fshop-baseline.png",
+        },
+        {
+          selector: "img#prefix-confusion",
+          sourceUrl:
+            "https://app.example/proxy?asset=https%3A%2F%2Fcdn.example%2Fproxy%2Fnotvisual%2Fshop-baseline.png%23preview",
         },
       ],
     });

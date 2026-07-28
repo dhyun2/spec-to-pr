@@ -6484,6 +6484,37 @@ describe("WorkflowService", () => {
       (evidence) => {
         evidence["requestedResources"] = [
           {
+            url: "https://app.example/proxy?asset=https%3A%2F%2Fcdn.example%2Fvisual%2Fdiff.png%3Fv%3D1",
+          },
+        ];
+      },
+      (evidence) => {
+        evidence["renderedMedia"] = [
+          {
+            selector: "img#nested-url-overlay",
+            sourceUrl:
+              "https://app.example/proxy?asset=https%3A%2F%2Fcdn.example%2Fvisual%2Fdiff.png%3Fv%3D1",
+          },
+        ];
+      },
+      (evidence) => {
+        evidence["renderedMedia"] = [
+          {
+            selector: "img#nested-path-fragment-overlay",
+            sourceUrl: "https://app.example/proxy?asset=%2Fproxy%2Fvisual%2Fdiff.png%23preview",
+          },
+        ];
+      },
+      (evidence) => {
+        evidence["requestedResources"] = [
+          {
+            url: "https://app.example/proxy?asset=https://a.example/one?next=https://b.example/two?next=https://c.example/three?next=https://d.example/four",
+          },
+        ];
+      },
+      (evidence) => {
+        evidence["requestedResources"] = [
+          {
             url: "https://app.example/assets/diff.png?probe=%252525252Fstill-encoded",
           },
         ];
@@ -6615,6 +6646,9 @@ describe("WorkflowService", () => {
         {
           url: "https://app.example/proxy?asset=assets%2Fdiff.png",
         },
+        {
+          url: "https://app.example/proxy?asset=https%3A%2F%2Fcdn.example%2Fassets%2Fdiff.png%3Fv%3D1",
+        },
       ];
       evidence["renderedMedia"] = [
         {
@@ -6624,6 +6658,11 @@ describe("WorkflowService", () => {
         {
           selector: "img#unrelated-query",
           sourceUrl: "https://app.example/proxy?asset=assets%2Fdiff.png",
+        },
+        {
+          selector: "img#prefix-confusion",
+          sourceUrl:
+            "https://app.example/proxy?asset=https%3A%2F%2Fcdn.example%2Fproxy%2Fnotvisual%2Fdiff.png%23preview",
         },
       ];
     });
