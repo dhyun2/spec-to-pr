@@ -6,6 +6,11 @@ import { promisify } from "node:util";
 
 import { z } from "zod";
 
+import {
+  NoopRuntimeMetrics,
+  type RuntimeMetricsSink,
+} from "../runtime/performance-instrumentation.js";
+
 import type { ArtifactBlobStore } from "../artifact-registry/artifact-blob-store.js";
 import {
   ReviewAssetUploadReceiptSchema,
@@ -299,6 +304,8 @@ export const RecordPublishReviewResultSchema = z
   .strict();
 
 export class PublisherService {
+  private readonly git: GitCommandRunner;
+
   public constructor(
     private readonly runStore: RunStore,
     private readonly artifactStore: ArtifactBlobStore,
@@ -310,8 +317,18 @@ export class PublisherService {
       github: new GitHubPublisherAdapter(),
       gitlab: new GitLabPublisherAdapter(),
     },
-    private readonly git: GitCommandRunner = defaultGitCommandRunner,
-  ) {}
+    git: GitCommandRunner = defaultGitCommandRunner,
+    private readonly metrics: RuntimeMetricsSink = new NoopRuntimeMetrics(),
+  ) {
+    this.git = async (cwd, args, options) => {
+      this.metrics.increment("git.command_count");
+      const result = await git(cwd, args, options);
+      if (args[0] === "diff" && args.includes("--binary")) {
+        this.metrics.increment("git.binary_diff_bytes", Buffer.byteLength(result.stdout));
+      }
+      return result;
+    };
+  }
 
   public async detectTarget(rawInput: unknown) {
     const input = DetectPublishTargetInputSchema.parse(rawInput);
@@ -858,6 +875,7 @@ export class PublisherService {
     signal: AbortSignal | undefined;
   }): Promise<PublishResult> {
     try {
+      this.metrics.increment("publisher.http_count", 1, { host: input.plan.target.host });
       input.signal?.throwIfAborted();
       const token = readPublisherToken(
         input.plan.target.host,
@@ -1007,6 +1025,7 @@ export class PublisherService {
     signal: AbortSignal | undefined;
   }): Promise<PublishResult> {
     try {
+      this.metrics.increment("publisher.http_count", 1, { host: input.plan.target.host });
       input.signal?.throwIfAborted();
       const token = readPublisherToken(
         input.plan.target.host,
@@ -1201,6 +1220,9 @@ export class PublisherService {
     let thrownUploadError: unknown;
 
     for (let attempt = 1; attempt <= 3 && missingAssets.length > 0; attempt += 1) {
+      if (attempt > 1) {
+        this.metrics.increment("publisher.retry_count", 1, { host: input.plan.target.host });
+      }
       let outcomes: ReviewAssetPublishOutcome[];
       try {
         outcomes = await input.publisher.publishAssets({

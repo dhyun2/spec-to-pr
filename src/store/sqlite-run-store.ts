@@ -4,6 +4,10 @@ import { createRequire } from "node:module";
 
 import { RunManifestSchema, RunSummarySchema, summarizeRun } from "../run/index.js";
 import { RunIdSchema, type RunId } from "../runtime/ids.js";
+import {
+  NoopRuntimeMetrics,
+  type RuntimeMetricsSink,
+} from "../runtime/performance-instrumentation.js";
 import { RevisionConflictError, RunAlreadyExistsError, RunNotFoundError } from "./errors.js";
 import type { ListRunsFilter, RunStore } from "./run-store.js";
 import type { RunManifest, RunSummary } from "../run/index.js";
@@ -38,7 +42,10 @@ function loadSqliteModule(): SqliteModule {
 export class SqliteRunStore implements RunStore {
   private readonly database: SqliteDatabase;
 
-  public constructor(databasePath: string) {
+  public constructor(
+    databasePath: string,
+    private readonly metrics: RuntimeMetricsSink = new NoopRuntimeMetrics(),
+  ) {
     mkdirSync(path.dirname(databasePath), {
       recursive: true,
       mode: 0o700,
@@ -54,6 +61,9 @@ export class SqliteRunStore implements RunStore {
   public async create(run: RunManifest): Promise<void> {
     const parsed = RunManifestSchema.parse(run);
     const summary = summarizeRun(parsed);
+    const serialized = serializeRun(parsed);
+    this.metrics.increment("run_store.save_count");
+    this.metrics.increment("run_store.serialized_bytes", Buffer.byteLength(serialized));
 
     try {
       this.transaction(() => {
@@ -85,7 +95,7 @@ export class SqliteRunStore implements RunStore {
             parsed.revision,
             parsed.createdAt,
             parsed.updatedAt,
-            serializeRun(parsed),
+            serialized,
           );
 
         this.upsertSummary(summary);
@@ -101,6 +111,7 @@ export class SqliteRunStore implements RunStore {
 
   public async get(rawRunId: RunId): Promise<RunManifest> {
     const runId = RunIdSchema.parse(rawRunId);
+    this.metrics.increment("run_store.get_count");
 
     const row = this.database.prepare("SELECT manifest_json FROM runs WHERE id = ?").get(runId);
 
@@ -121,6 +132,9 @@ export class SqliteRunStore implements RunStore {
     }
 
     const summary = summarizeRun(parsed);
+    const serialized = serializeRun(parsed);
+    this.metrics.increment("run_store.save_count");
+    this.metrics.increment("run_store.serialized_bytes", Buffer.byteLength(serialized));
 
     this.transaction(() => {
       const result = this.database
@@ -149,7 +163,7 @@ export class SqliteRunStore implements RunStore {
           parsed.revision,
           parsed.createdAt,
           parsed.updatedAt,
-          serializeRun(parsed),
+          serialized,
           parsed.id,
           expectedRevision,
         );

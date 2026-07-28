@@ -37,6 +37,12 @@ import { ArtifactRefSchema, type ArtifactRef } from "../runtime/artifact.js";
 import { GapSchema } from "../runtime/gap.js";
 import { createArtifactId, createGapId } from "../runtime/id-factory.js";
 import { ArtifactIdSchema, RunIdSchema } from "../runtime/ids.js";
+import {
+  NoopRuntimeMetrics,
+  RuntimeMetricsRecorder,
+  type RuntimeMetricsSink,
+} from "../runtime/performance-instrumentation.js";
+import type { Sha256Digest } from "../runtime/scalars.js";
 import { summarizeRun, type RunManifest } from "../run/index.js";
 import {
   extractPdfText,
@@ -497,6 +503,7 @@ export type WorkflowServiceDependencies = {
   fetchOpenApiSource?: (input: { url: string }) => Promise<RemoteOpenApiSource>;
   publisherService?: PublisherService;
   archiveService?: OpenSpecArchiveService;
+  metrics?: RuntimeMetricsSink;
   now?: () => string;
   externalLeaseTtlMs?: number;
   externalHeartbeatMs?: number;
@@ -517,12 +524,14 @@ export class WorkflowService {
   private readonly now: () => string;
   private readonly externalLeaseTtlMs: number;
   private readonly externalHeartbeatMs: number;
+  private readonly metrics: RuntimeMetricsSink;
   private readonly diagnosticPublishFlights = new Map<string, Promise<unknown>>();
 
   public constructor(private readonly dependencies: WorkflowServiceDependencies) {
     this.now = dependencies.now ?? (() => new Date().toISOString());
     this.externalLeaseTtlMs = dependencies.externalLeaseTtlMs ?? DEFAULT_EXTERNAL_LEASE_TTL_MS;
     this.externalHeartbeatMs = dependencies.externalHeartbeatMs ?? DEFAULT_EXTERNAL_HEARTBEAT_MS;
+    this.metrics = dependencies.metrics ?? new NoopRuntimeMetrics();
 
     if (
       this.externalHeartbeatMs <= 0 ||
@@ -534,6 +543,12 @@ export class WorkflowService {
   }
 
   public async start(rawInput: unknown): Promise<WorkflowStatus> {
+    return this.metrics.time("external_action.wall_ms", { action: "start" }, () =>
+      this.startUninstrumented(rawInput),
+    );
+  }
+
+  private async startUninstrumented(rawInput: unknown): Promise<WorkflowStatus> {
     const input = WorkflowStartInputSchema.parse(rawInput);
     const workspaceBinding =
       input.workspace === undefined
@@ -815,6 +830,9 @@ export class WorkflowService {
     legacyNetworkEvidence?: ProjectTextSource,
   ): Promise<{ artifact: ArtifactRef; inventory: LegacyInventory }> {
     const sourceInventory = await buildLegacyInventory(legacyProjectRoot);
+    this.metrics.increment("legacy.rebuild_count");
+    this.metrics.increment("legacy.file_read_count", sourceInventory.scannedFiles);
+    this.metrics.increment("legacy.parse_count", sourceInventory.entries.length);
     const inventory =
       legacyNetworkEvidence === undefined
         ? sourceInventory
@@ -867,6 +885,12 @@ export class WorkflowService {
   }
 
   public async advance(rawInput: unknown): Promise<WorkflowStatus> {
+    return this.metrics.time("external_action.wall_ms", { action: "advance" }, () =>
+      this.advanceUninstrumented(rawInput),
+    );
+  }
+
+  private async advanceUninstrumented(rawInput: unknown): Promise<WorkflowStatus> {
     const input = WorkflowAdvanceInputSchema.parse(rawInput);
 
     for (let step = 0; step < 8; step += 1) {
@@ -911,6 +935,12 @@ export class WorkflowService {
   }
 
   public async submit(rawInput: unknown): Promise<WorkflowStatus> {
+    return this.metrics.time("external_action.wall_ms", { action: "submit" }, () =>
+      this.submitUninstrumented(rawInput),
+    );
+  }
+
+  private async submitUninstrumented(rawInput: unknown): Promise<WorkflowStatus> {
     const input = WorkflowSubmitInputSchema.parse(rawInput);
     const run = await this.dependencies.runStore.get(input.runId);
     const submission = input.submission;
@@ -1221,6 +1251,12 @@ export class WorkflowService {
   }
 
   public async status(rawInput: unknown): Promise<WorkflowStatus> {
+    return this.metrics.time("external_action.wall_ms", { action: "status" }, () =>
+      this.statusUninstrumented(rawInput),
+    );
+  }
+
+  private async statusUninstrumented(rawInput: unknown): Promise<WorkflowStatus> {
     const input = WorkflowStatusInputSchema.parse(rawInput);
     const run = await this.dependencies.runStore.get(input.runId);
     const scope = scopeFromRun(run);
@@ -1430,7 +1466,11 @@ export class WorkflowService {
     const timestamp = this.now();
     const sourceRunRevision = run.revision;
     const report = await this.materializeBlockedReport(run, blocker, timestamp);
-    const { jsonArtifact, markdownArtifact: artifact } = await this.writePrReportArtifacts({
+    const {
+      jsonArtifact,
+      markdownArtifact: artifact,
+      runtimeArtifact,
+    } = await this.writePrReportArtifacts({
       run,
       report,
       reportIntent: "blocked-diagnostic",
@@ -1450,7 +1490,12 @@ export class WorkflowService {
           ...run,
           revision: run.revision + 1,
           updatedAt: timestamp,
-          artifacts: [...run.artifacts, jsonArtifact, artifact],
+          artifacts: [
+            ...run.artifacts,
+            jsonArtifact,
+            artifact,
+            ...(runtimeArtifact === undefined ? [] : [runtimeArtifact]),
+          ],
         },
         run.revision,
       );
@@ -2363,6 +2408,7 @@ export class WorkflowService {
               );
             }
             const decoded = await decodeBoundedPng(content, evidencePath);
+            this.metrics.increment("visual.decode_pixels", decoded.width * decoded.height);
             const stateContract = submission.stateContracts.find(
               (contract) => contract.targetId === target.targetId,
             );
@@ -2819,6 +2865,7 @@ export class WorkflowService {
         actualContent,
         `${target.targetId} browser capture`,
       );
+      this.metrics.increment("visual.decode_pixels", decodedActual.width * decodedActual.height);
       const expectedWidth = Math.round(target.viewport.width * target.deviceScaleFactor);
       const expectedHeight = Math.round(target.viewport.height * target.deviceScaleFactor);
       if (decodedActual.width !== expectedWidth || decodedActual.height !== expectedHeight) {
@@ -3301,6 +3348,17 @@ export class WorkflowService {
             colorSpace: target.figmaCapture.colorSpace,
             role: `${target.targetId} browser capture`,
           });
+          this.metrics.increment(
+            "visual.decode_pixels",
+            target.figmaCapture.bitmapSize.width * target.figmaCapture.bitmapSize.height +
+              Math.round(target.viewport.width * target.deviceScaleFactor) *
+                Math.round(target.viewport.height * target.deviceScaleFactor),
+          );
+          this.metrics.increment(
+            "visual.encode_pixels",
+            normalizedBaseline.width * normalizedBaseline.height +
+              normalizedActual.width * normalizedActual.height,
+          );
           comparisonBaseline = normalizedBaseline.content;
           comparisonActual = normalizedActual.content;
           baselineRef = await this.writeVisualArtifact({
@@ -3504,6 +3562,7 @@ export class WorkflowService {
       });
     } catch (error: unknown) {
       if (reservationResult.kind === "committed-replay") throw error;
+      this.metrics.increment("visual.reservation_aborted");
       const timestamp = this.now();
       const failureArtifact = await this.visualAttemptStatusArtifact({
         runId: run.id,
@@ -3781,6 +3840,8 @@ export class WorkflowService {
             });
       try {
         await this.dependencies.runStore.save(next, current.revision);
+        this.metrics.increment("visual.reservation_committed", 1, { outcome: "committed" });
+        this.metrics.gauge("visual.active_workers", 0, { stage: "implementation" });
         return;
       } catch (error: unknown) {
         if (!(error instanceof RevisionConflictError)) throw error;
@@ -3830,12 +3891,15 @@ export class WorkflowService {
         (candidate) => candidate.submissionIdentity === submissionIdentity,
       );
       if (committedReplay !== undefined) {
+        this.metrics.increment("visual.reservation_committed", 1, { outcome: "replay" });
         return { kind: "committed-replay", reservation: committedReplay };
       }
       if (currentVisualReport(current, packet.id)?.metadata["visualStatus"] === "passed") {
         throw new Error("The current review packet already has a passing visual comparison");
       }
       if (summary.active !== undefined) {
+        this.metrics.gauge("visual.active_workers", 1, { stage: "implementation" });
+        this.metrics.gauge("visual.peak_workers", 1, { stage: "implementation" });
         return { kind: "busy", reservation: summary.active };
       }
       if (summary.recoverable !== undefined) {
@@ -3864,6 +3928,7 @@ export class WorkflowService {
               },
               current.revision,
             );
+            this.metrics.increment("visual.reservation_stale");
             continue;
           } catch (error: unknown) {
             if (!(error instanceof RevisionConflictError)) throw error;
@@ -3901,6 +3966,8 @@ export class WorkflowService {
           },
           current.revision,
         );
+        this.metrics.gauge("visual.active_workers", 1, { stage: "implementation" });
+        this.metrics.gauge("visual.peak_workers", 1, { stage: "implementation" });
         return { kind: "reserved", reservation };
       } catch (error: unknown) {
         if (!(error instanceof RevisionConflictError)) throw error;
@@ -4220,7 +4287,7 @@ export class WorkflowService {
       ],
     });
     assertCurrentPrReportV2(report);
-    const { jsonArtifact, markdownArtifact } = await this.writePrReportArtifacts({
+    const { jsonArtifact, markdownArtifact, runtimeArtifact } = await this.writePrReportArtifacts({
       run,
       report,
       reportIntent: "ready",
@@ -4233,7 +4300,12 @@ export class WorkflowService {
         ...run,
         revision: run.revision + 1,
         updatedAt: timestamp,
-        artifacts: [...run.artifacts, jsonArtifact, markdownArtifact],
+        artifacts: [
+          ...run.artifacts,
+          jsonArtifact,
+          markdownArtifact,
+          ...(runtimeArtifact === undefined ? [] : [runtimeArtifact]),
+        ],
       },
       run.revision,
     );
@@ -4249,6 +4321,7 @@ export class WorkflowService {
   }): Promise<{
     jsonArtifact: ArtifactRef;
     markdownArtifact: ArtifactRef;
+    runtimeArtifact?: ArtifactRef;
   }> {
     const report = PrReportV2Schema.parse(input.report);
     assertCurrentPrReportV2(report);
@@ -4326,7 +4399,44 @@ export class WorkflowService {
         ...bindingMetadata,
       },
     });
-    return { jsonArtifact, markdownArtifact };
+    const runtimeArtifact = await this.writeRuntimePerformanceArtifact(
+      input.run.id,
+      jsonBlob.digest,
+      input.timestamp,
+    );
+    return {
+      jsonArtifact,
+      markdownArtifact,
+      ...(runtimeArtifact === undefined ? {} : { runtimeArtifact }),
+    };
+  }
+
+  private async writeRuntimePerformanceArtifact(
+    runId: string,
+    fixtureDigest: Sha256Digest,
+    timestamp: string,
+  ): Promise<ArtifactRef | undefined> {
+    if (!(this.metrics instanceof RuntimeMetricsRecorder)) return undefined;
+    const blob = await this.dependencies.artifactStore.writeBlob({
+      content: Buffer.from(
+        `${JSON.stringify(this.metrics.snapshot({ runId, fixtureDigest, collectedAt: timestamp }), null, 2)}\n`,
+        "utf8",
+      ),
+      mediaType: "application/json",
+      storedAt: timestamp,
+      label: "runtime-performance-v1.json",
+    });
+    return ArtifactRefSchema.parse({
+      id: createArtifactId(),
+      kind: "agent-result-report",
+      uri: blob.uri,
+      mediaType: "application/json",
+      digest: blob.digest,
+      producedBy: "orchestrator",
+      evidenceIds: [],
+      createdAt: timestamp,
+      metadata: { adapter: "runtime-performance-v1", reportKind: "runtime-performance-v1" },
+    });
   }
 
   private async featureTestCountForRun(

@@ -14,6 +14,8 @@
     "build": "tsup",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "bench:runtime": "vitest bench --run tests/performance/runtime-reduction.bench.ts",
+    "bench:runtime:json": "vitest bench --run tests/performance/runtime-reduction.bench.ts --outputJson benchmarks/runtime/latest.json",
     "skill-pressure:check-control": "node scripts/check-skill-pressure-results.mjs --phase control",
     "skill-pressure:check": "node scripts/check-skill-pressure-results.mjs --phase all",
     "guide:assets": "tsx scripts/build-guide-visual-assets.ts",

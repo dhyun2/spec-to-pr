@@ -9,6 +9,8 @@ import {
   WorkflowStartInputSchema,
   WorkflowStatusInputSchema,
 } from "../application/workflow-service.js";
+import type { WorkflowService } from "../application/workflow-service.js";
+import type { RuntimeMetricsSink } from "../runtime/performance-instrumentation.js";
 import type { ServicesProvider } from "./run-service-provider.js";
 
 const CONTRACT_VERSION = "2.0.0" as const;
@@ -110,7 +112,7 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
         "Create a Run, capture intake, estimate workload, classify scope, and stop at the next boundary.",
       inputSchema: WorkflowStartInputSchema.shape,
     },
-    async (input) => toolResult(await (await servicesProvider()).workflowService.start(input)),
+    async (input) => workflowToolResult(servicesProvider, (workflow) => workflow.start(input)),
   );
 
   server.registerTool(
@@ -120,7 +122,7 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
       description: "Run deterministic steps until completion, a blocker, or an external action.",
       inputSchema: WorkflowAdvanceInputSchema.shape,
     },
-    async (input) => toolResult(await (await servicesProvider()).workflowService.advance(input)),
+    async (input) => workflowToolResult(servicesProvider, (workflow) => workflow.advance(input)),
   );
 
   server.registerTool(
@@ -132,7 +134,7 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
       // discriminated submission contract before any state can change.
       inputSchema: WorkflowSubmitToolInputSchema,
     },
-    async (input) => toolResult(await (await servicesProvider()).workflowService.submit(input)),
+    async (input) => workflowToolResult(servicesProvider, (workflow) => workflow.submit(input)),
   );
 
   server.registerTool(
@@ -144,7 +146,7 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
       inputSchema: WorkflowStatusInputSchema.shape,
       annotations: { readOnlyHint: true },
     },
-    async (input) => toolResult(await (await servicesProvider()).workflowService.status(input)),
+    async (input) => workflowToolResult(servicesProvider, (workflow) => workflow.status(input)),
   );
 
   server.registerTool(
@@ -154,7 +156,7 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
       description: "Preview or execute safe draft PR/MR publication from the canonical report.",
       inputSchema: WorkflowPublishInputSchema.shape,
     },
-    async (input) => toolResult(await (await servicesProvider()).workflowService.publish(input)),
+    async (input) => workflowToolResult(servicesProvider, (workflow) => workflow.publish(input)),
   );
 
   server.registerTool(
@@ -164,17 +166,27 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
       description: "Preview or execute explicit post-merge OpenSpec archival.",
       inputSchema: WorkflowArchiveInputSchema.shape,
     },
-    async (input) => toolResult(await (await servicesProvider()).workflowService.archive(input)),
+    async (input) => workflowToolResult(servicesProvider, (workflow) => workflow.archive(input)),
   );
 
   return server;
 }
 
-function toolResult(value: unknown) {
+async function workflowToolResult(
+  servicesProvider: ServicesProvider,
+  operation: (workflow: WorkflowService) => Promise<unknown>,
+) {
+  const services = await servicesProvider();
+  return toolResult(await operation(services.workflowService), services.metrics);
+}
+
+function toolResult(value: unknown, metrics?: RuntimeMetricsSink) {
   const structuredContent = asStructuredContent(value);
+  const text = JSON.stringify(structuredContent);
+  metrics?.increment("status.serialized_bytes", Buffer.byteLength(text), { view: "tool-result" });
 
   return {
-    content: [{ type: "text" as const, text: JSON.stringify(structuredContent) }],
+    content: [{ type: "text" as const, text }],
     structuredContent,
   };
 }

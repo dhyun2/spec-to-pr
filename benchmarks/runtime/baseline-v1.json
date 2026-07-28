@@ -1,0 +1,47 @@
+{
+  "schemaVersion": "runtime-reduction-benchmark-v1",
+  "fixtureDigest": "sha256:2d6b23e2ff70952dabe62b219f14a62262cfc26a8d9767ce9d852a0f88a8b83c",
+  "environment": {
+    "nodeVersion": "v24.12.0",
+    "platform": "darwin",
+    "architecture": "arm64",
+    "cpuCount": 14
+  },
+  "warmupIterations": 1,
+  "measuredIterations": 5,
+  "fixtures": [
+    {
+      "name": "mixed intake: 20 local documents, 4 parser-safe chunks, 4 OpenAPI sources",
+      "p50WallMs": 0.06049999999999045,
+      "p95WallMs": 0.08183399999998642,
+      "peakRssBytes": 91488256,
+      "metricCounters": {
+        "localDocuments": 20,
+        "parserSafeChunks": 4,
+        "openApiSources": 4
+      }
+    },
+    {
+      "name": "legacy: 250 JS/Vue files, shared adapters, 40 terminal API calls",
+      "p50WallMs": 0.08166599999998425,
+      "p95WallMs": 0.09295800000001009,
+      "peakRssBytes": 91488256,
+      "metricCounters": {
+        "files": 250,
+        "terminalApiCalls": 40,
+        "sharedAdapters": 5
+      }
+    },
+    {
+      "name": "visual: two 360x1831 targets across three valid comparisons",
+      "p50WallMs": 0.06174999999998931,
+      "p95WallMs": 0.08199999999999363,
+      "peakRssBytes": 91488256,
+      "metricCounters": {
+        "targets": 2,
+        "comparisons": 3,
+        "pixelsPerTarget": 659160
+      }
+    }
+  ]
+}

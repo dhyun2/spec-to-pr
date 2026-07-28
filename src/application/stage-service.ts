@@ -8,6 +8,10 @@ import {
   WorkerIdSchema,
 } from "../run/stages.js";
 import { ArtifactIdSchema, GapIdSchema, RunIdSchema } from "../runtime/ids.js";
+import {
+  NoopRuntimeMetrics,
+  type RuntimeMetricsSink,
+} from "../runtime/performance-instrumentation.js";
 import { createResumePlan } from "../state/resume-plan.js";
 import {
   blockStage,
@@ -114,6 +118,7 @@ export class StageService {
   public constructor(
     private readonly store: RunStore,
     private readonly now: () => string = () => new Date().toISOString(),
+    private readonly metrics: RuntimeMetricsSink = new NoopRuntimeMetrics(),
   ) {}
 
   public async start(rawInput: unknown) {
@@ -129,7 +134,9 @@ export class StageService {
       this.now,
     );
 
-    await this.store.save(result.run, input.expectedRevision ?? run.revision);
+    await this.metrics.time("stage.wall_ms", { stage: input.stageName }, () =>
+      this.store.save(result.run, input.expectedRevision ?? run.revision),
+    );
 
     return result;
   }
@@ -149,7 +156,9 @@ export class StageService {
       this.now,
     );
 
-    await this.store.save(result.run, run.revision);
+    await this.metrics.time("stage.wall_ms", { stage: input.stageName }, () =>
+      this.store.save(result.run, run.revision),
+    );
 
     return result;
   }
@@ -169,7 +178,9 @@ export class StageService {
       this.now,
     );
 
-    await this.store.save(result.run, run.revision);
+    await this.metrics.time("stage.wall_ms", { stage: input.stageName }, () =>
+      this.store.save(result.run, run.revision),
+    );
 
     return result;
   }
@@ -190,7 +201,9 @@ export class StageService {
       this.now,
     );
 
-    await this.store.save(result.run, run.revision);
+    await this.metrics.time("stage.wall_ms", { stage: input.stageName }, () =>
+      this.store.save(result.run, run.revision),
+    );
 
     return result;
   }
@@ -212,7 +225,9 @@ export class StageService {
       this.now,
     );
 
-    await this.store.save(result.run, run.revision);
+    await this.metrics.time("stage.wall_ms", { stage: input.stageName }, () =>
+      this.store.save(result.run, run.revision),
+    );
 
     return result;
   }
@@ -232,7 +247,9 @@ export class StageService {
       this.now,
     );
 
-    await this.store.save(result.run, run.revision);
+    await this.metrics.time("stage.wall_ms", { stage: input.stageName }, () =>
+      this.store.save(result.run, run.revision),
+    );
 
     return result;
   }

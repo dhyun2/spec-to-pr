@@ -6,6 +6,10 @@ import path from "node:path";
 import { z } from "zod";
 
 import { IsoDateTimeSchema, Sha256DigestSchema, type Sha256Digest } from "../runtime/scalars.js";
+import {
+  NoopRuntimeMetrics,
+  type RuntimeMetricsSink,
+} from "../runtime/performance-instrumentation.js";
 import { digestPathSegments, sha256Digest } from "../source-registry/content-hash.js";
 
 export type ArtifactBlobMetadata = {
@@ -35,7 +39,10 @@ export type StoredArtifactBlob = {
 };
 
 export class ArtifactBlobStore {
-  public constructor(private readonly rootDirectory: string) {}
+  public constructor(
+    private readonly rootDirectory: string,
+    private readonly metrics: RuntimeMetricsSink = new NoopRuntimeMetrics(),
+  ) {}
 
   public async writeBlob(input: {
     content: Buffer;
@@ -44,6 +51,9 @@ export class ArtifactBlobStore {
     label?: string;
   }): Promise<StoredArtifactBlob> {
     const digest = sha256Digest(input.content);
+    this.metrics.increment("artifact.hash_count");
+    this.metrics.increment("artifact.write_count");
+    this.metrics.increment("artifact.write_bytes", input.content.byteLength);
     const { prefix, hex } = digestPathSegments(digest);
     const directory = path.join(this.rootDirectory, "sha256", prefix, hex);
     const contentPath = path.join(directory, "content");
@@ -99,6 +109,9 @@ export class ArtifactBlobStore {
     const contentPath = path.join(this.rootDirectory, "sha256", prefix, hex, "content");
     const metadata = await readMetadataFile(metadataPath, digest);
     const content = await readVerifiedContentFile(contentPath, digest);
+    this.metrics.increment("artifact.read_count");
+    this.metrics.increment("artifact.read_bytes", content.byteLength);
+    this.metrics.increment("artifact.hash_count");
     if (metadata.byteLength !== content.byteLength) {
       throw integrityFailure(
         `metadata byteLength ${metadata.byteLength} does not match content ${content.byteLength}`,
@@ -120,6 +133,9 @@ export class ArtifactBlobStore {
 
     const metadataPath = path.join(this.rootDirectory, "sha256", prefix, hex, "metadata.json");
     const content = await readVerifiedContentFile(contentPath, digest);
+    this.metrics.increment("artifact.read_count");
+    this.metrics.increment("artifact.read_bytes", content.byteLength);
+    this.metrics.increment("artifact.hash_count");
     const metadata = await readMetadataFile(metadataPath, digest);
     if (metadata.byteLength !== content.byteLength) {
       throw integrityFailure(
