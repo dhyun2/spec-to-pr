@@ -145,6 +145,31 @@ describe("remote detector", () => {
     expect(JSON.stringify(result)).not.toContain(token);
   });
 
+  it("uses the supplied GitLab environment credential without invoking the CLI", async () => {
+    const token = "glpat-environment-token";
+    childProcess.execFile.mockImplementation(() => {
+      throw new Error("CLI must not run when an environment credential is supplied");
+    });
+
+    const result = await preflightPublishTarget(
+      { name: "origin", url: "git@gitlab.internal.example:team/app.git" },
+      {
+        GITLAB_TOKEN: token,
+        SPEC_TO_PR_GIT_HOST: "gitlab",
+        SPEC_TO_PR_WEB_BASE_URL: "https://gitlab.internal.example",
+        SPEC_TO_PR_API_BASE_URL: "https://gitlab.internal.example/api/v4",
+      },
+    );
+
+    expect(result).toEqual({
+      public: expect.objectContaining({ host: "gitlab", projectPath: "team/app" }),
+      remoteHost: "gitlab.internal.example",
+      authVerified: true,
+    });
+    expect(childProcess.execFile).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).not.toContain(token);
+  });
+
   it.each(["", "Usage: glab config get token [flags]\n\nFlags:\n  --help"])(
     "treats unavailable GitLab CLI output as an unauthenticated preflight: %j",
     async (output) => {
@@ -201,6 +226,31 @@ describe("remote detector", () => {
       ),
     ).rejects.toThrow(/exact remote hostname/);
   });
+
+  it.each([
+    {
+      provider: "github",
+      remote: "https://github.com/acme/app.git",
+      baseUrl: "https://github.com.evil.invalid",
+    },
+    {
+      provider: "gitlab",
+      remote: "https://gitlab.com/team/app.git",
+      baseUrl: "https://gitlab.com.evil.invalid",
+    },
+  ] as const)(
+    "rejects $provider lookalike base host $baseUrl",
+    async ({ provider, remote, baseUrl }) => {
+      await expect(
+        preflightPublishTarget(
+          { name: "origin", url: remote },
+          {
+            SPEC_TO_PR_WEB_BASE_URL: baseUrl,
+          },
+        ),
+      ).rejects.toThrow(/exact remote hostname/);
+    },
+  );
 
   it("redacts auth probe failures", async () => {
     await expect(

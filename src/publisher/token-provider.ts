@@ -7,6 +7,11 @@ export type PublisherToken = {
   source: string;
 };
 
+export type PublisherCredentialAvailability = {
+  available: boolean;
+  source: string;
+};
+
 type HostTokenConfig = {
   label: string;
   envNames: string[];
@@ -54,6 +59,19 @@ export function credentialCommand(
   return provider === "github"
     ? { command: "gh", args: ["auth", "token", "--hostname", hostname] }
     : { command: "glab", args: ["config", "get", "token", "--host", hostname] };
+}
+
+export function environmentCredentialAvailability(
+  host: ReviewHost,
+  environment: Record<string, string | undefined>,
+): PublisherCredentialAvailability | undefined {
+  for (const name of HOST_CONFIG[host].envNames) {
+    if ((environment[name]?.trim().length ?? 0) > 0) {
+      return { available: true, source: name };
+    }
+  }
+
+  return undefined;
 }
 
 export function isCredentialOutputAvailable(output: string): boolean {
