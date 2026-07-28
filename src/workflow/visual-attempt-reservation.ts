@@ -54,7 +54,7 @@ export function reduceVisualReservations(
   }
 
   const collapsed = [...byIdentity.values()];
-  const committed: VisualAttemptReservation[] = [];
+  const committedByAttempt = new Map<VisualAttemptNumber, IndexedReservation>();
   for (const attempt of [1, 2, 3] as const) {
     const candidates = collapsed.filter(
       ({ reservation }) =>
@@ -66,6 +66,12 @@ export function reduceVisualReservations(
       throw new Error(`Duplicate committed visual attempt ${String(attempt)}`);
     }
     const candidate = candidates[0];
+    if (candidate !== undefined) committedByAttempt.set(attempt, candidate);
+  }
+
+  const committed: VisualAttemptReservation[] = [];
+  for (const attempt of [1, 2, 3] as const) {
+    const candidate = committedByAttempt.get(attempt);
     if (candidate === undefined) break;
     committed.push(candidate.reservation);
   }

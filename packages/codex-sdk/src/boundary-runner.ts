@@ -177,6 +177,7 @@ export async function executeBudgetedBoundaryTurns(input: {
   let blockedFinalizationAttempted = false;
   let blockedDiagnosticPreflightIneligible = false;
   let blockedDiagnosticReserveLatched = false;
+  let blockedDiagnosticReserveExhausted = false;
   const items: RunResult["items"] = [];
 
   while (turnCount < input.maxTurns) {
@@ -220,6 +221,8 @@ export async function executeBudgetedBoundaryTurns(input: {
       const blockedDiagnosticReserveRemaining =
         !blockedDiagnosticReserveLatched ||
         usage.totalTokens <= activeHardLimitTokens - (input.blockedDiagnosticTokenReserve ?? 0);
+      blockedDiagnosticReserveExhausted =
+        blockedDiagnosticReserveLatched && !blockedDiagnosticReserveRemaining;
       if (
         !blockedFinalizationAttempted &&
         canAttemptBlockedDiagnosticFinalization(workflowStatus) &&
@@ -291,7 +294,7 @@ export async function executeBudgetedBoundaryTurns(input: {
   }
 
   if (input.outputSchema !== undefined && (state === "completed" || state === "blocked")) {
-    if (blockedDiagnosticPreflightIneligible) {
+    if (blockedDiagnosticPreflightIneligible || blockedDiagnosticReserveExhausted) {
       outputFormatting = "budget-skipped";
     } else if (usage?.availability !== "complete") {
       outputFormatting = "usage-unavailable";

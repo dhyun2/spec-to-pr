@@ -721,6 +721,7 @@ describe("Codex SDK workload budget", () => {
     const result = await executeBudgetedBoundaryTurns({
       client,
       initialPrompt: "implement",
+      outputSchema: { type: "object" },
       hardLimitTokens: 48_000,
       workloadSize: "M",
       requiredValidations: ["functional"],
@@ -735,6 +736,7 @@ describe("Codex SDK workload budget", () => {
     });
 
     expect(result.state).toBe("blocked");
+    expect(result.outputFormatting).toBe("budget-skipped");
     expect(result.turnCount).toBe(1);
     expect(calls).toBe(1);
   });

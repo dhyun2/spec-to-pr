@@ -145,6 +145,26 @@ describe("visual attempt reservations", () => {
     ).toThrow(/duplicate committed visual attempt 1/i);
   });
 
+  it.each([2, 3] as const)(
+    "rejects duplicate committed attempt %i even when an earlier attempt is missing",
+    (attempt) => {
+      expect(() =>
+        reduceVisualReservations(
+          [
+            committed(attempt),
+            committed(attempt, {
+              submissionIdentity: `submission-concurrent-${String(attempt)}`,
+              ownerToken: `owner-concurrent-${String(attempt)}`,
+              reportArtifactId: `artifact-concurrent-${String(attempt)}`,
+              reportDigest: `sha256:${"a".repeat(64)}`,
+            }),
+          ],
+          now,
+        ),
+      ).toThrow(new RegExp(`duplicate committed visual attempt ${String(attempt)}`, "i"));
+    },
+  );
+
   it("requires committed attempt numbers to be contiguous", () => {
     const summary = reduceVisualReservations([committed(2), committed(3)], now);
 
