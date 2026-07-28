@@ -1,4 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const childProcess = vi.hoisted(() => ({ execFile: vi.fn() }));
+
+vi.mock("node:child_process", () => childProcess);
 
 import {
   detectPublishTargetFromRemote,
@@ -7,6 +11,9 @@ import {
 } from "../../src/publisher/remote-detector.js";
 
 describe("remote detector", () => {
+  afterEach(() => {
+    childProcess.execFile.mockReset();
+  });
   it("parses GitHub SSH remotes", () => {
     const target = detectPublishTargetFromRemote({
       name: "origin",
@@ -94,7 +101,7 @@ describe("remote detector", () => {
       },
       async (input) => {
         probes.push(input);
-        return { hostname: input.hostname, token: "secret-token" };
+        return { available: true, source: "test" };
       },
     );
 
@@ -109,12 +116,58 @@ describe("remote detector", () => {
     expect(probes).toEqual([{ provider: "gitlab", hostname: "gitlab.golfzon.local" }]);
   });
 
+  it("uses the exact-host GitLab credential command and never exposes its token", async () => {
+    const token = "glpat-keyring-token";
+    childProcess.execFile.mockImplementation((_command, _args, _options, callback) => {
+      callback(null, { stdout: `${token}\n` });
+    });
+
+    const result = await preflightPublishTarget(
+      { name: "origin", url: "git@gitlab.internal.example:team/app.git" },
+      {
+        SPEC_TO_PR_GIT_HOST: "gitlab",
+        SPEC_TO_PR_WEB_BASE_URL: "https://gitlab.internal.example",
+        SPEC_TO_PR_API_BASE_URL: "https://gitlab.internal.example/api/v4",
+      },
+    );
+
+    expect(childProcess.execFile).toHaveBeenCalledWith(
+      "glab",
+      ["config", "get", "token", "--host", "gitlab.internal.example"],
+      expect.objectContaining({ encoding: "utf8" }),
+      expect.any(Function),
+    );
+    expect(result).toEqual({
+      public: expect.objectContaining({ host: "gitlab", projectPath: "team/app" }),
+      remoteHost: "gitlab.internal.example",
+      authVerified: true,
+    });
+    expect(JSON.stringify(result)).not.toContain(token);
+  });
+
+  it.each(["", "Usage: glab config get token [flags]\n\nFlags:\n  --help"])(
+    "treats unavailable GitLab CLI output as an unauthenticated preflight: %j",
+    async (output) => {
+      childProcess.execFile.mockImplementation((_command, _args, _options, callback) => {
+        callback(null, { stdout: output });
+      });
+
+      await expect(
+        preflightPublishTarget(
+          { name: "origin", url: "git@gitlab.internal.example:team/app.git" },
+          {
+            SPEC_TO_PR_GIT_HOST: "gitlab",
+            SPEC_TO_PR_WEB_BASE_URL: "https://gitlab.internal.example",
+            SPEC_TO_PR_API_BASE_URL: "https://gitlab.internal.example/api/v4",
+          },
+        ),
+      ).rejects.toThrow(/authentication must resolve the exact remote hostname/);
+    },
+  );
+
   it("rejects incomplete or cross-host self-hosted configuration", async () => {
     const remote = { name: "origin", url: "git@gitlab.golfzon.local:web/mobydick.git" };
-    const auth = async () => ({
-      hostname: "gitlab.golfzon.local",
-      token: "secret-token",
-    });
+    const auth = async () => ({ available: true, source: "test" });
     await expect(
       preflightPublishTarget(
         remote,
@@ -144,7 +197,7 @@ describe("remote detector", () => {
           SPEC_TO_PR_WEB_BASE_URL: "https://gitlab.golfzon.local",
           SPEC_TO_PR_API_BASE_URL: "https://gitlab.golfzon.local/api/v4",
         },
-        async () => ({ hostname: "wrong.internal", token: "secret-token" }),
+        async () => ({ available: false, source: "test" }),
       ),
     ).rejects.toThrow(/exact remote hostname/);
   });

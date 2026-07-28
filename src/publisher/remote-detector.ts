@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { PublishTargetSchema } from "./publish-contracts.js";
 import type { PublishTarget } from "./publish-contracts.js";
+import { credentialCommand, isCredentialOutputAvailable } from "./token-provider.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -20,7 +21,7 @@ export type PublishPreflightEnvironment = Record<string, string | undefined>;
 export type PublishAuthProbe = (input: {
   provider: "github" | "gitlab";
   hostname: string;
-}) => Promise<{ hostname: string; token: string }>;
+}) => Promise<{ available: boolean; source: string }>;
 
 export function detectPublishTargetFromRemote(
   remote: GitRemoteInfo,
@@ -103,7 +104,7 @@ export async function preflightPublishTarget(
     SPEC_TO_PR_API_BASE_URL: apiBaseUrl,
   });
 
-  let auth: { hostname: string; token: string };
+  let auth: { available: boolean; source: string };
   try {
     auth = await authProbe({ provider, hostname: normalized.host });
   } catch {
@@ -111,7 +112,7 @@ export async function preflightPublishTarget(
       `${provider === "github" ? "gh" : "glab"} auth token probe failed for ${normalized.host}`,
     );
   }
-  if (auth.hostname.toLowerCase() !== normalized.host || auth.token.trim() === "") {
+  if (!auth.available) {
     throw preflightError("authentication must resolve the exact remote hostname");
   }
   return {
@@ -177,13 +178,16 @@ function requireCustomBaseUrl(
 async function defaultAuthProbe(input: {
   provider: "github" | "gitlab";
   hostname: string;
-}): Promise<{ hostname: string; token: string }> {
-  const executable = input.provider === "github" ? "gh" : "glab";
-  const result = await execFileAsync(executable, ["auth", "token", "--hostname", input.hostname], {
+}): Promise<{ available: boolean; source: string }> {
+  const credential = credentialCommand(input.provider, input.hostname);
+  const result = await execFileAsync(credential.command, credential.args, {
     encoding: "utf8",
     maxBuffer: 1024 * 1024,
   });
-  return { hostname: input.hostname, token: result.stdout.trim() };
+  return {
+    available: isCredentialOutputAvailable(result.stdout),
+    source: `${credential.command} ${credential.args.join(" ")}`,
+  };
 }
 
 function preflightError(message: string): Error {

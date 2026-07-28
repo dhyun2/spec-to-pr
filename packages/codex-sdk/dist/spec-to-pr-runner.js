@@ -428,16 +428,16 @@ function gitOutput(workingDirectory, args, env) {
 function supportedReviewHost(remoteUrl, env) {
     if (remoteUrl === undefined)
         return undefined;
-    const host = remoteHost(remoteUrl);
-    if (host === undefined)
+    const hostname = remoteHost(remoteUrl);
+    if (hostname === undefined)
         return undefined;
     const override = env["SPEC_TO_PR_GIT_HOST"]?.trim().toLowerCase();
     if (override === "github" || override === "gitlab")
-        return override;
-    if (host === "github.com")
-        return "github";
-    if (host === "gitlab.com")
-        return "gitlab";
+        return { provider: override, hostname };
+    if (hostname === "github.com")
+        return { provider: "github", hostname };
+    if (hostname === "gitlab.com")
+        return { provider: "gitlab", hostname };
     return undefined;
 }
 function remoteHost(remoteUrl) {
@@ -453,21 +453,32 @@ function remoteHost(remoteUrl) {
     }
 }
 function hasExistingPublisherCredential(host, env) {
-    const names = host === "github" ? ["GITHUB_TOKEN", "GH_TOKEN"] : ["GITLAB_TOKEN", "GITLAB_PRIVATE_TOKEN"];
+    const names = host.provider === "github"
+        ? ["GITHUB_TOKEN", "GH_TOKEN"]
+        : ["GITLAB_TOKEN", "GITLAB_PRIVATE_TOKEN"];
     if (names.some((name) => (env[name]?.trim().length ?? 0) > 0))
         return true;
-    const command = host === "github" ? "gh" : "glab";
+    const credential = credentialCommand(host.provider, host.hostname);
     try {
-        return (execFileSync(command, ["auth", "token"], {
+        return isCredentialOutputAvailable(execFileSync(credential.command, credential.args, {
             encoding: "utf8",
             env,
             stdio: ["ignore", "pipe", "ignore"],
             timeout: 10_000,
-        }).trim().length > 0);
+        }));
     }
     catch {
         return false;
     }
+}
+function credentialCommand(provider, hostname) {
+    return provider === "github"
+        ? { command: "gh", args: ["auth", "token", "--hostname", hostname] }
+        : { command: "glab", args: ["config", "get", "token", "--host", hostname] };
+}
+function isCredentialOutputAvailable(output) {
+    const normalized = output.trim();
+    return normalized.length > 0 && !/^usage:/im.test(normalized) && !/^help:/im.test(normalized);
 }
 function requiredValidationsForInput(input) {
     const prompt = input.prompt ?? "";

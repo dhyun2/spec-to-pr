@@ -10,25 +10,22 @@ export type PublisherToken = {
 type HostTokenConfig = {
   label: string;
   envNames: string[];
-  cli: { command: string; args: string[] };
 };
 
 const HOST_CONFIG: Record<ReviewHost, HostTokenConfig> = {
   github: {
     label: "GitHub",
     envNames: ["GITHUB_TOKEN", "GH_TOKEN"],
-    cli: { command: "gh", args: ["auth", "token"] },
   },
   gitlab: {
     label: "GitLab",
     envNames: ["GITLAB_TOKEN", "GITLAB_PRIVATE_TOKEN"],
-    cli: { command: "glab", args: ["config", "get", "token", "--host"] },
   },
 };
 
 export function readPublisherToken(host: ReviewHost, hostname?: string): PublisherToken {
   const config = HOST_CONFIG[host];
-  const cli = cliForHost(config.cli, host, hostname);
+  const cli = credentialCommand(host, hostname?.trim() || defaultHostname(host));
 
   // 1. Environment variables take precedence (explicit, CI-friendly).
   const fromEnv = readEnvToken(config.envNames);
@@ -50,17 +47,22 @@ export function readPublisherToken(host: ReviewHost, hostname?: string): Publish
   );
 }
 
-function cliForHost(
-  cli: { command: string; args: string[] },
-  host: ReviewHost,
-  hostname: string | undefined,
+export function credentialCommand(
+  provider: "github" | "gitlab",
+  hostname: string,
 ): { command: string; args: string[] } {
-  if (host !== "gitlab") return cli;
+  return provider === "github"
+    ? { command: "gh", args: ["auth", "token", "--hostname", hostname] }
+    : { command: "glab", args: ["config", "get", "token", "--host", hostname] };
+}
 
-  return {
-    command: cli.command,
-    args: [...cli.args, hostname?.trim() || "gitlab.com"],
-  };
+export function isCredentialOutputAvailable(output: string): boolean {
+  const normalized = output.trim();
+  return normalized.length > 0 && !/^usage:/im.test(normalized) && !/^help:/im.test(normalized);
+}
+
+function defaultHostname(host: ReviewHost): string {
+  return host === "github" ? "github.com" : "gitlab.com";
 }
 
 function readEnvToken(names: string[]): PublisherToken | undefined {
@@ -83,7 +85,7 @@ function readCliToken(cli: { command: string; args: string[] }): PublisherToken 
       timeout: 10_000,
     }).trim();
 
-    if (output.length > 0) {
+    if (isCredentialOutputAvailable(output)) {
       return { token: output, source: `${cli.command} ${cli.args.join(" ")}` };
     }
   } catch {

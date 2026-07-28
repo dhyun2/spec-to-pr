@@ -602,14 +602,14 @@ function gitOutput(
 function supportedReviewHost(
   remoteUrl: string | undefined,
   env: NodeJS.ProcessEnv,
-): "github" | "gitlab" | undefined {
+): { provider: "github" | "gitlab"; hostname: string } | undefined {
   if (remoteUrl === undefined) return undefined;
-  const host = remoteHost(remoteUrl);
-  if (host === undefined) return undefined;
+  const hostname = remoteHost(remoteUrl);
+  if (hostname === undefined) return undefined;
   const override = env["SPEC_TO_PR_GIT_HOST"]?.trim().toLowerCase();
-  if (override === "github" || override === "gitlab") return override;
-  if (host === "github.com") return "github";
-  if (host === "gitlab.com") return "gitlab";
+  if (override === "github" || override === "gitlab") return { provider: override, hostname };
+  if (hostname === "github.com") return { provider: "github", hostname };
+  if (hostname === "gitlab.com") return { provider: "gitlab", hostname };
   return undefined;
 }
 
@@ -625,25 +625,41 @@ function remoteHost(remoteUrl: string): string | undefined {
 }
 
 function hasExistingPublisherCredential(
-  host: "github" | "gitlab",
+  host: { provider: "github" | "gitlab"; hostname: string },
   env: NodeJS.ProcessEnv,
 ): boolean {
   const names =
-    host === "github" ? ["GITHUB_TOKEN", "GH_TOKEN"] : ["GITLAB_TOKEN", "GITLAB_PRIVATE_TOKEN"];
+    host.provider === "github"
+      ? ["GITHUB_TOKEN", "GH_TOKEN"]
+      : ["GITLAB_TOKEN", "GITLAB_PRIVATE_TOKEN"];
   if (names.some((name) => (env[name]?.trim().length ?? 0) > 0)) return true;
-  const command = host === "github" ? "gh" : "glab";
+  const credential = credentialCommand(host.provider, host.hostname);
   try {
-    return (
-      execFileSync(command, ["auth", "token"], {
+    return isCredentialOutputAvailable(
+      execFileSync(credential.command, credential.args, {
         encoding: "utf8",
         env,
         stdio: ["ignore", "pipe", "ignore"],
         timeout: 10_000,
-      }).trim().length > 0
+      }),
     );
   } catch {
     return false;
   }
+}
+
+function credentialCommand(
+  provider: "github" | "gitlab",
+  hostname: string,
+): { command: string; args: string[] } {
+  return provider === "github"
+    ? { command: "gh", args: ["auth", "token", "--hostname", hostname] }
+    : { command: "glab", args: ["config", "get", "token", "--host", hostname] };
+}
+
+function isCredentialOutputAvailable(output: string): boolean {
+  const normalized = output.trim();
+  return normalized.length > 0 && !/^usage:/im.test(normalized) && !/^help:/im.test(normalized);
 }
 
 function requiredValidationsForInput(input: SpecToPrCodexRunInput): string[] {
