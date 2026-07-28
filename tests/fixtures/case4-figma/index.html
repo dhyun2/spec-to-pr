@@ -5,6 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Case 4 · 매장 찾기</title>
     <style>
+      :root {
+        --semantic-text-tertiary: rgb(107 114 128);
+        --semantic-status-positive: rgb(15 107 55);
+        --semantic-status-negative: rgb(159 18 57);
+        --semantic-border-primary: rgb(209 213 219);
+        --semantic-focus-primary: rgb(245 158 11);
+      }
+
       * {
         box-sizing: border-box;
       }
@@ -38,6 +46,20 @@
         font-size: 18px;
         font-weight: 800;
         letter-spacing: -0.03em;
+      }
+
+      .copy-button {
+        width: 32px;
+        height: 32px;
+        flex: 0 0 32px;
+        margin: 0;
+        padding: 0;
+        border: 1px solid var(--semantic-border-primary);
+        border-radius: 8px;
+        color: var(--semantic-text-tertiary);
+        background: #fff;
+        font-size: 16px;
+        line-height: 1;
       }
 
       .map {
@@ -174,7 +196,80 @@
         font-size: 14px;
       }
 
-      button {
+      .comparison {
+        margin-top: 28px;
+      }
+
+      .comparison h2 {
+        margin: 0 0 12px;
+        font-size: 18px;
+        line-height: 1.4;
+      }
+
+      .preview-pair {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .preview-pair img {
+        display: block;
+        width: 100%;
+        height: 88px;
+        border: 1px solid var(--semantic-border-primary);
+        border-radius: 8px;
+        background: #eaf1e9;
+        object-fit: cover;
+      }
+
+      .icon-fixtures {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        margin-top: 16px;
+      }
+
+      .icon-fixture {
+        width: 16px;
+        height: 16px;
+        display: inline-flex;
+        flex-shrink: 0;
+        align-self: center;
+        align-items: center;
+        justify-content: center;
+        font-size: 16px;
+        line-height: 16px;
+      }
+
+      [data-icon="spot"] {
+        color: var(--semantic-text-tertiary);
+      }
+
+      [data-icon="circle"] {
+        color: var(--semantic-status-positive);
+      }
+
+      [data-icon="close"] {
+        color: var(--semantic-status-negative);
+      }
+
+      .comparison-table {
+        width: 100%;
+        margin-top: 16px;
+        border: 1px solid var(--semantic-border-primary);
+        border-collapse: collapse;
+        color: #374151;
+        font-size: 13px;
+      }
+
+      .comparison-table th,
+      .comparison-table td {
+        padding: 8px;
+        border: 1px solid var(--semantic-border-primary);
+        text-align: left;
+      }
+
+      #action {
         width: 100%;
         height: 54px;
         margin-top: 24px;
@@ -187,11 +282,11 @@
       }
 
       button:focus-visible {
-        outline: 3px solid #f59e0b;
+        outline: 3px solid var(--semantic-focus-primary);
         outline-offset: 3px;
       }
 
-      body[data-state="unavailable"] button {
+      body[data-state="unavailable"] #action {
         background: #9ca3af;
       }
     </style>
@@ -200,7 +295,15 @@
     <main>
       <header>
         <span class="brand">NX Plus Park</span>
-        <span aria-hidden="true">⌖</span>
+        <button
+          class="copy-button"
+          data-ui="copy-button"
+          id="copy-link"
+          type="button"
+          aria-label="비교 링크 복사"
+        >
+          ⧉
+        </button>
       </header>
       <section class="map" aria-label="충전소 위치 지도">
         <div class="pin"><span>EV</span></div>
@@ -213,6 +316,69 @@
         <span class="status" id="status"></span>
         <div class="chargers" id="chargers"></div>
         <ul class="facts" id="facts"></ul>
+        <section class="comparison" aria-labelledby="comparison-title">
+          <h2 id="comparison-title">화면 비교</h2>
+          <div class="preview-pair">
+            <img
+              data-ui="left-image"
+              alt="사용 가능 상태 미리보기"
+              src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="
+            />
+            <img
+              data-ui="right-image"
+              alt="사용 불가 상태 미리보기"
+              src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="
+            />
+          </div>
+          <div class="icon-fixtures" aria-label="상태 아이콘">
+            <span
+              class="icon-fixture"
+              data-icon="spot"
+              data-export="Spot"
+              data-state-prop="normal"
+              data-token="--semantic-text-tertiary"
+              aria-label="기본 상태"
+              >●</span
+            >
+            <span
+              class="icon-fixture"
+              data-icon="circle"
+              data-export="Circle"
+              data-state-prop="available"
+              data-token="--semantic-status-positive"
+              aria-label="사용 가능"
+              >○</span
+            >
+            <span
+              class="icon-fixture"
+              data-icon="close"
+              data-export="Close"
+              data-state-prop="unavailable"
+              data-token="--semantic-status-negative"
+              aria-label="사용 불가"
+              >×</span
+            >
+          </div>
+          <table class="comparison-table" data-ui="comparison-table">
+            <thead>
+              <tr>
+                <th scope="col">항목</th>
+                <th scope="col">검증값</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">아이콘</th>
+                <td>16 × 16</td>
+              </tr>
+              <tr>
+                <th scope="row">외곽선</th>
+                <td>전체 표시</td>
+              </tr>
+            </tbody>
+          </table>
+          <p id="copy-result" role="status" aria-live="polite"></p>
+        </section>
         <button type="button" id="action">길 안내 시작</button>
       </section>
     </main>
@@ -255,6 +421,12 @@
       const action = document.querySelector("#action");
       action.disabled = state === "unavailable";
       action.textContent = state === "unavailable" ? "현재 이용할 수 없어요" : "길 안내 시작";
+      const copyButton = document.querySelector("#copy-link");
+      const copyResult = document.querySelector("#copy-result");
+      copyButton.addEventListener("click", () => {
+        copyButton.dataset.copyResult = "copied";
+        copyResult.textContent = "비교 링크를 복사했습니다";
+      });
       await document.fonts.ready;
       window.__CASE4_READY__ = {
         fixtureId: fixture.id,

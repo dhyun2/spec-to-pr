@@ -62,6 +62,90 @@ const origin = `http://127.0.0.1:${address.port}`;
 const browser = await chromium.launch({ headless: true });
 const browserChannel = "chromium";
 const adapterVersion = "capture-runner-v2";
+const requiredAssertionIds = [
+  "paired-image-geometry",
+  "table-border-top",
+  "table-border-bottom",
+  "table-border-left",
+  "table-border-right",
+  "copy-button-geometry",
+  ...["spot", "circle", "close"].flatMap((icon) => [
+    `${icon}-icon-width`,
+    `${icon}-icon-height`,
+    `${icon}-icon-color`,
+    `${icon}-icon-token`,
+    `${icon}-icon-alignment`,
+    `${icon}-icon-flex-shrink`,
+  ]),
+  "copy-button-focus-order",
+  "copy-button-focus-visible",
+  "heading-order",
+  "copy-button-name",
+  "copy-click",
+  "copy-keyboard",
+].sort();
+const exactDesignBindings = [
+  {
+    id: "icon-normal-spot",
+    figmaComponent: "icon/normal/spot",
+    nodeId: "900:1",
+    role: "icon",
+    resolution: {
+      kind: "component",
+      module: "@frontend/ui/icons/vue",
+      exportName: "Spot",
+      props: { size: 16, color: "--semantic-text-tertiary", state: "normal" },
+    },
+    semanticTokens: [
+      {
+        role: "icon",
+        figmaVariable: "semantic/text/tertiary",
+        codeToken: "--semantic-text-tertiary",
+      },
+    ],
+    expectedGeometry: { width: 16, height: 16, alignment: "center", flexShrink: 0 },
+  },
+  {
+    id: "icon-status-circle",
+    figmaComponent: "icon/status/circle",
+    nodeId: "900:2",
+    role: "icon",
+    resolution: {
+      kind: "component",
+      module: "@frontend/ui/icons/vue",
+      exportName: "Circle",
+      props: { size: 16, color: "--semantic-status-positive", state: "available" },
+    },
+    semanticTokens: [
+      {
+        role: "icon",
+        figmaVariable: "semantic/status/positive",
+        codeToken: "--semantic-status-positive",
+      },
+    ],
+    expectedGeometry: { width: 16, height: 16, alignment: "center", flexShrink: 0 },
+  },
+  {
+    id: "icon-status-close",
+    figmaComponent: "icon/status/close",
+    nodeId: "900:3",
+    role: "icon",
+    resolution: {
+      kind: "component",
+      module: "@frontend/ui/icons/vue",
+      exportName: "Close",
+      props: { size: 16, color: "--semantic-status-negative", state: "unavailable" },
+    },
+    semanticTokens: [
+      {
+        role: "icon",
+        figmaVariable: "semantic/status/negative",
+        codeToken: "--semantic-status-negative",
+      },
+    ],
+    expectedGeometry: { width: 16, height: 16, alignment: "center", flexShrink: 0 },
+  },
+];
 
 try {
   const captures = [];
@@ -94,7 +178,7 @@ try {
           value: fixture.stateFacts.parking,
         },
       ],
-      requiredAssertionIds: [`assert-shop-${state}`],
+      requiredAssertionIds,
     };
     const stateContractDigest = `sha256:${createHash("sha256")
       .update(JSON.stringify(stateContractFields))
@@ -136,7 +220,308 @@ try {
       assert.ok(ready.assetCount >= 1);
       assert.equal(await page.locator("main").evaluate((node) => node.scrollHeight), 1824);
       assert.equal(await page.locator("h1").textContent(), "내 주변 충전소");
-      assert.equal(await page.locator("button").isDisabled(), state === "unavailable");
+      assert.equal(await page.locator("#action").isDisabled(), state === "unavailable");
+      const focusBefore = await page.evaluate(() => {
+        document.querySelector("#copy-link").blur();
+        document.querySelector("#action").blur();
+        return document.activeElement?.tagName ?? "";
+      });
+      await page.keyboard.press("Tab");
+      const focusAfter = await page.evaluate(
+        () => document.activeElement?.id ?? document.activeElement?.tagName ?? "",
+      );
+      const focusVisible = await page
+        .locator("#copy-link")
+        .evaluate((element) => element.matches(":focus-visible"));
+      await page.locator("#copy-link").click();
+      const clickOutcome = await page.locator("#copy-link").getAttribute("data-copy-result");
+      await page.locator("#copy-link").evaluate((element) => {
+        delete element.dataset.copyResult;
+      });
+      await page.locator("#copy-link").focus();
+      await page.keyboard.press("Enter");
+      const keyboardOutcome = await page.locator("#copy-link").getAttribute("data-copy-result");
+      const uiObservation = await page.evaluate(() => {
+        const rect = (selector) => {
+          const value = document.querySelector(selector).getBoundingClientRect();
+          return {
+            x: value.x,
+            y: value.y,
+            width: value.width,
+            height: value.height,
+          };
+        };
+        const tableStyle = getComputedStyle(document.querySelector("[data-ui=comparison-table]"));
+        const icons = Object.fromEntries(
+          ["spot", "circle", "close"].map((icon) => {
+            const element = document.querySelector(`[data-icon="${icon}"]`);
+            const style = getComputedStyle(element);
+            return [
+              icon,
+              {
+                exportName: element.dataset.export,
+                stateProp: element.dataset.stateProp,
+                token: element.dataset.token,
+                width: style.width,
+                height: style.height,
+                color: style.color,
+                alignment: style.alignSelf,
+                flexShrink: style.flexShrink,
+              },
+            ];
+          }),
+        );
+        return {
+          images: {
+            left: rect("[data-ui=left-image]"),
+            right: rect("[data-ui=right-image]"),
+          },
+          table: {
+            rect: rect("[data-ui=comparison-table]"),
+            borderTopStyle: tableStyle.borderTopStyle,
+            borderBottomStyle: tableStyle.borderBottomStyle,
+            borderLeftStyle: tableStyle.borderLeftStyle,
+            borderRightStyle: tableStyle.borderRightStyle,
+          },
+          copyButton: {
+            rect: rect("[data-ui=copy-button]"),
+            accessibleName: document
+              .querySelector("[data-ui=copy-button]")
+              .getAttribute("aria-label"),
+          },
+          icons,
+          rootSemanticTokens: {
+            "--semantic-text-tertiary": getComputedStyle(document.documentElement)
+              .getPropertyValue("--semantic-text-tertiary")
+              .trim(),
+            "--semantic-status-positive": getComputedStyle(document.documentElement)
+              .getPropertyValue("--semantic-status-positive")
+              .trim(),
+            "--semantic-status-negative": getComputedStyle(document.documentElement)
+              .getPropertyValue("--semantic-status-negative")
+              .trim(),
+          },
+          headingOrder: [...document.querySelectorAll("h1,h2,h3,h4,h5,h6")]
+            .map((heading) => heading.tagName.slice(1))
+            .join(","),
+        };
+      });
+      const geometryAssertion = (id, selector, subject, expected, observed) => ({
+        id,
+        kind: "geometry",
+        selector,
+        subject,
+        expected,
+        observed,
+        tolerance: 0.5,
+        status: "passed",
+      });
+      const styleAssertion = (id, selector, subject, property, expected, observed) => ({
+        id,
+        kind: "computed-style",
+        selector,
+        subject,
+        property,
+        expected,
+        observed,
+        status: "passed",
+      });
+      const accessibilityAssertion = (id, selector, subject, check, expected, observed) => ({
+        id,
+        kind: "accessibility",
+        selector,
+        subject,
+        check,
+        expected,
+        observed,
+        status: "passed",
+      });
+      const interactionAssertion = (id, selector, subject, action, expected, observed) => ({
+        id,
+        kind: "interaction",
+        selector,
+        subject,
+        action,
+        expected,
+        observed,
+        status: "passed",
+      });
+      const rightImageExpected = {
+        x: 184,
+        y: uiObservation.images.left.y,
+        width: 156,
+        height: 88,
+      };
+      const uiAssertions = [
+        geometryAssertion(
+          "paired-image-geometry",
+          "[data-ui=right-image]",
+          "left and right preview image geometry",
+          rightImageExpected,
+          uiObservation.images.right,
+        ),
+        ...[
+          ["table-border-top", "border-top-style", uiObservation.table.borderTopStyle],
+          ["table-border-bottom", "border-bottom-style", uiObservation.table.borderBottomStyle],
+          ["table-border-left", "border-left-style", uiObservation.table.borderLeftStyle],
+          ["table-border-right", "border-right-style", uiObservation.table.borderRightStyle],
+        ].map(([id, property, observed]) =>
+          styleAssertion(
+            id,
+            "[data-ui=comparison-table]",
+            `comparison table ${property}`,
+            property,
+            "solid",
+            observed,
+          ),
+        ),
+        geometryAssertion(
+          "copy-button-geometry",
+          "[data-ui=copy-button]",
+          "copy button size and placement",
+          { x: 308, y: 16, width: 32, height: 32 },
+          uiObservation.copyButton.rect,
+        ),
+        ...Object.entries({
+          spot: {
+            color: "rgb(107, 114, 128)",
+            token: "--semantic-text-tertiary",
+          },
+          circle: {
+            color: "rgb(15, 107, 55)",
+            token: "--semantic-status-positive",
+          },
+          close: {
+            color: "rgb(159, 18, 57)",
+            token: "--semantic-status-negative",
+          },
+        }).flatMap(([icon, expected]) => {
+          const observed = uiObservation.icons[icon];
+          return [
+            styleAssertion(
+              `${icon}-icon-width`,
+              `[data-icon=${icon}]`,
+              `${icon} icon width`,
+              "width",
+              "16px",
+              observed.width,
+            ),
+            styleAssertion(
+              `${icon}-icon-height`,
+              `[data-icon=${icon}]`,
+              `${icon} icon height`,
+              "height",
+              "16px",
+              observed.height,
+            ),
+            styleAssertion(
+              `${icon}-icon-color`,
+              `[data-icon=${icon}]`,
+              `${icon} icon computed color`,
+              "color",
+              expected.color,
+              observed.color,
+            ),
+            styleAssertion(
+              `${icon}-icon-token`,
+              `[data-icon=${icon}]`,
+              `${icon} icon semantic color prop`,
+              "color-token",
+              expected.token,
+              observed.token,
+            ),
+            styleAssertion(
+              `${icon}-icon-alignment`,
+              `[data-icon=${icon}]`,
+              `${icon} icon alignment`,
+              "align-self",
+              "center",
+              observed.alignment,
+            ),
+            styleAssertion(
+              `${icon}-icon-flex-shrink`,
+              `[data-icon=${icon}]`,
+              `${icon} icon flex shrink`,
+              "flex-shrink",
+              "0",
+              observed.flexShrink,
+            ),
+          ];
+        }),
+        accessibilityAssertion(
+          "copy-button-focus-order",
+          "[data-ui=copy-button]",
+          "keyboard focus before and after Tab",
+          "keyboard-focus",
+          "BODY->copy-link",
+          `${focusBefore}->${focusAfter}`,
+        ),
+        accessibilityAssertion(
+          "copy-button-focus-visible",
+          "[data-ui=copy-button]",
+          "visible keyboard focus",
+          "focus-visible",
+          true,
+          focusVisible,
+        ),
+        accessibilityAssertion(
+          "heading-order",
+          "main",
+          "ordered heading levels",
+          "heading-order",
+          "1,2",
+          uiObservation.headingOrder,
+        ),
+        accessibilityAssertion(
+          "copy-button-name",
+          "[data-ui=copy-button]",
+          "copy button accessible name",
+          "accessible-name",
+          "비교 링크 복사",
+          uiObservation.copyButton.accessibleName,
+        ),
+        interactionAssertion(
+          "copy-click",
+          "[data-ui=copy-button]",
+          "copy click result",
+          "click",
+          "copied",
+          clickOutcome,
+        ),
+        interactionAssertion(
+          "copy-keyboard",
+          "[data-ui=copy-button]",
+          "copy Enter result",
+          "keyboard",
+          "copied",
+          keyboardOutcome,
+        ),
+      ];
+      assert.deepEqual(uiAssertions.map((assertion) => assertion.id).sort(), requiredAssertionIds);
+      for (const assertion of uiAssertions) {
+        if (assertion.kind === "geometry") {
+          for (const key of ["x", "y", "width", "height"]) {
+            assert.ok(
+              Math.abs(assertion.expected[key] - assertion.observed[key]) <= assertion.tolerance,
+              `${assertion.id} ${key}: expected ${assertion.expected[key]}, observed ${assertion.observed[key]}`,
+            );
+          }
+        } else {
+          assert.deepEqual(
+            assertion.observed,
+            assertion.expected,
+            `${assertion.id}: focused UI assertion failed`,
+          );
+        }
+      }
+      for (const [index, icon] of ["spot", "circle", "close"].entries()) {
+        const observed = uiObservation.icons[icon];
+        const binding = exactDesignBindings[index];
+        assert.equal(observed.exportName, binding.resolution.exportName);
+        assert.equal(observed.stateProp, binding.resolution.props.state);
+        assert.equal(observed.token, binding.resolution.props.color);
+        assert.ok(uiObservation.rootSemanticTokens[observed.token].length > 0);
+      }
       const capturePath = path.join(outputRoot, `${state}.png`);
       await page.screenshot({ path: capturePath, fullPage: true });
       const bytes = await readFile(capturePath);
@@ -191,7 +576,23 @@ try {
       };
       const receiptPath = path.join(outputRoot, `${state}.receipt.json`);
       const receiptBytes = Buffer.from(`${JSON.stringify(receipt, null, 2)}\n`, "utf8");
+      const receiptDigest = `sha256:${createHash("sha256").update(receiptBytes).digest("hex")}`;
       await writeFile(receiptPath, receiptBytes);
+      const uiAssertionReport = {
+        schemaVersion: "ui-assertions-v1",
+        reviewPacketId: receipt.reviewPacketId,
+        headSha: receipt.headSha,
+        targetId: receipt.targetId,
+        fixtureId: receipt.fixture.id,
+        captureReceiptDigest: receiptDigest,
+        assertions: uiAssertions,
+        status: "passed",
+      };
+      const uiAssertionReportBytes = Buffer.from(
+        `${JSON.stringify(uiAssertionReport, null, 2)}\n`,
+        "utf8",
+      );
+      await writeFile(path.join(outputRoot, `${state}.ui-assertions.json`), uiAssertionReportBytes);
       captures.push({
         state,
         fixtureId: ready.fixtureId,
@@ -199,8 +600,12 @@ try {
         stateContractDigest,
         width: decoded.width,
         height: decoded.height,
-        receiptDigest: `sha256:${createHash("sha256").update(receiptBytes).digest("hex")}`,
+        receiptDigest,
         receipt,
+        uiAssertionReportDigest: `sha256:${createHash("sha256")
+          .update(uiAssertionReportBytes)
+          .digest("hex")}`,
+        uiAssertionReport,
         baselineIsolation: {
           schemaVersion: "baseline-isolation-v1",
           reviewPacketId: receipt.reviewPacketId,
@@ -318,6 +723,8 @@ try {
       "tests/unit/visual-normalizer.test.ts",
       "tests/unit/capture-receipt.test.ts",
       "tests/unit/baseline-isolation.test.ts",
+      "tests/unit/figma-design-mapping.test.ts",
+      "tests/unit/ui-assertion-contract.test.ts",
       "tests/unit/remote-detector.test.ts",
       "tests/unit/workspace-binding.test.ts",
     ],
@@ -338,7 +745,13 @@ try {
 
   process.stdout.write(
     `${JSON.stringify(
-      { status: "passed", mode: "figma", captures, maliciousObservation },
+      {
+        status: "passed",
+        mode: "figma",
+        exactDesignBindings,
+        captures,
+        maliciousObservation,
+      },
       null,
       2,
     )}\n`,

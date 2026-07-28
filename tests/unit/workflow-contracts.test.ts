@@ -1314,6 +1314,7 @@ describe("workflow v2 contracts", () => {
   it("accepts only visual captures and never caller-supplied scores or decisions", () => {
     const reviewPacketId = `packet_${"a".repeat(64)}`;
     const baselineIsolationPath = `visual/actual/${reviewPacketId}/baseline-isolation.json`;
+    const assertionReportPath = `visual/actual/${reviewPacketId}/checkout.assertions.json`;
     const submission = {
       kind: "visual-comparison",
       reviewPacketId,
@@ -1329,11 +1330,17 @@ describe("workflow v2 contracts", () => {
           capturedAt: "2026-07-20T00:00:00.000Z",
           actualPath: `visual/actual/${reviewPacketId}/checkout.png`,
           actualDigest: `sha256:${"1".repeat(64)}`,
+          assertionReportPath,
+          assertionReportDigest: `sha256:${"4".repeat(64)}`,
         },
       ],
       baselineIsolationPath,
       baselineIsolationDigest: `sha256:${"3".repeat(64)}`,
-      artifactPaths: [`visual/actual/${reviewPacketId}/checkout.png`, baselineIsolationPath],
+      artifactPaths: [
+        `visual/actual/${reviewPacketId}/checkout.png`,
+        assertionReportPath,
+        baselineIsolationPath,
+      ],
     };
 
     expect(WorkflowSubmissionSchema.safeParse(submission).success).toBe(true);
@@ -1356,6 +1363,32 @@ describe("workflow v2 contracts", () => {
         ...submission,
         captures: [{ ...submission.captures[0], receiptPath }],
         artifactPaths: [...submission.artifactPaths, receiptPath],
+      }).success,
+    ).toBe(false);
+    expect(
+      WorkflowSubmissionSchema.safeParse({
+        ...submission,
+        captures: [
+          {
+            ...submission.captures[0],
+            assertionReportPath: undefined,
+            assertionReportDigest: undefined,
+          },
+        ],
+        artifactPaths: submission.artifactPaths.filter(
+          (artifactPath) => artifactPath !== assertionReportPath,
+        ),
+      }).success,
+    ).toBe(false);
+    expect(
+      WorkflowSubmissionSchema.safeParse({
+        ...submission,
+        captures: [
+          {
+            ...submission.captures[0],
+            assertionReportDigest: undefined,
+          },
+        ],
       }).success,
     ).toBe(false);
     expect(

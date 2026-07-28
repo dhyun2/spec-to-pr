@@ -222,7 +222,7 @@ export function assertFigmaStateContracts(rawInput: {
   }
 }
 
-const RepositoryPathSchema = z
+export const RepositoryPathSchema = z
   .string()
   .trim()
   .min(1)
@@ -232,6 +232,7 @@ const RepositoryPathSchema = z
       !value.startsWith("/") &&
       !value.startsWith("\\") &&
       !/^[a-z]:[\\/]/i.test(value) &&
+      !/^[a-z][a-z0-9+.-]*:\/\//i.test(value) &&
       !value.split(/[\\/]/).some((segment) => segment === ".."),
     "Path must be repository-relative",
   );
@@ -240,6 +241,35 @@ export const CapturedFigmaComponentSchema = z
   .object({
     name: z.string().trim().min(1).max(500),
     nodeId: z.string().trim().min(1).max(500),
+  })
+  .strict();
+
+const FigmaBindingPropValueSchema = z.union([z.string(), z.number(), z.boolean()]);
+
+export const FigmaSemanticTokenBindingSchema = z
+  .object({
+    role: z.enum(["text", "icon", "background", "border"]),
+    figmaVariable: z.string().trim().min(1),
+    codeToken: z.string().trim().min(1),
+  })
+  .strict()
+  .superRefine((token, context) => {
+    const expected = semanticCodeToken(token.figmaVariable, token.role);
+    if (token.codeToken !== expected) {
+      context.addIssue({
+        code: "custom",
+        path: ["codeToken"],
+        message: `Semantic token ${token.figmaVariable} must use ${expected} for ${token.role}`,
+      });
+    }
+  });
+
+export const FigmaExpectedGeometrySchema = z
+  .object({
+    width: z.number().positive().optional(),
+    height: z.number().positive().optional(),
+    alignment: z.string().trim().min(1).optional(),
+    flexShrink: z.number().nonnegative().optional(),
   })
   .strict();
 
@@ -254,6 +284,7 @@ const ComponentResolutionSchema = z.discriminatedUnion("kind", [
         .min(1)
         .max(300)
         .regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/),
+      props: z.record(z.string(), FigmaBindingPropValueSchema),
     })
     .strict(),
   z
@@ -270,6 +301,87 @@ const ComponentResolutionSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
 ]);
+
+export const FigmaDesignBindingSchema = z
+  .object({
+    id: z.string().trim().min(1),
+    figmaComponent: z.string().trim().min(1),
+    nodeId: z.string().trim().min(1),
+    role: z.enum(["component", "icon"]),
+    resolution: ComponentResolutionSchema,
+    semanticTokens: z.array(FigmaSemanticTokenBindingSchema),
+    expectedGeometry: FigmaExpectedGeometrySchema.optional(),
+  })
+  .strict()
+  .superRefine((binding, context) => {
+    const duplicateTokens = duplicates(
+      binding.semanticTokens.map((token) => `${token.role}\u0000${token.figmaVariable}`),
+    );
+    if (duplicateTokens.length > 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["semanticTokens"],
+        message: "Semantic token bindings must be unique",
+      });
+    }
+    if (binding.role !== "icon" || binding.resolution.kind !== "component") return;
+    if (!/^@?[^/]+(?:\/[^/]+)?\/icons\/(?:vue|react)$/.test(binding.resolution.module)) {
+      context.addIssue({
+        code: "custom",
+        path: ["resolution", "module"],
+        message: "Icon bindings must use the public design-system icon module",
+      });
+    }
+    const size = binding.resolution.props["size"];
+    const color = binding.resolution.props["color"];
+    if (typeof size !== "number" || size <= 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["resolution", "props", "size"],
+        message: "Icon bindings require an exact positive numeric size prop",
+      });
+    }
+    if (
+      binding.semanticTokens.some((token) => token.role === "icon") &&
+      (typeof color !== "string" || !/^--semantic-[a-z0-9-]+$/i.test(color))
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["resolution", "props", "color"],
+        message: "Icon color props must use a bare --semantic-* custom property name",
+      });
+    }
+    const iconToken = binding.semanticTokens.find((token) => token.role === "icon");
+    if (iconToken !== undefined && color !== iconToken.codeToken) {
+      context.addIssue({
+        code: "custom",
+        path: ["resolution", "props", "color"],
+        message: "Icon color prop must exactly match its semantic token binding",
+      });
+    }
+    if (
+      binding.expectedGeometry?.width === undefined ||
+      binding.expectedGeometry.height === undefined ||
+      binding.expectedGeometry.alignment === undefined ||
+      binding.expectedGeometry.flexShrink === undefined
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["expectedGeometry"],
+        message: "Icon bindings require exact width, height, alignment, and flex-shrink geometry",
+      });
+    }
+    if (
+      typeof size === "number" &&
+      (binding.expectedGeometry?.width !== size || binding.expectedGeometry.height !== size)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["expectedGeometry"],
+        message: "Icon width and height must match the exact size prop",
+      });
+    }
+  });
 
 export const FigmaDesignMappingSchema = z
   .object({
@@ -291,17 +403,7 @@ export const FigmaDesignMappingSchema = z
         guidanceSkill: z.string().trim().min(1).max(500).optional(),
       })
       .strict(),
-    components: z
-      .array(
-        z
-          .object({
-            figmaComponent: z.string().trim().min(1).max(500),
-            nodeId: z.string().trim().min(1).max(500),
-            resolution: ComponentResolutionSchema,
-          })
-          .strict(),
-      )
-      .max(1_000),
+    components: z.array(FigmaDesignBindingSchema).max(1_000),
     fonts: z
       .array(
         z
@@ -324,10 +426,74 @@ export const FigmaDesignMappingSchema = z
       )
       .max(2_000),
   })
-  .strict();
+  .strict()
+  .superRefine((mapping, context) => {
+    const duplicateIds = duplicates(mapping.components.map((component) => component.id));
+    if (duplicateIds.length > 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["components"],
+        message: `Duplicate design binding IDs: ${duplicateIds.join(", ")}`,
+      });
+    }
+    mapping.components.forEach((component, index) => {
+      if (component.resolution.kind !== "component") return;
+      const expectedModule =
+        component.role === "icon"
+          ? new Set([
+              `${mapping.designSystem.packageName}/icons/vue`,
+              `${mapping.designSystem.packageName}/icons/react`,
+            ])
+          : new Set([mapping.designSystem.packageName]);
+      if (!expectedModule.has(component.resolution.module)) {
+        context.addIssue({
+          code: "custom",
+          path: ["components", index, "resolution", "module"],
+          message: `Binding ${component.id} must use a public module from ${mapping.designSystem.packageName}`,
+        });
+      }
+    });
+  });
 
 export type CapturedFigmaComponent = z.infer<typeof CapturedFigmaComponentSchema>;
 export type FigmaDesignMapping = z.infer<typeof FigmaDesignMappingSchema>;
+export type FigmaDesignBinding = z.infer<typeof FigmaDesignBindingSchema>;
+
+const FigmaImplementationResolutionSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("component"),
+      module: z.string().trim().min(1),
+      exportName: z.string().trim().min(1),
+      appliedProps: z.record(z.string(), FigmaBindingPropValueSchema),
+      tokenUsages: z.array(FigmaSemanticTokenBindingSchema),
+      observedGeometry: FigmaExpectedGeometrySchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("asset"),
+      path: RepositoryPathSchema,
+      digest: Sha256DigestSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("exception"),
+      reason: z.string().trim().min(1),
+    })
+    .strict(),
+]);
+
+export const FigmaImplementationBindingSchema = z
+  .object({
+    mappingId: z.string().trim().min(1),
+    sourceFile: RepositoryPathSchema,
+    resolution: FigmaImplementationResolutionSchema,
+  })
+  .strict();
+
+export type FigmaImplementationBinding = z.infer<typeof FigmaImplementationBindingSchema>;
 
 export function assertCompleteDesignMapping(rawInput: {
   capturedComponents: CapturedFigmaComponent[];
@@ -373,6 +539,60 @@ export function assertCompleteDesignMapping(rawInput: {
     parsed.data.mapping.tokens.map((token) => token.figmaVariable),
     "Figma variables",
   );
+}
+
+export function assertExactFigmaImplementationBindings(rawInput: {
+  mapping: FigmaDesignMapping;
+  usages: FigmaImplementationBinding[];
+}): void {
+  const parsed = z
+    .object({
+      mapping: FigmaDesignMappingSchema,
+      usages: z.array(FigmaImplementationBindingSchema).max(1_000),
+    })
+    .strict()
+    .safeParse(rawInput);
+  if (!parsed.success) {
+    throw implementationBindingError(parsed.error.issues.map((issue) => issue.message).join("; "));
+  }
+
+  const mappingsById = new Map(
+    parsed.data.mapping.components.map((component) => [component.id, component]),
+  );
+  const usagesById = new Map(parsed.data.usages.map((usage) => [usage.mappingId, usage]));
+  const duplicateUsageIds = duplicates(parsed.data.usages.map((usage) => usage.mappingId));
+  const missing = [...mappingsById.keys()].filter((mappingId) => !usagesById.has(mappingId));
+  const unknown = [...usagesById.keys()].filter((mappingId) => !mappingsById.has(mappingId));
+  const mismatched = [...mappingsById].flatMap(([mappingId, binding]) => {
+    const usage = usagesById.get(mappingId);
+    if (usage === undefined) return [];
+    const expectedResolution =
+      binding.resolution.kind === "component"
+        ? {
+            kind: "component" as const,
+            module: binding.resolution.module,
+            exportName: binding.resolution.exportName,
+            appliedProps: binding.resolution.props,
+            tokenUsages: binding.semanticTokens,
+            ...(binding.expectedGeometry === undefined
+              ? {}
+              : { observedGeometry: binding.expectedGeometry }),
+          }
+        : binding.resolution;
+    return canonicalBindingValue(usage.resolution) === canonicalBindingValue(expectedResolution)
+      ? []
+      : [mappingId];
+  });
+  if (
+    duplicateUsageIds.length > 0 ||
+    missing.length > 0 ||
+    unknown.length > 0 ||
+    mismatched.length > 0
+  ) {
+    throw implementationBindingError(
+      `missing: ${missing.join(", ") || "none"}; unknown: ${unknown.join(", ") || "none"}; duplicate: ${duplicateUsageIds.join(", ") || "none"}; mismatched: ${mismatched.join(", ") || "none"}`,
+    );
+  }
 }
 
 export function assertFigmaCaptureGeometry(rawInput: {
@@ -490,6 +710,10 @@ function designMappingError(message: string): Error {
   return new Error(`FIGMA_DESIGN_MAPPING_INCOMPLETE: ${message}`);
 }
 
+function implementationBindingError(message: string): Error {
+  return new Error(`FIGMA_DESIGN_SYSTEM_EVIDENCE_INVALID: ${message}`);
+}
+
 function stateContractError(message: string): Error {
   return new Error(`FIGMA_STATE_CONTRACT_INVALID: ${message}`);
 }
@@ -518,4 +742,32 @@ function canonicalFacts(facts: Array<z.infer<typeof FigmaStateFactSchema>>): str
 
 function compareCanonicalStrings(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function semanticCodeToken(
+  figmaVariable: string,
+  role: "text" | "icon" | "background" | "border",
+): string {
+  const customProperty = `--${figmaVariable.trim().replaceAll("/", "-")}`;
+  return role === "icon" ? customProperty : `var(${customProperty})`;
+}
+
+function canonicalBindingValue(value: unknown): string {
+  return JSON.stringify(canonicalizeBindingValue(value));
+}
+
+function canonicalizeBindingValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value
+      .map(canonicalizeBindingValue)
+      .sort((left, right) => compareCanonicalStrings(JSON.stringify(left), JSON.stringify(right)));
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([left], [right]) => compareCanonicalStrings(left, right))
+        .map(([key, nested]) => [key, canonicalizeBindingValue(nested)]),
+    );
+  }
+  return value;
 }

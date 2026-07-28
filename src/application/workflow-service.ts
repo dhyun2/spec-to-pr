@@ -121,10 +121,15 @@ import {
   assertBaselineIsolation,
 } from "../visual/baseline-isolation.js";
 import {
+  UiAssertionReportSchema,
+  assertUiAssertionReport,
+} from "../visual/ui-assertion-contract.js";
+import {
   CapturedFigmaComponentSchema,
   FigmaDesignMappingSchema,
   FigmaStateContractSchema,
   assertCompleteDesignMapping,
+  assertExactFigmaImplementationBindings,
   assertFigmaCaptureGeometry,
   assertFigmaStateContracts,
   type FigmaDesignMapping,
@@ -2504,6 +2509,9 @@ export class WorkflowService {
       const visualReceipt = submission.captures.find(
         (capture) => capture.receiptPath === evidencePath,
       );
+      const visualAssertion = submission.captures.find(
+        (capture) => capture.assertionReportPath === evidencePath,
+      );
       const baselineIsolationEvidence = submission.baselineIsolationPath === evidencePath;
       if (baselineIsolationEvidence) {
         let rawEvidence: unknown;
@@ -2532,6 +2540,21 @@ export class WorkflowService {
         if (!VisualCaptureReceiptSchema.safeParse(rawReceipt).success) {
           throw new Error(
             `VISUAL_CAPTURE_PROVENANCE_INVALID: receipt schema is invalid: ${evidencePath}`,
+          );
+        }
+      } else if (visualAssertion !== undefined) {
+        let rawAssertionReport: unknown;
+        try {
+          rawAssertionReport = JSON.parse(content.toString("utf8"));
+        } catch {
+          throw new Error(
+            `UI_ASSERTION_REPORT_INVALID: report must be strict JSON: ${evidencePath}`,
+          );
+        }
+        const parsedAssertionReport = UiAssertionReportSchema.safeParse(rawAssertionReport);
+        if (!parsedAssertionReport.success) {
+          throw new Error(
+            `UI_ASSERTION_REPORT_INVALID: report schema is invalid: ${evidencePath}: ${parsedAssertionReport.error.issues.map((issue) => issue.message).join("; ")}`,
           );
         }
       } else if (visualCapture !== undefined) {
@@ -2566,11 +2589,14 @@ export class WorkflowService {
             diffDigest: reviewPacketFromRun(run)?.diffDigest,
             visualRole: baselineIsolationEvidence
               ? "baseline-isolation"
-              : visualCapture === undefined
+              : visualReceipt !== undefined
                 ? "capture-receipt"
-                : "actual",
+                : visualAssertion !== undefined
+                  ? "ui-assertions"
+                  : "actual",
             ...(visualCapture === undefined ? {} : { targetId: visualCapture.targetId }),
             ...(visualReceipt === undefined ? {} : { targetId: visualReceipt.targetId }),
+            ...(visualAssertion === undefined ? {} : { targetId: visualAssertion.targetId }),
           },
         }),
       });
@@ -2717,6 +2743,40 @@ export class WorkflowService {
           `VISUAL_CAPTURE_PROVENANCE_INVALID: receipt timestamp does not match ${target.targetId}`,
         );
       }
+      const assertionArtifact = evidenceArtifacts.find(
+        (artifact) =>
+          artifact.metadata["projectRelativePath"] === capture.assertionReportPath &&
+          artifact.metadata["visualRole"] === "ui-assertions",
+      );
+      if (assertionArtifact === undefined) {
+        throw new Error(`UI_ASSERTION_REPORT_INVALID: missing report for ${target.targetId}`);
+      }
+      const stateContract = figmaStateContractsFromRun(run).find(
+        (contract) => contract.targetId === target.targetId,
+      );
+      if (stateContract === undefined) {
+        throw new Error(
+          `UI_ASSERTION_REPORT_INVALID: missing state contract for ${target.targetId}`,
+        );
+      }
+      let assertionReport: unknown;
+      try {
+        const assertionContent =
+          preparedContent.get(assertionArtifact.digest) ??
+          (await this.dependencies.artifactStore.readContent(assertionArtifact.digest));
+        assertionReport = JSON.parse(assertionContent.toString("utf8"));
+      } catch {
+        throw new Error(
+          `UI_ASSERTION_REPORT_INVALID: report must be strict JSON for ${target.targetId}`,
+        );
+      }
+      assertUiAssertionReport({
+        report: assertionReport,
+        packet,
+        target,
+        stateContract,
+        captureReceiptDigest: capture.receiptDigest,
+      });
       const captureLineageId = captureRendererLineageId(validated.environment);
       if (rendererLineageId !== undefined && captureLineageId !== rendererLineageId) {
         throw rendererDriftError(
@@ -2856,6 +2916,9 @@ export class WorkflowService {
       const receiptCapture = submission.captures.find(
         (capture) => capture.receiptPath === artifact.metadata["projectRelativePath"],
       );
+      const assertionCapture = submission.captures.find(
+        (capture) => capture.assertionReportPath === artifact.metadata["projectRelativePath"],
+      );
       const baselineIsolationArtifact =
         submission.baselineIsolationPath === artifact.metadata["projectRelativePath"];
       if (capture !== undefined && capture.actualDigest !== artifact.digest) {
@@ -2868,6 +2931,14 @@ export class WorkflowService {
           `VISUAL_CAPTURE_PROVENANCE_INVALID: ${receiptCapture.receiptPath} does not match its declared digest`,
         );
       }
+      if (
+        assertionCapture !== undefined &&
+        assertionCapture.assertionReportDigest !== artifact.digest
+      ) {
+        throw new Error(
+          `UI_ASSERTION_REPORT_INVALID: ${assertionCapture.assertionReportPath} does not match its declared digest`,
+        );
+      }
       if (baselineIsolationArtifact && submission.baselineIsolationDigest !== artifact.digest) {
         throw new Error(
           `VISUAL_BASELINE_ISOLATION_INVALID: ${submission.baselineIsolationPath} does not match its declared digest`,
@@ -2877,15 +2948,21 @@ export class WorkflowService {
         ...artifact,
         metadata: {
           ...artifact.metadata,
-          ...(capture === undefined && receiptCapture === undefined
+          ...(capture === undefined &&
+          receiptCapture === undefined &&
+          assertionCapture === undefined
             ? {}
             : {
-                targetId: (capture ?? receiptCapture)!.targetId,
-                captureProvider: (capture ?? receiptCapture)!.provider,
-                visualCapturedAt: (capture ?? receiptCapture)!.capturedAt,
-                ...(capture === undefined
-                  ? { declaredReceiptDigest: receiptCapture!.receiptDigest }
-                  : { declaredCaptureDigest: capture.actualDigest }),
+                targetId: (capture ?? receiptCapture ?? assertionCapture)!.targetId,
+                captureProvider: (capture ?? receiptCapture ?? assertionCapture)!.provider,
+                visualCapturedAt: (capture ?? receiptCapture ?? assertionCapture)!.capturedAt,
+                ...(capture !== undefined
+                  ? { declaredCaptureDigest: capture.actualDigest }
+                  : receiptCapture !== undefined
+                    ? { declaredReceiptDigest: receiptCapture!.receiptDigest }
+                    : {
+                        declaredAssertionReportDigest: assertionCapture!.assertionReportDigest,
+                      }),
               }),
         },
       });
@@ -6340,33 +6417,8 @@ function assertFigmaImplementationBindings(
   if (mapping === undefined) {
     throw new Error("FIGMA_DESIGN_SYSTEM_EVIDENCE_INVALID: Figma design mapping is missing");
   }
-  const requiredMappings = new Map(
-    mapping.components
-      .filter((component) => component.resolution.kind !== "exception")
-      .map((component) => [component.figmaComponent, component]),
-  );
   const usages = submission.designSystemEvidence?.usages ?? [];
-  const usagesByComponent = new Map(usages.map((usage) => [usage.figmaComponent, usage]));
-  const missingUsages = [...requiredMappings].filter(
-    ([figmaComponent]) => !usagesByComponent.has(figmaComponent),
-  );
-  const unknownUsages = [...usagesByComponent].filter(
-    ([figmaComponent]) =>
-      !mapping.components.some((component) => component.figmaComponent === figmaComponent),
-  );
-  const mismatchedUsages = [...requiredMappings].filter(([figmaComponent, component]) => {
-    const usage = usagesByComponent.get(figmaComponent);
-    if (usage === undefined || usage.resolutionKind !== component.resolution.kind) return true;
-    if (component.resolution.kind === "component") {
-      return usage.importedExport !== component.resolution.exportName;
-    }
-    return component.resolution.kind !== "asset" || usage.assetPath !== component.resolution.path;
-  });
-  if (missingUsages.length > 0 || unknownUsages.length > 0 || mismatchedUsages.length > 0) {
-    throw new Error(
-      `FIGMA_DESIGN_SYSTEM_EVIDENCE_INVALID: missing: ${missingUsages.map(([name]) => name).join(", ") || "none"}; unknown: ${unknownUsages.map(([name]) => name).join(", ") || "none"}; mismatched: ${mismatchedUsages.map(([name]) => name).join(", ") || "none"}`,
-    );
-  }
+  assertExactFigmaImplementationBindings({ mapping, usages });
 }
 
 function visualLineageId(packet: ImplementationReviewPacket): string {
@@ -6778,6 +6830,8 @@ function visualSubmissionIdentity(
     capturedAt: string;
     actualPath: string;
     actualDigest: string;
+    assertionReportPath: string;
+    assertionReportDigest: string;
     receiptPath?: string | undefined;
     receiptDigest?: string | undefined;
   }>,
@@ -6797,6 +6851,8 @@ function visualSubmissionIdentity(
       capturedAt: capture.capturedAt,
       actualPath: capture.actualPath,
       actualDigest: capture.actualDigest,
+      assertionReportPath: capture.assertionReportPath,
+      assertionReportDigest: capture.assertionReportDigest,
       ...(capture.receiptPath === undefined ? {} : { receiptPath: capture.receiptPath }),
       ...(capture.receiptDigest === undefined ? {} : { receiptDigest: capture.receiptDigest }),
     }))

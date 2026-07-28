@@ -87,6 +87,11 @@ export const VisualCaptureSchema = z
       .trim()
       .regex(/\.png$/i),
     actualDigest: Sha256DigestSchema,
+    assertionReportPath: z
+      .string()
+      .trim()
+      .regex(/\.json$/i),
+    assertionReportDigest: Sha256DigestSchema,
     receiptPath: z
       .string()
       .trim()

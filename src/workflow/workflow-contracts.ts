@@ -16,6 +16,7 @@ import { DraftEvidenceBundleSchema } from "./draft-evidence-bundle.js";
 import {
   CapturedFigmaComponentSchema,
   FigmaDesignMappingSchema,
+  FigmaImplementationBindingSchema,
   FigmaStateContractSchema,
   assertCompleteDesignMapping,
   assertFigmaStateContracts,
@@ -1173,31 +1174,7 @@ const MockDataEvidenceSchema = z
     }
   });
 
-const DesignSystemUsageSchema = z
-  .object({
-    figmaComponent: z.string().trim().min(1).max(500),
-    sourceFile: WorkflowSourcePathSchema,
-    resolutionKind: z.enum(["component", "asset", "exception"]),
-    importedExport: z.string().trim().min(1).max(500).optional(),
-    assetPath: WorkflowSourcePathSchema.optional(),
-  })
-  .strict()
-  .superRefine((usage, context) => {
-    if (usage.resolutionKind === "component" && usage.importedExport === undefined) {
-      context.addIssue({
-        code: "custom",
-        path: ["importedExport"],
-        message: "Component usage requires the imported export",
-      });
-    }
-    if (usage.resolutionKind === "asset" && usage.assetPath === undefined) {
-      context.addIssue({
-        code: "custom",
-        path: ["assetPath"],
-        message: "Asset usage requires the canonical asset path",
-      });
-    }
-  });
+const DesignSystemUsageSchema = FigmaImplementationBindingSchema;
 
 const DesignSystemEvidenceSchema = z
   .object({
@@ -1205,16 +1182,16 @@ const DesignSystemEvidenceSchema = z
   })
   .strict()
   .superRefine((evidence, context) => {
-    const componentNames = new Set<string>();
+    const mappingIds = new Set<string>();
     evidence.usages.forEach((usage, index) => {
-      if (componentNames.has(usage.figmaComponent)) {
+      if (mappingIds.has(usage.mappingId)) {
         context.addIssue({
           code: "custom",
-          path: ["usages", index, "figmaComponent"],
-          message: `Duplicate design-system usage ${usage.figmaComponent}`,
+          path: ["usages", index, "mappingId"],
+          message: `Duplicate design-system usage ${usage.mappingId}`,
         });
       }
-      componentNames.add(usage.figmaComponent);
+      mappingIds.add(usage.mappingId);
     });
   });
 
@@ -1574,6 +1551,20 @@ export const VisualComparisonSubmissionSchema = z
       targetIds.add(capture.targetId);
       actualPaths.add(capture.actualPath);
       expectedArtifactPaths.add(capture.actualPath);
+      const assertionReportFileName = capture.assertionReportPath.slice(expectedDirectory.length);
+      if (
+        !capture.assertionReportPath.startsWith(expectedDirectory) ||
+        assertionReportFileName.includes("/") ||
+        !/^[a-z0-9][a-z0-9._:-]*\.json$/i.test(assertionReportFileName) ||
+        expectedArtifactPaths.has(capture.assertionReportPath)
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["captures", index, "assertionReportPath"],
+          message: `UI assertion report must use a distinct file in ${expectedDirectory}`,
+        });
+      }
+      expectedArtifactPaths.add(capture.assertionReportPath);
       if (capture.receiptPath !== undefined) {
         const receiptFileName = capture.receiptPath.slice(expectedDirectory.length);
         if (
@@ -1599,7 +1590,7 @@ export const VisualComparisonSubmissionSchema = z
         code: "custom",
         path: ["artifactPaths"],
         message:
-          "Visual comparison artifactPaths must exactly match submitted actual PNGs, receipts, and baseline-isolation evidence",
+          "Visual comparison artifactPaths must exactly match submitted actual PNGs, receipts, UI assertion reports, and baseline-isolation evidence",
       });
     }
   });
