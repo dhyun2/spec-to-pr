@@ -173,6 +173,7 @@ export async function executeBudgetedBoundaryTurns(input: {
   let hasAuthoritativeValidations = false;
   let pinnedRunId: string | null = null;
   let blockedFinalizationAttempted = false;
+  let blockedDiagnosticPreflightIneligible = false;
   let blockedDiagnosticReserveLatched = false;
   const items: RunResult["items"] = [];
 
@@ -194,7 +195,9 @@ export async function executeBudgetedBoundaryTurns(input: {
     }
     pinnedRunId ??= currentStatus.runId;
     workflowStatus = currentStatus;
-    blockedDiagnosticReserveLatched ||= currentStatus.deliveryProfile.publication === "draft";
+    blockedDiagnosticReserveLatched ||=
+      input.blockedDiagnosticTokenReserve !== undefined &&
+      currentStatus.deliveryProfile.publication === "draft";
     const configuredHardLimit = input.workloadHardLimits?.[currentStatus.workload.size];
     if (configuredHardLimit !== undefined) {
       activeHardLimitTokens = configuredHardLimit;
@@ -227,6 +230,7 @@ export async function executeBudgetedBoundaryTurns(input: {
           prompt = buildBlockedDiagnosticFinalizationPrompt(workflowStatus, preflight);
           continue;
         }
+        blockedDiagnosticPreflightIneligible = true;
       }
       break;
     }
@@ -239,6 +243,9 @@ export async function executeBudgetedBoundaryTurns(input: {
     const normalTokenLimit = blockedDiagnosticReserveLatched
       ? activeHardLimitTokens - (input.blockedDiagnosticTokenReserve ?? 0)
       : activeHardLimitTokens;
+    const canAdmitAnotherNormalTurn =
+      !blockedDiagnosticReserveLatched ||
+      usage.totalTokens + turn.usage.input_tokens + turn.usage.output_tokens < normalTokenLimit;
 
     const decision = decideBudgetAction({
       usedTokens: usage.totalTokens,
@@ -252,7 +259,7 @@ export async function executeBudgetedBoundaryTurns(input: {
       break;
     }
     if (decision.action === "checkpoint") {
-      if (turnCount >= normalTurnLimit) {
+      if (turnCount >= normalTurnLimit || !canAdmitAnotherNormalTurn) {
         state = "turn-limit";
         break;
       }
@@ -266,7 +273,7 @@ export async function executeBudgetedBoundaryTurns(input: {
       continue;
     }
 
-    if (turnCount >= normalTurnLimit) {
+    if (turnCount >= normalTurnLimit || !canAdmitAnotherNormalTurn) {
       state = "turn-limit";
       break;
     }
@@ -278,7 +285,9 @@ export async function executeBudgetedBoundaryTurns(input: {
   }
 
   if (input.outputSchema !== undefined && (state === "completed" || state === "blocked")) {
-    if (usage?.availability !== "complete") {
+    if (blockedDiagnosticPreflightIneligible) {
+      outputFormatting = "budget-skipped";
+    } else if (usage?.availability !== "complete") {
       outputFormatting = "usage-unavailable";
     } else if (usage.totalTokens >= activeHardLimitTokens || turnCount >= input.maxTurns) {
       outputFormatting = "budget-skipped";

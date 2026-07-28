@@ -740,6 +740,42 @@ describe("Codex SDK workload budget", () => {
         run: async (prompt: string) => {
           prompts.push(prompt);
           return turnResult(
+            10_000,
+            workflowStatus("running", undefined, {
+              hardLimitTokens: 48_000,
+              publication: "draft",
+            }),
+          );
+        },
+      }),
+      resumeThread: () => {
+        throw new Error("not expected");
+      },
+    };
+
+    const result = await executeBudgetedBoundaryTurns({
+      client,
+      initialPrompt: "implement",
+      hardLimitTokens: 48_000,
+      workloadSize: "M",
+      requiredValidations: ["functional"],
+      maxTurns: 3,
+      blockedDiagnosticTokenReserve: 24_000,
+    });
+
+    expect(result.state).toBe("turn-limit");
+    expect(result.checkpointCount).toBe(0);
+    expect(prompts[1]).toContain('"hardLimitTokens":24000');
+  });
+
+  it("does not admit another ordinary turn that would consume the held token reserve", async () => {
+    let calls = 0;
+    const client = {
+      startThread: () => ({
+        id: "thread-1",
+        run: async () => {
+          calls += 1;
+          return turnResult(
             20_000,
             workflowStatus("running", undefined, {
               hardLimitTokens: 48_000,
@@ -763,9 +799,9 @@ describe("Codex SDK workload budget", () => {
       blockedDiagnosticTokenReserve: 24_000,
     });
 
-    expect(result.state).toBe("split-required");
-    expect(result.checkpointCount).toBe(1);
-    expect(prompts[1]).toContain('"hardLimitTokens":24000');
+    expect(result.state).toBe("turn-limit");
+    expect(result.turnCount).toBe(1);
+    expect(calls).toBe(1);
   });
 
   it("releases held diagnostic tokens when a draft Run completes", async () => {
@@ -971,6 +1007,48 @@ describe("Codex SDK workload budget", () => {
     });
 
     expect(result.state).toBe("blocked");
+    expect(result.turnCount).toBe(1);
+    expect(calls).toBe(1);
+  });
+
+  it("does not format a blocked result after ineligible diagnostic publication preflight", async () => {
+    let calls = 0;
+    const client = {
+      startThread: () => ({
+        id: "thread-1",
+        run: async () => {
+          calls += 1;
+          return turnResult(
+            1_000,
+            workflowStatus("blocked", undefined, {
+              publication: "draft",
+              blockerKind: "verification",
+            }),
+          );
+        },
+      }),
+      resumeThread: () => {
+        throw new Error("not expected");
+      },
+    };
+
+    const result = await executeBudgetedBoundaryTurns({
+      client,
+      initialPrompt: "implement",
+      outputSchema: { type: "object" },
+      hardLimitTokens: 48_000,
+      workloadSize: "M",
+      requiredValidations: ["functional"],
+      maxTurns: 2,
+      blockedDiagnosticTokenReserve: 24_000,
+      inspectBlockedDiagnosticPreflight: () => ({
+        eligible: false,
+        reason: "working-tree-not-clean",
+      }),
+    });
+
+    expect(result.state).toBe("blocked");
+    expect(result.outputFormatting).toBe("budget-skipped");
     expect(result.turnCount).toBe(1);
     expect(calls).toBe(1);
   });
