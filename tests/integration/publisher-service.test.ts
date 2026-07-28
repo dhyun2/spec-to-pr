@@ -205,19 +205,19 @@ describe("PublisherService", () => {
       confirm: true,
     });
 
-    expect(gitCalls.filter((args) => args[0] === "status")).toHaveLength(2);
-    expect(gitCalls.filter((args) => args[0] === "symbolic-ref")).toHaveLength(2);
+    expect(gitCalls.filter((args) => args[0] === "status").length).toBeGreaterThanOrEqual(4);
+    expect(gitCalls.filter((args) => args[0] === "symbolic-ref").length).toBeGreaterThanOrEqual(4);
     expect(
-      gitCalls.filter((args) => args[0] === "rev-parse" && args.at(-1) === "HEAD"),
-    ).toHaveLength(2);
+      gitCalls.filter((args) => args[0] === "rev-parse" && args.at(-1) === "HEAD").length,
+    ).toBeGreaterThanOrEqual(4);
     expect(
-      gitCalls.filter((args) => args[0] === "rev-parse" && args.at(-1) === "codex/pinned"),
-    ).toHaveLength(2);
-    expect(gitCalls.filter((args) => args[0] === "remote")).toHaveLength(2);
-    expect(gitCalls.filter((args) => args[0] === "rev-list")).toHaveLength(2);
+      gitCalls.filter((args) => args[0] === "rev-parse" && args.at(-1) === "codex/pinned").length,
+    ).toBeGreaterThanOrEqual(4);
+    expect(gitCalls.filter((args) => args[0] === "remote").length).toBeGreaterThanOrEqual(4);
+    expect(gitCalls.filter((args) => args[0] === "rev-list").length).toBeGreaterThanOrEqual(4);
   });
 
-  it("invalidates the private publication fence when the Run revision changes", async () => {
+  it("invalidates the private publication fence when semantic Run state changes", async () => {
     const run = await runService.createRun({ projectRoot });
     await markRunReadyForPublish(run.id);
     const report = await prReportService.generatePrReport({ runId: run.id });
@@ -227,7 +227,9 @@ describe("PublisherService", () => {
       get: async (runId) => {
         const current = await store.get(runId);
         reads += 1;
-        return reads < 3 ? current : { ...current, revision: current.revision + 1 };
+        return reads < 3
+          ? current
+          : { ...current, status: "cancelled" as const, revision: current.revision + 1 };
       },
       list: (filter) => store.list(filter),
       save: (manifest, expectedRevision) => store.save(manifest, expectedRevision),
@@ -290,6 +292,163 @@ describe("PublisherService", () => {
       }),
     ).rejects.toThrow(/PUBLISH_EXECUTION_FENCE_STALE.*Run semantic binding/i);
 
+    expect(githubPublisher.createdPayloads).toHaveLength(0);
+    expect(githubPublisher.updatedMetadata).toHaveLength(0);
+    expect(
+      (await store.get(run.id)).artifacts.filter(
+        (artifact) => artifact.metadata["reportKind"] === "publish-result",
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("allows publisher-owned lease and diagnostic-claim heartbeats across publication", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    const initial = await store.get(run.id);
+    const initialClaim = await writeArtifact({
+      id: "art_12121212121212121212121212121212",
+      kind: "other",
+      label: "diagnostic-publish-claim.json",
+      reportKind: "diagnostic-publish-claim",
+      content: Buffer.from('{"event":"claim","expiresAt":"2026-06-23T00:01:00.000Z"}\n'),
+      mediaType: "application/json",
+      timestamp: "2026-06-23T00:00:01.000Z",
+      metadata: {
+        diagnosticExecutionKey: "diagnostic:test",
+        claimState: "active",
+        ownerClaimId: "art_12121212121212121212121212121212",
+        expiresAt: "2026-06-23T00:01:00.000Z",
+      },
+    });
+    await store.save(
+      {
+        ...initial,
+        revision: initial.revision + 1,
+        updatedAt: "2026-06-23T00:00:01.000Z",
+        artifacts: [...initial.artifacts, initialClaim],
+        stages: initial.stages.map((stage) =>
+          stage.name === "publish"
+            ? {
+                ...stage,
+                status: "running" as const,
+                attempt: 1,
+                startedAt: "2026-06-23T00:00:01.000Z",
+                lease: {
+                  id: "lease_12121212121212121212121212121212",
+                  workerId: "orchestrator",
+                  acquiredAt: "2026-06-23T00:00:01.000Z",
+                  heartbeatAt: "2026-06-23T00:00:01.000Z",
+                  expiresAt: "2026-06-23T00:01:01.000Z",
+                },
+              }
+            : stage,
+        ),
+      },
+      initial.revision,
+    );
+    githubPublisher.beforeFindExisting = async () => {
+      const current = await store.get(run.id);
+      const renewal = await writeArtifact({
+        id: "art_13131313131313131313131313131313",
+        kind: "other",
+        label: "diagnostic-publish-claim.json",
+        reportKind: "diagnostic-publish-claim",
+        content: Buffer.from('{"event":"claim","expiresAt":"2026-06-23T00:02:00.000Z"}\n'),
+        mediaType: "application/json",
+        timestamp: "2026-06-23T00:00:01.500Z",
+        metadata: {
+          diagnosticExecutionKey: "diagnostic:test",
+          claimState: "active",
+          ownerClaimId: "art_12121212121212121212121212121212",
+          expiresAt: "2026-06-23T00:02:00.000Z",
+        },
+      });
+      await store.save(
+        {
+          ...current,
+          revision: current.revision + 1,
+          updatedAt: "2026-06-23T00:00:01.500Z",
+          artifacts: [...current.artifacts, renewal],
+          stages: current.stages.map((stage) =>
+            stage.name === "publish" && stage.lease !== undefined
+              ? {
+                  ...stage,
+                  lease: {
+                    ...stage.lease,
+                    heartbeatAt: "2026-06-23T00:00:01.500Z",
+                    expiresAt: "2026-06-23T00:01:01.500Z",
+                  },
+                }
+              : stage,
+          ),
+        },
+        current.revision,
+      );
+    };
+
+    const published = await publisherService.publish({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      pushBranch: false,
+      confirm: true,
+    });
+
+    expect(published.result.status).toBe("passed");
+    expect(githubPublisher.createdPayloads).toHaveLength(1);
+  });
+
+  it("rejects Git drift after provider lookup before draft mutation and result recording", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    githubPublisher.beforeFindExisting = async () => {
+      gitCurrentBranch = "codex/drifted";
+    };
+
+    await expect(
+      publisherService.publish({
+        runId: run.id,
+        reportArtifactId: report.markdownArtifactId,
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        pushBranch: false,
+        confirm: true,
+      }),
+    ).rejects.toThrow(/PUBLISH_EXECUTION_FENCE_STALE|WORKSPACE_BRANCH_MISMATCH|checked-out branch/);
+
+    expect(githubPublisher.createdPayloads).toHaveLength(0);
+    expect(githubPublisher.updatedMetadata).toHaveLength(0);
+    expect(
+      (await store.get(run.id)).artifacts.filter(
+        (artifact) => artifact.metadata["reportKind"] === "publish-result",
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("rechecks Git immediately after asset upload before draft mutation", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    await addVisualEvidence(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    githubPublisher.afterPublishAssets = async () => {
+      gitCurrentBranch = "codex/drifted-after-upload";
+    };
+
+    await expect(
+      publisherService.publish({
+        runId: run.id,
+        reportArtifactId: report.markdownArtifactId,
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        pushBranch: false,
+        confirm: true,
+      }),
+    ).rejects.toThrow(/checked-out branch/);
+
+    expect(githubPublisher.uploadedAssets).toHaveLength(1);
     expect(githubPublisher.createdPayloads).toHaveLength(0);
     expect(githubPublisher.updatedMetadata).toHaveLength(0);
     expect(
@@ -1731,6 +1890,44 @@ describe("PublisherService", () => {
     expect(updated.agentResultId).toBeUndefined();
     expect(githubPublisher.updatedBodies[0]).toContain("# 요약");
     expect(githubPublisher.updatedBodies[0]).toContain("## 결정");
+  });
+
+  it("fences updateBody against Run changes during provider lookup", async () => {
+    const run = await runService.createRun({ projectRoot });
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    githubPublisher.existingRequest = existingDraftRequest("476");
+    githubPublisher.beforeFindExisting = async () => {
+      const current = await store.get(run.id);
+      await store.save(
+        {
+          ...current,
+          status: "cancelled",
+          revision: current.revision + 1,
+          updatedAt: "2026-06-23T00:00:01.750Z",
+        },
+        current.revision,
+      );
+    };
+
+    await expect(
+      publisherService.updateBody({
+        runId: run.id,
+        reportArtifactId: report.markdownArtifactId,
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        pushBranch: false,
+        requestNumber: "476",
+        allowBlockedBody: true,
+        confirm: true,
+      }),
+    ).rejects.toThrow(/PUBLISH_EXECUTION_FENCE_STALE/);
+
+    expect(githubPublisher.updatedMetadata).toHaveLength(0);
+    expect(
+      (await store.get(run.id)).artifacts.filter(
+        (artifact) => artifact.metadata["reportKind"] === "publish-result",
+      ),
+    ).toHaveLength(0);
   });
 
   it("can sync a blocked report using the blocked draft update publish mode", async () => {
@@ -3271,6 +3468,7 @@ class FakePublisher implements ReviewRequestPublisher {
   public forceNonDraftResult = false;
   public remoteBodyOverride: string | undefined;
   public beforeFindExisting: (() => Promise<void>) | undefined;
+  public afterPublishAssets: (() => Promise<void>) | undefined;
   public assetOutcomePlan:
     | ((input: { invocation: number; assets: ReviewRequestAsset[] }) => ReviewAssetPublishOutcome[])
     | undefined;
@@ -3302,6 +3500,7 @@ class FakePublisher implements ReviewRequestPublisher {
 
     this.uploadedAssets.push(input.assets.map((asset) => ({ role: asset.role })));
     this.uploadedAssetIds.push(input.assets.map((asset) => asset.artifactId));
+    await this.afterPublishAssets?.();
 
     const invocation = this.uploadedAssetIds.length;
     return (

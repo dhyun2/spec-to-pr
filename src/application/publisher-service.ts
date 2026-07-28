@@ -576,14 +576,19 @@ export class PublisherService {
       });
     }
     const reportArtifact = requireArtifact(run.artifacts, plan.payload.reportArtifactId);
-    await this.assertPublicationBindingsCurrent(run, plan, reportArtifact, branchState.headSha);
-    const implementation = run.stages.find((stage) => stage.name === "implementation");
+    const fenceRun = await this.assertPublicationBindingsCurrent(
+      run,
+      plan,
+      reportArtifact,
+      branchState.headSha,
+    );
+    const implementation = fenceRun.stages.find((stage) => stage.name === "implementation");
     const packet = ImplementationReviewPacketSchema.safeParse(
       implementation?.checkpoint?.data["reviewPacket"],
     );
     const fence: PublicationExecutionFence = {
-      runRevision: run.revision,
-      runSemanticDigest: publicationRunSemanticDigest(run),
+      runRevision: fenceRun.revision,
+      runSemanticDigest: publicationRunSemanticDigest(fenceRun),
       reportArtifactId: reportArtifact.id,
       reportDigest: reportArtifact.digest,
       ...(plan.payload.reviewPacketId === undefined
@@ -600,7 +605,7 @@ export class PublisherService {
     };
 
     const result = await this.executePublish({
-      run,
+      run: fenceRun,
       plan,
       fence,
       token: credential.token,
@@ -665,8 +670,71 @@ export class PublisherService {
       });
     }
 
-    const result = await this.executeUpdateBody({
+    const branchState = await this.assertPublishBranchReady({
+      projectRoot: publicationProjectRoot(run),
+      sourceBranch: input.sourceBranch,
+      targetBranch: input.targetBranch,
+      ...(plan.payload.headSha === undefined ? {} : { headSha: plan.payload.headSha }),
+      workspaceValidated: run.workspaceBinding !== undefined,
+    });
+    let credential: ReturnType<typeof readPublisherToken>;
+    try {
+      credential = readPublisherToken(plan.target.host, new URL(plan.target.webBaseUrl).hostname);
+    } catch (error: unknown) {
+      const result = failedPublishResult({
+        runId: plan.runId,
+        target: plan.target,
+        reportArtifactId: plan.payload.reportArtifactId,
+        error,
+        publishedAt: timestamp,
+      });
+      return this.recordPublishResult({
+        runId: run.id,
+        result,
+        payload: plan.payload,
+        timestamp,
+        remoteName: input.remoteName,
+        pushBranch: input.pushBranch,
+        addPublishingAgentResult: false,
+      });
+    }
+    const reportArtifact = requireArtifact(run.artifacts, plan.payload.reportArtifactId);
+    const fenceRun = await this.assertPublicationBindingsCurrent(
+      run,
       plan,
+      reportArtifact,
+      branchState.headSha,
+    );
+    const implementation = fenceRun.stages.find((stage) => stage.name === "implementation");
+    const packet = ImplementationReviewPacketSchema.safeParse(
+      implementation?.checkpoint?.data["reviewPacket"],
+    );
+    const credentialSource = publisherCredentialSource(credential.source);
+    const fence: PublicationExecutionFence = {
+      runRevision: fenceRun.revision,
+      runSemanticDigest: publicationRunSemanticDigest(fenceRun),
+      reportArtifactId: reportArtifact.id,
+      reportDigest: reportArtifact.digest,
+      ...(plan.payload.reviewPacketId === undefined
+        ? {}
+        : { reviewPacketId: plan.payload.reviewPacketId }),
+      ...(branchState.headSha === undefined ? {} : { headSha: branchState.headSha }),
+      ...(packet.success ? { diffDigest: packet.data.diffDigest } : {}),
+      sourceBranch: input.sourceBranch,
+      targetBranch: input.targetBranch,
+      remoteName: input.remoteName,
+      remoteTargetKey: publicationRemoteTargetKey(plan.target),
+      credentialSource,
+      cleanStatusDigest: branchState.cleanStatusDigest,
+    };
+
+    const result = await this.executeUpdateBody({
+      run: fenceRun,
+      plan,
+      fence,
+      token: credential.token,
+      remoteName: input.remoteName,
+      credentialSource,
       requestNumber,
       timestamp,
       signal: options.signal,
@@ -681,6 +749,9 @@ export class PublisherService {
       remoteName: input.remoteName,
       pushBranch: input.pushBranch,
       addPublishingAgentResult: result.status === "passed",
+      fence,
+      plan,
+      credentialSource,
     });
   }
 
@@ -960,12 +1031,15 @@ export class PublisherService {
     plan: z.infer<typeof PublishPlanSchema>,
     reportArtifact: ArtifactRef,
     headSha: string | undefined,
-  ): Promise<void> {
+  ): Promise<Awaited<ReturnType<RunStore["get"]>>> {
     const current = await this.runStore.get(plan.runId);
     const report = current.artifacts.find(
       (artifact) => artifact.id === reportArtifact.id && artifact.digest === reportArtifact.digest,
     );
-    if (current.revision !== sourceRun.revision || report === undefined) {
+    if (
+      publicationRunSemanticDigest(current) !== publicationRunSemanticDigest(sourceRun) ||
+      report === undefined
+    ) {
       throw new Error("PUBLISH_EXECUTION_FENCE_STALE: Run or report binding changed");
     }
     if (plan.payload.reviewPacketId !== undefined) {
@@ -981,6 +1055,7 @@ export class PublisherService {
         throw new Error("PUBLISH_EXECUTION_FENCE_STALE: review packet or head binding changed");
       }
     }
+    return current;
   }
 
   private async assertPublicationExecutionFenceCurrent(input: {
@@ -1052,6 +1127,22 @@ export class PublisherService {
     }
   }
 
+  private async assertPublicationFenceCurrent(input: {
+    plan: z.infer<typeof PublishPlanSchema>;
+    fence: PublicationExecutionFence;
+    remoteName: string;
+    credentialSource: "env" | "cli";
+  }) {
+    const run = await this.assertPublicationExecutionFenceCurrent(input);
+    await this.assertPublicationGitFenceCurrent({
+      run,
+      plan: input.plan,
+      fence: input.fence,
+      remoteName: input.remoteName,
+    });
+    return run;
+  }
+
   private async executePublish(input: {
     run: Awaited<ReturnType<RunStore["get"]>>;
     plan: z.infer<typeof PublishPlanSchema>;
@@ -1072,8 +1163,7 @@ export class PublisherService {
         input.remoteName,
         input.credentialSource,
       );
-      await this.assertPublicationExecutionFenceCurrent(input);
-      await this.assertPublicationGitFenceCurrent(input);
+      await this.assertPublicationFenceCurrent(input);
 
       if (input.pushBranch) {
         await this.git(publicationProjectRoot(input.run), [
@@ -1096,7 +1186,7 @@ export class PublisherService {
         timestamp: input.timestamp,
         signal: input.signal,
         assertFenceCurrent: async () => {
-          await this.assertPublicationExecutionFenceCurrent(input);
+          await this.assertPublicationFenceCurrent(input);
         },
       });
       try {
@@ -1124,7 +1214,7 @@ export class PublisherService {
       if (existing !== undefined && !existing.draft) {
         throw new Error(`Refusing to update non-draft review request ${existing.number}`);
       }
-      await this.assertPublicationExecutionFenceCurrent(input);
+      await this.assertPublicationFenceCurrent(input);
       const request =
         existing === undefined
           ? await publisher.create({
@@ -1218,7 +1308,12 @@ export class PublisherService {
   }
 
   private async executeUpdateBody(input: {
+    run: Awaited<ReturnType<RunStore["get"]>>;
     plan: z.infer<typeof PublishPlanSchema>;
+    fence: PublicationExecutionFence;
+    token: string;
+    remoteName: string;
+    credentialSource: "env" | "cli";
     requestNumber: string;
     timestamp: string;
     signal: AbortSignal | undefined;
@@ -1226,19 +1321,24 @@ export class PublisherService {
     try {
       this.metrics.increment("publisher.http_count", 1, { host: input.plan.target.host });
       input.signal?.throwIfAborted();
-      const token = readPublisherToken(
-        input.plan.target.host,
-        new URL(input.plan.target.webBaseUrl).hostname,
+      assertPublicationFenceMatchesPlan(
+        input.fence,
+        input.plan,
+        input.remoteName,
+        input.credentialSource,
       );
+      await this.assertPublicationFenceCurrent(input);
       const publisher = this.publishers[input.plan.target.host];
-      const run = await this.runStore.get(input.plan.runId);
       const prepared = await this.preparePayloadForPublish({
-        run,
+        run: input.run,
         plan: input.plan,
         publisher,
-        token: token.token,
+        token: input.token,
         timestamp: input.timestamp,
         signal: input.signal,
+        assertFenceCurrent: async () => {
+          await this.assertPublicationFenceCurrent(input);
+        },
       });
       try {
         assertPublishedAssetUrlsInBody(prepared.payload.body, prepared.publishedAssets);
@@ -1259,7 +1359,7 @@ export class PublisherService {
       const existing = await publisher.findExisting({
         target: input.plan.target,
         payload: prepared.payload,
-        token: token.token,
+        token: input.token,
         ...(input.signal === undefined ? {} : { signal: input.signal }),
       });
       if (existing === undefined || existing.number !== input.requestNumber) {
@@ -1268,11 +1368,12 @@ export class PublisherService {
       if (!existing.draft) {
         throw new Error(`Refusing to update non-draft review request ${existing.number}`);
       }
+      await this.assertPublicationFenceCurrent(input);
       const request = await publisher.update({
         target: input.plan.target,
         requestNumber: input.requestNumber,
         update: reviewRequestUpdateFromPayload(prepared.payload),
-        token: token.token,
+        token: input.token,
         ...(input.signal === undefined ? {} : { signal: input.signal }),
       });
       if (!request.draft) {
@@ -1286,7 +1387,7 @@ export class PublisherService {
           const remoteBody = await publisher.readBody({
             target: input.plan.target,
             requestNumber: request.number,
-            token: token.token,
+            token: input.token,
             ...(input.signal === undefined ? {} : { signal: input.signal }),
           });
           assertPublishedAssetUrlsInBody(remoteBody, prepared.publishedAssets);
@@ -2055,7 +2156,7 @@ export class PublisherService {
     let run =
       input.fence === undefined || input.plan === undefined || input.credentialSource === undefined
         ? await this.runStore.get(RunIdSchema.parse(input.runId))
-        : await this.assertPublicationExecutionFenceCurrent({
+        : await this.assertPublicationFenceCurrent({
             fence: input.fence,
             plan: input.plan,
             remoteName: input.remoteName,
@@ -2160,7 +2261,7 @@ export class PublisherService {
           input.plan === undefined ||
           input.credentialSource === undefined
             ? await this.runStore.get(RunIdSchema.parse(input.runId))
-            : await this.assertPublicationExecutionFenceCurrent({
+            : await this.assertPublicationFenceCurrent({
                 fence: input.fence,
                 plan: input.plan,
                 remoteName: input.remoteName,
@@ -2283,14 +2384,56 @@ function assertPublicationFenceMatchesPlan(
 function publicationRunSemanticDigest(
   run: Awaited<ReturnType<RunStore["get"]>>,
 ): `sha256:${string}` {
-  const semanticArtifacts = run.artifacts.filter(
-    (artifact) => artifact.metadata["reportKind"] !== "review-asset-upload-receipt",
-  );
+  const diagnosticClaims = new Map<
+    string,
+    {
+      diagnosticExecutionKey: string;
+      claimState: string;
+      ownerClaimId: string;
+    }
+  >();
+  const semanticArtifacts = run.artifacts.filter((artifact) => {
+    const reportKind = artifact.metadata["reportKind"];
+    if (reportKind === "review-asset-upload-receipt") return false;
+    if (reportKind !== "diagnostic-publish-claim") return true;
+
+    const diagnosticExecutionKey = artifact.metadata["diagnosticExecutionKey"];
+    const claimState = artifact.metadata["claimState"];
+    const ownerClaimId = artifact.metadata["ownerClaimId"];
+    if (
+      typeof diagnosticExecutionKey !== "string" ||
+      typeof claimState !== "string" ||
+      typeof ownerClaimId !== "string"
+    ) {
+      return true;
+    }
+    diagnosticClaims.set(diagnosticExecutionKey, {
+      diagnosticExecutionKey,
+      claimState,
+      ownerClaimId,
+    });
+    return false;
+  });
   const semanticRun = {
     ...run,
     revision: 0,
     updatedAt: "publication-semantic-snapshot",
+    stages: run.stages.map((stage) =>
+      stage.lease === undefined
+        ? stage
+        : {
+            ...stage,
+            lease: {
+              ...stage.lease,
+              heartbeatAt: "publication-lease-heartbeat",
+              expiresAt: "publication-lease-expiry",
+            },
+          },
+    ),
     artifacts: semanticArtifacts,
+    diagnosticPublishClaims: [...diagnosticClaims.values()].sort((left, right) =>
+      left.diagnosticExecutionKey.localeCompare(right.diagnosticExecutionKey),
+    ),
   };
   return `sha256:${createHash("sha256").update(JSON.stringify(semanticRun)).digest("hex")}`;
 }
