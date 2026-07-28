@@ -1023,6 +1023,25 @@ describe("v2 documentation", () => {
     }
   });
 
+  it("requires functional review to inspect baseline references and focused evidence", () => {
+    const reviewFunctional = readFileSync(
+      path.join(root, "skills", "review-functional", "SKILL.md"),
+      "utf8",
+    );
+
+    for (const marker of [
+      "baseline references",
+      "production source",
+      "bundle",
+      "fixture",
+      "action",
+      "accessibility",
+      "focused UI assertions",
+    ]) {
+      expect(reviewFunctional, `review-functional:${marker}`).toContain(marker);
+    }
+  });
+
   it("documents composable sources, guidance precedence, and the zero-to-100 feature recipe", () => {
     const readmes = ["README.md", "README.ko.md", "packages/codex-sdk/README.md"].map((file) =>
       readFileSync(path.join(root, file), "utf8"),
