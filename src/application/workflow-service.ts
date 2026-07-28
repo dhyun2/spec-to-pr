@@ -93,6 +93,8 @@ import type { RunService } from "./run-service.js";
 import type { StageService } from "./stage-service.js";
 import {
   MAX_VISUAL_REPAIR_ATTEMPTS,
+  normalizeVisualTargetManifest,
+  VisualTargetManifestCompatibilitySchema,
   VisualTargetManifestSchema,
   compareVisualPngs,
   type VisualTargetManifest,
@@ -173,7 +175,7 @@ const FigmaManifestSchema = z
           .regex(/\.png$/i),
       )
       .min(1),
-    visualTargets: z.array(VisualTargetManifestSchema).min(1).max(50),
+    visualTargets: z.array(VisualTargetManifestCompatibilitySchema).min(1).max(50),
   })
   .strict();
 
@@ -2692,7 +2694,6 @@ export class WorkflowService {
           baseline: comparisonBaseline,
           actual: comparisonActual,
           masks: target.masks,
-          reviewThreshold: target.reviewThreshold,
         });
         const diffArtifact = await this.writeVisualArtifact({
           content: comparison.diff,
@@ -5385,9 +5386,11 @@ function visualTargetsFromRun(run: RunManifest): VisualTargetManifest[] {
   for (const artifact of [...run.artifacts].reverse()) {
     if (artifact.metadata["workflowSubmissionKind"] !== expectedSubmissionKind) continue;
     const parsed = z
-      .array(VisualTargetManifestSchema)
+      .array(VisualTargetManifestCompatibilitySchema)
       .safeParse(artifact.metadata["visualTargets"]);
-    if (parsed.success && parsed.data.length > 0) return parsed.data;
+    if (parsed.success && parsed.data.length > 0) {
+      return parsed.data.map(normalizeVisualTargetManifest);
+    }
   }
   return [];
 }
@@ -5930,7 +5933,8 @@ function assertFigmaManifest(
       JSON.stringify(submission.capturedComponents) ||
     JSON.stringify(parsed.data.designMapping) !== JSON.stringify(submission.designMapping) ||
     JSON.stringify(parsed.data.visualPaths) !== JSON.stringify(expectedVisualPaths) ||
-    JSON.stringify(parsed.data.visualTargets) !== JSON.stringify(submission.visualTargets)
+    JSON.stringify(parsed.data.visualTargets.map(normalizeVisualTargetManifest)) !==
+      JSON.stringify(submission.visualTargets)
   ) {
     throw new Error(`Figma manifest provenance does not match its submission: ${evidencePath}`);
   }

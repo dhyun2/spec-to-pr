@@ -5066,7 +5066,7 @@ describe("WorkflowService", () => {
         results: [
           expect.objectContaining({
             targetId: "checkout-default",
-            metrics: expect.objectContaining({ threshold: 0.98 }),
+            metrics: expect.objectContaining({ threshold: 0.92 }),
           }),
         ],
       },
@@ -5518,6 +5518,35 @@ describe("WorkflowService", () => {
       return candidate.headSha;
     };
 
+    const persistedTargets = await store.get(started.runId);
+    let figmaBundleIndex = -1;
+    for (let index = persistedTargets.artifacts.length - 1; index >= 0; index -= 1) {
+      if (persistedTargets.artifacts[index]?.metadata["workflowSubmissionKind"] === "figma-bundle") {
+        figmaBundleIndex = index;
+        break;
+      }
+    }
+    if (figmaBundleIndex < 0) throw new Error("Missing persisted Figma target manifest");
+    const figmaBundleArtifact = persistedTargets.artifacts[figmaBundleIndex]!;
+    expect(figmaBundleArtifact.metadata["visualTargets"]).toEqual([
+      expect.objectContaining({ reviewThreshold: 0.92 }),
+    ]);
+    const storedTargets = figmaBundleArtifact.metadata["visualTargets"];
+    if (!Array.isArray(storedTargets)) throw new Error("Missing persisted visual targets");
+    persistedTargets.artifacts[figmaBundleIndex] = ArtifactRefSchema.parse({
+      ...figmaBundleArtifact,
+      metadata: {
+        ...figmaBundleArtifact.metadata,
+        visualTargets: storedTargets.map((target) => ({
+          ...(target as Record<string, unknown>),
+          reviewThreshold: 0.98,
+        })),
+      },
+    });
+    persistedTargets.revision += 1;
+    persistedTargets.updatedAt = new Date().toISOString();
+    await store.save(persistedTargets, persistedTargets.revision - 1);
+
     const firstAttempt = await visualSubmission(
       compareAction,
       implementationPacket.headSha,
@@ -5639,7 +5668,7 @@ describe("WorkflowService", () => {
       results: [
         expect.objectContaining({
           targetId: "checkout-default",
-          metrics: expect.objectContaining({ reviewMatchRatio: 0, threshold: 0.98 }),
+          metrics: expect.objectContaining({ reviewMatchRatio: 0, threshold: 0.92 }),
         }),
       ],
     });

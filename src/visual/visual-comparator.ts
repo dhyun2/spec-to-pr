@@ -4,6 +4,7 @@ import { FigmaCaptureGeometrySchema } from "../figma/figma-capture-contract.js";
 import { IsoDateTimeSchema, Sha256DigestSchema } from "../runtime/scalars.js";
 import { VISUAL_POLICY } from "../workflow/delivery-mode-policy.js";
 import { decodeBoundedPng } from "./png-decoder.js";
+import type { PngImage } from "./png-codec.js";
 
 export const DEFAULT_VISUAL_REVIEW_THRESHOLD = VISUAL_POLICY.reviewThreshold;
 export const DEFAULT_VISUAL_PIXEL_TOLERANCE = 0.02;
@@ -20,7 +21,7 @@ export const VisualMaskSchema = z
   })
   .strict();
 
-export const VisualTargetManifestSchema = z
+export const VisualTargetManifestCoreSchema = z
   .object({
     targetId: z
       .string()
@@ -46,13 +47,18 @@ export const VisualTargetManifestSchema = z
     fixture: z.string().trim().min(1).max(2_000),
     figmaCapture: FigmaCaptureGeometrySchema.optional(),
     masks: z.array(VisualMaskSchema).max(50).default([]),
-    reviewThreshold: z
-      .number()
-      .min(DEFAULT_VISUAL_REVIEW_THRESHOLD)
-      .max(1)
-      .default(DEFAULT_VISUAL_REVIEW_THRESHOLD),
   })
   .strict();
+
+export const VisualTargetManifestCompatibilitySchema = VisualTargetManifestCoreSchema.extend({
+  reviewThreshold: z.number().min(0).max(1).optional(),
+}).strict();
+
+export const VisualTargetManifestSchema = VisualTargetManifestCoreSchema.extend({
+  reviewThreshold: z
+    .literal(VISUAL_POLICY.reviewThreshold)
+    .default(VISUAL_POLICY.reviewThreshold),
+}).strict();
 
 export const VisualCaptureSchema = z
   .object({
@@ -109,8 +115,21 @@ export const VisualComparisonMetricsV2Schema = z
   .strict();
 
 export type VisualMask = z.infer<typeof VisualMaskSchema>;
-export type VisualTargetManifest = z.infer<typeof VisualTargetManifestSchema>;
+export type VisualTargetManifest = Omit<
+  z.infer<typeof VisualTargetManifestCompatibilitySchema>,
+  "reviewThreshold"
+> & {
+  reviewThreshold: typeof VISUAL_POLICY.reviewThreshold;
+};
 export type VisualComparisonMetricsV2 = z.infer<typeof VisualComparisonMetricsV2Schema>;
+
+export function normalizeVisualTargetManifest(raw: unknown): VisualTargetManifest {
+  const parsed = VisualTargetManifestCompatibilitySchema.parse(raw);
+  return {
+    ...parsed,
+    reviewThreshold: VISUAL_POLICY.reviewThreshold,
+  };
+}
 
 export type VisualComparisonOutput = {
   status: "passed" | "failed";
@@ -124,7 +143,6 @@ export async function compareVisualPngs(input: {
   baseline: Buffer;
   actual: Buffer;
   masks?: VisualMask[];
-  reviewThreshold?: number;
   pixelTolerance?: number;
 }): Promise<VisualComparisonOutput> {
   const [{ createPng, encodePng }, baseline, actual] = await Promise.all([
@@ -132,6 +150,27 @@ export async function compareVisualPngs(input: {
     readPng(input.baseline, "baseline"),
     readPng(input.actual, "actual"),
   ]);
+  return compareDecodedVisualPngs({
+    baseline,
+    actual,
+    createPng,
+    encodePng,
+    ...(input.masks === undefined ? {} : { masks: input.masks }),
+    ...(input.pixelTolerance === undefined ? {} : { pixelTolerance: input.pixelTolerance }),
+    threshold: VISUAL_POLICY.reviewThreshold,
+  });
+}
+
+function compareDecodedVisualPngs(input: {
+  baseline: PngImage;
+  actual: PngImage;
+  createPng: (width: number, height: number) => PngImage;
+  encodePng: (image: PngImage) => Buffer;
+  masks?: VisualMask[];
+  pixelTolerance?: number;
+  threshold: typeof VISUAL_POLICY.reviewThreshold;
+}): VisualComparisonOutput {
+  const { baseline, actual, createPng, encodePng, threshold } = input;
   if (baseline.width !== actual.width || baseline.height !== actual.height) {
     throw new Error(
       `VISUAL_DIMENSION_MISMATCH: baseline is ${baseline.width}x${baseline.height}, actual is ${actual.width}x${actual.height}`,
@@ -158,11 +197,6 @@ export async function compareVisualPngs(input: {
     );
   }
 
-  const threshold = z
-    .number()
-    .min(DEFAULT_VISUAL_REVIEW_THRESHOLD)
-    .max(1)
-    .parse(input.reviewThreshold ?? DEFAULT_VISUAL_REVIEW_THRESHOLD);
   const pixelTolerance = z
     .number()
     .min(0)
