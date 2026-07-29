@@ -38,7 +38,7 @@
     "sdk:build": "pnpm --dir packages/codex-sdk build",
     "sdk:check-dist": "node scripts/check-generated-files.mjs packages/codex-sdk/dist",
     "bundle:check-dist": "node scripts/check-generated-files.mjs dist/mcp",
-    "check": "pnpm sdk:typecheck && pnpm sdk:build && pnpm sdk:check-dist && pnpm format:check && pnpm typecheck && pnpm schemas:build && pnpm schemas:check && pnpm build && pnpm bundle:check-dist && pnpm test",
+    "check": "tsx scripts/run-repository-checks.ts",
     "plugin:validate": "pnpm plugin:validate:claude && pnpm plugin:validate:codex",
     "plugin:validate:claude": "claude plugin validate . --strict",
     "plugin:validate:codex": "tsx scripts/validate-codex-plugin.ts"

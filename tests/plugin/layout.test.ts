@@ -665,9 +665,17 @@ describe("plugin layout", () => {
     expect(rootPackage.scripts["bundle:check-dist"]).toBe(
       "node scripts/check-generated-files.mjs dist/mcp",
     );
-    expect(rootPackage.scripts["check"]).toContain("pnpm sdk:build && pnpm sdk:check-dist");
-    expect(rootPackage.scripts["check"]).toContain("pnpm schemas:build && pnpm schemas:check");
-    expect(rootPackage.scripts["check"]).toContain("pnpm build && pnpm bundle:check-dist");
+    expect(rootPackage.scripts["check"]).toBe("tsx scripts/run-repository-checks.ts");
+    const repositoryCheckPlan = readFileSync(
+      path.join(root, "src", "release", "repository-check-plan.ts"),
+      "utf8",
+    );
+    expect(repositoryCheckPlan).toContain('id: "sdk"');
+    expect(repositoryCheckPlan).toContain('id: "schemas"');
+    expect(repositoryCheckPlan).toContain('id: "mcp"');
+    expect(repositoryCheckPlan).toContain('["pnpm", ["sdk:build"]]');
+    expect(repositoryCheckPlan).toContain('["pnpm", ["schemas:build"]]');
+    expect(repositoryCheckPlan).toContain('["pnpm", ["build"]]');
 
     const sdkPackage = JSON.parse(
       readFileSync(path.join(root, "packages", "codex-sdk", "package.json"), "utf8"),
@@ -681,6 +689,18 @@ describe("plugin layout", () => {
       "utf8",
     );
     expect(schemaBuilder).toContain("await rm(outputDirectory");
+  });
+
+  it("keeps plugin-maintainer checks out of a target-project implementation run", () => {
+    const implementationSkill = readFileSync(
+      path.join(root, "skills", "implement", "SKILL.md"),
+      "utf8",
+    );
+
+    expect(implementationSkill).toContain("plugin-maintainer checks");
+    expect(implementationSkill).toContain("pnpm check");
+    expect(implementationSkill).toContain("case4:check");
+    expect(implementationSkill).toContain("bench:runtime");
   });
 
   it("keeps the MDX installation page free of raw container directives", () => {
