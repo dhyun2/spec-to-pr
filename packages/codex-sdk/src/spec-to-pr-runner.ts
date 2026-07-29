@@ -41,6 +41,8 @@ import {
 } from "./workflow-policy.js";
 
 export const DEFAULT_BLOCKED_DIAGNOSTIC_TOKEN_RESERVE = 24_000;
+export const DEFAULT_BOUNDARY_TURN_TIMEOUT_MS = 10 * 60_000;
+export const DEFAULT_BOUNDARY_RUN_TIMEOUT_MS = 45 * 60_000;
 
 export type SpecToPrCodexRunInput = {
   workingDirectory: string;
@@ -72,6 +74,10 @@ export type SpecToPrCodexRunInput = {
   outputSchema?: unknown;
   enableReviewAgents?: boolean;
   maxTurns?: number;
+  /** Bound one model/tool turn so an unavailable dependency cannot keep the user waiting forever. */
+  turnTimeoutMs?: number;
+  /** Bound a complete user Run; release workflows can opt into a larger explicit budget. */
+  runTimeoutMs?: number;
   blockedDiagnosticTokenReserve?: number;
   usageHistoryPath?: string;
   usageCalibration?: boolean;
@@ -91,7 +97,9 @@ export type SpecToPrCodexRunResult = {
       | "run-mismatch"
       | "usage-unavailable"
       | "status-unavailable"
-      | "turn-limit";
+      | "turn-limit"
+      | "turn-timeout"
+      | "run-timeout";
     checkpointPercent: 80;
     checkpointAtTokens: number;
     hardLimitTokens: number;
@@ -99,6 +107,18 @@ export type SpecToPrCodexRunResult = {
     checkpointCount: number;
     requiredValidations: string[];
     usageAvailability: AggregatedUsage["availability"];
+    elapsedMs: number;
+    turnTimeoutMs: number;
+    runTimeoutMs: number;
+    actionTurns: Array<{
+      turn: number;
+      elapsedMs: number;
+      outcome: "completed" | "turn-timeout" | "run-timeout" | "failed";
+    }>;
+    formatTurn?: {
+      elapsedMs: number;
+      outcome: "completed" | "turn-timeout" | "run-timeout" | "failed";
+    };
   };
   turnCount: number;
   outputFormatting:
@@ -179,6 +199,8 @@ export async function runSpecToPrWithCodex(
     ),
     requiredValidations,
     maxTurns: input.maxTurns ?? 12,
+    turnTimeoutMs: input.turnTimeoutMs ?? DEFAULT_BOUNDARY_TURN_TIMEOUT_MS,
+    runTimeoutMs: input.runTimeoutMs ?? DEFAULT_BOUNDARY_RUN_TIMEOUT_MS,
     blockedDiagnosticTokenReserve:
       input.blockedDiagnosticTokenReserve ?? DEFAULT_BLOCKED_DIAGNOSTIC_TOKEN_RESERVE,
     inspectBlockedDiagnosticPreflight: () =>
@@ -247,6 +269,22 @@ export async function runSpecToPrWithCodex(
       checkpointCount: result.checkpointCount,
       requiredValidations: result.requiredValidations,
       usageAvailability: result.usage.availability,
+      elapsedMs: result.timing.elapsedMs,
+      turnTimeoutMs: input.turnTimeoutMs ?? DEFAULT_BOUNDARY_TURN_TIMEOUT_MS,
+      runTimeoutMs: input.runTimeoutMs ?? DEFAULT_BOUNDARY_RUN_TIMEOUT_MS,
+      actionTurns: result.timing.actionTurns.map((turn) => ({
+        turn: turn.turn,
+        elapsedMs: turn.elapsedMs,
+        outcome: turn.outcome,
+      })),
+      ...(result.timing.formatTurn === undefined
+        ? {}
+        : {
+            formatTurn: {
+              elapsedMs: result.timing.formatTurn.elapsedMs,
+              outcome: result.timing.formatTurn.outcome,
+            },
+          }),
     },
     turnCount: result.turnCount,
     outputFormatting: result.outputFormatting,
@@ -454,6 +492,17 @@ export function validateSpecToPrRunInput(input: SpecToPrCodexRunInput): void {
   if (input.maxTurns !== undefined && (!Number.isInteger(input.maxTurns) || input.maxTurns <= 0)) {
     throw new Error("maxTurns must be a positive integer");
   }
+  for (const [name, timeoutMs] of [
+    ["turnTimeoutMs", input.turnTimeoutMs],
+    ["runTimeoutMs", input.runTimeoutMs],
+  ] as const) {
+    if (
+      timeoutMs !== undefined &&
+      (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0)
+    ) {
+      throw new Error(`${name} must be a positive integer`);
+    }
+  }
   if (
     (input.publication ?? "draft") === "draft" &&
     input.maxTurns !== undefined &&
@@ -564,15 +613,26 @@ function createBoundaryClient(codex: Codex, options: ThreadOptions): BoundaryCli
   };
 }
 
-function adaptThread(thread: ReturnType<Codex["startThread"]>): BoundaryThread {
+export function adaptThread(thread: {
+  readonly id: string | null;
+  run(
+    prompt: string,
+    options?: { outputSchema?: unknown; signal?: AbortSignal },
+  ): Promise<RunResult>;
+}): BoundaryThread {
   return {
     get id() {
       return thread.id;
     },
-    run: async (prompt, options) =>
-      options?.outputSchema === undefined
+    run: async (prompt, options) => {
+      const turnOptions = {
+        ...(options?.outputSchema === undefined ? {} : { outputSchema: options.outputSchema }),
+        ...(options?.signal === undefined ? {} : { signal: options.signal }),
+      };
+      return Object.keys(turnOptions).length === 0
         ? thread.run(prompt)
-        : thread.run(prompt, { outputSchema: options.outputSchema }),
+        : thread.run(prompt, turnOptions);
+    },
   };
 }
 

@@ -10,6 +10,10 @@ export async function executeBudgetedBoundaryTurns(input) {
             input.blockedDiagnosticTokenReserve >= input.hardLimitTokens)) {
         throw new Error("blockedDiagnosticTokenReserve must be a positive integer below hardLimitTokens");
     }
+    assertPositiveTimeout(input.turnTimeoutMs, "turnTimeoutMs");
+    assertPositiveTimeout(input.runTimeoutMs, "runTimeoutMs");
+    const now = input.now ?? performance.now.bind(performance);
+    const startedAtMs = now();
     let thread = input.resumeThreadId === undefined
         ? input.client.startThread()
         : input.client.resumeThread(input.resumeThreadId);
@@ -32,8 +36,30 @@ export async function executeBudgetedBoundaryTurns(input) {
     let blockedDiagnosticReserveLatched = false;
     let blockedDiagnosticReserveExhausted = false;
     const items = [];
+    const actionTurns = [];
+    let formatTurn;
     while (turnCount < input.maxTurns) {
-        const turn = await thread.run(prompt);
+        const result = await executeBoundaryTurnWithTimeout({
+            thread,
+            prompt,
+            turn: turnCount + 1,
+            kind: "action",
+            ...(input.turnTimeoutMs === undefined ? {} : { turnTimeoutMs: input.turnTimeoutMs }),
+            ...(input.runTimeoutMs === undefined ? {} : { runTimeoutMs: input.runTimeoutMs }),
+            startedAtMs,
+            now,
+        });
+        actionTurns.push(result.timing);
+        if (result.kind === "timeout") {
+            state = result.timeout === "run-timeout" ? "run-timeout" : "turn-timeout";
+            finalResponse = timeoutFinalResponse({
+                timeout: result.timeout,
+                threadId: thread.id,
+                timeoutMs: result.timeoutMs,
+            });
+            break;
+        }
+        const turn = result.turn;
         turnCount += 1;
         finalResponse = turn.finalResponse;
         items.push(...turn.items);
@@ -146,9 +172,46 @@ export async function executeBudgetedBoundaryTurns(input) {
         }
         else {
             try {
-                const formatted = await thread.run(buildFinalResponsePrompt(workflowStatus), {
+                const formattedResult = await executeBoundaryTurnWithTimeout({
+                    thread,
+                    prompt: buildFinalResponsePrompt(workflowStatus),
+                    turn: turnCount + 1,
+                    kind: "format",
                     outputSchema: input.outputSchema,
+                    ...(input.turnTimeoutMs === undefined ? {} : { turnTimeoutMs: input.turnTimeoutMs }),
+                    ...(input.runTimeoutMs === undefined ? {} : { runTimeoutMs: input.runTimeoutMs }),
+                    startedAtMs,
+                    now,
                 });
+                formatTurn = formattedResult.timing;
+                if (formattedResult.kind === "timeout") {
+                    state = formattedResult.timeout;
+                    outputFormatting = "failed";
+                    finalResponse = timeoutFinalResponse({
+                        timeout: formattedResult.timeout,
+                        threadId: thread.id,
+                        timeoutMs: formattedResult.timeoutMs,
+                    });
+                    return boundaryRunResult({
+                        thread,
+                        finalResponse,
+                        items,
+                        usage,
+                        state,
+                        outputFormatting,
+                        turnCount,
+                        checkpointCount,
+                        workflowStatus,
+                        requiredValidations: activeRequiredValidations,
+                        workloadSize: activeWorkloadSize,
+                        hardLimitTokens: activeHardLimitTokens,
+                        startedAtMs,
+                        now,
+                        actionTurns,
+                        ...(formatTurn === undefined ? {} : { formatTurn }),
+                    });
+                }
+                const formatted = formattedResult.turn;
                 turnCount += 1;
                 finalResponse = formatted.finalResponse;
                 items.push(...formatted.items);
@@ -161,11 +224,11 @@ export async function executeBudgetedBoundaryTurns(input) {
             }
         }
     }
-    return {
-        threadId: thread.id,
+    return boundaryRunResult({
+        thread,
         finalResponse,
         items,
-        usage: usage ?? accumulateUsage(null, null),
+        usage,
         state,
         outputFormatting,
         turnCount,
@@ -174,6 +237,132 @@ export async function executeBudgetedBoundaryTurns(input) {
         requiredValidations: activeRequiredValidations,
         workloadSize: activeWorkloadSize,
         hardLimitTokens: activeHardLimitTokens,
+        startedAtMs,
+        now,
+        actionTurns,
+        ...(formatTurn === undefined ? {} : { formatTurn }),
+    });
+}
+async function executeBoundaryTurnWithTimeout(input) {
+    const startedAtMs = input.now();
+    const remainingRunMs = input.runTimeoutMs === undefined
+        ? Number.POSITIVE_INFINITY
+        : input.runTimeoutMs - (startedAtMs - input.startedAtMs);
+    if (remainingRunMs <= 0) {
+        return {
+            kind: "timeout",
+            timeout: "run-timeout",
+            timeoutMs: input.runTimeoutMs,
+            timing: {
+                turn: input.turn,
+                kind: input.kind,
+                elapsedMs: 0,
+                outcome: "run-timeout",
+            },
+        };
+    }
+    const timeoutMs = Math.min(input.turnTimeoutMs ?? Number.POSITIVE_INFINITY, remainingRunMs);
+    const timeout = timeoutMs === Number.POSITIVE_INFINITY
+        ? undefined
+        : input.turnTimeoutMs !== undefined && input.turnTimeoutMs <= remainingRunMs
+            ? "turn-timeout"
+            : "run-timeout";
+    const controller = new AbortController();
+    let timer;
+    const timeoutPromise = timeout === undefined
+        ? undefined
+        : new Promise((_, reject) => {
+            timer = setTimeout(() => {
+                const error = new BoundaryTurnTimeoutError(timeout, timeoutMs);
+                controller.abort(error);
+                reject(error);
+            }, timeoutMs);
+        });
+    try {
+        const runOptions = {
+            ...(input.outputSchema === undefined ? {} : { outputSchema: input.outputSchema }),
+            ...(timeout === undefined ? {} : { signal: controller.signal }),
+        };
+        const invocation = input.thread.run(input.prompt, Object.keys(runOptions).length === 0 ? undefined : runOptions);
+        const turn = timeoutPromise === undefined ? await invocation : await Promise.race([invocation, timeoutPromise]);
+        return {
+            kind: "completed",
+            turn,
+            timing: {
+                turn: input.turn,
+                kind: input.kind,
+                elapsedMs: Math.max(0, input.now() - startedAtMs),
+                outcome: "completed",
+            },
+        };
+    }
+    catch (error) {
+        if (error instanceof BoundaryTurnTimeoutError) {
+            return {
+                kind: "timeout",
+                timeout: error.timeout,
+                timeoutMs: error.timeoutMs,
+                timing: {
+                    turn: input.turn,
+                    kind: input.kind,
+                    elapsedMs: Math.max(0, input.now() - startedAtMs),
+                    outcome: error.timeout,
+                },
+            };
+        }
+        throw error;
+    }
+    finally {
+        if (timer !== undefined)
+            clearTimeout(timer);
+    }
+}
+class BoundaryTurnTimeoutError extends Error {
+    timeout;
+    timeoutMs;
+    constructor(timeout, timeoutMs) {
+        super(`${timeout} after ${timeoutMs}ms`);
+        this.timeout = timeout;
+        this.timeoutMs = timeoutMs;
+        this.name = "BoundaryTurnTimeoutError";
+    }
+}
+function assertPositiveTimeout(timeoutMs, name) {
+    if (timeoutMs !== undefined && (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0)) {
+        throw new Error(`${name} must be a positive integer`);
+    }
+}
+function timeoutFinalResponse(input) {
+    const reason = input.timeout === "turn-timeout"
+        ? `a single Codex turn exceeded its ${input.timeoutMs}ms deadline`
+        : `the total Run deadline of ${input.timeoutMs}ms was exhausted`;
+    return [
+        `The spec-to-pr runner stopped waiting because ${reason}.`,
+        "No validation was waived and no terminal verdict was inferred.",
+        input.threadId === null
+            ? "Resume this Codex task to inspect the durable workflow status before continuing."
+            : `The existing thread ${input.threadId} can be resumed after the blocked dependency is addressed.`,
+    ].join(" ");
+}
+function boundaryRunResult(input) {
+    return {
+        threadId: input.thread.id,
+        finalResponse: input.finalResponse,
+        items: input.items,
+        usage: input.usage ?? accumulateUsage(null, null),
+        state: input.state,
+        outputFormatting: input.outputFormatting,
+        turnCount: input.turnCount,
+        checkpointCount: input.checkpointCount,
+        workflowStatus: input.workflowStatus,
+        requiredValidations: input.requiredValidations,
+        workloadSize: input.workloadSize,
+        hardLimitTokens: input.hardLimitTokens,
+        timing: {
+            elapsedMs: Math.max(0, input.now() - input.startedAtMs),
+            actionTurns: input.actionTurns,
+            ...(input.formatTurn === undefined ? {} : { formatTurn: input.formatTurn }),
+        },
     };
 }
 export function extractWorkflowStatus(items) {

@@ -189,6 +189,7 @@ import {
 
 const WORKER_ID = "workflow-orchestrator" as const;
 const execFileAsync = promisify(execFile);
+const GIT_COMMAND_TIMEOUT_MS = 60_000;
 const DEFAULT_EXTERNAL_LEASE_TTL_MS = 15 * 60 * 1000;
 const DEFAULT_EXTERNAL_HEARTBEAT_MS = 60 * 1000;
 const MAX_DIAGNOSTIC_CLAIM_ATTEMPTS = 8;
@@ -9190,11 +9191,15 @@ export async function captureGitSnapshot(
           cwd: projectRoot,
           encoding: "utf8",
           maxBuffer: 1024 * 1024,
+          timeout: GIT_COMMAND_TIMEOUT_MS,
+          killSignal: "SIGTERM",
         }),
         execFileAsync("git", ["status", "--porcelain=v1", "--untracked-files=all"], {
           cwd: projectRoot,
           encoding: "utf8",
           maxBuffer: 5 * 1024 * 1024,
+          timeout: GIT_COMMAND_TIMEOUT_MS,
+          killSignal: "SIGTERM",
         }),
       ]);
       if (checkedOutBranch.trim() !== strictBinding.sourceBranch) {
@@ -9215,17 +9220,23 @@ export async function captureGitSnapshot(
         cwd: projectRoot,
         encoding: "buffer",
         maxBuffer: 50 * 1024 * 1024,
+        timeout: GIT_COMMAND_TIMEOUT_MS,
+        killSignal: "SIGTERM",
       }),
       execFileAsync("git", ["diff", "--name-only", "-z", ...diffRange, "--"], {
         cwd: projectRoot,
         encoding: "buffer",
         maxBuffer: 5 * 1024 * 1024,
+        timeout: GIT_COMMAND_TIMEOUT_MS,
+        killSignal: "SIGTERM",
       }),
       strictBinding === undefined
         ? execFileAsync("git", ["ls-files", "--others", "--exclude-standard", "-z"], {
             cwd: projectRoot,
             encoding: "buffer",
             maxBuffer: 5 * 1024 * 1024,
+            timeout: GIT_COMMAND_TIMEOUT_MS,
+            killSignal: "SIGTERM",
           })
         : Promise.resolve({ stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }),
     ]);
@@ -9338,16 +9349,22 @@ async function captureImplementationSnapshotFence(
       cwd: projectRoot,
       encoding: "utf8",
       maxBuffer: 1024 * 1024,
+      timeout: GIT_COMMAND_TIMEOUT_MS,
+      killSignal: "SIGTERM",
     }),
     execFileAsync("git", ["symbolic-ref", "--quiet", "--short", "HEAD"], {
       cwd: projectRoot,
       encoding: "utf8",
       maxBuffer: 1024 * 1024,
+      timeout: GIT_COMMAND_TIMEOUT_MS,
+      killSignal: "SIGTERM",
     }),
     execFileAsync("git", ["status", "--porcelain=v1", "--untracked-files=all"], {
       cwd: projectRoot,
       encoding: "utf8",
       maxBuffer: 5 * 1024 * 1024,
+      timeout: GIT_COMMAND_TIMEOUT_MS,
+      killSignal: "SIGTERM",
     }),
   ]);
   return {
@@ -9403,6 +9420,8 @@ async function currentGitHead(
     const { stdout } = await execFileAsync("git", ["rev-parse", "--verify", "HEAD"], {
       cwd: projectRoot,
       encoding: "utf8",
+      timeout: GIT_COMMAND_TIMEOUT_MS,
+      killSignal: "SIGTERM",
     });
     const parsed = z
       .string()

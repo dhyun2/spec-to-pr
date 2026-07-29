@@ -4,6 +4,25 @@ import { GitHubPublisherAdapter } from "../../src/publisher/github-publisher.js"
 import type { PublishTarget, ReviewRequestPayload } from "../../src/publisher/index.js";
 
 describe("GitHubPublisherAdapter", () => {
+  it("aborts an unresponsive GitHub API request at the adapter deadline", async () => {
+    const fetchMock = vi.fn(
+      (_url: string, init: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+        }),
+    );
+    const adapter = new GitHubPublisherAdapter(fetchMock, 10);
+
+    await expect(
+      adapter.findExisting({
+        target: githubTarget(),
+        payload: payload(),
+        token: "token",
+      }),
+    ).rejects.toMatchObject({ name: "TimeoutError" });
+    expect(fetchMock.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+  });
+
   it("creates draft pull requests with report body", async () => {
     const fetchMock = vi
       .fn()
@@ -30,7 +49,7 @@ describe("GitHubPublisherAdapter", () => {
       "https://api.github.com/repos/acme/spec-to-pr/pulls",
       expect.objectContaining({
         method: "POST",
-        signal: controller.signal,
+        signal: expect.any(AbortSignal),
         headers: expect.objectContaining({
           Authorization: "Bearer ghp_example",
         }),

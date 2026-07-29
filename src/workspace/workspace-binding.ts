@@ -15,6 +15,7 @@ import {
 import { GitObjectIdSchema } from "../runtime/scalars.js";
 
 const execFileAsync = promisify(execFile);
+const WORKSPACE_GIT_COMMAND_TIMEOUT_MS = 60_000;
 
 const RepoRelativePathSchema = z
   .string()
@@ -346,6 +347,8 @@ async function defaultWorkspaceGitRunner(
     cwd,
     encoding: "utf8",
     maxBuffer: 5 * 1024 * 1024,
+    timeout: WORKSPACE_GIT_COMMAND_TIMEOUT_MS,
+    killSignal: "SIGTERM",
   });
 }
 

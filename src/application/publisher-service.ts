@@ -78,6 +78,7 @@ import { assertWorkspaceFresh } from "../workspace/workspace-binding.js";
 const execFileAsync = promisify(execFile);
 const PUBLISHER_ADAPTER = "publisher-v1" as const;
 const MAX_PUBLISH_RESULT_SAVE_ATTEMPTS = 8;
+const PUBLISH_GIT_COMMAND_TIMEOUT_MS = 60_000;
 
 type VisualPreviewPolicy = {
   includeFigma?: boolean;
@@ -2330,6 +2331,8 @@ async function defaultGitCommandRunner(
   const result = await execFileAsync("git", args, {
     cwd,
     encoding,
+    timeout: PUBLISH_GIT_COMMAND_TIMEOUT_MS,
+    killSignal: "SIGTERM",
     ...(options.maxBuffer === undefined ? {} : { maxBuffer: options.maxBuffer }),
   });
 

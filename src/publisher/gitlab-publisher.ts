@@ -21,6 +21,7 @@ type AbortableRequestInit = Omit<RequestInit, "signal"> & {
   signal?: AbortSignal | undefined;
 };
 
+const DEFAULT_PUBLISH_HTTP_TIMEOUT_MS = 60_000;
 /**
  * An upload-only failure. The application layer uses this type to distinguish
  * a project-upload outage from a create/update MR failure; only the former can
@@ -51,7 +52,10 @@ export function canUseGitLabRawEvidenceFallback(error: unknown): boolean {
 }
 
 export class GitLabPublisherAdapter implements ReviewRequestPublisher {
-  public constructor(private readonly fetchImpl: FetchLike = fetch) {}
+  public constructor(
+    private readonly fetchImpl: FetchLike = fetch,
+    private readonly requestTimeoutMs = DEFAULT_PUBLISH_HTTP_TIMEOUT_MS,
+  ) {}
 
   public async findExisting(input: {
     target: PublishTarget;
@@ -285,12 +289,18 @@ export class GitLabPublisherAdapter implements ReviewRequestPublisher {
     };
 
     const { signal, ...requestInit } = init;
+    const requestSignal = withRequestTimeout(signal, this.requestTimeoutMs);
     return this.fetchImpl(url, {
       ...requestInit,
-      ...(signal === undefined ? {} : { signal }),
+      signal: requestSignal,
       headers,
     });
   }
+}
+
+function withRequestTimeout(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  return signal === undefined ? timeout : AbortSignal.any([signal, timeout]);
 }
 
 function draftTitle(title: string): string {

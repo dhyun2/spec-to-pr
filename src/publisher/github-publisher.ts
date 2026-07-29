@@ -22,6 +22,7 @@ type AbortableRequestInit = Omit<RequestInit, "signal"> & {
   signal?: AbortSignal | undefined;
 };
 
+const DEFAULT_PUBLISH_HTTP_TIMEOUT_MS = 60_000;
 export const GITHUB_EVIDENCE_BRANCH = "spec-to-pr/evidence" as const;
 const GITHUB_EVIDENCE_REF = `refs/heads/${GITHUB_EVIDENCE_BRANCH}` as const;
 const MAX_EVIDENCE_UPLOAD_ATTEMPTS = 3;
@@ -32,7 +33,10 @@ type ValidatedEvidenceRef = {
 };
 
 export class GitHubPublisherAdapter implements ReviewRequestPublisher {
-  public constructor(private readonly fetchImpl: FetchLike = fetch) {}
+  public constructor(
+    private readonly fetchImpl: FetchLike = fetch,
+    private readonly requestTimeoutMs = DEFAULT_PUBLISH_HTTP_TIMEOUT_MS,
+  ) {}
 
   public async findExisting(input: {
     target: PublishTarget;
@@ -495,9 +499,10 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
     init: AbortableRequestInit,
   ): Promise<Response> {
     const { signal, ...requestInit } = init;
+    const requestSignal = withRequestTimeout(signal, this.requestTimeoutMs);
     return this.fetchImpl(url, {
       ...requestInit,
-      ...(signal === undefined ? {} : { signal }),
+      signal: requestSignal,
       headers: {
         Accept: "application/vnd.github+json",
         Authorization: `Bearer ${token}`,
@@ -541,6 +546,11 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
 
     return typeof sha === "string" && sha.length > 0 ? sha : undefined;
   }
+}
+
+function withRequestTimeout(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  return signal === undefined ? timeout : AbortSignal.any([signal, timeout]);
 }
 
 function assertGitHub(target: PublishTarget): asserts target is PublishTarget & {

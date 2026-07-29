@@ -1,7 +1,9 @@
 import { type ApprovalMode, type ModelReasoningEffort, type RunResult, type SandboxMode } from "@openai/codex-sdk";
-import { type BlockedDiagnosticPreflight } from "./boundary-runner.js";
+import { type BlockedDiagnosticPreflight, type BoundaryThread } from "./boundary-runner.js";
 import { type AggregatedUsage, type SdkWorkloadEstimate } from "./workload-budget.js";
 export declare const DEFAULT_BLOCKED_DIAGNOSTIC_TOKEN_RESERVE = 24000;
+export declare const DEFAULT_BOUNDARY_TURN_TIMEOUT_MS: number;
+export declare const DEFAULT_BOUNDARY_RUN_TIMEOUT_MS: number;
 export type SpecToPrCodexRunInput = {
     workingDirectory: string;
     deliveryMode?: "auto" | "brief" | "legacy" | "feature" | "figma";
@@ -32,6 +34,10 @@ export type SpecToPrCodexRunInput = {
     outputSchema?: unknown;
     enableReviewAgents?: boolean;
     maxTurns?: number;
+    /** Bound one model/tool turn so an unavailable dependency cannot keep the user waiting forever. */
+    turnTimeoutMs?: number;
+    /** Bound a complete user Run; release workflows can opt into a larger explicit budget. */
+    runTimeoutMs?: number;
     blockedDiagnosticTokenReserve?: number;
     usageHistoryPath?: string;
     usageCalibration?: boolean;
@@ -43,7 +49,7 @@ export type SpecToPrCodexRunResult = {
     items: RunResult["items"];
     workload: SdkWorkloadEstimate;
     budget: {
-        state: "completed" | "blocked" | "split-required" | "run-mismatch" | "usage-unavailable" | "status-unavailable" | "turn-limit";
+        state: "completed" | "blocked" | "split-required" | "run-mismatch" | "usage-unavailable" | "status-unavailable" | "turn-limit" | "turn-timeout" | "run-timeout";
         checkpointPercent: 80;
         checkpointAtTokens: number;
         hardLimitTokens: number;
@@ -51,6 +57,18 @@ export type SpecToPrCodexRunResult = {
         checkpointCount: number;
         requiredValidations: string[];
         usageAvailability: AggregatedUsage["availability"];
+        elapsedMs: number;
+        turnTimeoutMs: number;
+        runTimeoutMs: number;
+        actionTurns: Array<{
+            turn: number;
+            elapsedMs: number;
+            outcome: "completed" | "turn-timeout" | "run-timeout" | "failed";
+        }>;
+        formatTurn?: {
+            elapsedMs: number;
+            outcome: "completed" | "turn-timeout" | "run-timeout" | "failed";
+        };
     };
     turnCount: number;
     outputFormatting: "not-requested" | "not-terminal" | "applied" | "budget-skipped" | "usage-unavailable" | "failed";
@@ -66,3 +84,10 @@ export declare function buildSpecToPrPrompt(input: SpecToPrCodexRunInput): strin
 export declare function buildResumeSpecToPrPrompt(): string;
 export declare function inspectBlockedDiagnosticPreflight(workingDirectory: string, configuredEnv?: Record<string, string>): BlockedDiagnosticPreflight;
 export declare function validateSpecToPrRunInput(input: SpecToPrCodexRunInput): void;
+export declare function adaptThread(thread: {
+    readonly id: string | null;
+    run(prompt: string, options?: {
+        outputSchema?: unknown;
+        signal?: AbortSignal;
+    }): Promise<RunResult>;
+}): BoundaryThread;

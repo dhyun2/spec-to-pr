@@ -6,6 +6,7 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  adaptThread,
   buildResumeSpecToPrPrompt,
   buildSpecToPrPrompt,
   inspectBlockedDiagnosticPreflight,
@@ -42,6 +43,19 @@ const legacyToolNames = [
 ];
 
 describe("Codex SDK workflow policy", () => {
+  it("forwards timeout cancellation to the underlying Codex SDK turn", async () => {
+    const rawThread = {
+      id: "thread-signal",
+      run: vi.fn(async () => ({ finalResponse: "ok", items: [], usage: null })),
+    };
+    const signal = AbortSignal.timeout(1_000);
+    const schema = { type: "object" };
+
+    await adaptThread(rawThread).run("continue", { outputSchema: schema, signal });
+
+    expect(rawThread.run).toHaveBeenCalledWith("continue", { outputSchema: schema, signal });
+  });
+
   it("uses only the seven workflow facade tools", () => {
     expect(CODEX_WORKFLOW_TOOL_NAMES).toEqual([
       "workflow_info",
@@ -170,6 +184,30 @@ describe("Codex SDK workflow policy", () => {
     expect(prompt).toContain("independent read-heavy discovery");
     expect(prompt).toContain("no nested scouts or parallel writers");
     expect(prompt).toContain("only after implementation");
+  });
+
+  it("forbids polling and recursive delegation in latency-bound user Runs", () => {
+    const prompt = buildSpecToPrPrompt({
+      workingDirectory: "/tmp/project",
+      prompt: "Implement the responsive settings UI.",
+      figmaUrl: "https://figma.com/design/example",
+    });
+
+    expect(prompt).toContain("latency-bound user Run");
+    expect(prompt).toContain("Do not create generic helper agents");
+    expect(prompt).toContain("Do not poll or repeatedly wait");
+    expect(prompt).toContain("one reviewer per applicable role");
+  });
+
+  it("keeps mandatory review evidence explicit when delegated review agents are disabled", () => {
+    const prompt = buildSpecToPrPrompt({
+      workingDirectory: "/tmp/project",
+      prompt: "Implement the checkout API.",
+      enableReviewAgents: false,
+    });
+
+    expect(prompt).toContain("delegated reviewer agents are disabled");
+    expect(prompt).toContain("does not waive the required review gate");
   });
 
   it("records optional skills only when they were actually applied", () => {
@@ -685,6 +723,10 @@ describe("Codex SDK workflow policy", () => {
       "api-generator",
       "--blocked-diagnostic-token-reserve",
       "24000",
+      "--turn-timeout-seconds",
+      "30",
+      "--run-timeout-seconds",
+      "600",
     ];
 
     try {
@@ -709,6 +751,8 @@ describe("Codex SDK workflow policy", () => {
         guidancePaths: ["AGENTS.md", "docs/architecture/ARCHITECTURE.md"],
         skillHints: ["react-best-practices", "api-generator"],
         blockedDiagnosticTokenReserve: 24_000,
+        turnTimeoutMs: 30_000,
+        runTimeoutMs: 600_000,
       }),
     ]);
   });

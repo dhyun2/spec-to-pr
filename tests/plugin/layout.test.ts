@@ -706,6 +706,20 @@ describe("plugin layout", () => {
     expect(workflowSkill).toContain("capture and functional reviewer concurrently");
   });
 
+  it("bounds user-run delegation so progress checks cannot become a long polling loop", () => {
+    const workflowSkill = readFileSync(path.join(root, "skills", "spec-to-pr", "SKILL.md"), "utf8");
+
+    for (const marker of [
+      "latency-bound user Run",
+      "Do not create generic helper agents",
+      "Do not poll or repeatedly wait",
+      "one reviewer per applicable role",
+      "do not retry or replace a reviewer",
+    ]) {
+      expect(workflowSkill, marker).toContain(marker);
+    }
+  });
+
   it("keeps the MDX installation page free of raw container directives", () => {
     const installation = readFileSync(
       path.join(root, "website", "docs", "getting-started", "installation.mdx"),

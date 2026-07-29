@@ -7,6 +7,25 @@ import {
 import type { PublishTarget, ReviewRequestPayload } from "../../src/publisher/index.js";
 
 describe("GitLabPublisherAdapter", () => {
+  it("aborts an unresponsive GitLab API request at the adapter deadline", async () => {
+    const fetchMock = vi.fn(
+      (_url: string, init: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+        }),
+    );
+    const adapter = new GitLabPublisherAdapter(fetchMock, 10);
+
+    await expect(
+      adapter.findExisting({
+        target: gitlabTarget(),
+        payload: payload(),
+        token: "token",
+      }),
+    ).rejects.toMatchObject({ name: "TimeoutError" });
+    expect(fetchMock.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+  });
+
   it("creates draft merge requests with Draft title prefix", async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse({
@@ -30,7 +49,7 @@ describe("GitLabPublisherAdapter", () => {
       "https://gitlab.com/api/v4/projects/acme%2Fplatform%2Fspec-to-pr/merge_requests",
       expect.objectContaining({
         method: "POST",
-        signal: controller.signal,
+        signal: expect.any(AbortSignal),
         headers: expect.objectContaining({
           "PRIVATE-TOKEN": "glpat-example",
         }),

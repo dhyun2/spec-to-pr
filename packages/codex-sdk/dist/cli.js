@@ -60,6 +60,12 @@ if (args.noReviewAgents !== undefined) {
 if (args.maxTurns !== undefined) {
     input.maxTurns = args.maxTurns;
 }
+if (args.turnTimeoutSeconds !== undefined) {
+    input.turnTimeoutMs = secondsToMilliseconds(args.turnTimeoutSeconds, "--turn-timeout-seconds");
+}
+if (args.runTimeoutSeconds !== undefined) {
+    input.runTimeoutMs = secondsToMilliseconds(args.runTimeoutSeconds, "--run-timeout-seconds");
+}
 if (args.blockedDiagnosticTokenReserve !== undefined) {
     input.blockedDiagnosticTokenReserve = args.blockedDiagnosticTokenReserve;
 }
@@ -162,6 +168,12 @@ function parseArgs(argv) {
             case "--max-turns":
                 parsed.maxTurns = parsePositiveInteger(value, arg);
                 break;
+            case "--turn-timeout-seconds":
+                parsed.turnTimeoutSeconds = parsePositiveInteger(value, arg);
+                break;
+            case "--run-timeout-seconds":
+                parsed.runTimeoutSeconds = parsePositiveInteger(value, arg);
+                break;
             case "--blocked-diagnostic-token-reserve":
                 parsed.blockedDiagnosticTokenReserve = parsePositiveInteger(value, arg);
                 break;
@@ -193,6 +205,13 @@ function parsePositiveInteger(value, argument) {
     }
     return parsed;
 }
+function secondsToMilliseconds(seconds, argument) {
+    const milliseconds = seconds * 1_000;
+    if (!Number.isSafeInteger(milliseconds)) {
+        throw new Error(`${argument} is too large`);
+    }
+    return milliseconds;
+}
 function printUsage() {
     console.error(`Usage: spec-to-pr-codex --cwd <repo> [options]
 
@@ -210,6 +229,10 @@ Options:
   --resume <thread-id>  Resume an existing Codex thread
   --model <model>       Optional Codex model override
   --max-turns <n>       Maximum workflow boundary turns (default: 12)
+  --turn-timeout-seconds <n>
+                        Stop and preserve a resumable thread when one turn exceeds n seconds
+  --run-timeout-seconds <n>
+                        Stop and preserve a resumable thread when the full Run exceeds n seconds
   --blocked-diagnostic-token-reserve <n>
                         Tokens held for finalizing a blocked draft (default: 24000)
   --usage-history <p>   Numeric-only calibration JSONL path
@@ -218,5 +241,5 @@ Options:
   --change-kind <kind>  feature, fix, refactor, migration, design, docs, or auto
   --publish             Publish a draft PR/MR when ready
   --no-publish          Finish after evidence-backed implementation and review
-  --no-review-agents    Disable review subagent instructions`);
+  --no-review-agents    Keep mandatory review evidence in the current context instead of delegation`);
 }

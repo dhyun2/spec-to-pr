@@ -26,11 +26,147 @@ import {
   extractWorkflowStatus,
   type BoundaryWorkflowStatus,
 } from "../../packages/codex-sdk/src/boundary-runner.js";
-import { DEFAULT_BLOCKED_DIAGNOSTIC_TOKEN_RESERVE } from "../../packages/codex-sdk/src/spec-to-pr-runner.js";
+import {
+  DEFAULT_BLOCKED_DIAGNOSTIC_TOKEN_RESERVE,
+  DEFAULT_BOUNDARY_RUN_TIMEOUT_MS,
+  DEFAULT_BOUNDARY_TURN_TIMEOUT_MS,
+} from "../../packages/codex-sdk/src/spec-to-pr-runner.js";
 
 describe("Codex SDK workload budget", () => {
   it("defaults the blocked-diagnostic reserve to deterministic 50% headroom", () => {
     expect(DEFAULT_BLOCKED_DIAGNOSTIC_TOKEN_RESERVE).toBe(24_000);
+    expect(DEFAULT_BOUNDARY_TURN_TIMEOUT_MS).toBe(10 * 60_000);
+    expect(DEFAULT_BOUNDARY_RUN_TIMEOUT_MS).toBe(45 * 60_000);
+  });
+
+  it("aborts an unresponsive action turn at the configured turn deadline and leaves it resumable", async () => {
+    let observedSignal: AbortSignal | undefined;
+    const client = {
+      startThread: () => ({
+        id: "thread-timeout",
+        run: async (_prompt: string, options?: { signal?: AbortSignal }) => {
+          observedSignal = options?.signal;
+          return new Promise<never>(() => undefined);
+        },
+      }),
+      resumeThread: () => {
+        throw new Error("not expected");
+      },
+    };
+
+    const result = await executeBudgetedBoundaryTurns({
+      client,
+      initialPrompt: "implement",
+      hardLimitTokens: 100_000,
+      workloadSize: "M",
+      requiredValidations: ["functional"],
+      maxTurns: 8,
+      turnTimeoutMs: 10,
+      runTimeoutMs: 1_000,
+    });
+
+    expect(result.state).toBe("turn-timeout");
+    expect(result.threadId).toBe("thread-timeout");
+    expect(result.turnCount).toBe(0);
+    expect(observedSignal?.aborted).toBe(true);
+    expect(result.finalResponse).toContain("resumed");
+    expect(result.timing.actionTurns).toEqual([
+      expect.objectContaining({ outcome: "turn-timeout", turn: 1 }),
+    ]);
+  });
+
+  it("reports a formatting deadline as a timeout without claiming the durable workflow verdict", async () => {
+    let calls = 0;
+    const client = {
+      startThread: () => ({
+        id: "thread-format-timeout",
+        run: async (_prompt: string, options?: { outputSchema?: unknown; signal?: AbortSignal }) => {
+          calls += 1;
+          if (options?.outputSchema !== undefined) {
+            return new Promise<never>(() => undefined);
+          }
+          return turnResult(1_000, workflowStatus("completed"));
+        },
+      }),
+      resumeThread: () => {
+        throw new Error("not expected");
+      },
+    };
+
+    const result = await executeBudgetedBoundaryTurns({
+      client,
+      initialPrompt: "finish",
+      outputSchema: { type: "object" },
+      hardLimitTokens: 100_000,
+      workloadSize: "M",
+      requiredValidations: ["functional"],
+      maxTurns: 8,
+      turnTimeoutMs: 10,
+      runTimeoutMs: 1_000,
+    });
+
+    expect(calls).toBe(2);
+    expect(result.state).toBe("turn-timeout");
+    expect(result.workflowStatus?.status).toBe("completed");
+    expect(result.outputFormatting).toBe("failed");
+    expect(result.timing.formatTurn).toEqual(
+      expect.objectContaining({ outcome: "turn-timeout", turn: 2 }),
+    );
+  });
+
+  it("rejects unsafe direct boundary timeout values before starting a turn", async () => {
+    const client = {
+      startThread: () => ({ id: "thread-1", run: async () => turnResult(1_000, workflowStatus("completed")) }),
+      resumeThread: () => {
+        throw new Error("not expected");
+      },
+    };
+
+    await expect(
+      executeBudgetedBoundaryTurns({
+        client,
+        initialPrompt: "finish",
+        hardLimitTokens: 100_000,
+        workloadSize: "M",
+        requiredValidations: ["functional"],
+        maxTurns: 8,
+        turnTimeoutMs: Number.MAX_SAFE_INTEGER + 1,
+      }),
+    ).rejects.toThrow(/turnTimeoutMs/);
+  });
+
+  it("stops before launching another action turn when the total run deadline is exhausted", async () => {
+    const clockValues = [0, 0, 0, 101];
+    let calls = 0;
+    const client = {
+      startThread: () => ({
+        id: "thread-run-timeout",
+        run: async () => {
+          calls += 1;
+          return turnResult(1_000, workflowStatus("running", "implement"));
+        },
+      }),
+      resumeThread: () => {
+        throw new Error("not expected");
+      },
+    };
+
+    const result = await executeBudgetedBoundaryTurns({
+      client,
+      initialPrompt: "implement",
+      hardLimitTokens: 100_000,
+      workloadSize: "M",
+      requiredValidations: ["functional"],
+      maxTurns: 8,
+      turnTimeoutMs: 1_000,
+      runTimeoutMs: 100,
+      now: () => clockValues.shift() ?? 101,
+    });
+
+    expect(result.state).toBe("run-timeout");
+    expect(calls).toBe(1);
+    expect(result.timing.elapsedMs).toBe(101);
+    expect(result.finalResponse).toContain("total Run deadline");
   });
   it("counts input and output once while retaining cached and reasoning dimensions", () => {
     const usage = accumulateUsage(null, {

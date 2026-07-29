@@ -91,15 +91,19 @@ node packages/codex-sdk/dist/cli.js \
 | `--resume <task-id>`     | 기존 Codex 작업 재개                |
 | `--model <model>`        | 사용할 모델 지정                    |
 | `--max-turns <n>`        | 작업 묶음별 최대 실행 횟수, 기본 12 |
+| `--turn-timeout-seconds <n>` | 한 작업 차례가 이 시간을 넘으면 취소하고 재개 가능한 상태로 반환 |
+| `--run-timeout-seconds <n>` | 전체 실행이 이 시간을 넘으면 취소하고 재개 가능한 상태로 반환 |
 | `--usage-history <p>`    | 숫자 전용 사용량 보정 JSONL 경로    |
 | `--no-usage-calibration` | 사용량 보정 읽기/쓰기 비활성화      |
-| `--no-review-agents`     | 독립 검토자 지침 생략               |
+| `--no-review-agents`     | 검토를 위임하지 않고 현재 작업 맥락에서 필수 검토 자료를 제출 |
 
 `mode`를 생략하면 레거시 루트는 `legacy`, 기획서 경로는 `brief`, Figma URL은 `figma`, 나머지는 `auto`로 분류됩니다. 네 가지 명시적 제공 방식은 `--no-publish`가 없으면 초안 발행을 요청합니다.
 
 SDK는 예상 작업량 등급의 기본 최대값을 사용량 상한으로 사용합니다. 사용자가 별도 숫자 한도를 지정하지 않으며, 사용량 보정도 이 상한을 바꾸지 않습니다. 계약 단계에서 작업 크기가 바뀌면 다음 경계부터 예상치와 전체 `requiredValidations`에 반영합니다.
 
 작업 묶음 하나가 끝난 뒤 사용량이 80%를 넘으면 진행 상태를 저장하고 새 작업 맥락에서 이어갑니다. 상한에 도달하면 작업 크기와 관계없이 `split-required`를 반환하고 독립적으로 검증 가능한 범위로 나눕니다. 사용량을 알 수 없으면 `usage-unavailable`로 표시하지만 필수 검증은 그대로 유지합니다. 사용량 보정은 화면에 표시할 범위만 조정하며, 다른 상한으로 기록된 과거 표본은 제외합니다.
+
+SDK 기본 시간 예산은 한 작업 차례 10분, 전체 실행 45분입니다. `turn-timeout` 또는 `run-timeout`이면 검증을 통과한 것으로 처리하지 않고, 현재 스레드와 마지막 지속 상태를 반환합니다. 같은 스레드를 재개해 차단 원인을 해결한 뒤 계속할 수 있습니다. `budget.elapsedMs`, `budget.actionTurns`, `budget.formatTurn`에서 실제 대기 구간을 확인할 수 있으며, 더 큰 시간 예산은 명시한 CLI 옵션으로만 허용됩니다.
 
 `--resume <task-id>`는 작업 기록에서 최신 실행 ID를 복구한 뒤 `workflow_status`부터 호출합니다. `resumeContext`에 기록된 목표, 프로젝트 상대 검증 자료 경로, 제출 요약으로 기존 실행을 이어가며 접수나 실행 생성을 반복하지 않습니다.
 

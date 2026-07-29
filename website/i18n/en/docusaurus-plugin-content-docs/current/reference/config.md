@@ -72,13 +72,17 @@ node packages/codex-sdk/dist/cli.js \
 | `--resume <task-id>`     | Resume an existing Codex task             |
 | `--model <model>`        | Model override                            |
 | `--max-turns <n>`        | Action-group turn limit, default 12       |
+| `--turn-timeout-seconds <n>` | Stop and return a resumable state when one turn exceeds this duration |
+| `--run-timeout-seconds <n>` | Stop and return a resumable state when the full Run exceeds this duration |
 | `--usage-history <p>`    | Numeric-only calibration JSONL path       |
 | `--no-usage-calibration` | Disable calibration reads/writes          |
-| `--no-review-agents`     | Omit independent reviewer instructions    |
+| `--no-review-agents`     | Keep required review evidence in the current task instead of delegating it |
 
 Without an explicit mode, a legacy root selects `legacy`, brief path selects `brief`, Figma URL selects `figma`, and all other requests use `auto`. Unless `--no-publish` is present, all four explicit modes request draft publication.
 
 The SDK uses the workload-class default maximum as its automatic hard limit. Users do not specify a numeric limit, and calibration does not change it. Contract refinement updates runtime estimates and the complete `requiredValidations` list at the next boundary. At the first completed action turn at or above 80%, the SDK starts a compact fresh thread. At the hard limit it always returns `split-required`; missing usage returns `usage-unavailable`. Calibration adjusts only the displayed estimate and excludes samples recorded under a different hard limit.
+
+The SDK defaults to a 10-minute action-turn budget and a 45-minute total Run budget. `turn-timeout` or `run-timeout` never marks validation as passed; it returns the existing thread and the latest durable workflow state so the task can be resumed after the dependency is addressed. Inspect `budget.elapsedMs`, `budget.actionTurns`, and `budget.formatTurn` to identify the wait, and use the explicit timeout CLI options only when a larger budget is justified.
 
 `--resume <task-id>` recovers the latest Run ID from task history and calls `workflow_status` first. It continues from `resumeContext` without repeating intake or creating another Run.
 

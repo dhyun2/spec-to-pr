@@ -71,6 +71,7 @@ export type BoundaryThread = {
     readonly id: string | null;
     run(prompt: string, options?: {
         outputSchema?: unknown;
+        signal?: AbortSignal;
     }): Promise<RunResult>;
 };
 export type BoundaryClient = {
@@ -86,7 +87,13 @@ export type BlockedDiagnosticPreflight = {
     eligible: false;
     reason: string;
 };
-export type BoundaryRunState = "completed" | "blocked" | "split-required" | "run-mismatch" | "usage-unavailable" | "status-unavailable" | "turn-limit";
+export type BoundaryRunState = "completed" | "blocked" | "split-required" | "run-mismatch" | "usage-unavailable" | "status-unavailable" | "turn-limit" | "turn-timeout" | "run-timeout";
+export type BoundaryTurnTiming = {
+    turn: number;
+    kind: "action" | "format";
+    elapsedMs: number;
+    outcome: "completed" | "turn-timeout" | "run-timeout" | "failed";
+};
 export declare function executeBudgetedBoundaryTurns(input: {
     client: BoundaryClient;
     initialPrompt: string;
@@ -97,6 +104,12 @@ export declare function executeBudgetedBoundaryTurns(input: {
     workloadHardLimits?: Partial<Record<WorkloadSize, number>>;
     requiredValidations: readonly string[];
     maxTurns: number;
+    /** Maximum elapsed time for one Codex SDK turn. Undefined preserves the caller's existing limit. */
+    turnTimeoutMs?: number;
+    /** Maximum elapsed time for the complete SDK Run. Undefined preserves the caller's existing limit. */
+    runTimeoutMs?: number;
+    /** Injectable only for deterministic timing tests. */
+    now?: () => number;
     blockedDiagnosticTokenReserve?: number;
     inspectBlockedDiagnosticPreflight?: () => BlockedDiagnosticPreflight | Promise<BlockedDiagnosticPreflight>;
 }): Promise<{
@@ -112,6 +125,11 @@ export declare function executeBudgetedBoundaryTurns(input: {
     requiredValidations: string[];
     workloadSize: WorkloadSize;
     hardLimitTokens: number;
+    timing: {
+        elapsedMs: number;
+        actionTurns: BoundaryTurnTiming[];
+        formatTurn?: BoundaryTurnTiming;
+    };
 }>;
 export declare function extractWorkflowStatus(items: RunResult["items"]): BoundaryWorkflowStatus | null;
 export declare function buildCompactCheckpointPrompt(status: BoundaryWorkflowStatus, requiredValidations: readonly string[], effectiveBudget: {

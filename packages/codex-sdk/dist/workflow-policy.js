@@ -34,11 +34,12 @@ export function buildCodexActionEnvelopeInstructions(options) {
         ? options.includeDesignReview
             ? "functional-reviewer and design-reviewer"
             : "functional-reviewer"
-        : "no independent reviewer agent";
+        : "delegated reviewer agents are disabled; this does not waive the required review gate, so submit the applicable read-only review evidence in this context";
     return [
         "Treat each fresh workflow_status as the compact action envelope: use status.nextActions, status.blockerDetails, status.deliveryProfile.publication, status.delegationPolicy, status.diagnosticPublication, status.requiredValidations, and status.resumeContext instead of restating workflow policy.",
         "Complete only one external action group and stop after its fresh status. Keep API and UI work in one implementation context.",
         "Scout routing is XS/S=0, M<=1, L/XL<=2, and only for independent read-heavy discovery; no nested scouts or parallel writers. Independent functional/design reviewers may run in parallel only when status.delegationPolicy.parallelReviewers is true and only after implementation.",
+        "This is a latency-bound user Run. Do not create generic helper agents for planning, intake, status polling, progress narration, or re-checking completed work. Do not poll or repeatedly wait for an agent. Use the one writer, only the status-authorized scout count, and one reviewer per applicable role; do not retry or replace a reviewer that returns blocked, missing evidence, or times out.",
         `Applicable review route: ${reviewers}. Give each reviewer the immutable workflow_status snapshot, accepted contracts, diff, and evidence paths; reviewers neither edit implementation nor call workflow tools.`,
         options.publication === "draft"
             ? "Draft publication uses an actual non-target codex/<short-slug> branch: commit all intended changes only, require a clean tree and at least one commit beyond the target, and pass actual branches; workflow_publish never merges or marks ready."

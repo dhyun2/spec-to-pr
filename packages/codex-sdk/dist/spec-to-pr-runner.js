@@ -8,6 +8,8 @@ import { UsageCalibrationStore, calibrateTokenRange, isUsageCalibrationReadEnabl
 import { defaultTokenRangeForWorkload, effectiveHardLimitForWorkload, estimateSdkWorkload, } from "./workload-budget.js";
 import { CODEX_WORKFLOW_TOOL_NAMES, buildCodexActionEnvelopeInstructions, } from "./workflow-policy.js";
 export const DEFAULT_BLOCKED_DIAGNOSTIC_TOKEN_RESERVE = 24_000;
+export const DEFAULT_BOUNDARY_TURN_TIMEOUT_MS = 10 * 60_000;
+export const DEFAULT_BOUNDARY_RUN_TIMEOUT_MS = 45 * 60_000;
 export async function runSpecToPrWithCodex(input) {
     validateSpecToPrRunInput(input);
     const composableSources = normalizeComposableSources(input);
@@ -64,6 +66,8 @@ export async function runSpecToPrWithCodex(input) {
         ])),
         requiredValidations,
         maxTurns: input.maxTurns ?? 12,
+        turnTimeoutMs: input.turnTimeoutMs ?? DEFAULT_BOUNDARY_TURN_TIMEOUT_MS,
+        runTimeoutMs: input.runTimeoutMs ?? DEFAULT_BOUNDARY_RUN_TIMEOUT_MS,
         blockedDiagnosticTokenReserve: input.blockedDiagnosticTokenReserve ?? DEFAULT_BLOCKED_DIAGNOSTIC_TOKEN_RESERVE,
         inspectBlockedDiagnosticPreflight: () => inspectBlockedDiagnosticPreflight(input.workingDirectory, input.env),
     });
@@ -127,6 +131,22 @@ export async function runSpecToPrWithCodex(input) {
             checkpointCount: result.checkpointCount,
             requiredValidations: result.requiredValidations,
             usageAvailability: result.usage.availability,
+            elapsedMs: result.timing.elapsedMs,
+            turnTimeoutMs: input.turnTimeoutMs ?? DEFAULT_BOUNDARY_TURN_TIMEOUT_MS,
+            runTimeoutMs: input.runTimeoutMs ?? DEFAULT_BOUNDARY_RUN_TIMEOUT_MS,
+            actionTurns: result.timing.actionTurns.map((turn) => ({
+                turn: turn.turn,
+                elapsedMs: turn.elapsedMs,
+                outcome: turn.outcome,
+            })),
+            ...(result.timing.formatTurn === undefined
+                ? {}
+                : {
+                    formatTurn: {
+                        elapsedMs: result.timing.formatTurn.elapsedMs,
+                        outcome: result.timing.formatTurn.outcome,
+                    },
+                }),
         },
         turnCount: result.turnCount,
         outputFormatting: result.outputFormatting,
@@ -300,6 +320,15 @@ export function validateSpecToPrRunInput(input) {
     if (input.maxTurns !== undefined && (!Number.isInteger(input.maxTurns) || input.maxTurns <= 0)) {
         throw new Error("maxTurns must be a positive integer");
     }
+    for (const [name, timeoutMs] of [
+        ["turnTimeoutMs", input.turnTimeoutMs],
+        ["runTimeoutMs", input.runTimeoutMs],
+    ]) {
+        if (timeoutMs !== undefined &&
+            (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0)) {
+            throw new Error(`${name} must be a positive integer`);
+        }
+    }
     if ((input.publication ?? "draft") === "draft" &&
         input.maxTurns !== undefined &&
         input.maxTurns < 2) {
@@ -394,14 +423,20 @@ function createBoundaryClient(codex, options) {
         resumeThread: (threadId) => adaptThread(codex.resumeThread(threadId, options)),
     };
 }
-function adaptThread(thread) {
+export function adaptThread(thread) {
     return {
         get id() {
             return thread.id;
         },
-        run: async (prompt, options) => options?.outputSchema === undefined
-            ? thread.run(prompt)
-            : thread.run(prompt, { outputSchema: options.outputSchema }),
+        run: async (prompt, options) => {
+            const turnOptions = {
+                ...(options?.outputSchema === undefined ? {} : { outputSchema: options.outputSchema }),
+                ...(options?.signal === undefined ? {} : { signal: options.signal }),
+            };
+            return Object.keys(turnOptions).length === 0
+                ? thread.run(prompt)
+                : thread.run(prompt, turnOptions);
+        },
     };
 }
 function sdkUsage(usage) {
