@@ -13,7 +13,7 @@
     "controlledEnvironment": "sha256:ed1dc8d93efc2add1127fecaf9fc65ccb9105e88421b07ed7526b5dbf78283b7",
     "dependencyLockfile": "sha256:cb30cef98f530c19b2b725ccc7e6f0547652ba7ffa2d1d24ff4256f12f412baf",
     "fixtureDigestAggregate": "sha256:b815ff9837eccd9e946b2e6fe3d6e09fd6cd56e22f11f65b0a5a985ab0db9763",
-    "packetDigestAggregate": "sha256:38843e8ea980a119f39eccf415c7e2b4b8138bed894e501889bf15d4aa53ed05"
+    "packetDigestAggregate": "sha256:8b948137c7653496a8de7346c316b25a7e74cab3f4dbba1741a302e0592e17e5"
   },
   "controlledEnvironment": {
     "schemaVersion": "reviewer-scheduling-environment-v1",
