@@ -143,6 +143,7 @@ const publicApiCatalogFields = {
       digest: barrelDigest,
     },
   ],
+  publicSources: [],
   codeConnectManifest: {
     path: "tests/fixtures/case4-figma/ui-consumer/code-connect.manifest.json",
     digest: codeConnectDigest,
@@ -391,6 +392,7 @@ describe("Figma design mapping", () => {
           digest: barrelDigest,
         },
       ],
+      publicSources: [],
       codeConnectManifest: {
         path: "tests/fixtures/case4-figma/ui-consumer/code-connect.manifest.json",
         digest: codeConnectDigest,
@@ -457,6 +459,102 @@ describe("Figma design mapping", () => {
         }),
       ).toThrow(/FIGMA_DESIGN_MAPPING_INCOMPLETE|catalog|frontend\/ui|prop/i);
     }
+  });
+
+  it("accepts @lessonpro/ui conditional exports without a Code Connect manifest", () => {
+    const packagePath = "workspace/libs/ui/package.json";
+    const rootPath = "workspace/libs/ui/src/index.ts";
+    const controlPath = "workspace/libs/ui/src/components/control/index.ts";
+    const checkboxPath = "workspace/libs/ui/src/components/control/checkbox.tsx";
+    const packageBytes = Buffer.from(
+      JSON.stringify({
+        name: "@lessonpro/ui",
+        version: "0.1.0",
+        exports: {
+          ".": { types: "./src/index.ts", default: "./src/index.ts" },
+        },
+      }),
+    );
+    const rootBytes = Buffer.from(
+      "export { Checkbox } from './components/control';\nexport { Unrelated } from './unlisted';\nexport const Divider = {};\n",
+    );
+    const controlBytes = Buffer.from("export { Checkbox } from './checkbox';\n");
+    const checkboxBytes = Buffer.from("export const Checkbox = {};\n");
+    const lessonBinding = {
+      id: "qualification-checkbox",
+      figmaComponent: "control/checkbox",
+      nodeId: "1938:12929",
+      role: "component" as const,
+      resolution: {
+        kind: "component" as const,
+        module: "@lessonpro/ui" as const,
+        exportName: "Checkbox",
+        props: { checked: true },
+      },
+      semanticTokens: [],
+    };
+    const fields = {
+      schemaVersion: "figma-public-api-catalog-v1" as const,
+      packageName: "@lessonpro/ui" as const,
+      packageVersion: "0.1.0",
+      packageManifest: {
+        path: packagePath,
+        digest: `sha256:${createHash("sha256").update(packageBytes).digest("hex")}` as const,
+      },
+      publicBarrels: [
+        {
+          module: "@lessonpro/ui" as const,
+          path: rootPath,
+          digest: `sha256:${createHash("sha256").update(rootBytes).digest("hex")}` as const,
+        },
+      ],
+      publicSources: [
+        {
+          path: controlPath,
+          digest: `sha256:${createHash("sha256").update(controlBytes).digest("hex")}` as const,
+        },
+        {
+          path: checkboxPath,
+          digest: `sha256:${createHash("sha256").update(checkboxBytes).digest("hex")}` as const,
+        },
+      ],
+      exports: [
+        {
+          figmaComponent: lessonBinding.figmaComponent,
+          nodeId: lessonBinding.nodeId,
+          module: lessonBinding.resolution.module,
+          exportName: lessonBinding.resolution.exportName,
+          allowedProps: ["checked"],
+        },
+      ],
+    };
+    const catalog = {
+      ...fields,
+      digest: figmaContract.figmaPublicApiCatalogDigest(fields),
+    };
+    const lessonMapping = {
+      designSystem: {
+        packageName: "@lessonpro/ui" as const,
+        packageVersion: "0.1.0",
+        catalogDigest: catalog.digest,
+      },
+      publicApiCatalog: catalog,
+      components: [lessonBinding],
+      fonts: [],
+      tokens: [],
+    } as FigmaDesignMapping;
+
+    expect(() =>
+      figmaContract.assertFigmaPublicApiCatalogEvidence({
+        mapping: lessonMapping,
+        evidence: [
+          { path: packagePath, content: packageBytes },
+          { path: rootPath, content: rootBytes },
+          { path: controlPath, content: controlBytes },
+          { path: checkboxPath, content: checkboxBytes },
+        ],
+      }),
+    ).not.toThrow();
   });
 
   it("CALLER_CATALOG_AND_UNVERIFIED_VERSION_EXPORT_ACCEPTED", () => {

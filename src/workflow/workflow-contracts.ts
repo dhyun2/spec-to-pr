@@ -1463,7 +1463,10 @@ export const FigmaBundleSubmissionSchema = z
     const catalogEvidencePaths = [
       submission.designMapping.publicApiCatalog.packageManifest.path,
       ...submission.designMapping.publicApiCatalog.publicBarrels.map((barrel) => barrel.path),
-      submission.designMapping.publicApiCatalog.codeConnectManifest.path,
+      ...submission.designMapping.publicApiCatalog.publicSources.map((source) => source.path),
+      ...(submission.designMapping.publicApiCatalog.codeConnectManifest === undefined
+        ? []
+        : [submission.designMapping.publicApiCatalog.codeConnectManifest.path]),
     ];
     if (
       new Set(catalogEvidencePaths).size !== catalogEvidencePaths.length ||
@@ -1477,7 +1480,7 @@ export const FigmaBundleSubmissionSchema = z
         code: "custom",
         path: ["designMapping", "publicApiCatalog"],
         message:
-          "Digest-bound public barrels and Code Connect manifest must use distinct non-baseline paths",
+          "Digest-bound public API evidence must use distinct non-baseline paths",
       });
     }
     const visualPaths = submission.artifactPaths.filter(

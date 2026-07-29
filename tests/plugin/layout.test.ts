@@ -545,6 +545,9 @@ describe("plugin layout", () => {
     expect(intake).toContain("React package evidence -> `react-best-practices`");
     expect(intake).toContain("Next.js package evidence -> `next-best-practices`");
     expect(intake).toContain("feature UI -> `playwright`");
+    expect(intake).toContain("Honor an explicit design-system package");
+    expect(intake).toContain("Code Connect is optional");
+    expect(intake).toContain("ask one concise question");
 
     const designReviewSkill = readFileSync(
       path.join(root, "skills", "review-design", "SKILL.md"),

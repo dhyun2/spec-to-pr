@@ -400,17 +400,29 @@ const ExactSemanticVersionSchema = z
     "Design-system package version must be an exact semantic version",
   );
 
-const FrontendUiPublicModuleSchema = z.enum([
+const DesignSystemPackageNameSchema = z.enum(["@frontend/ui", "@lessonpro/ui"]);
+
+const DesignSystemPublicModuleSchema = z.enum([
   "@frontend/ui",
   "@frontend/ui/icons/vue",
   "@frontend/ui/icons/react",
+  "@lessonpro/ui",
+  "@lessonpro/ui/icons",
 ]);
+
+function publicModulesForPackage(
+  packageName: z.infer<typeof DesignSystemPackageNameSchema>,
+): readonly z.infer<typeof DesignSystemPublicModuleSchema>[] {
+  return packageName === "@frontend/ui"
+    ? ["@frontend/ui", "@frontend/ui/icons/vue", "@frontend/ui/icons/react"]
+    : ["@lessonpro/ui", "@lessonpro/ui/icons"];
+}
 
 const FigmaPublicApiExportSchema = z
   .object({
     figmaComponent: z.string().trim().min(1),
     nodeId: z.string().trim().min(1),
-    module: FrontendUiPublicModuleSchema,
+    module: DesignSystemPublicModuleSchema,
     exportName: z
       .string()
       .trim()
@@ -433,7 +445,7 @@ const FigmaPublicApiExportSchema = z
 const FigmaPublicApiCatalogFieldsSchema = z
   .object({
     schemaVersion: z.literal("figma-public-api-catalog-v1"),
-    packageName: z.literal("@frontend/ui"),
+    packageName: DesignSystemPackageNameSchema,
     packageVersion: ExactSemanticVersionSchema,
     packageManifest: z
       .object({
@@ -445,7 +457,7 @@ const FigmaPublicApiCatalogFieldsSchema = z
       .array(
         z
           .object({
-            module: FrontendUiPublicModuleSchema,
+            module: DesignSystemPublicModuleSchema,
             path: RepositoryPathSchema,
             digest: Sha256DigestSchema,
           })
@@ -453,17 +465,29 @@ const FigmaPublicApiCatalogFieldsSchema = z
       )
       .min(1)
       .max(10),
+    publicSources: z
+      .array(
+        z
+          .object({
+            path: RepositoryPathSchema,
+            digest: Sha256DigestSchema,
+          })
+          .strict(),
+      )
+      .max(100)
+      .default([]),
     codeConnectManifest: z
       .object({
         path: RepositoryPathSchema,
         digest: Sha256DigestSchema,
       })
-      .strict(),
+      .strict()
+      .optional(),
     exports: z.array(FigmaPublicApiExportSchema).max(2_000),
   })
   .strict();
 
-export type FigmaPublicApiCatalogFields = z.infer<typeof FigmaPublicApiCatalogFieldsSchema>;
+export type FigmaPublicApiCatalogFields = z.input<typeof FigmaPublicApiCatalogFieldsSchema>;
 
 export function figmaPublicApiCatalogDigest(
   rawFields: FigmaPublicApiCatalogFields,
@@ -476,6 +500,9 @@ export function figmaPublicApiCatalogDigest(
     packageManifest: fields.packageManifest,
     publicBarrels: [...fields.publicBarrels].sort((left, right) =>
       compareCanonicalStrings(left.module, right.module),
+    ),
+    publicSources: [...fields.publicSources].sort((left, right) =>
+      compareCanonicalStrings(left.path, right.path),
     ),
     codeConnectManifest: fields.codeConnectManifest,
     exports: [...fields.exports]
@@ -510,7 +537,8 @@ export const FigmaPublicApiCatalogSchema = FigmaPublicApiCatalogFieldsSchema.ext
     const duplicateEvidencePaths = duplicates([
       catalog.packageManifest.path,
       ...catalog.publicBarrels.map((barrel) => barrel.path),
-      catalog.codeConnectManifest.path,
+      ...catalog.publicSources.map((source) => source.path),
+      ...(catalog.codeConnectManifest === undefined ? [] : [catalog.codeConnectManifest.path]),
     ]);
     const duplicateExports = duplicates(
       catalog.exports.map((entry) => `${entry.figmaComponent}\u0000${entry.nodeId}`),
@@ -535,6 +563,16 @@ export const FigmaPublicApiCatalogSchema = FigmaPublicApiCatalogFieldsSchema.ext
         path: ["packageManifest"],
         message: `Public API evidence paths must be distinct: ${duplicateEvidencePaths.join(", ")}`,
       });
+    }
+    const allowedModules = new Set(publicModulesForPackage(catalog.packageName));
+    for (const [index, barrel] of catalog.publicBarrels.entries()) {
+      if (!allowedModules.has(barrel.module)) {
+        context.addIssue({
+          code: "custom",
+          path: ["publicBarrels", index, "module"],
+          message: `${barrel.module} is not published by ${catalog.packageName}`,
+        });
+      }
     }
     for (const [index, entry] of catalog.exports.entries()) {
       if (!catalog.publicBarrels.some((barrel) => barrel.module === entry.module)) {
@@ -578,7 +616,8 @@ export function assertFigmaPublicApiCatalogEvidence(rawInput: {
   const expectedEvidence = [
     catalog.packageManifest,
     ...catalog.publicBarrels,
-    catalog.codeConnectManifest,
+    ...catalog.publicSources,
+    ...(catalog.codeConnectManifest === undefined ? [] : [catalog.codeConnectManifest]),
   ];
   for (const expected of expectedEvidence) {
     const content = evidence.get(expected.path);
@@ -597,9 +636,24 @@ export function assertFigmaPublicApiCatalogEvidence(rawInput: {
     catalog.packageManifest.path,
     z
       .object({
-        name: z.literal("@frontend/ui"),
+        name: DesignSystemPackageNameSchema,
         version: ExactSemanticVersionSchema,
-        exports: z.record(z.string(), z.string().trim().min(1)),
+        exports: z.record(
+          z.string(),
+          z.union([
+            z.string().trim().min(1),
+            z
+              .object({
+                types: z.string().trim().min(1).optional(),
+                default: z.string().trim().min(1).optional(),
+              })
+              .strict()
+              .refine(
+                (entry) => entry.types !== undefined || entry.default !== undefined,
+                "Conditional export must contain a types or default target",
+              ),
+          ]),
+        ),
       })
       .passthrough(),
   );
@@ -616,12 +670,22 @@ export function assertFigmaPublicApiCatalogEvidence(rawInput: {
   const packageDirectory = pathDirectory(catalog.packageManifest.path);
   const barrelsByModule = new Map(catalog.publicBarrels.map((barrel) => [barrel.module, barrel]));
   const exportedNamesByModule = new Map<string, Set<string>>();
-  const allowedBarrelPaths = new Set(catalog.publicBarrels.map((barrel) => barrel.path));
+  const requestedExportsByModule = new Map<string, Set<string>>();
+  for (const entry of catalog.exports) {
+    const exports = requestedExportsByModule.get(entry.module) ?? new Set<string>();
+    exports.add(entry.exportName);
+    requestedExportsByModule.set(entry.module, exports);
+  }
+  const allowedBarrelPaths = new Set([
+    ...catalog.publicBarrels.map((barrel) => barrel.path),
+    ...catalog.publicSources.map((source) => source.path),
+  ]);
   const exportedNamesByPath = new Map<string, Set<string>>();
   for (const barrel of catalog.publicBarrels) {
-    const exportKey =
-      barrel.module === "@frontend/ui" ? "." : `.${barrel.module.slice("@frontend/ui".length)}`;
-    const declaredTarget = packageManifest.exports[exportKey];
+    const exportKey = barrel.module === catalog.packageName
+      ? "."
+      : `.${barrel.module.slice(catalog.packageName.length)}`;
+    const declaredTarget = packageExportTarget(packageManifest.exports[exportKey]);
     if (declaredTarget === undefined) {
       throw designMappingError(
         `package manifest does not publish ${barrel.module} at ${exportKey}`,
@@ -642,6 +706,9 @@ export function assertFigmaPublicApiCatalogEvidence(rawInput: {
         allowedBarrelPaths,
         exportedNamesByPath,
         visiting: new Set(),
+        ...(requestedExportsByModule.get(barrel.module) === undefined
+          ? {}
+          : { requestedNames: requestedExportsByModule.get(barrel.module)! }),
       }),
     );
   }
@@ -656,26 +723,28 @@ export function assertFigmaPublicApiCatalogEvidence(rawInput: {
     }
   }
 
-  const codeConnectManifest = parseJsonEvidence(
-    evidence.get(catalog.codeConnectManifest.path)!,
-    catalog.codeConnectManifest.path,
-    z
-      .object({
-        packageName: z.literal("@frontend/ui"),
-        packageVersion: ExactSemanticVersionSchema,
-        mappings: z.array(FigmaPublicApiExportSchema).max(2_000),
-      })
-      .strict(),
-  );
-  if (
-    codeConnectManifest.packageName !== catalog.packageName ||
-    codeConnectManifest.packageVersion !== catalog.packageVersion ||
-    canonicalPublicApiExports(codeConnectManifest.mappings) !==
-      canonicalPublicApiExports(catalog.exports)
-  ) {
-    throw designMappingError(
-      "Code Connect manifest package/version/mappings do not exact-match the public API catalog",
+  if (catalog.codeConnectManifest !== undefined) {
+    const codeConnectManifest = parseJsonEvidence(
+      evidence.get(catalog.codeConnectManifest.path)!,
+      catalog.codeConnectManifest.path,
+      z
+        .object({
+          packageName: DesignSystemPackageNameSchema,
+          packageVersion: ExactSemanticVersionSchema,
+          mappings: z.array(FigmaPublicApiExportSchema).max(2_000),
+        })
+        .strict(),
     );
+    if (
+      codeConnectManifest.packageName !== catalog.packageName ||
+      codeConnectManifest.packageVersion !== catalog.packageVersion ||
+      canonicalPublicApiExports(codeConnectManifest.mappings) !==
+        canonicalPublicApiExports(catalog.exports)
+    ) {
+      throw designMappingError(
+        "Code Connect manifest package/version/mappings do not exact-match the public API catalog",
+      );
+    }
   }
 }
 
@@ -733,7 +802,7 @@ const ComponentResolutionSchema = z.discriminatedUnion("kind", [
       reason: z.string().trim().min(1).max(1_000),
       unavailableExport: z
         .object({
-          requestedModule: FrontendUiPublicModuleSchema,
+          requestedModule: DesignSystemPublicModuleSchema,
           requestedExport: z
             .string()
             .trim()
@@ -831,7 +900,7 @@ export const FigmaDesignBindingSchema = z
       }
       return;
     }
-    if (!/^@frontend\/ui\/icons\/(?:vue|react)$/.test(binding.resolution.module)) {
+    if (!/^@frontend\/ui\/icons\/(?:vue|react)$/.test(binding.resolution.module) && binding.resolution.module !== "@lessonpro/ui/icons") {
       context.addIssue({
         code: "custom",
         path: ["resolution", "module"],
@@ -877,7 +946,7 @@ export const FigmaDesignMappingSchema = z
   .object({
     designSystem: z
       .object({
-        packageName: z.literal("@frontend/ui"),
+        packageName: DesignSystemPackageNameSchema,
         packageVersion: ExactSemanticVersionSchema,
         catalogDigest: Sha256DigestSchema,
         guidanceSkill: z.string().trim().min(1).max(500).optional(),
@@ -918,7 +987,7 @@ export const FigmaDesignMappingSchema = z
         code: "custom",
         path: ["publicApiCatalog"],
         message:
-          "Public API catalog must bind the exact @frontend/ui package, resolved semver, and catalog digest",
+          "Public API catalog must bind the exact design-system package, resolved semver, and catalog digest",
       });
     }
     const duplicateIds = duplicates(mapping.components.map((component) => component.id));
@@ -958,8 +1027,12 @@ export const FigmaDesignMappingSchema = z
       const resolution = component.resolution;
       const expectedModule =
         component.role === "icon"
-          ? new Set(["@frontend/ui/icons/vue", "@frontend/ui/icons/react"])
-          : new Set(["@frontend/ui"]);
+          ? new Set(
+              mapping.designSystem.packageName === "@frontend/ui"
+                ? ["@frontend/ui/icons/vue", "@frontend/ui/icons/react"]
+                : ["@lessonpro/ui/icons"],
+            )
+          : new Set([mapping.designSystem.packageName]);
       if (!expectedModule.has(resolution.module)) {
         context.addIssue({
           code: "custom",
@@ -1023,7 +1096,7 @@ const FigmaImplementationResolutionSchema = z.discriminatedUnion("kind", [
       reason: z.string().trim().min(1),
       unavailableExport: z
         .object({
-          requestedModule: FrontendUiPublicModuleSchema,
+          requestedModule: DesignSystemPublicModuleSchema,
           requestedExport: z.string().trim().min(1),
           catalogDigest: Sha256DigestSchema,
         })
@@ -1460,6 +1533,13 @@ function pathDirectory(repositoryPath: string): string {
   return directory === "." ? "" : directory;
 }
 
+function packageExportTarget(
+  entry: string | { types?: string | undefined; default?: string | undefined } | undefined,
+): string | undefined {
+  if (typeof entry === "string") return entry;
+  return entry?.default ?? entry?.types;
+}
+
 function normalizeRepositoryPath(directory: string, target: string): string {
   if (!target.startsWith("./")) {
     throw designMappingError(`package export target must be a relative ./ path: ${target}`);
@@ -1475,8 +1555,10 @@ function namedModuleExports(input: {
   allowedBarrelPaths: ReadonlySet<string>;
   exportedNamesByPath: Map<string, Set<string>>;
   visiting: Set<string>;
+  requestedNames?: ReadonlySet<string>;
 }): Set<string> {
-  const cached = input.exportedNamesByPath.get(input.evidencePath);
+  const cached =
+    input.requestedNames === undefined ? input.exportedNamesByPath.get(input.evidencePath) : undefined;
   if (cached !== undefined) return cached;
   if (input.visiting.has(input.evidencePath)) {
     throw designMappingError(
@@ -1528,6 +1610,7 @@ function namedModuleExports(input: {
         const local = moduleExportName(specifier["local"]);
         const exported = moduleExportName(specifier["exported"]);
         if (local === undefined || exported === undefined) continue;
+        if (input.requestedNames !== undefined && !input.requestedNames.has(exported)) continue;
         const source = moduleSourceValue(statement["source"]);
         if (source === undefined) {
           if (runtimeLocals.has(local)) names.add(exported);
@@ -1549,12 +1632,15 @@ function namedModuleExports(input: {
           content: targetContent,
           evidencePath: targetPath,
           visiting: new Set(input.visiting),
+          requestedNames: new Set([local]),
         });
         if (targetExports.has(local)) names.add(exported);
       }
     }
   }
-  input.exportedNamesByPath.set(input.evidencePath, names);
+  if (input.requestedNames === undefined) {
+    input.exportedNamesByPath.set(input.evidencePath, names);
+  }
   input.visiting.delete(input.evidencePath);
   return names;
 }
@@ -1612,12 +1698,23 @@ function resolveDigestBoundReExportPath(input: {
   const resolved = RepositoryPathSchema.parse(
     path.posix.normalize(path.posix.join(path.posix.dirname(input.evidencePath), input.source)),
   );
-  if (!input.allowedBarrelPaths.has(resolved)) {
+  const candidates = [
+    resolved,
+    `${resolved}.ts`,
+    `${resolved}.tsx`,
+    `${resolved}.js`,
+    `${resolved}.jsx`,
+    `${resolved}/index.ts`,
+    `${resolved}/index.tsx`,
+    `${resolved}/index.js`,
+    `${resolved}/index.jsx`,
+  ].filter((candidate) => input.allowedBarrelPaths.has(candidate));
+  if (candidates.length !== 1) {
     throw designMappingError(
       `public barrel ${input.evidencePath} re-export target is not digest-bound evidence: ${resolved}`,
     );
   }
-  return resolved;
+  return candidates[0]!;
 }
 
 function collectBindingNames(rawPattern: unknown, names: Set<string>): void {

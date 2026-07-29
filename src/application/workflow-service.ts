@@ -2479,7 +2479,10 @@ export class WorkflowService {
             ...submission.artifactPaths,
             submission.designMapping.publicApiCatalog.packageManifest.path,
             ...submission.designMapping.publicApiCatalog.publicBarrels.map((barrel) => barrel.path),
-            submission.designMapping.publicApiCatalog.codeConnectManifest.path,
+            ...submission.designMapping.publicApiCatalog.publicSources.map((source) => source.path),
+            ...(submission.designMapping.publicApiCatalog.codeConnectManifest === undefined
+              ? []
+              : [submission.designMapping.publicApiCatalog.codeConnectManifest.path]),
           ]
         : submission.artifactPaths;
     for (const evidencePath of [...new Set(submissionEvidencePaths)]) {
@@ -2513,7 +2516,10 @@ export class WorkflowService {
       const catalogPaths = new Set([
         submission.designMapping.publicApiCatalog.packageManifest.path,
         ...submission.designMapping.publicApiCatalog.publicBarrels.map((barrel) => barrel.path),
-        submission.designMapping.publicApiCatalog.codeConnectManifest.path,
+        ...submission.designMapping.publicApiCatalog.publicSources.map((source) => source.path),
+        ...(submission.designMapping.publicApiCatalog.codeConnectManifest === undefined
+          ? []
+          : [submission.designMapping.publicApiCatalog.codeConnectManifest.path]),
       ]);
       assertFigmaPublicApiCatalogEvidence({
         mapping: submission.designMapping,
@@ -2651,7 +2657,10 @@ export class WorkflowService {
           const catalogEvidence = [
             submission.designMapping.publicApiCatalog.packageManifest,
             ...submission.designMapping.publicApiCatalog.publicBarrels,
-            submission.designMapping.publicApiCatalog.codeConnectManifest,
+            ...submission.designMapping.publicApiCatalog.publicSources,
+            ...(submission.designMapping.publicApiCatalog.codeConnectManifest === undefined
+              ? []
+              : [submission.designMapping.publicApiCatalog.codeConnectManifest]),
           ].find((candidate) => candidate.path === evidencePath);
           if (catalogEvidence !== undefined) {
             const digest = `sha256:${createHash("sha256").update(content).digest("hex")}`;
@@ -6687,8 +6696,11 @@ function assertSubmissionPrerequisites(
   ) {
     throw new Error("A Figma bundle was already submitted for this Run");
   }
-  if (submission.kind === "figma-bundle" && stage(run, "contracts").status !== "pending") {
-    throw new Error("Figma bundle evidence must be submitted before contracts begin");
+  if (
+    submission.kind === "figma-bundle" &&
+    !["pending", "failed", "blocked"].includes(stage(run, "contracts").status)
+  ) {
+    throw new Error("Figma bundle evidence must be submitted before contracts pass");
   }
   if (
     submission.kind === "implementation" &&
@@ -8060,7 +8072,10 @@ function assertFigmaManifest(
   const catalogEvidencePaths = [
     submission.designMapping.publicApiCatalog.packageManifest.path,
     ...submission.designMapping.publicApiCatalog.publicBarrels.map((barrel) => barrel.path),
-    submission.designMapping.publicApiCatalog.codeConnectManifest.path,
+    ...submission.designMapping.publicApiCatalog.publicSources.map((source) => source.path),
+    ...(submission.designMapping.publicApiCatalog.codeConnectManifest === undefined
+      ? []
+      : [submission.designMapping.publicApiCatalog.codeConnectManifest.path]),
   ];
   const expectedVisualPaths = submission.artifactPaths.filter(
     (artifactPath) =>

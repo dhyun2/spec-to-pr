@@ -189,7 +189,10 @@ export function canonicalCaptureFontDigests(
   const canonical = new Map<string, `sha256:${string}`>();
   for (const font of fonts) {
     if (font.digest === undefined) {
-      throw provenanceError(`mapped font ${font.family} is missing its required digest`);
+      // Figma exposes the family used by a node, but does not provide the
+      // distributable font binary. Treat that metadata as informative rather
+      // than fabricating a provenance digest for a font we cannot verify.
+      continue;
     }
     const digest = Sha256DigestSchema.safeParse(font.digest);
     if (!digest.success) {
