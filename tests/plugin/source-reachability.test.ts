@@ -6,6 +6,10 @@ import { describe, expect, it } from "vitest";
 const projectRoot = process.cwd();
 const sourceRoot = path.join(projectRoot, "src");
 const productionRoots = [
+  // `pnpm check` is a supported production-maintainer entrypoint even though
+  // its executable lives in scripts/. Follow it so its source plan is not
+  // misclassified as an unreachable shipped module.
+  "scripts/run-repository-checks.ts",
   "src/mcp/server.ts",
   "src/application/release-service.ts",
   "src/release/release-publish-plan.ts",
