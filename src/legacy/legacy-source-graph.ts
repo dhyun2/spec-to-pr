@@ -1,9 +1,29 @@
 import { createHash } from "node:crypto";
-import { lstat, opendir, readFile, realpath } from "node:fs/promises";
+import { lstat, opendir, realpath } from "node:fs/promises";
 import path from "node:path";
 
 import {
+  LegacySourceCache,
+  MAX_LEGACY_RESOLUTION_DECISIONS,
+  createLegacySourceManifest,
+  findLegacyApplicationRoot,
+  isSafeLegacyUrlEnvironmentName,
+  legacyEnvironmentReferencesDigest,
+  legacyEnvironmentValue,
+  legacyManifestConfigDigest,
+  legacyManifestFile,
+  legacyResolutionStateDigest,
+  loadLegacyResolutionConfig,
+  readLegacyBoundedDigestInput,
+  sanitizedLegacyHttpOrigin,
+  type LegacyResolutionDecision,
+  type LegacySourceEnvironmentReference,
+  type LegacySourceManifest,
+  type LegacySourceRecord,
+} from "./legacy-source-cache.js";
+import {
   type LegacyAstNode,
+  type ParsedLegacySource,
   isLegacyAstNode,
   legacyAstNode as astNode,
   legacyExportedSelection,
@@ -14,7 +34,6 @@ import {
   legacyProgramBody as programBody,
   legacyPropertyName,
   legacyStringLiteralValue as stringLiteralValue,
-  parseLegacySource,
   walkLegacyAst,
 } from "./legacy-parser.js";
 
@@ -58,6 +77,8 @@ export type LegacySourceGraphLimits = {
   maxBytes: number;
   maxDepth: number;
   maxElapsedMs: number;
+  maxDirectories: number;
+  maxEntries: number;
 };
 
 export const LEGACY_SOURCE_DIGEST_ALGORITHM_V1 = "legacy-source-graph-v1" as const;
@@ -67,6 +88,7 @@ export type LegacySourceDigestAlgorithm =
 
 export type LegacySourceGraphOptions = {
   digestAlgorithm?: LegacySourceDigestAlgorithm;
+  sourceCache?: LegacySourceCache;
 };
 
 const DEFAULT_LIMITS: LegacySourceGraphLimits = {
@@ -74,6 +96,8 @@ const DEFAULT_LIMITS: LegacySourceGraphLimits = {
   maxBytes: 20 * 1024 * 1024,
   maxDepth: 32,
   maxElapsedMs: 5_000,
+  maxDirectories: 2_000,
+  maxEntries: 20_000,
 };
 const MAX_ENVIRONMENT_EVIDENCE_FILES = 100;
 
@@ -93,13 +117,7 @@ export type LegacyDependencyEdge = {
   resolver: "relative-import" | "alias" | "style" | "asset";
 };
 
-export type LegacyEnvironmentReference = {
-  runtime: "process.env" | "import.meta.env";
-  name: string;
-  sourcePaths: string[];
-  sanitizedOrigin?: string;
-  sanitizedOrigins?: Array<{ sourceName: string; origin: string }>;
-};
+export type LegacyEnvironmentReference = LegacySourceEnvironmentReference;
 
 export type LegacySourceGraph = {
   featureRoot: string;
@@ -108,10 +126,15 @@ export type LegacySourceGraph = {
   ownedFiles: LegacyGraphFile[];
   supportingFiles: LegacyGraphFile[];
   edges: LegacyDependencyEdge[];
+  resolutionDecisions: LegacyResolutionDecision[];
   aliases: Record<string, string>;
   environmentRefs: LegacyEnvironmentReference[];
   digestAlgorithm: LegacySourceDigestAlgorithm;
   sourceDigest: `sha256:${string}`;
+  sourceManifest: LegacySourceManifest;
+  sourceCache: LegacySourceCache;
+  visitedDirectories: number;
+  visitedEntries: number;
   truncated: boolean;
   truncation?: { limit: string; sourcePath: string };
 };
@@ -119,14 +142,19 @@ export type LegacySourceGraph = {
 type SourceReadBudget = {
   limits: LegacySourceGraphLimits;
   startedAt: number;
-  files: Map<string, { content: string }>;
+  files: Map<string, LegacySourceRecord>;
+  sourceCache: LegacySourceCache;
   scannedBytes: number;
   truncation?: { limit: keyof LegacySourceGraphLimits; absolutePath: string };
 };
 
 type ExportInspection = {
+  applicationRoot: string;
+  candidatePaths: Set<string>;
+  featureRoot: string;
   readBudget: SourceReadBudget;
-  parsedFiles: Map<string, ReturnType<typeof parseLegacySource>>;
+  resolutionDecisions: Map<string, LegacyResolutionDecision>;
+  resolutionDecisionLimitSourcePath?: string;
   results: Map<string, boolean>;
 };
 
@@ -135,16 +163,33 @@ export async function discoverLegacySourceGraph(
   limitOverrides: Partial<LegacySourceGraphLimits> = {},
   options: LegacySourceGraphOptions = {},
 ): Promise<LegacySourceGraph> {
+  const sourceCache = options.sourceCache ?? new LegacySourceCache();
+  sourceCache.beginSnapshot();
+  return discoverLegacySourceGraphFromSnapshot(featureRoot, limitOverrides, {
+    ...options,
+    sourceCache,
+  });
+}
+
+/** @internal Compose graph discovery inside a caller-owned source snapshot. */
+export async function discoverLegacySourceGraphFromSnapshot(
+  featureRoot: string,
+  limitOverrides: Partial<LegacySourceGraphLimits> = {},
+  options: LegacySourceGraphOptions = {},
+): Promise<LegacySourceGraph> {
   const limits = { ...DEFAULT_LIMITS, ...limitOverrides };
   const digestAlgorithm = options.digestAlgorithm ?? LEGACY_SOURCE_DIGEST_ALGORITHM_V2;
+  const sourceCache = options.sourceCache ?? new LegacySourceCache();
   const startedAt = Date.now();
   const canonicalFeatureRoot = await realpath(featureRoot);
-  const applicationRoot = await findEnclosingApplicationRoot(canonicalFeatureRoot);
-  const aliases = await loadSupportedAliases(applicationRoot);
-  const ownedPaths = await collectOwnedSourceFiles(canonicalFeatureRoot, limits, startedAt);
+  const applicationRoot = await findLegacyApplicationRoot(canonicalFeatureRoot);
+  const resolutionConfig = await loadLegacyResolutionConfig(applicationRoot, sourceCache);
+  const aliases = resolutionConfig.aliases;
+  const owned = await collectOwnedSourceFiles(canonicalFeatureRoot, limits, startedAt);
   const files = new Map<string, LegacyGraphFile>();
   const edges: LegacyDependencyEdge[] = [];
   const edgeKeys = new Set<string>();
+  const resolutionDecisions = new Map<string, LegacyResolutionDecision>();
   const environmentSources = new Map<
     string,
     { runtime: LegacyEnvironmentReference["runtime"]; sourcePaths: Set<string> }
@@ -153,20 +198,34 @@ export async function discoverLegacySourceGraph(
     limits,
     startedAt,
     files: new Map(),
+    sourceCache,
     scannedBytes: 0,
   };
   const exportInspection: ExportInspection = {
+    applicationRoot,
+    candidatePaths: new Set(),
+    featureRoot: canonicalFeatureRoot,
     readBudget,
-    parsedFiles: new Map(),
+    resolutionDecisions,
     results: new Map(),
   };
-  let truncation: LegacySourceGraph["truncation"];
+  let truncation: LegacySourceGraph["truncation"] =
+    owned.truncation === undefined
+      ? undefined
+      : {
+          limit: owned.truncation.limit,
+          sourcePath: publicGraphPath(
+            owned.truncation.sourcePath,
+            canonicalFeatureRoot,
+            applicationRoot,
+          ),
+        };
 
   const pending: Array<{
     absolutePath: string;
     ownership: LegacyGraphFile["ownership"];
     requestedExports?: string[];
-  }> = ownedPaths.map((absolutePath) => ({ absolutePath, ownership: "feature" }));
+  }> = owned.paths.map((absolutePath) => ({ absolutePath, ownership: "feature" }));
   const fullyExpanded = new Set<string>();
   const expandedExports = new Map<string, Set<string>>();
   traversal: while (pending.length > 0) {
@@ -201,9 +260,9 @@ export async function discoverLegacySourceGraph(
         break;
       }
       if (source === undefined) continue;
-      const content = source.content;
+      const content = source.text();
       const sourcePath = publicGraphPath(next.absolutePath, canonicalFeatureRoot, applicationRoot);
-      graphFile = {
+      const discoveredFile: LegacyGraphFile = {
         absolutePath: next.absolutePath,
         sourcePath,
         applicationRelativePath: path
@@ -211,14 +270,18 @@ export async function discoverLegacySourceGraph(
           .split(path.sep)
           .join("/"),
         content,
-        digest: `sha256:${createHash("sha256").update(content).digest("hex")}`,
+        digest: source.digest,
         ownership: next.ownership,
       };
-      files.set(next.absolutePath, graphFile);
+      graphFile = discoveredFile;
+      files.set(next.absolutePath, discoveredFile);
     }
+    if (graphFile === undefined) continue;
 
     if (!SCRIPT_EXTENSION.test(next.absolutePath)) continue;
-    for (const environment of discoverEnvironmentReferences(graphFile.content, next.absolutePath)) {
+    const parsed = sourceCache.record(graphFile.absolutePath, graphFile.digest)?.parsed();
+    if (parsed === undefined) continue;
+    for (const environment of discoverEnvironmentReferences(parsed)) {
       const key = `${environment.runtime}:${environment.name}`;
       const existing = environmentSources.get(key) ?? {
         runtime: environment.runtime,
@@ -229,16 +292,37 @@ export async function discoverLegacySourceGraph(
     }
     const references: LegacyModuleReference[] =
       digestAlgorithm === LEGACY_SOURCE_DIGEST_ALGORITHM_V1
-        ? discoverModuleSpecifiers(graphFile.content, next.absolutePath).map((specifier) => ({
+        ? discoverModuleSpecifiers(parsed).map((specifier) => ({
             specifier,
           }))
-        : discoverModuleReferences(graphFile.content, next.absolutePath, requestedExports);
+        : discoverModuleReferences(parsed, requestedExports);
     for (const reference of references) {
+      if (
+        !collectLegacyResolutionDecision(resolutionDecisions, {
+          importer: graphFile.sourcePath,
+          specifier: reference.specifier,
+          resolvedPath: "@missing",
+        })
+      ) {
+        truncation = {
+          limit: "maxResolutionDecisions",
+          sourcePath: graphFile.sourcePath,
+        };
+        break traversal;
+      }
       const resolved = await resolveGraphDependency({
         importer: next.absolutePath,
         specifier: reference.specifier,
         applicationRoot,
         aliases,
+      });
+      collectLegacyResolutionDecision(resolutionDecisions, {
+        importer: graphFile.sourcePath,
+        specifier: reference.specifier,
+        resolvedPath:
+          resolved === undefined
+            ? "@missing"
+            : path.relative(applicationRoot, resolved.absolutePath).split(path.sep).join("/"),
       });
       if (resolved === undefined) continue;
       if (
@@ -250,6 +334,13 @@ export async function discoverLegacySourceGraph(
           exportInspection,
         ))
       ) {
+        if (exportInspection.resolutionDecisionLimitSourcePath !== undefined) {
+          truncation = {
+            limit: "maxResolutionDecisions",
+            sourcePath: exportInspection.resolutionDecisionLimitSourcePath,
+          };
+          break traversal;
+        }
         if (readBudget.truncation !== undefined) {
           truncation = publicTruncation(
             readBudget.truncation,
@@ -300,6 +391,36 @@ export async function discoverLegacySourceGraph(
   const allFiles = [...files.values()].sort((left, right) =>
     left.applicationRelativePath.localeCompare(right.applicationRelativePath),
   );
+  const sortedResolutionDecisions = [...resolutionDecisions.values()].sort((left, right) =>
+    `${left.importer}\0${left.specifier}`.localeCompare(`${right.importer}\0${right.specifier}`),
+  );
+  const resolutionStateDigest = await legacyResolutionStateDigest({
+    featureRoot: canonicalFeatureRoot,
+    applicationRoot,
+    aliases,
+    decisions: sortedResolutionDecisions,
+  });
+  const sourceManifest = createLegacySourceManifest({
+    files: [
+      ...new Map(
+        [...allFiles.map((file) => file.absolutePath), ...exportInspection.candidatePaths].map(
+          (absolutePath) => [absolutePath, absolutePath] as const,
+        ),
+      ).values(),
+    ].flatMap((absolutePath) => {
+      const record = readBudget.files.get(absolutePath);
+      return record === undefined
+        ? []
+        : [
+            legacyManifestFile(
+              record,
+              path.relative(applicationRoot, absolutePath).split(path.sep).join("/"),
+            ),
+          ];
+    }),
+    environmentDigest: legacyEnvironmentReferencesDigest(environmentRefs),
+    configDigest: legacyManifestConfigDigest(resolutionConfig.digest, resolutionStateDigest),
+  });
   const sourceHash = createHash("sha256");
   for (const file of allFiles) {
     sourceHash.update(file.applicationRelativePath).update("\0").update(file.digest).update("\0");
@@ -315,10 +436,15 @@ export async function discoverLegacySourceGraph(
     edges: edges.sort((left, right) =>
       `${left.importer}:${left.specifier}`.localeCompare(`${right.importer}:${right.specifier}`),
     ),
+    resolutionDecisions: sortedResolutionDecisions,
     aliases,
     environmentRefs,
     digestAlgorithm,
     sourceDigest: `sha256:${sourceHash.digest("hex")}`,
+    sourceManifest,
+    sourceCache,
+    visitedDirectories: owned.visitedDirectories,
+    visitedEntries: owned.visitedEntries,
     truncated: truncation !== undefined,
     ...(truncation === undefined ? {} : { truncation }),
   };
@@ -327,7 +453,8 @@ export async function discoverLegacySourceGraph(
 async function readBudgetedSourceFile(
   absolutePath: string,
   budget: SourceReadBudget,
-): Promise<{ content: string } | undefined> {
+  options: { boundedDigestInput?: boolean } = {},
+): Promise<LegacySourceRecord | undefined> {
   if (budget.truncation !== undefined) return undefined;
   if (Date.now() - budget.startedAt >= budget.limits.maxElapsedMs) {
     budget.truncation = { limit: "maxElapsedMs", absolutePath };
@@ -350,8 +477,12 @@ async function readBudgetedSourceFile(
     budget.truncation = { limit: "maxBytes", absolutePath };
     return undefined;
   }
-  const content = await readFile(absolutePath, "utf8");
-  const byteLength = Buffer.byteLength(content, "utf8");
+  const source =
+    options.boundedDigestInput === true
+      ? await readLegacyBoundedDigestInput(absolutePath, budget.sourceCache)
+      : await budget.sourceCache.read(absolutePath);
+  if (source === undefined) return undefined;
+  const byteLength = source.byteLength;
   if (budget.scannedBytes + byteLength > budget.limits.maxBytes) {
     budget.truncation = { limit: "maxBytes", absolutePath };
     return undefined;
@@ -360,7 +491,6 @@ async function readBudgetedSourceFile(
     budget.truncation = { limit: "maxElapsedMs", absolutePath };
     return undefined;
   }
-  const source = { content };
   budget.files.set(absolutePath, source);
   budget.scannedBytes += byteLength;
   return source;
@@ -377,99 +507,46 @@ function publicTruncation(
   };
 }
 
-async function findEnclosingApplicationRoot(featureRoot: string): Promise<string> {
-  let current = featureRoot;
-  while (true) {
-    if (await isRegularFile(path.join(current, "package.json"))) return current;
-    if (await isDirectory(path.join(current, ".git"))) return featureRoot;
-    const parent = path.dirname(current);
-    if (parent === current) return featureRoot;
-    current = parent;
-  }
-}
-
-async function loadSupportedAliases(applicationRoot: string): Promise<Record<string, string>> {
-  const aliases = new Map<string, string>();
-  for (const configName of ["tsconfig.json", "jsconfig.json"]) {
-    const configPath = path.join(applicationRoot, configName);
-    if (!(await isRegularFile(configPath))) continue;
-    let parsed: { compilerOptions?: { baseUrl?: string; paths?: Record<string, string[]> } };
-    try {
-      parsed = JSON.parse(
-        jsonConfigurationText(await readFile(configPath, "utf8")),
-      ) as typeof parsed;
-    } catch {
-      continue;
-    }
-    const compilerOptions = parsed.compilerOptions;
-    const baseUrl = path.resolve(applicationRoot, compilerOptions?.baseUrl ?? ".");
-    for (const [key, targets] of Object.entries(compilerOptions?.paths ?? {})) {
-      const first = targets[0];
-      if (first === undefined) continue;
-      aliases.set(key.replace(/\*$/u, ""), path.resolve(baseUrl, first.replace(/\*$/u, "")));
-    }
-  }
-  const vueConfig = path.join(applicationRoot, "vue.config.js");
-  if (await isRegularFile(vueConfig)) {
-    const content = await readFile(vueConfig, "utf8");
-    const expression =
-      /["']([^"']+)["']\s*:\s*path\.(?:join|resolve)\s*\(\s*__dirname\s*,\s*["']([^"']+)["']/gu;
-    let match: RegExpExecArray | null;
-    while ((match = expression.exec(content)) !== null) {
-      aliases.set(match[1]!, path.resolve(applicationRoot, match[2]!));
-    }
-  }
-  return Object.fromEntries([...aliases].sort(([left], [right]) => left.localeCompare(right)));
-}
-
-function jsonConfigurationText(content: string): string {
-  let result = "";
-  let quote: '"' | "'" | undefined;
-  let escaped = false;
-  for (let index = 0; index < content.length; index += 1) {
-    const current = content[index]!;
-    const next = content[index + 1];
-    if (quote !== undefined) {
-      result += current;
-      if (escaped) escaped = false;
-      else if (current === "\\") escaped = true;
-      else if (current === quote) quote = undefined;
-      continue;
-    }
-    if (current === '"' || current === "'") {
-      quote = current;
-      result += current;
-    } else if (current === "/" && next === "/") {
-      while (index < content.length && content[index] !== "\n") index += 1;
-      result += "\n";
-    } else if (current === "/" && next === "*") {
-      index += 2;
-      while (index < content.length && !(content[index] === "*" && content[index + 1] === "/")) {
-        index += 1;
-      }
-      index += 1;
-    } else {
-      result += current;
-    }
-  }
-  return result.replace(/,\s*([}\]])/gu, "$1");
-}
-
 async function collectOwnedSourceFiles(
   root: string,
   limits: LegacySourceGraphLimits,
   startedAt: number,
-): Promise<string[]> {
+): Promise<{
+  paths: string[];
+  visitedDirectories: number;
+  visitedEntries: number;
+  truncation?: { limit: string; sourcePath: string };
+}> {
   const result: string[] = [];
   const pending = [{ directory: root, depth: 0 }];
+  let visitedDirectories = 0;
+  let visitedEntries = 0;
+  let truncation: { limit: string; sourcePath: string } | undefined;
   while (pending.length > 0) {
     const current = pending.pop()!;
-    if (current.depth > limits.maxDepth || Date.now() - startedAt >= limits.maxElapsedMs) break;
+    visitedDirectories += 1;
+    if (visitedDirectories > limits.maxDirectories) {
+      truncation = { limit: "maxDirectories", sourcePath: current.directory };
+      break;
+    }
+    if (current.depth > limits.maxDepth) {
+      truncation = { limit: "maxDepth", sourcePath: current.directory };
+      break;
+    }
+    if (Date.now() - startedAt >= limits.maxElapsedMs) {
+      truncation = { limit: "maxElapsedMs", sourcePath: current.directory };
+      break;
+    }
     const directory = await opendir(current.directory);
     const entries = [];
     for await (const entry of directory) entries.push(entry);
     entries.sort((left, right) => left.name.localeCompare(right.name));
     for (const entry of entries) {
+      visitedEntries += 1;
+      if (visitedEntries > limits.maxEntries) {
+        truncation = { limit: "maxEntries", sourcePath: path.join(current.directory, entry.name) };
+        break;
+      }
       if (entry.isSymbolicLink()) continue;
       const absolutePath = path.join(current.directory, entry.name);
       if (entry.isDirectory() && !SKIPPED_DIRECTORIES.has(entry.name)) {
@@ -478,8 +555,14 @@ async function collectOwnedSourceFiles(
         result.push(await realpath(absolutePath));
       }
     }
+    if (truncation !== undefined) break;
   }
-  return result.sort();
+  return {
+    paths: result.sort(),
+    visitedDirectories,
+    visitedEntries,
+    ...(truncation === undefined ? {} : { truncation }),
+  };
 }
 
 type LegacyModuleReference = {
@@ -488,8 +571,7 @@ type LegacyModuleReference = {
   requiredExports?: string[];
 };
 
-function discoverModuleSpecifiers(content: string, filePath: string): string[] {
-  const parsed = parseLegacySource(content, filePath);
+function discoverModuleSpecifiers(parsed: ParsedLegacySource): string[] {
   const specifiers = new Set<string>();
   walkLegacyAst(parsed.root, (node) => {
     if (
@@ -516,11 +598,9 @@ function discoverModuleSpecifiers(content: string, filePath: string): string[] {
 }
 
 function discoverModuleReferences(
-  content: string,
-  filePath: string,
+  parsed: ParsedLegacySource,
   requestedExports?: string[],
 ): LegacyModuleReference[] {
-  const parsed = parseLegacySource(content, filePath);
   const references = new Map<string, Set<string> | undefined>();
   const conditionalExports = new Map<string, Set<string>>();
   const unconditionalReferences = new Set<string>();
@@ -698,10 +778,8 @@ function relevantExportNodes(root: LegacyAstNode, requestedExports?: string[]): 
 }
 
 function discoverEnvironmentReferences(
-  content: string,
-  filePath: string,
+  parsed: ParsedLegacySource,
 ): Array<{ runtime: LegacyEnvironmentReference["runtime"]; name: string }> {
-  const parsed = parseLegacySource(content, filePath);
   const result = new Map<
     string,
     { runtime: LegacyEnvironmentReference["runtime"]; name: string }
@@ -806,11 +884,8 @@ async function sourceDirectlyExports(
   visited.add(absolutePath);
   const source = await readBudgetedSourceFile(absolutePath, inspection.readBudget);
   if (source === undefined) return false;
-  let parsed = inspection.parsedFiles.get(absolutePath);
-  if (parsed === undefined) {
-    parsed = parseLegacySource(source.content, absolutePath);
-    inspection.parsedFiles.set(absolutePath, parsed);
-  }
+  inspection.candidatePaths.add(absolutePath);
+  const parsed = source.parsed();
   if (Date.now() - inspection.readBudget.startedAt >= inspection.readBudget.limits.maxElapsedMs) {
     inspection.readBudget.truncation = { limit: "maxElapsedMs", absolutePath };
     return false;
@@ -866,18 +941,60 @@ async function sourceDirectlyExports(
       inspection.results.set(resultKey, true);
       return true;
     }
-    const target = await resolveSourceFile(path.resolve(path.dirname(absolutePath), source));
+    const importer = publicGraphPath(
+      absolutePath,
+      inspection.featureRoot,
+      inspection.applicationRoot,
+    );
     if (
-      target !== undefined &&
-      (await sourceDirectlyExports(target, namedRequests, inspection, new Set(visited), depth + 1))
+      !collectLegacyResolutionDecision(inspection.resolutionDecisions, {
+        importer,
+        specifier: source,
+        resolvedPath: "@missing",
+      })
+    ) {
+      inspection.resolutionDecisionLimitSourcePath = importer;
+      return false;
+    }
+    const target = await resolveSourceFile(path.resolve(path.dirname(absolutePath), source));
+    const boundedTarget =
+      target !== undefined && isWithin(inspection.applicationRoot, target) ? target : undefined;
+    collectLegacyResolutionDecision(inspection.resolutionDecisions, {
+      importer,
+      specifier: source,
+      resolvedPath:
+        boundedTarget === undefined
+          ? "@missing"
+          : path.relative(inspection.applicationRoot, boundedTarget).split(path.sep).join("/"),
+    });
+    if (
+      boundedTarget !== undefined &&
+      (await sourceDirectlyExports(
+        boundedTarget,
+        namedRequests,
+        inspection,
+        new Set(visited),
+        depth + 1,
+      ))
     ) {
       inspection.results.set(resultKey, true);
       return true;
     }
+    if (inspection.resolutionDecisionLimitSourcePath !== undefined) return false;
     if (inspection.readBudget.truncation !== undefined) return false;
   }
   inspection.results.set(resultKey, false);
   return false;
+}
+
+function collectLegacyResolutionDecision(
+  decisions: Map<string, LegacyResolutionDecision>,
+  decision: LegacyResolutionDecision,
+): boolean {
+  const key = `${decision.importer}\0${decision.specifier}`;
+  if (!decisions.has(key) && decisions.size >= MAX_LEGACY_RESOLUTION_DECISIONS) return false;
+  decisions.set(key, decision);
+  return true;
 }
 
 function dependencyKind(
@@ -933,9 +1050,11 @@ async function enrichEnvironmentReferences(
   const contents: Array<{ sourceName: string; text: string }> = [];
   if (readBudget.truncation === undefined) {
     for (const envFile of envFiles.slice(0, MAX_ENVIRONMENT_EVIDENCE_FILES)) {
-      const source = await readBudgetedSourceFile(envFile, readBudget);
-      if (source === undefined) break;
-      contents.push({ sourceName: path.basename(envFile), text: source.content });
+      const source = await readBudgetedSourceFile(envFile, readBudget, {
+        boundedDigestInput: true,
+      });
+      if (source === undefined) continue;
+      contents.push({ sourceName: path.basename(envFile), text: source.text() });
     }
   }
   if (readBudget.truncation === undefined && envFileCount > MAX_ENVIRONMENT_EVIDENCE_FILES) {
@@ -948,10 +1067,10 @@ async function enrichEnvironmentReferences(
     .map((reference) => {
       const origins = new Set<string>();
       const sanitizedOrigins: Array<{ sourceName: string; origin: string }> = [];
-      if (isSafeUrlEnvironmentName(reference.name)) {
+      if (isSafeLegacyUrlEnvironmentName(reference.name)) {
         for (const content of contents) {
-          const value = environmentValue(content.text, reference.name);
-          const origin = value === undefined ? undefined : sanitizedHttpOrigin(value);
+          const value = legacyEnvironmentValue(content.text, reference.name);
+          const origin = value === undefined ? undefined : sanitizedLegacyHttpOrigin(value);
           if (origin !== undefined) {
             origins.add(origin);
             sanitizedOrigins.push({ sourceName: content.sourceName, origin });
@@ -970,41 +1089,6 @@ async function enrichEnvironmentReferences(
     .sort((left, right) =>
       `${left.runtime}:${left.name}`.localeCompare(`${right.runtime}:${right.name}`),
     );
-}
-
-function environmentValue(content: string, name: string): string | undefined {
-  const escaped = name.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-  const match = new RegExp(`^\\s*(?:export\\s+)?${escaped}\\s*=\\s*(.*?)\\s*$`, "mu").exec(content);
-  if (match === null) return undefined;
-  const value = match[1]!.trim();
-  if (
-    (value.startsWith('"') && value.endsWith('"')) ||
-    (value.startsWith("'") && value.endsWith("'"))
-  ) {
-    return value.slice(1, -1);
-  }
-  return value;
-}
-
-function isSafeUrlEnvironmentName(name: string): boolean {
-  return (
-    !/(?:^|_)(?:AUTH|COOKIE|CREDENTIAL|KEY|PASS|PASSWORD|SECRET|TOKEN)(?:_|$)/iu.test(name) &&
-    /(?:^|_)(?:API|BASE|ENDPOINT|GATEWAY|GW|HOST|ORIGIN|URI|URL)(?:_|$)/iu.test(name)
-  );
-}
-
-function sanitizedHttpOrigin(value: string): string | undefined {
-  try {
-    const parsed = new URL(value);
-    if (!/^https?:$/u.test(parsed.protocol) || parsed.username !== "" || parsed.password !== "") {
-      return undefined;
-    }
-    parsed.search = "";
-    parsed.hash = "";
-    return parsed.toString();
-  } catch {
-    return undefined;
-  }
 }
 
 function publicGraphPath(
@@ -1026,14 +1110,6 @@ function isWithin(root: string, candidate: string): boolean {
 async function isRegularFile(candidate: string): Promise<boolean> {
   try {
     return (await lstat(candidate)).isFile();
-  } catch {
-    return false;
-  }
-}
-
-async function isDirectory(candidate: string): Promise<boolean> {
-  try {
-    return (await lstat(candidate)).isDirectory();
   } catch {
     return false;
   }

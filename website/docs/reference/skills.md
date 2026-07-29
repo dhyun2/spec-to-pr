@@ -67,6 +67,10 @@ title: 공개 스킬 8개
 
 두 검토자는 읽기 전용입니다. 코드를 고치거나 `workflow_*` 도구를 호출하지 않고, 고정된 상태·계약·코드 차이·검증 자료를 읽어 판정만 반환합니다. `design-reviewer`는 UI 작업일 때만 참여합니다.
 
+## 시각 피드백 루프
+
+`implement`는 고정 92% 기준으로 최초 비교와 최대 두 번의 보정을 사용자 확인 없이 이어갑니다. geometry·fixture·renderer lineage가 맞지 않는 취득 오류는 횟수에 넣지 않습니다. 세 번째 유효 실패는 실행을 `blocked`로 끝내고 `review-design`을 호출하지 않으며, `publish`는 발행 조건을 만족할 때 같은 15개 섹션 템플릿에 동일 크기 기준/결과와 별도 diff/overlay를 담은 진단 초안을 만듭니다. `review-functional`과 `review-design`의 집중 UI assertion은 전체 점수가 92% 이상이어도 별도로 통과해야 합니다.
+
 ## 공개 도구와 브라우저의 경계
 
 실행 상태를 바꾸는 도구는 `workflow_info`, `workflow_start`, `workflow_advance`, `workflow_submit`, `workflow_status`, `workflow_publish`, `workflow_archive` 일곱 개뿐입니다. API를 사용하는 UI의 `api-ready` 자료도 `workflow_submit`으로 제출합니다.

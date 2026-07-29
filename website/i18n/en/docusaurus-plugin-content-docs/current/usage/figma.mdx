@@ -44,7 +44,7 @@ mode: figma
 scope: ui
 figmaUrls: [https://www.figma.com/design/FILE/shop?node-id=12-345, https://www.figma.com/design/FILE/shop?node-id=12-678]
 publication: draft
-Implement the Figma design with deterministic mock data, compare it at the 98% threshold, and publish a draft PR.
+Implement the Figma design with deterministic mock data, compare it at the 92% threshold, and publish a draft PR.
 ```
 
 ## Full prompt example <span id="full-prompt-figma"></span>
@@ -69,10 +69,18 @@ Create real Figma `visualTargets`, deterministic mock states, exact/review ratio
 2. **Figma contracts:** Read every URL's node, logical frame geometry, export bitmap size/scale, variables, component context, screenshots, fonts, and assets. A host thumbnail never becomes the browser viewport.
 3. **Design-system mapping:** Map each captured component exactly once to a verifiable installed design-system export, digest-bound canonical asset, or explicit exception before custom markup.
 4. **Implementation:** Submit `{deterministic:true, fixtures:[{id,path,sha256}]}` plus separate JSON fixtures. Every state is bound to a named fixture ID and digest.
-5. **Compare / repair:** Wait for the fixture, `document.fonts.ready`, and assets, then emit a receipt binding packet/head, logical geometry/DPR, capture provider, browser environment, fixture, fonts/assets, and PNG digest. Runtime owns sRGB normalization and the 98% verdict. A valid failure returns `implementation-repair`; modify and commit code, create a fresh packet, and recapture. Acquisition errors consume no attempt; there are three total comparison attempts (the initial comparison plus at most two repairs).
-6. **Review / report / publish:** Complete both independent reviews and packet-bound 15-section `pr-report-v2.1`, then publish only while the start-bound source/target/remote remain unchanged.
+5. **Compare / repair:** Wait for the fixture, `document.fonts.ready`, and assets, then emit a receipt binding packet/head, logical geometry/DPR, capture provider, browser environment, fixture, fonts/assets, and PNG digest. Runtime owns sRGB normalization and the fixed 92% verdict. The initial comparison and repairs after the first two valid failures run automatically without asking the user. Acquisition errors consume no attempt. A third valid failure terminally blocks the Run and skips design review.
+6. **Review / report / publish:** A passing Run completes both independent reviews and the packet-bound 15-section `pr-report-v2.1`, then publishes only while the start-bound source/target/remote remain unchanged. When preconditions allow, a third-attempt failure publishes the same template with equal-size baseline/current media and separate diff/overlay links while remaining blocked.
 
 Every report section is `complete`, `not-run`, `blocked`, or `not-applicable`; stale paths outside the current review packet are omitted. GitHub images, diffs, and overlays use immutable paths on one managed `spec-to-pr/evidence` branch and URLs pinned to the upload commit SHA, not a branch per Run.
+
+### Common implementation traps
+
+- Reacquire a native export instead of stretching a connected-host thumbnail to the target frame.
+- Let captured state facts, not prose assumptions, define separate fixture digests.
+- Map internal `Spot`, `Circle`, and `Close` exports and semantic tokens such as `semantic/text/tertiary` exactly; an external SVG or similar hex value is not an automatic substitute.
+- Keep baseline PNGs out of product DOM, CSS, SVG, canvas, proxy, and overlay code.
+- Verify left/right image geometry, table borders, copy control, icon geometry/color, focus, headings, accessible names, and actions with focused assertions independent of the 92% aggregate score.
 
 ## Execution policy: stages, agents, skills, and tools
 
@@ -110,7 +118,7 @@ After fixing access, node, or evidence, resume the **same Run** at its latest st
 | ---------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | Bundle                 | `evidence/figma/figma-bundle.json`                                   | All `fileUrls`, nodes, native geometry, design mappings, font/asset provenance are bound |
 | Manifest/visuals       | `evidence/figma/manifest.json`, `evidence/figma/checkout-mobile.png` | Actual PNG paths distinguish logical frames from export bitmaps                          |
-| Visual comparison      | `evidence/visual/figma-report.json`                                  | exact/review ratio ≥ 98%, baseline/target/diff/overlay                                   |
+| Visual comparison      | `evidence/visual/figma-report.json`                                  | exact/review ratio ≥ 92%, baseline/target/diff/overlay                                   |
 | Mock fixtures          | `evidence/fixtures/checkout.json`                                    | named path/digest is carried into the capture receipt                                    |
 | Capture receipt        | `evidence/visual/<packet>/checkout.json`                             | current packet/head, environment, geometry, fixture, font/asset, and PNG digests match   |
 | Responsive/interaction | `evidence/design/responsive.json`, `interaction.json`                | Named viewports and state transitions are verified                                       |
@@ -142,7 +150,7 @@ Figma mode does not automatically require feature-targeted E2E and video. If com
 
 ## Design validation
 
-- exact match: 97.84%; review match: 99.12%; threshold: 98%
+- exact match: 97.84%; review match: 99.12%; threshold: 92%
 - baseline / target / diff / overlay links
 - responsive / interaction / accessibility: passed
 - design-reviewer: approved

@@ -20,13 +20,18 @@ import {
 } from "../../packages/codex-sdk/src/usage-calibration.js";
 import {
   buildBlockedDiagnosticFinalizationPrompt,
+  buildBoundaryContinuationPrompt,
   buildCompactCheckpointPrompt,
   executeBudgetedBoundaryTurns,
   extractWorkflowStatus,
   type BoundaryWorkflowStatus,
 } from "../../packages/codex-sdk/src/boundary-runner.js";
+import { DEFAULT_BLOCKED_DIAGNOSTIC_TOKEN_RESERVE } from "../../packages/codex-sdk/src/spec-to-pr-runner.js";
 
 describe("Codex SDK workload budget", () => {
+  it("defaults the blocked-diagnostic reserve to deterministic 50% headroom", () => {
+    expect(DEFAULT_BLOCKED_DIAGNOSTIC_TOKEN_RESERVE).toBe(24_000);
+  });
   it("counts input and output once while retaining cached and reasoning dimensions", () => {
     const usage = accumulateUsage(null, {
       input_tokens: 800,
@@ -588,7 +593,7 @@ describe("Codex SDK workload budget", () => {
       { usedTokens: 144_000, hardLimitTokens: 180_000 },
     );
 
-    expect(prompt).toContain("workflow_status");
+    expect(prompt).toContain('workflow_status with {"runId":"run_12345678","view":"checkpoint"}');
     expect(prompt).toContain("review-functional");
     expect(prompt).toContain("requiredValidations");
     expect(prompt).toContain("Implement the checkout selector");
@@ -598,6 +603,33 @@ describe("Codex SDK workload budget", () => {
     expect(prompt).toContain('"checkpointAtTokens":144000');
     expect(prompt).toContain('"hardLimitTokens":180000');
     expect(prompt).not.toContain("promptText");
+  });
+
+  it("requests the smallest status view needed at each SDK boundary", () => {
+    const implementation = buildBoundaryContinuationPrompt(
+      workflowStatus("running", "implement"),
+      ["functional"],
+      { usedTokens: 12_000, hardLimitTokens: 48_000 },
+    );
+    const reviewer = buildBoundaryContinuationPrompt(
+      workflowStatus("running", "review-functional"),
+      ["functional"],
+      { usedTokens: 12_000, hardLimitTokens: 48_000 },
+    );
+    const report = buildBoundaryContinuationPrompt(
+      { ...workflowStatus("running"), currentStage: "report" },
+      ["functional"],
+      { usedTokens: 12_000, hardLimitTokens: 48_000 },
+    );
+
+    expect(implementation).toContain(
+      'workflow_status with {"runId":"run_12345678","view":"action"}',
+    );
+    expect(implementation).not.toContain('"view":"detail"');
+    expect(reviewer).toContain('workflow_status with {"runId":"run_12345678","view":"action"}');
+    expect(reviewer).toContain('workflow_status with {"runId":"run_12345678","view":"detail"}');
+    expect(reviewer).toContain("immutable reviewer evidence");
+    expect(report).toContain('workflow_status with {"runId":"run_12345678","view":"detail"}');
   });
 
   it("projects blocker, publication, delegation, and diagnostic publication status", () => {
@@ -629,6 +661,316 @@ describe("Codex SDK workload budget", () => {
         number: "42",
       },
     });
+  });
+
+  it("holds the last normal turn for a blocked draft diagnostic finalization", async () => {
+    const prompts: string[] = [];
+    let calls = 0;
+    const initialBlockedStatus = workflowStatus("blocked", undefined, {
+      hardLimitTokens: 48_000,
+      publication: "draft",
+      blockerKind: "verification",
+    });
+    const client = {
+      startThread: () => ({
+        id: "thread-1",
+        run: async (prompt: string) => {
+          prompts.push(prompt);
+          calls += 1;
+          return turnResult(
+            16_000,
+            calls === 1
+              ? initialBlockedStatus
+              : workflowStatus("blocked", undefined, {
+                  hardLimitTokens: 48_000,
+                  publication: "draft",
+                  blockerKind: "verification",
+                  diagnosticPublication: {
+                    host: "github" as const,
+                    url: "https://github.com/example/repo/pull/42",
+                    number: "42",
+                    created: true,
+                    updated: false,
+                    publishResultArtifactId: "artifact_publish_12345678",
+                  },
+                }),
+          );
+        },
+      }),
+      resumeThread: () => {
+        throw new Error("not expected");
+      },
+    };
+
+    const result = await executeBudgetedBoundaryTurns({
+      client,
+      initialPrompt: "implement",
+      hardLimitTokens: 48_000,
+      workloadSize: "M",
+      requiredValidations: ["functional"],
+      maxTurns: 2,
+      blockedDiagnosticTokenReserve: 24_000,
+      inspectBlockedDiagnosticPreflight: () => ({
+        eligible: true,
+        sourceBranch: "codex/checkout",
+        targetBranch: "main",
+        remoteName: "origin",
+      }),
+    });
+
+    expect(result.state).toBe("blocked");
+    expect(result.turnCount).toBe(2);
+    expect(calls).toBe(2);
+    expect(prompts[1]).toContain('intent: "blocked-diagnostic"');
+  });
+
+  it("does not launch blocked finalization when the first blocked turn already consumed the reserve", async () => {
+    let calls = 0;
+    const client = {
+      startThread: () => ({
+        id: "thread-1",
+        run: async () => {
+          calls += 1;
+          return turnResult(
+            40_000,
+            workflowStatus("blocked", undefined, {
+              hardLimitTokens: 48_000,
+              publication: "draft",
+              blockerKind: "verification",
+            }),
+          );
+        },
+      }),
+      resumeThread: () => {
+        throw new Error("not expected");
+      },
+    };
+
+    const result = await executeBudgetedBoundaryTurns({
+      client,
+      initialPrompt: "implement",
+      outputSchema: { type: "object" },
+      hardLimitTokens: 48_000,
+      workloadSize: "M",
+      requiredValidations: ["functional"],
+      maxTurns: 2,
+      blockedDiagnosticTokenReserve: 24_000,
+      inspectBlockedDiagnosticPreflight: () => ({
+        eligible: true,
+        sourceBranch: "codex/checkout",
+        targetBranch: "main",
+        remoteName: "origin",
+      }),
+    });
+
+    expect(result.state).toBe("blocked");
+    expect(result.outputFormatting).toBe("budget-skipped");
+    expect(result.turnCount).toBe(1);
+    expect(calls).toBe(1);
+  });
+
+  it("does not let nonterminal draft work consume its reserved finalization turn", async () => {
+    let calls = 0;
+    const client = {
+      startThread: () => ({
+        id: "thread-1",
+        run: async () => {
+          calls += 1;
+          return turnResult(
+            1_000,
+            workflowStatus("running", undefined, {
+              hardLimitTokens: 48_000,
+              publication: "draft",
+            }),
+          );
+        },
+      }),
+      resumeThread: () => {
+        throw new Error("not expected");
+      },
+    };
+
+    const result = await executeBudgetedBoundaryTurns({
+      client,
+      initialPrompt: "implement",
+      hardLimitTokens: 48_000,
+      workloadSize: "M",
+      requiredValidations: ["functional"],
+      maxTurns: 2,
+      blockedDiagnosticTokenReserve: 24_000,
+    });
+
+    expect(result.state).toBe("turn-limit");
+    expect(result.turnCount).toBe(1);
+    expect(calls).toBe(1);
+  });
+
+  it("uses the hard limit less the held blocked-diagnostic token reserve for draft work", async () => {
+    const prompts: string[] = [];
+    const client = {
+      startThread: () => ({
+        id: "thread-1",
+        run: async (prompt: string) => {
+          prompts.push(prompt);
+          return turnResult(
+            10_000,
+            workflowStatus("running", undefined, {
+              hardLimitTokens: 48_000,
+              publication: "draft",
+            }),
+          );
+        },
+      }),
+      resumeThread: () => {
+        throw new Error("not expected");
+      },
+    };
+
+    const result = await executeBudgetedBoundaryTurns({
+      client,
+      initialPrompt: "implement",
+      hardLimitTokens: 48_000,
+      workloadSize: "M",
+      requiredValidations: ["functional"],
+      maxTurns: 3,
+      blockedDiagnosticTokenReserve: 24_000,
+    });
+
+    expect(result.state).toBe("turn-limit");
+    expect(result.checkpointCount).toBe(0);
+    expect(prompts[1]).toContain('"hardLimitTokens":24000');
+  });
+
+  it("does not admit another ordinary turn that would consume the held token reserve", async () => {
+    let calls = 0;
+    const client = {
+      startThread: () => ({
+        id: "thread-1",
+        run: async () => {
+          calls += 1;
+          return turnResult(
+            20_000,
+            workflowStatus("running", undefined, {
+              hardLimitTokens: 48_000,
+              publication: "draft",
+            }),
+          );
+        },
+      }),
+      resumeThread: () => {
+        throw new Error("not expected");
+      },
+    };
+
+    const result = await executeBudgetedBoundaryTurns({
+      client,
+      initialPrompt: "implement",
+      hardLimitTokens: 48_000,
+      workloadSize: "M",
+      requiredValidations: ["functional"],
+      maxTurns: 3,
+      blockedDiagnosticTokenReserve: 24_000,
+    });
+
+    expect(result.state).toBe("turn-limit");
+    expect(result.turnCount).toBe(1);
+    expect(calls).toBe(1);
+  });
+
+  it("releases held diagnostic tokens when a draft Run completes", async () => {
+    let calls = 0;
+    const client = {
+      startThread: () => ({
+        id: "thread-1",
+        run: async () => {
+          calls += 1;
+          return turnResult(
+            30_000,
+            workflowStatus("completed", undefined, {
+              hardLimitTokens: 48_000,
+              publication: "draft",
+            }),
+          );
+        },
+      }),
+      resumeThread: () => {
+        throw new Error("not expected");
+      },
+    };
+
+    const result = await executeBudgetedBoundaryTurns({
+      client,
+      initialPrompt: "implement",
+      outputSchema: { type: "object" },
+      hardLimitTokens: 48_000,
+      workloadSize: "M",
+      requiredValidations: ["functional"],
+      maxTurns: 2,
+      blockedDiagnosticTokenReserve: 24_000,
+    });
+
+    expect(result.state).toBe("completed");
+    expect(result.outputFormatting).toBe("applied");
+    expect(result.turnCount).toBe(2);
+    expect(calls).toBe(2);
+  });
+
+  it("runs blocked publication before optional output formatting", async () => {
+    const prompts: string[] = [];
+    let calls = 0;
+    const client = {
+      startThread: () => ({
+        id: "thread-1",
+        run: async (prompt: string) => {
+          prompts.push(prompt);
+          calls += 1;
+          return turnResult(
+            1_000,
+            workflowStatus("blocked", undefined, {
+              hardLimitTokens: 48_000,
+              publication: "draft",
+              blockerKind: "verification",
+              ...(calls === 1
+                ? {}
+                : {
+                    diagnosticPublication: {
+                      host: "github" as const,
+                      url: "https://github.com/example/repo/pull/42",
+                      number: "42",
+                      created: true,
+                      updated: false,
+                      publishResultArtifactId: "artifact_publish_12345678",
+                    },
+                  }),
+            }),
+          );
+        },
+      }),
+      resumeThread: () => {
+        throw new Error("not expected");
+      },
+    };
+
+    const result = await executeBudgetedBoundaryTurns({
+      client,
+      initialPrompt: "implement",
+      outputSchema: { type: "object" },
+      hardLimitTokens: 48_000,
+      workloadSize: "M",
+      requiredValidations: ["functional"],
+      maxTurns: 3,
+      blockedDiagnosticTokenReserve: 24_000,
+      inspectBlockedDiagnosticPreflight: () => ({
+        eligible: true,
+        sourceBranch: "codex/checkout",
+        targetBranch: "main",
+        remoteName: "origin",
+      }),
+    });
+
+    expect(result.outputFormatting).toBe("applied");
+    expect(prompts[1]).toContain('intent: "blocked-diagnostic"');
+    expect(prompts[2]).toContain("Format the final result");
   });
 
   it("gives a blocked draft Run at most one bounded diagnostic-finalization turn", async () => {
@@ -726,10 +1068,11 @@ describe("Codex SDK workload budget", () => {
     const result = await executeBudgetedBoundaryTurns({
       client,
       initialPrompt: "implement",
-      hardLimitTokens: 100_000,
+      hardLimitTokens: 48_000,
       workloadSize: "M",
       requiredValidations: ["functional"],
-      maxTurns: 8,
+      maxTurns: 2,
+      blockedDiagnosticTokenReserve: 24_000,
       inspectBlockedDiagnosticPreflight: () => ({
         eligible: false,
         reason: "working-tree-not-clean",
@@ -737,6 +1080,48 @@ describe("Codex SDK workload budget", () => {
     });
 
     expect(result.state).toBe("blocked");
+    expect(result.turnCount).toBe(1);
+    expect(calls).toBe(1);
+  });
+
+  it("does not format a blocked result after ineligible diagnostic publication preflight", async () => {
+    let calls = 0;
+    const client = {
+      startThread: () => ({
+        id: "thread-1",
+        run: async () => {
+          calls += 1;
+          return turnResult(
+            1_000,
+            workflowStatus("blocked", undefined, {
+              publication: "draft",
+              blockerKind: "verification",
+            }),
+          );
+        },
+      }),
+      resumeThread: () => {
+        throw new Error("not expected");
+      },
+    };
+
+    const result = await executeBudgetedBoundaryTurns({
+      client,
+      initialPrompt: "implement",
+      outputSchema: { type: "object" },
+      hardLimitTokens: 48_000,
+      workloadSize: "M",
+      requiredValidations: ["functional"],
+      maxTurns: 2,
+      blockedDiagnosticTokenReserve: 24_000,
+      inspectBlockedDiagnosticPreflight: () => ({
+        eligible: false,
+        reason: "working-tree-not-clean",
+      }),
+    });
+
+    expect(result.state).toBe("blocked");
+    expect(result.outputFormatting).toBe("budget-skipped");
     expect(result.turnCount).toBe(1);
     expect(calls).toBe(1);
   });
@@ -1147,6 +1532,7 @@ function workflowStatus(
   const size = options.size ?? "M";
   const hardLimitTokens = options.hardLimitTokens ?? 180_000;
   return {
+    view: "action",
     runId: options.runId ?? "run_12345678",
     revision: 7,
     status,

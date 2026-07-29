@@ -1,9 +1,15 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it } from "vitest";
 
 import {
   WorkflowStartInputSchema,
   buildParserSafeChunks,
 } from "../../src/application/workflow-service.js";
+import {
+  figmaPublicApiCatalogDigest,
+  figmaStateFactsDigest,
+} from "../../src/figma/figma-capture-contract.js";
 import { RUN_STAGE_NAMES } from "../../src/run/stages.js";
 import {
   AGENT_ROLES,
@@ -18,12 +24,173 @@ import {
   DeliveryProfileSchema,
   GuidanceTraceSchema,
   ImplementationReviewPacketSchema,
+  VisualLineageOutcomeV2Schema,
+  VisualRepairEvidenceV2Schema,
+  WorkflowActionSchema,
+  WorkflowActionStatusSchema,
   WorkflowBlockerSchema,
+  WorkflowCheckpointStatusSchema,
+  WorkflowDetailStatusSchema,
   WorkflowResumeContextSchema,
+  WorkflowStatusInputSchema,
+  WorkflowStatusSchema,
   WorkflowSubmissionSchema,
 } from "../../src/workflow/index.js";
 
+function figmaDesignMappingFixture() {
+  const catalogFields = {
+    schemaVersion: "figma-public-api-catalog-v1" as const,
+    packageName: "@frontend/ui" as const,
+    packageVersion: "1.2.3",
+    packageManifest: {
+      path: "test-ui-package/package.json",
+      digest: `sha256:${"c".repeat(64)}` as const,
+    },
+    publicBarrels: [
+      {
+        module: "@frontend/ui" as const,
+        path: "test-ui-package/index.js",
+        digest: `sha256:${"a".repeat(64)}` as const,
+      },
+    ],
+    codeConnectManifest: {
+      path: "test-ui-package/code-connect.manifest.json",
+      digest: `sha256:${"b".repeat(64)}` as const,
+    },
+    exports: [],
+  };
+  const publicApiCatalog = {
+    ...catalogFields,
+    digest: figmaPublicApiCatalogDigest(catalogFields),
+  };
+  return {
+    designSystem: {
+      packageName: "@frontend/ui" as const,
+      packageVersion: "1.2.3",
+      catalogDigest: publicApiCatalog.digest,
+      guidanceSkill: "design-system",
+    },
+    publicApiCatalog,
+    components: [],
+    fonts: [],
+    tokens: [],
+  };
+}
+
+function requiredInteractionAssertion(id: string) {
+  return {
+    id,
+    kind: "interaction" as const,
+    selector: "[data-ui=checkout]",
+    subject: "checkout state rendered",
+    action: "click" as const,
+    expected: "rendered",
+  };
+}
+
 describe("workflow v2 contracts", () => {
+  it("versions rich visual repair actions without fabricating legacy artifact evidence", () => {
+    const runId = `run_${"a".repeat(32)}`;
+    const reviewPacketId = `packet_${"b".repeat(64)}`;
+    const lineageId = `packet_${"c".repeat(64)}`;
+    const repairEvidenceArtifactId = `art_${"d".repeat(32)}`;
+
+    expect(
+      WorkflowActionSchema.parse({
+        kind: "implementation-repair",
+        repairEvidenceVersion: "v2",
+        runId,
+        reviewPacketId,
+        lineageId,
+        nextAttempt: 2,
+        failedTargets: [{ targetId: "shop-default", reviewMatchRatio: 0.87 }],
+        repairEvidenceArtifactId,
+      }),
+    ).toMatchObject({ repairEvidenceVersion: "v2", repairEvidenceArtifactId });
+
+    const legacy = WorkflowActionSchema.parse({
+      kind: "implementation-repair",
+      repairEvidenceVersion: "legacy-v1",
+      runId,
+      reviewPacketId,
+      lineageId,
+      nextAttempt: 2,
+      failedTargets: [{ targetId: "shop-default", reviewMatchRatio: 0.87 }],
+    });
+    expect(legacy).toMatchObject({ repairEvidenceVersion: "legacy-v1" });
+    expect(legacy).not.toHaveProperty("repairEvidenceArtifactId");
+  });
+
+  it("binds rich visual repair evidence to the immutable implementation head", () => {
+    const evidence = {
+      schemaVersion: "visual-repair-evidence-v2",
+      runId: `run_${"a".repeat(32)}`,
+      lineageId: `packet_${"b".repeat(64)}`,
+      reviewPacketId: `packet_${"c".repeat(64)}`,
+      headSha: "d".repeat(40),
+      rendererLineageId: `sha256:${"e".repeat(64)}`,
+      attempt: 1,
+      generatedAt: "2026-07-28T00:00:00.000Z",
+      failedTargets: [
+        {
+          targetId: "shop-default",
+          name: "Shop",
+          route: "/shop",
+          state: "default",
+          fixture: "mock:shop",
+          viewport: { width: 1280, height: 720 },
+          deviceScaleFactor: 1,
+          metrics: {
+            width: 1280,
+            height: 720,
+            comparedPixelCount: 921_600,
+            maskedPixelCount: 0,
+            maskedAreaRatio: 0,
+            exactMatchRatio: 0.8,
+            reviewMatchRatio: 0.87,
+            meanDistance: 0.04,
+            maxDistance: 0.2,
+            pixelTolerance: 0.02,
+            threshold: 0.92,
+          },
+          diffArtifactId: `art_${"e".repeat(32)}`,
+          overlayArtifactId: `art_${"f".repeat(32)}`,
+          captureSummary: {
+            provider: "playwright",
+            browser: "chromium 138",
+            fontsReady: true,
+            assetsReady: true,
+          },
+          causeHints: ["implementation"],
+        },
+      ],
+    } as const;
+
+    expect(VisualRepairEvidenceV2Schema.parse(evidence)).toMatchObject({
+      reviewPacketId: evidence.reviewPacketId,
+      headSha: evidence.headSha,
+      attempt: 1,
+    });
+    const { headSha: _headSha, ...unbound } = evidence;
+    expect(VisualRepairEvidenceV2Schema.safeParse(unbound).success).toBe(false);
+  });
+
+  it("binds closed visual lineage outcomes to the committed renderer lineage", () => {
+    const outcome = {
+      schemaVersion: "visual-repair-lineage-v2",
+      runId: `run_${"a".repeat(32)}`,
+      lineageId: `packet_${"b".repeat(64)}`,
+      reviewPacketId: `packet_${"c".repeat(64)}`,
+      headSha: "d".repeat(40),
+      rendererLineageId: `sha256:${"e".repeat(64)}`,
+      attempt: 1,
+      generatedAt: "2026-07-28T00:00:00.000Z",
+      status: "closed",
+    } as const;
+
+    expect(VisualLineageOutcomeV2Schema.parse(outcome)).toEqual(outcome);
+  });
+
   it("defines the bounded strict workflow blocker contract", () => {
     const blocker = {
       stage: "implementation",
@@ -641,6 +808,118 @@ describe("workflow v2 contracts", () => {
     ).toBe(false);
   });
 
+  it("discriminates strict action, checkpoint, and detail status projections", () => {
+    const common = {
+      runId: `run_${"a".repeat(32)}`,
+      revision: 3,
+      status: "needs-external-action" as const,
+      currentStage: "contracts",
+      deliveryProfile: {
+        publication: "draft" as const,
+        recommendedSkills: ["test-driven-development"],
+      },
+      workload: {
+        size: "S" as const,
+        score: 5,
+        confidence: "high" as const,
+        source: "contracts" as const,
+        sampleCount: 1,
+        reasons: ["One bounded contract."],
+        tokenRange: { min: 24_000, max: 48_000 },
+        budget: {
+          checkpointPercent: 80 as const,
+          checkpointAtTokens: 38_400,
+          hardLimitTokens: 48_000,
+        },
+      },
+      delegationPolicy: {
+        singleWriter: true as const,
+        allowNested: false as const,
+        maxReadOnlyScouts: 0 as const,
+        parallelReviewers: false,
+      },
+      requiredValidations: ["functional"],
+      stages: [
+        { name: "intake", status: "passed" as const },
+        { name: "contracts", status: "pending" as const },
+      ],
+      nextActions: [
+        {
+          kind: "prepare-contracts" as const,
+          runId: `run_${"a".repeat(32)}`,
+        },
+      ],
+      blockers: [],
+      blockerDetails: [],
+    };
+    const action = { view: "action" as const, ...common };
+    const checkpoint = {
+      ...common,
+      view: "checkpoint" as const,
+      stages: [
+        { name: "intake", status: "passed" as const, checkpoint: "intake-ready" },
+        { name: "contracts", status: "pending" as const },
+      ],
+      resumeContext: {
+        goal: "Implement the accepted contract.",
+        evidencePaths: ["contracts/requirements.json"],
+        submissions: [{ kind: "contracts", summary: "Accepted.", outcome: "passed" }],
+      },
+    };
+    const detail = {
+      ...checkpoint,
+      view: "detail" as const,
+      scope: {
+        code: true,
+        ui: false,
+        api: false,
+        specification: false,
+        hasVisualBaseline: false,
+        securitySensitive: false,
+        performanceSensitive: false,
+        observabilityRequested: false,
+      },
+      deliveryProfile: {
+        mode: "auto" as const,
+        changeKind: "feature" as const,
+        publication: "draft" as const,
+        requirements: {
+          brief: false,
+          legacyBaseline: false,
+          legacyInventory: false,
+          targetedFeatureE2E: false,
+          featureVideo: false,
+          figmaBundle: false,
+          visualComparison: false,
+          apiCoverage: false,
+          performanceEvidence: false,
+          mockData: false,
+        },
+        recommendedSkills: ["test-driven-development"],
+        openApiPaths: [],
+        openApiUrls: [],
+        openApiOperations: [],
+        sourceProvenance: [],
+      },
+    };
+
+    expect(WorkflowStatusInputSchema.parse({ runId: common.runId })).toEqual({
+      runId: common.runId,
+      view: "action",
+    });
+    expect(
+      WorkflowStatusInputSchema.safeParse({ runId: common.runId, view: "action", extra: true })
+        .success,
+    ).toBe(false);
+    expect(WorkflowActionStatusSchema.parse(action)).toEqual(action);
+    expect(WorkflowCheckpointStatusSchema.parse(checkpoint)).toEqual(checkpoint);
+    expect(WorkflowDetailStatusSchema.parse(detail)).toMatchObject(detail);
+    expect(WorkflowStatusSchema.parse(action).view).toBe("action");
+    expect(WorkflowStatusSchema.parse(checkpoint).view).toBe("checkpoint");
+    expect(WorkflowStatusSchema.parse(detail).view).toBe("detail");
+    expect(WorkflowStatusSchema.safeParse({ ...action, scope: detail.scope }).success).toBe(false);
+  });
+
   it("requires executable artifacts for passed implementation submissions", () => {
     const result = WorkflowSubmissionSchema.safeParse({
       kind: "implementation",
@@ -951,7 +1230,27 @@ describe("workflow v2 contracts", () => {
     }
   });
 
-  it("requires one explicit Figma manifest and PNG evidence", () => {
+  it("requires native v2 geometry plus exact target/node/state/fixture contracts", () => {
+    const stateContract = (overrides: Record<string, unknown> = {}) => {
+      const fields = {
+        targetId: "checkout",
+        nodeId: "1:2",
+        state: "default",
+        fixtureId: "mock:checkout",
+        facts: [
+          { id: "cinema", kind: "variant" as const, subject: "CINEMA 4K", value: "available" },
+          { id: "money", kind: "visibility" as const, subject: "G패스 머니", value: true },
+          { id: "parking", kind: "text" as const, subject: "주차", value: "가능" },
+        ],
+        requiredAssertions: [requiredInteractionAssertion("assert-checkout-state")],
+        designBindingIds: [],
+        ...overrides,
+      };
+      return {
+        ...fields,
+        digest: figmaStateFactsDigest(fields),
+      };
+    };
     const base = {
       kind: "figma-bundle",
       provider: "host-connected-figma",
@@ -960,17 +1259,9 @@ describe("workflow v2 contracts", () => {
       fileUrls: ["https://www.figma.com/design/abc/file?node-id=1-2"],
       nodeIds: ["1:2"],
       capturedComponents: [],
-      designMapping: {
-        designSystem: {
-          packageName: "@frontend/ui",
-          packageVersion: "1.2.3",
-          guidanceSkill: "design-system",
-        },
-        components: [],
-        fonts: [],
-        tokens: [],
-      },
+      designMapping: figmaDesignMappingFixture(),
       manifestPath: "figma/design-context.json",
+      stateContracts: [stateContract()],
       visualTargets: [
         {
           targetId: "checkout",
@@ -982,17 +1273,37 @@ describe("workflow v2 contracts", () => {
           viewport: { width: 1440, height: 900 },
           deviceScaleFactor: 1,
           fixture: "mock:checkout",
+          figmaCapture: {
+            schemaVersion: "figma-capture-geometry-v2",
+            provider: "host-connected-figma-native-export",
+            nodeId: "1:2",
+            state: "default",
+            captureKind: "viewport",
+            logicalSize: { width: 1440, height: 900 },
+            exportScale: 1,
+            bitmapSize: { width: 1440, height: 900 },
+            colorSpace: "srgb",
+          },
           masks: [],
         },
       ],
+      artifactPaths: ["figma/design-context.json", "visual/checkout.png"],
     };
 
-    expect(
-      WorkflowSubmissionSchema.safeParse({
-        ...base,
-        artifactPaths: ["figma/design-context.json", "visual/checkout.png"],
-      }).success,
-    ).toBe(false);
+    expect(WorkflowSubmissionSchema.safeParse(base).success).toBe(true);
+    for (const nodeIds of [[], ["9:9"], ["1:2", "9:9"], ["1:2", "1:2"]]) {
+      expect(WorkflowSubmissionSchema.safeParse({ ...base, nodeIds }).success).toBe(false);
+    }
+    for (const stateContracts of [
+      [],
+      [stateContract(), stateContract()],
+      [stateContract({ targetId: "wrong-target" })],
+      [stateContract({ nodeId: "9:9" })],
+      [stateContract({ state: "selected" })],
+      [stateContract({ fixtureId: "mock:reused" })],
+    ]) {
+      expect(WorkflowSubmissionSchema.safeParse({ ...base, stateContracts }).success).toBe(false);
+    }
     expect(
       WorkflowSubmissionSchema.safeParse({
         ...base,
@@ -1007,26 +1318,154 @@ describe("workflow v2 contracts", () => {
             colorSpace: "srgb",
           },
         })),
-        artifactPaths: ["figma/design-context.json", "visual/checkout.png"],
       }).success,
-    ).toBe(true);
+    ).toBe(false);
     expect(
       WorkflowSubmissionSchema.safeParse({
         ...base,
         artifactPaths: ["figma/design-context.json", "visual/checkout.svg"],
       }).success,
     ).toBe(false);
+  });
+
+  it("rejects fixture reuse, prose authority, and identical facts for different states", () => {
+    const facts = [
+      { id: "cinema", kind: "variant" as const, subject: "CINEMA 4K", value: "available" },
+      { id: "money", kind: "visibility" as const, subject: "G패스 머니", value: true },
+      { id: "parking", kind: "text" as const, subject: "주차", value: "가능" },
+    ];
+    const contract = (
+      targetId: string,
+      nodeId: string,
+      state: string,
+      fixtureId: string,
+      stateFacts: Array<{
+        id: string;
+        kind: "variant" | "visibility" | "text";
+        subject: string;
+        value: string | boolean;
+      }>,
+    ) => {
+      const fields = {
+        targetId,
+        nodeId,
+        state,
+        fixtureId,
+        facts: stateFacts,
+        requiredAssertions: [requiredInteractionAssertion(`assert-${state}`)],
+        designBindingIds: [],
+      };
+      return {
+        ...fields,
+        digest: figmaStateFactsDigest(fields),
+      };
+    };
+    const target = (targetId: string, nodeId: string, state: string, fixture: string) => ({
+      targetId,
+      name: state,
+      state,
+      route: `/shop?state=${state}`,
+      baselineKind: "figma",
+      baselinePath: `visual/${state}.png`,
+      viewport: { width: 360, height: 1831 },
+      deviceScaleFactor: 1,
+      fixture,
+      figmaCapture: {
+        schemaVersion: "figma-capture-geometry-v2",
+        provider: "host-connected-figma-native-export",
+        nodeId,
+        state,
+        captureKind: "full-frame",
+        logicalSize: { width: 360, height: 1831 },
+        exportScale: 1,
+        bitmapSize: { width: 360, height: 1831 },
+        colorSpace: "srgb",
+      },
+      masks: [],
+    });
+    const available = contract("shop-available", "1:2", "available", "fixture:available", facts);
+    const unavailableFacts = facts.map((fact) =>
+      fact.id === "cinema"
+        ? { ...fact, value: "unavailable" }
+        : fact.id === "money"
+          ? { ...fact, value: false }
+          : { ...fact, value: "불가" },
+    );
+    const unavailable = contract(
+      "shop-unavailable",
+      "1:3",
+      "unavailable",
+      "fixture:unavailable",
+      unavailableFacts,
+    );
+    const base = {
+      kind: "figma-bundle",
+      provider: "host-connected-figma",
+      capturedAt: "2026-07-13T00:00:00.000Z",
+      fileUrl: "https://www.figma.com/design/abc/file?node-id=1-2",
+      fileUrls: [
+        "https://www.figma.com/design/abc/file?node-id=1-2",
+        "https://www.figma.com/design/abc/file?node-id=1-3",
+      ],
+      nodeIds: ["1:2", "1:3"],
+      capturedComponents: [],
+      designMapping: figmaDesignMappingFixture(),
+      manifestPath: "figma/design-context.json",
+      stateContracts: [available, unavailable],
+      visualTargets: [
+        target("shop-available", "1:2", "available", "fixture:available"),
+        target("shop-unavailable", "1:3", "unavailable", "fixture:unavailable"),
+      ],
+      artifactPaths: [
+        "figma/design-context.json",
+        "visual/available.png",
+        "visual/unavailable.png",
+      ],
+    };
+
+    expect(WorkflowSubmissionSchema.safeParse(base).success).toBe(true);
     expect(
       WorkflowSubmissionSchema.safeParse({
         ...base,
-        manifestPath: "figma/missing.json",
-        artifactPaths: ["figma/design-context.json", "visual/checkout.png"],
+        stateContracts: [
+          available,
+          contract("shop-unavailable", "1:3", "unavailable", "fixture:available", unavailableFacts),
+        ],
+        visualTargets: [
+          base.visualTargets[0],
+          target("shop-unavailable", "1:3", "unavailable", "fixture:available"),
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      WorkflowSubmissionSchema.safeParse({
+        ...base,
+        stateContracts: [
+          available,
+          {
+            ...unavailable,
+            prose: "Only CINEMA 4K differs.",
+          },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      WorkflowSubmissionSchema.safeParse({
+        ...base,
+        stateContracts: [
+          available,
+          contract("shop-unavailable", "1:3", "unavailable", "fixture:unavailable", facts),
+        ],
       }).success,
     ).toBe(false);
   });
 
   it("accepts only visual captures and never caller-supplied scores or decisions", () => {
     const reviewPacketId = `packet_${"a".repeat(64)}`;
+    const baselineIsolationPath = `visual/actual/${reviewPacketId}/baseline-isolation.json`;
+    const assertionReportPath = `visual/actual/${reviewPacketId}/checkout.assertions.json`;
+    const assertionResultPath = `visual/actual/${reviewPacketId}/checkout.playwright.json`;
+    const assertionObservationPath = `visual/actual/${reviewPacketId}/checkout.observation.json`;
     const submission = {
       kind: "visual-comparison",
       reviewPacketId,
@@ -1042,9 +1481,23 @@ describe("workflow v2 contracts", () => {
           capturedAt: "2026-07-20T00:00:00.000Z",
           actualPath: `visual/actual/${reviewPacketId}/checkout.png`,
           actualDigest: `sha256:${"1".repeat(64)}`,
+          assertionReportPath,
+          assertionReportDigest: `sha256:${"4".repeat(64)}`,
+          assertionResultPath,
+          assertionResultDigest: `sha256:${"5".repeat(64)}`,
+          assertionObservationPath,
+          assertionObservationDigest: `sha256:${"6".repeat(64)}`,
         },
       ],
-      artifactPaths: [`visual/actual/${reviewPacketId}/checkout.png`],
+      baselineIsolationPath,
+      baselineIsolationDigest: `sha256:${"3".repeat(64)}`,
+      artifactPaths: [
+        `visual/actual/${reviewPacketId}/checkout.png`,
+        assertionReportPath,
+        assertionResultPath,
+        assertionObservationPath,
+        baselineIsolationPath,
+      ],
     };
 
     expect(WorkflowSubmissionSchema.safeParse(submission).success).toBe(true);
@@ -1067,6 +1520,50 @@ describe("workflow v2 contracts", () => {
         ...submission,
         captures: [{ ...submission.captures[0], receiptPath }],
         artifactPaths: [...submission.artifactPaths, receiptPath],
+      }).success,
+    ).toBe(false);
+    expect(
+      WorkflowSubmissionSchema.safeParse({
+        ...submission,
+        captures: [
+          {
+            ...submission.captures[0],
+            assertionReportPath: undefined,
+            assertionReportDigest: undefined,
+            assertionResultPath: undefined,
+            assertionResultDigest: undefined,
+            assertionObservationPath: undefined,
+            assertionObservationDigest: undefined,
+          },
+        ],
+        artifactPaths: submission.artifactPaths
+          .filter(
+            (artifactPath) =>
+              artifactPath !== assertionReportPath && artifactPath !== assertionResultPath,
+          )
+          .filter((artifactPath) => artifactPath !== assertionObservationPath),
+      }).success,
+    ).toBe(true);
+    expect(
+      WorkflowSubmissionSchema.safeParse({
+        ...submission,
+        captures: [
+          {
+            ...submission.captures[0],
+            assertionReportDigest: undefined,
+          },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      WorkflowSubmissionSchema.safeParse({
+        ...submission,
+        captures: [
+          {
+            ...submission.captures[0],
+            assertionResultDigest: undefined,
+          },
+        ],
       }).success,
     ).toBe(false);
     expect(

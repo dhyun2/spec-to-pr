@@ -382,6 +382,13 @@ export const PrReportV2Schema = z
         message: "Ready report requires requirement traceability",
       });
     }
+    if (report.visual.reportArtifactId !== undefined && report.binding === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["visual", "reportArtifactId"],
+        message: "A visual report reference requires a review packet binding",
+      });
+    }
   });
 
 export type ReportDecision = z.infer<typeof ReportDecisionSchema>;

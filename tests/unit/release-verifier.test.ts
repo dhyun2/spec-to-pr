@@ -38,6 +38,16 @@ describe("release verifier", () => {
     expect(result.status).toBe("passed");
   });
 
+  it("requires the visual comparison worker beside the MCP server entry", () => {
+    const withoutWorker = requiredReleaseInventory().filter(
+      (file) => file !== "dist/mcp/visual-comparison-worker.js",
+    );
+
+    expect(verifyReleasePackageFiles(withoutWorker).failures).toContain(
+      "Required file missing: dist/mcp/visual-comparison-worker.js",
+    );
+  });
+
   it("requires the exact skill and reviewer inventory", () => {
     const withoutSkill = requiredReleaseInventory().filter(
       (file) => file !== "skills/review-design/SKILL.md",
@@ -152,6 +162,30 @@ describe("release verifier", () => {
     );
   });
 
+  it("requires strict visual evidence markers in every reviewer profile pair", () => {
+    const shared =
+      "immutable review packet token pressure scope split every reviewed requirement visual baseline read-only never edit implementation workflow mcp playwright 25 mb 92% focused ui assertions baseline references renderer lineage";
+    const files = new Map<string, Buffer>([
+      ["agents/design-reviewer.md", Buffer.from(`${shared} every required design gate`)],
+      [
+        ".codex/agents/spec-to-pr-design-reviewer.toml",
+        Buffer.from(`${shared} every required design gate mcp_servers = {}`),
+      ],
+      ["agents/functional-reviewer.md", Buffer.from(`${shared} every required functional gate`)],
+      [
+        ".codex/agents/spec-to-pr-functional-reviewer.toml",
+        Buffer.from(`${shared} every required functional gate mcp_servers = {}`),
+      ],
+    ]);
+
+    expect(verifyReviewerProfileParity(files)).toContain(
+      "Reviewer profile parity missing 'third valid failure' for functional reviewer.",
+    );
+    expect(verifyReviewerProfileParity(files)).toContain(
+      "Reviewer profile parity missing 'third valid failure' for design reviewer.",
+    );
+  });
+
   it("requires both Codex reviewers to disable inherited MCP servers", () => {
     const functionalMarkers =
       "immutable review packet token pressure scope split every required functional gate every reviewed requirement playwright 25 mb read-only never edit implementation workflow mcp mcp_servers = {}";
@@ -241,6 +275,7 @@ function requiredReleaseInventory(): string[] {
     "agents/functional-reviewer.md",
     "dist/mcp/chunk-TEST1234.js",
     "dist/mcp/server.js",
+    "dist/mcp/visual-comparison-worker.js",
     "package.json",
     "packages/codex-sdk/dist/boundary-runner.d.ts",
     "packages/codex-sdk/dist/boundary-runner.js",
@@ -296,6 +331,7 @@ async function createArchiveFixture(): Promise<string> {
     ["CHANGELOG.md", "# Changelog\n"],
     ["dist/mcp/server.js", 'import "./chunk-TEST1234.js";\n'],
     ["dist/mcp/chunk-TEST1234.js", "export {};\n"],
+    ["dist/mcp/visual-comparison-worker.js", "export {};\n"],
   ]);
 
   for (const [file, content] of files) {

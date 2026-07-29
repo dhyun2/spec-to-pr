@@ -6,10 +6,23 @@ import { promisify } from "node:util";
 
 import { z } from "zod";
 
+import {
+  NoopRuntimeMetrics,
+  type RuntimeMetricsSink,
+} from "../runtime/performance-instrumentation.js";
+
 import type { ArtifactBlobStore } from "../artifact-registry/artifact-blob-store.js";
+import {
+  ReviewAssetUploadReceiptSchema,
+  reviewAssetUploadReceiptArtifactId,
+  reviewAssetUploadReceiptIdentity,
+  reviewAssetUploadTargetKey,
+  type ReviewAssetUploadReceipt,
+} from "../publisher/asset-upload-receipt.js";
 import {
   detectPublishTargetFromRemote,
   canUseGitLabRawEvidenceFallback,
+  GitLabAssetUploadError,
   GitHubPublisherAdapter,
   GitLabPublisherAdapter,
   PublishedReviewRequestSchema,
@@ -21,6 +34,7 @@ import {
   redactSecrets,
   ReviewHostSchema,
   type ReviewRequestAsset,
+  type ReviewAssetPublishOutcome,
   ReviewRequestSynchronizationError,
   ReviewRequestPayloadSchema,
 } from "../publisher/index.js";
@@ -35,8 +49,11 @@ import type {
 import {
   ReportLocaleSchema,
   ReportDecisionSchema,
+  PrReportV2Schema,
   WorkflowReportMetadataSchema,
   WorkflowReportIntentSchema,
+  assertCurrentPrReportV2,
+  type PrReportV2,
   type ReportDecision,
   type WorkflowReportIntent,
 } from "../pr-report/pr-report-model.js";
@@ -52,7 +69,10 @@ import type { ArtifactRef } from "../runtime/index.js";
 import type { RunStore } from "../store/run-store.js";
 import { RevisionConflictError } from "../store/errors.js";
 import { VisualReportSchema, type VisualReport } from "../visual/visual-model.js";
-import { isSafeDurableEvidencePath } from "../workflow/workflow-contracts.js";
+import {
+  ImplementationReviewPacketSchema,
+  isSafeDurableEvidencePath,
+} from "../workflow/workflow-contracts.js";
 import { assertWorkspaceFresh } from "../workspace/workspace-binding.js";
 
 const execFileAsync = promisify(execFile);
@@ -77,8 +97,61 @@ type VisualPreviewResult = VisualReport["results"][number] & {
   context?: VisualPreviewContext;
 };
 
+type PublicationVisualTarget = {
+  attempt: number;
+  targetId: string;
+  name: string;
+  route: string;
+  state: string;
+  fixture: string;
+  viewport: { width: number; height: number };
+  deviceScaleFactor: number;
+  status: "passed" | "failed";
+  metrics: {
+    reviewMatchRatio: number;
+    exactMatchRatio: number;
+    maskedAreaRatio: number;
+    threshold: number;
+  };
+  baselineArtifactId: string;
+  actualArtifactId: string;
+  diffArtifactId?: string;
+  overlayArtifactId?: string;
+};
+
 type VisualPreviewReport = Omit<VisualReport, "results"> & {
   results: VisualPreviewResult[];
+  publicationTargets: PublicationVisualTarget[];
+};
+
+type PublicationReportBinding = {
+  report: PrReportV2;
+  jsonArtifact: ArtifactRef;
+  reviewPacketId?: string;
+  headSha?: string;
+  diffDigest?: string;
+  visualReportArtifact?: ArtifactRef;
+};
+
+type PublicationExecutionFence = {
+  runRevision: number;
+  runSemanticDigest: `sha256:${string}`;
+  reportArtifactId: string;
+  reportDigest: string;
+  reviewPacketId?: string;
+  headSha?: string;
+  diffDigest?: string;
+  sourceBranch: string;
+  targetBranch: string;
+  remoteName: string;
+  remoteTargetKey: string;
+  credentialSource: "env" | "cli";
+  cleanStatusDigest: `sha256:${string}`;
+};
+
+type ReceiptPublishedAsset = {
+  asset: PublishedReviewAsset;
+  receiptArtifactId: string;
 };
 
 const VisualPreviewContextSchema = z
@@ -150,6 +223,10 @@ const BasePublishInputShape = {
   remoteName: z.string().trim().min(1).default("origin"),
   remoteUrl: z.string().trim().min(1).optional(),
   headSha: GitObjectIdSchema.optional(),
+  reviewPacketId: z
+    .string()
+    .regex(/^packet_[a-f0-9]{64}$/)
+    .optional(),
 } as const;
 
 export const DetectPublishTargetInputSchema = z
@@ -246,6 +323,8 @@ export const RecordPublishReviewResultSchema = z
   .strict();
 
 export class PublisherService {
+  private readonly git: GitCommandRunner;
+
   public constructor(
     private readonly runStore: RunStore,
     private readonly artifactStore: ArtifactBlobStore,
@@ -257,8 +336,18 @@ export class PublisherService {
       github: new GitHubPublisherAdapter(),
       gitlab: new GitLabPublisherAdapter(),
     },
-    private readonly git: GitCommandRunner = defaultGitCommandRunner,
-  ) {}
+    git: GitCommandRunner = defaultGitCommandRunner,
+    private readonly metrics: RuntimeMetricsSink = new NoopRuntimeMetrics(),
+  ) {
+    this.git = async (cwd, args, options) => {
+      this.metrics.increment("git.command_count");
+      const result = await git(cwd, args, options);
+      if (args[0] === "diff" && args.includes("--binary")) {
+        this.metrics.increment("git.binary_diff_bytes", Buffer.byteLength(result.stdout));
+      }
+      return result;
+    };
+  }
 
   public async detectTarget(rawInput: unknown) {
     const input = DetectPublishTargetInputSchema.parse(rawInput);
@@ -312,6 +401,8 @@ export class PublisherService {
   public async plan(rawInput: unknown) {
     const input = PlanReviewRequestPublishInputSchema.parse(rawInput);
     const run = await this.runStore.get(input.runId);
+    const reportArtifact = resolvePrReportArtifact(run.artifacts, input.reportArtifactId);
+    const binding = await this.resolvePublicationReportBinding(run, reportArtifact, input.intent);
     if (run.workspaceBinding !== undefined) {
       await assertWorkspaceFresh(
         run.workspaceBinding,
@@ -320,15 +411,18 @@ export class PublisherService {
           targetBranch: input.targetBranch,
           remoteName: input.remoteName,
           ...(input.remoteUrl === undefined ? {} : { remoteUrl: input.remoteUrl }),
-          ...(input.headSha === undefined || input.intent === "blocked-diagnostic"
-            ? {}
-            : { reviewedHeadSha: input.headSha }),
+          ...(binding.headSha === undefined ? {} : { reviewedHeadSha: binding.headSha }),
         },
-        { git: (cwd, args) => this.git(cwd, args) },
+        {
+          git: (cwd, args) => this.git(cwd, args),
+          authProbe: async () => ({
+            available: true,
+            source: "deferred-to-authoritative-publication-fence",
+          }),
+        },
       );
     }
     const timestamp = IsoDateTimeSchema.parse(this.now());
-    const reportArtifact = resolvePrReportArtifact(run.artifacts, input.reportArtifactId);
     const reportBody = (await this.artifactStore.readContent(reportArtifact.digest)).toString(
       "utf8",
     );
@@ -348,7 +442,6 @@ export class PublisherService {
         `Requested host ${input.host} but ${input.remoteName} remote is ${target.host}`,
       );
     }
-    const reviewPacketId = reportArtifact.metadata["reviewPacketId"];
     const payload = ReviewRequestPayloadSchema.parse({
       runId: run.id,
       title: publishTitle({
@@ -359,14 +452,8 @@ export class PublisherService {
       body: reportBody,
       sourceBranch: input.sourceBranch,
       targetBranch: input.targetBranch,
-      ...(input.headSha === undefined || input.intent === "blocked-diagnostic"
-        ? {}
-        : { headSha: input.headSha }),
-      ...(input.intent === "ready" &&
-      typeof reviewPacketId === "string" &&
-      /^packet_[a-f0-9]{64}$/.test(reviewPacketId)
-        ? { reviewPacketId }
-        : {}),
+      ...(binding.headSha === undefined ? {} : { headSha: binding.headSha }),
+      ...(binding.reviewPacketId === undefined ? {} : { reviewPacketId: binding.reviewPacketId }),
       mode: input.mode,
       labels: publishLabels(input.labels, input.intent),
       reviewers: input.reviewers,
@@ -436,14 +523,14 @@ export class PublisherService {
       });
     }
 
+    let branchState: Awaited<ReturnType<PublisherService["assertPublishBranchReady"]>>;
     try {
-      await this.assertPublishBranchReady({
+      branchState = await this.assertPublishBranchReady({
         projectRoot: publicationProjectRoot(run),
         sourceBranch: input.sourceBranch,
         targetBranch: input.targetBranch,
-        ...(input.headSha === undefined || plan.intent === "blocked-diagnostic"
-          ? {}
-          : { headSha: input.headSha }),
+        ...(plan.payload.headSha === undefined ? {} : { headSha: plan.payload.headSha }),
+        workspaceValidated: run.workspaceBinding !== undefined,
       });
     } catch (error: unknown) {
       if (!(error instanceof PublishNoDeltaError)) throw error;
@@ -467,13 +554,66 @@ export class PublisherService {
       });
     }
 
-    const result = await this.executePublish({
+    let credential: ReturnType<typeof readPublisherToken>;
+    try {
+      credential = readPublisherToken(plan.target.host, new URL(plan.target.webBaseUrl).hostname);
+    } catch (error: unknown) {
+      const result = failedPublishResult({
+        runId: plan.runId,
+        target: plan.target,
+        reportArtifactId: plan.payload.reportArtifactId,
+        error,
+        publishedAt: timestamp,
+      });
+      return this.recordPublishResult({
+        runId: run.id,
+        result,
+        payload: plan.payload,
+        timestamp,
+        remoteName: input.remoteName,
+        pushBranch: input.pushBranch,
+        addPublishingAgentResult: false,
+      });
+    }
+    const reportArtifact = requireArtifact(run.artifacts, plan.payload.reportArtifactId);
+    const fenceRun = await this.assertPublicationBindingsCurrent(
       run,
       plan,
+      reportArtifact,
+      branchState.headSha,
+    );
+    const implementation = fenceRun.stages.find((stage) => stage.name === "implementation");
+    const packet = ImplementationReviewPacketSchema.safeParse(
+      implementation?.checkpoint?.data["reviewPacket"],
+    );
+    const fence: PublicationExecutionFence = {
+      runRevision: fenceRun.revision,
+      runSemanticDigest: publicationRunSemanticDigest(fenceRun),
+      reportArtifactId: reportArtifact.id,
+      reportDigest: reportArtifact.digest,
+      ...(plan.payload.reviewPacketId === undefined
+        ? {}
+        : { reviewPacketId: plan.payload.reviewPacketId }),
+      ...(branchState.headSha === undefined ? {} : { headSha: branchState.headSha }),
+      ...(packet.success ? { diffDigest: packet.data.diffDigest } : {}),
+      sourceBranch: input.sourceBranch,
+      targetBranch: input.targetBranch,
+      remoteName: input.remoteName,
+      remoteTargetKey: publicationRemoteTargetKey(plan.target),
+      credentialSource: publisherCredentialSource(credential.source),
+      cleanStatusDigest: branchState.cleanStatusDigest,
+    };
+
+    const result = await this.executePublish({
+      run: fenceRun,
+      plan,
+      fence,
+      token: credential.token,
       timestamp,
       pushBranch: input.pushBranch,
       remoteName: input.remoteName,
       signal: options.signal,
+      credentialSource: publisherCredentialSource(credential.source),
     });
     options.signal?.throwIfAborted();
 
@@ -485,6 +625,9 @@ export class PublisherService {
       remoteName: input.remoteName,
       pushBranch: input.pushBranch,
       addPublishingAgentResult: result.status === "passed",
+      fence,
+      plan,
+      credentialSource: publisherCredentialSource(credential.source),
     });
   }
 
@@ -527,8 +670,71 @@ export class PublisherService {
       });
     }
 
-    const result = await this.executeUpdateBody({
+    const branchState = await this.assertPublishBranchReady({
+      projectRoot: publicationProjectRoot(run),
+      sourceBranch: input.sourceBranch,
+      targetBranch: input.targetBranch,
+      ...(plan.payload.headSha === undefined ? {} : { headSha: plan.payload.headSha }),
+      workspaceValidated: run.workspaceBinding !== undefined,
+    });
+    let credential: ReturnType<typeof readPublisherToken>;
+    try {
+      credential = readPublisherToken(plan.target.host, new URL(plan.target.webBaseUrl).hostname);
+    } catch (error: unknown) {
+      const result = failedPublishResult({
+        runId: plan.runId,
+        target: plan.target,
+        reportArtifactId: plan.payload.reportArtifactId,
+        error,
+        publishedAt: timestamp,
+      });
+      return this.recordPublishResult({
+        runId: run.id,
+        result,
+        payload: plan.payload,
+        timestamp,
+        remoteName: input.remoteName,
+        pushBranch: input.pushBranch,
+        addPublishingAgentResult: false,
+      });
+    }
+    const reportArtifact = requireArtifact(run.artifacts, plan.payload.reportArtifactId);
+    const fenceRun = await this.assertPublicationBindingsCurrent(
+      run,
       plan,
+      reportArtifact,
+      branchState.headSha,
+    );
+    const implementation = fenceRun.stages.find((stage) => stage.name === "implementation");
+    const packet = ImplementationReviewPacketSchema.safeParse(
+      implementation?.checkpoint?.data["reviewPacket"],
+    );
+    const credentialSource = publisherCredentialSource(credential.source);
+    const fence: PublicationExecutionFence = {
+      runRevision: fenceRun.revision,
+      runSemanticDigest: publicationRunSemanticDigest(fenceRun),
+      reportArtifactId: reportArtifact.id,
+      reportDigest: reportArtifact.digest,
+      ...(plan.payload.reviewPacketId === undefined
+        ? {}
+        : { reviewPacketId: plan.payload.reviewPacketId }),
+      ...(branchState.headSha === undefined ? {} : { headSha: branchState.headSha }),
+      ...(packet.success ? { diffDigest: packet.data.diffDigest } : {}),
+      sourceBranch: input.sourceBranch,
+      targetBranch: input.targetBranch,
+      remoteName: input.remoteName,
+      remoteTargetKey: publicationRemoteTargetKey(plan.target),
+      credentialSource,
+      cleanStatusDigest: branchState.cleanStatusDigest,
+    };
+
+    const result = await this.executeUpdateBody({
+      run: fenceRun,
+      plan,
+      fence,
+      token: credential.token,
+      remoteName: input.remoteName,
+      credentialSource,
       requestNumber,
       timestamp,
       signal: options.signal,
@@ -543,6 +749,9 @@ export class PublisherService {
       remoteName: input.remoteName,
       pushBranch: input.pushBranch,
       addPublishingAgentResult: result.status === "passed",
+      fence,
+      plan,
+      credentialSource,
     });
   }
 
@@ -569,41 +778,204 @@ export class PublisherService {
     });
   }
 
+  private async resolvePublicationReportBinding(
+    run: Awaited<ReturnType<RunStore["get"]>>,
+    markdownArtifact: ArtifactRef,
+    requestedIntent: PublishIntent,
+  ): Promise<PublicationReportBinding> {
+    const invalid = (message: string): never => {
+      throw new Error(`PUBLISH_REPORT_BINDING_INVALID: ${message}`);
+    };
+    const reportJsonArtifactId = markdownArtifact.metadata["reportJsonArtifactId"];
+    if (typeof reportJsonArtifactId !== "string") {
+      return invalid("Markdown does not reference its canonical JSON artifact");
+    }
+    const jsonArtifact = run.artifacts.find((artifact) => artifact.id === reportJsonArtifactId);
+    if (
+      jsonArtifact === undefined ||
+      jsonArtifact.kind !== "pr-report" ||
+      jsonArtifact.mediaType !== "application/json" ||
+      jsonArtifact.metadata["reportKind"] !== "pr-report-v2-json"
+    ) {
+      return invalid("the referenced canonical JSON artifact is missing or invalid");
+    }
+
+    let report: PrReportV2;
+    try {
+      report = PrReportV2Schema.parse(
+        JSON.parse((await this.artifactStore.readContent(jsonArtifact.digest)).toString("utf8")),
+      );
+      assertCurrentPrReportV2(report);
+    } catch (error: unknown) {
+      return invalid(
+        `the referenced canonical JSON cannot be validated: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    if (report.schemaVersion !== "pr-report-v2.1" || report.runId !== run.id) {
+      return invalid("the canonical JSON is not current or belongs to another Run");
+    }
+
+    const markdownMetadata = reportMetadataFromArtifact(markdownArtifact);
+    const expectedIntent = report.decision === "ready" ? "ready" : "blocked-diagnostic";
+    if (!markdownMetadata.valid) {
+      return invalid("Markdown report metadata is missing, malformed, or internally inconsistent");
+    }
+    if (
+      markdownMetadata.reportDecision !== report.decision ||
+      markdownMetadata.reportIntent !== expectedIntent
+    ) {
+      return invalid("Markdown intent or decision does not match the canonical JSON");
+    }
+    if (requestedIntent !== expectedIntent) {
+      return invalid(
+        `requested intent ${requestedIntent} does not match canonical intent ${expectedIntent}`,
+      );
+    }
+    if (
+      jsonArtifact.metadata["reportSchemaVersion"] !== report.schemaVersion ||
+      jsonArtifact.metadata["decision"] !== report.decision
+    ) {
+      return invalid("canonical JSON artifact metadata does not match its content");
+    }
+
+    if (report.binding === undefined) {
+      if (report.visual.reportArtifactId !== undefined) {
+        return invalid("packetless reports cannot reference visual media");
+      }
+      return { report, jsonArtifact };
+    }
+
+    const binding = report.binding;
+    for (const artifact of [markdownArtifact, jsonArtifact]) {
+      if (
+        artifact.metadata["reviewPacketId"] !== binding.reviewPacketId ||
+        artifact.metadata["headSha"] !== binding.headSha ||
+        artifact.metadata["diffDigest"] !== binding.diffDigest
+      ) {
+        return invalid(`artifact ${artifact.id} metadata crosses the canonical packet binding`);
+      }
+    }
+
+    let visualReportArtifact: ArtifactRef | undefined;
+    if (report.visual.reportArtifactId !== undefined) {
+      visualReportArtifact = run.artifacts.find(
+        (artifact) => artifact.id === report.visual.reportArtifactId,
+      );
+      if (
+        visualReportArtifact === undefined ||
+        visualReportArtifact.kind !== "visual-report" ||
+        visualReportArtifact.metadata["reviewPacketId"] !== binding.reviewPacketId ||
+        visualReportArtifact.metadata["headSha"] !== binding.headSha ||
+        visualReportArtifact.metadata["diffDigest"] !== binding.diffDigest
+      ) {
+        return invalid("the exact visual report artifact crosses the canonical packet binding");
+      }
+      if (
+        markdownArtifact.metadata["visualReportArtifactId"] !== visualReportArtifact.id ||
+        jsonArtifact.metadata["visualReportArtifactId"] !== visualReportArtifact.id
+      ) {
+        return invalid("report artifact metadata does not name the exact visual report");
+      }
+
+      let rawVisual: Record<string, unknown>;
+      try {
+        const raw = JSON.parse(
+          (await this.artifactStore.readContent(visualReportArtifact.digest)).toString("utf8"),
+        ) as unknown;
+        if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+          return invalid("the exact visual report content is not an object");
+        }
+        rawVisual = raw as Record<string, unknown>;
+      } catch (error: unknown) {
+        return invalid(
+          `the exact visual report cannot be read: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      if (rawVisual["runId"] !== run.id) {
+        return invalid("the exact visual report belongs to another Run");
+      }
+      if (
+        rawVisual["reviewPacketId"] !== binding.reviewPacketId ||
+        rawVisual["headSha"] !== binding.headSha ||
+        rawVisual["diffDigest"] !== binding.diffDigest
+      ) {
+        return invalid("the exact visual report content crosses the canonical packet binding");
+      }
+    }
+
+    const implementation = run.stages.find((candidate) => candidate.name === "implementation");
+    if (implementation?.error?.code === "VISUAL_REVIEW_THRESHOLD_NOT_MET") {
+      const checkpoint = implementation.checkpoint;
+      const checkpointPacket =
+        typeof checkpoint?.data["reviewPacket"] === "object" &&
+        checkpoint.data["reviewPacket"] !== null
+          ? (checkpoint.data["reviewPacket"] as Record<string, unknown>)
+          : undefined;
+      if (
+        visualReportArtifact === undefined ||
+        checkpoint?.name !== "visual-threshold-not-met" ||
+        checkpoint.data["visualReportArtifactId"] !== visualReportArtifact.id ||
+        checkpoint.data["visualReportDigest"] !== visualReportArtifact.digest ||
+        checkpointPacket?.["id"] !== binding.reviewPacketId ||
+        checkpointPacket["headSha"] !== binding.headSha ||
+        checkpointPacket["diffDigest"] !== binding.diffDigest
+      ) {
+        return invalid("terminal visual blocker does not bind the persisted checkpoint report");
+      }
+    }
+
+    return {
+      report,
+      jsonArtifact,
+      reviewPacketId: binding.reviewPacketId,
+      headSha: binding.headSha,
+      diffDigest: binding.diffDigest,
+      ...(visualReportArtifact === undefined ? {} : { visualReportArtifact }),
+    };
+  }
+
   private async assertPublishBranchReady(input: {
     projectRoot: string;
     sourceBranch: string;
     targetBranch: string;
     headSha?: string;
-  }): Promise<void> {
-    const status = (await this.git(input.projectRoot, ["status", "--porcelain"])).stdout.trim();
+    workspaceValidated?: boolean;
+  }): Promise<{ headSha?: string; cleanStatusDigest: `sha256:${string}` }> {
+    let checkedOutHead = input.headSha;
+    let status = "";
+    if (!input.workspaceValidated) {
+      status = (await this.git(input.projectRoot, ["status", "--porcelain"])).stdout.trim();
+    }
     if (status.length > 0) {
       throw new Error(
         "Draft publication requires a clean working tree; commit the intended implementation changes first",
       );
     }
 
-    const checkedOutBranch = (
-      await this.git(input.projectRoot, ["symbolic-ref", "--quiet", "--short", "HEAD"])
-    ).stdout.trim();
-    if (checkedOutBranch !== input.sourceBranch) {
-      throw new Error(
-        `Draft publication requires checked-out branch ${input.sourceBranch}; found ${checkedOutBranch || "detached HEAD"}`,
-      );
-    }
+    if (!input.workspaceValidated) {
+      const checkedOutBranch = (
+        await this.git(input.projectRoot, ["symbolic-ref", "--quiet", "--short", "HEAD"])
+      ).stdout.trim();
+      if (checkedOutBranch !== input.sourceBranch) {
+        throw new Error(
+          `Draft publication requires checked-out branch ${input.sourceBranch}; found ${checkedOutBranch || "detached HEAD"}`,
+        );
+      }
 
-    const checkedOutHead = (
-      await this.git(input.projectRoot, ["rev-parse", "--verify", "HEAD"])
-    ).stdout.trim();
-    const sourceHead = (
-      await this.git(input.projectRoot, ["rev-parse", "--verify", input.sourceBranch])
-    ).stdout.trim();
-    if (checkedOutHead !== sourceHead) {
-      throw new Error(`Checked-out HEAD does not match source branch ${input.sourceBranch}`);
-    }
-    if (input.headSha !== undefined && checkedOutHead !== input.headSha) {
-      throw new Error(
-        `Checked-out HEAD ${checkedOutHead} does not match the reviewed source SHA ${input.headSha}`,
-      );
+      checkedOutHead = (
+        await this.git(input.projectRoot, ["rev-parse", "--verify", "HEAD"])
+      ).stdout.trim();
+      const sourceHead = (
+        await this.git(input.projectRoot, ["rev-parse", "--verify", input.sourceBranch])
+      ).stdout.trim();
+      if (checkedOutHead !== sourceHead) {
+        throw new Error(`Checked-out HEAD does not match source branch ${input.sourceBranch}`);
+      }
+      if (input.headSha !== undefined && checkedOutHead !== input.headSha) {
+        throw new Error(
+          `Checked-out HEAD ${checkedOutHead} does not match the reviewed source SHA ${input.headSha}`,
+        );
+      }
     }
 
     const aheadText = (
@@ -617,6 +989,10 @@ export class PublisherService {
     if (!Number.isSafeInteger(ahead) || ahead < 1) {
       throw new PublishNoDeltaError(input.sourceBranch, input.targetBranch);
     }
+    return {
+      ...(checkedOutHead === undefined ? {} : { headSha: checkedOutHead }),
+      cleanStatusDigest: `sha256:${createHash("sha256").update(status).digest("hex")}`,
+    };
   }
 
   public async recordReview(rawInput: unknown) {
@@ -650,27 +1026,153 @@ export class PublisherService {
     });
   }
 
+  private async assertPublicationBindingsCurrent(
+    sourceRun: Awaited<ReturnType<RunStore["get"]>>,
+    plan: z.infer<typeof PublishPlanSchema>,
+    reportArtifact: ArtifactRef,
+    headSha: string | undefined,
+  ): Promise<Awaited<ReturnType<RunStore["get"]>>> {
+    const current = await this.runStore.get(plan.runId);
+    const report = current.artifacts.find(
+      (artifact) => artifact.id === reportArtifact.id && artifact.digest === reportArtifact.digest,
+    );
+    if (
+      publicationRunSemanticDigest(current) !== publicationRunSemanticDigest(sourceRun) ||
+      report === undefined
+    ) {
+      throw new Error("PUBLISH_EXECUTION_FENCE_STALE: Run or report binding changed");
+    }
+    if (plan.payload.reviewPacketId !== undefined) {
+      const implementation = current.stages.find((stage) => stage.name === "implementation");
+      const packet = ImplementationReviewPacketSchema.safeParse(
+        implementation?.checkpoint?.data["reviewPacket"],
+      );
+      if (
+        !packet.success ||
+        packet.data.id !== plan.payload.reviewPacketId ||
+        packet.data.headSha !== headSha
+      ) {
+        throw new Error("PUBLISH_EXECUTION_FENCE_STALE: review packet or head binding changed");
+      }
+    }
+    return current;
+  }
+
+  private async assertPublicationExecutionFenceCurrent(input: {
+    plan: z.infer<typeof PublishPlanSchema>;
+    fence: PublicationExecutionFence;
+    remoteName: string;
+    credentialSource: "env" | "cli";
+  }) {
+    assertPublicationFenceMatchesPlan(
+      input.fence,
+      input.plan,
+      input.remoteName,
+      input.credentialSource,
+    );
+    const current = await this.runStore.get(input.plan.runId);
+    assertPublicationRunMatchesFence(current, input.fence, input.plan);
+    return current;
+  }
+
+  private async assertPublicationGitFenceCurrent(input: {
+    run: Awaited<ReturnType<RunStore["get"]>>;
+    plan: z.infer<typeof PublishPlanSchema>;
+    fence: PublicationExecutionFence;
+    remoteName: string;
+  }): Promise<void> {
+    const branchState = await this.assertPublishBranchReady({
+      projectRoot: publicationProjectRoot(input.run),
+      sourceBranch: input.fence.sourceBranch,
+      targetBranch: input.fence.targetBranch,
+      ...(input.fence.headSha === undefined ? {} : { headSha: input.fence.headSha }),
+      workspaceValidated: input.run.workspaceBinding !== undefined,
+    });
+    if (
+      branchState.headSha !== input.fence.headSha ||
+      branchState.cleanStatusDigest !== input.fence.cleanStatusDigest
+    ) {
+      throw new Error("PUBLISH_EXECUTION_FENCE_STALE: Git head or clean status changed");
+    }
+
+    if (input.run.workspaceBinding !== undefined) {
+      await assertWorkspaceFresh(
+        input.run.workspaceBinding,
+        {
+          sourceBranch: input.fence.sourceBranch,
+          targetBranch: input.fence.targetBranch,
+          remoteName: input.remoteName,
+          ...(input.fence.headSha === undefined ? {} : { reviewedHeadSha: input.fence.headSha }),
+        },
+        {
+          git: (cwd, args) => this.git(cwd, args),
+          authProbe: async () => ({
+            available: true,
+            source: "validated-by-publication-credential-fence",
+          }),
+        },
+      );
+      return;
+    }
+
+    const remoteUrl = (
+      await this.git(publicationProjectRoot(input.run), ["remote", "get-url", input.remoteName])
+    ).stdout.trim();
+    const currentTarget = detectPublishTargetFromRemote({
+      name: input.remoteName,
+      url: remoteUrl,
+    });
+    if (publicationRemoteTargetKey(currentTarget) !== input.fence.remoteTargetKey) {
+      throw new Error("PUBLISH_EXECUTION_FENCE_STALE: publication remote target changed");
+    }
+  }
+
+  private async assertPublicationFenceCurrent(input: {
+    plan: z.infer<typeof PublishPlanSchema>;
+    fence: PublicationExecutionFence;
+    remoteName: string;
+    credentialSource: "env" | "cli";
+  }) {
+    const run = await this.assertPublicationExecutionFenceCurrent(input);
+    await this.assertPublicationGitFenceCurrent({
+      run,
+      plan: input.plan,
+      fence: input.fence,
+      remoteName: input.remoteName,
+    });
+    return run;
+  }
+
   private async executePublish(input: {
     run: Awaited<ReturnType<RunStore["get"]>>;
     plan: z.infer<typeof PublishPlanSchema>;
+    fence: PublicationExecutionFence;
+    token: string;
     timestamp: string;
     pushBranch: boolean;
     remoteName: string;
     signal: AbortSignal | undefined;
+    credentialSource: "env" | "cli";
   }): Promise<PublishResult> {
     try {
+      this.metrics.increment("publisher.http_count", 1, { host: input.plan.target.host });
       input.signal?.throwIfAborted();
-      const token = readPublisherToken(
-        input.plan.target.host,
-        new URL(input.plan.target.webBaseUrl).hostname,
+      assertPublicationFenceMatchesPlan(
+        input.fence,
+        input.plan,
+        input.remoteName,
+        input.credentialSource,
       );
+      await this.assertPublicationFenceCurrent(input);
 
       if (input.pushBranch) {
         await this.git(publicationProjectRoot(input.run), [
           "push",
           "--set-upstream",
           input.remoteName,
-          input.plan.payload.sourceBranch,
+          ...(input.fence.headSha === undefined
+            ? [input.plan.payload.sourceBranch]
+            : [`${input.fence.headSha}:refs/heads/${input.plan.payload.sourceBranch}`]),
         ]);
       }
       input.signal?.throwIfAborted();
@@ -680,35 +1182,96 @@ export class PublisherService {
         run: input.run,
         plan: input.plan,
         publisher,
-        token: token.token,
+        token: input.token,
+        timestamp: input.timestamp,
         signal: input.signal,
+        assertFenceCurrent: async () => {
+          await this.assertPublicationFenceCurrent(input);
+        },
       });
+      try {
+        assertPublishedAssetUrlsInBody(prepared.payload.body, prepared.publishedAssets);
+      } catch (error: unknown) {
+        return partialAssetPublishResult({
+          runId: input.plan.runId,
+          target: input.plan.target,
+          reportArtifactId: input.plan.payload.reportArtifactId,
+          prepared,
+          partialReasons: [
+            ...prepared.partialReasons,
+            error instanceof Error ? error.message : "PUBLISH_ASSET_BODY_SYNC_INCOMPLETE",
+          ],
+          retryable: false,
+          publishedAt: input.timestamp,
+        });
+      }
       const existing = await publisher.findExisting({
         target: input.plan.target,
         payload: prepared.payload,
-        token: token.token,
+        token: input.token,
         ...(input.signal === undefined ? {} : { signal: input.signal }),
       });
       if (existing !== undefined && !existing.draft) {
         throw new Error(`Refusing to update non-draft review request ${existing.number}`);
       }
+      await this.assertPublicationFenceCurrent(input);
       const request =
         existing === undefined
           ? await publisher.create({
               target: input.plan.target,
               payload: prepared.payload,
-              token: token.token,
+              token: input.token,
               ...(input.signal === undefined ? {} : { signal: input.signal }),
             })
           : await publisher.update({
               target: input.plan.target,
               requestNumber: existing.number,
               update: reviewRequestUpdateFromPayload(prepared.payload),
-              token: token.token,
+              token: input.token,
               ...(input.signal === undefined ? {} : { signal: input.signal }),
             });
       if (!request.draft) {
         throw new Error(`Review request ${request.number} is not a draft after publication`);
+      }
+      if (prepared.publishedAssets.length > 0) {
+        try {
+          if (publisher.readBody === undefined) {
+            throw new Error("PUBLISH_ASSET_BODY_SYNC_UNVERIFIED");
+          }
+          const remoteBody = await publisher.readBody({
+            target: input.plan.target,
+            requestNumber: request.number,
+            token: input.token,
+            ...(input.signal === undefined ? {} : { signal: input.signal }),
+          });
+          assertPublishedAssetUrlsInBody(remoteBody, prepared.publishedAssets);
+        } catch (error: unknown) {
+          return partialAssetPublishResult({
+            runId: input.plan.runId,
+            target: input.plan.target,
+            request,
+            reportArtifactId: input.plan.payload.reportArtifactId,
+            prepared,
+            partialReasons: [
+              ...prepared.partialReasons,
+              error instanceof Error ? error.message : "PUBLISH_ASSET_BODY_SYNC_UNVERIFIED",
+            ],
+            retryable: true,
+            publishedAt: input.timestamp,
+          });
+        }
+      }
+      if (!prepared.assetUploadComplete) {
+        return partialAssetPublishResult({
+          runId: input.plan.runId,
+          target: input.plan.target,
+          request,
+          reportArtifactId: input.plan.payload.reportArtifactId,
+          prepared,
+          partialReasons: prepared.partialReasons,
+          retryable: prepared.assetUploadRetryable,
+          publishedAt: input.timestamp,
+        });
       }
 
       return PublishResultSchema.parse({
@@ -718,6 +1281,7 @@ export class PublisherService {
         request,
         reportArtifactId: input.plan.payload.reportArtifactId,
         publishedAssets: prepared.publishedAssets,
+        uploadReceiptArtifactIds: prepared.uploadReceiptArtifactIds,
         requestSynced: true,
         visualPreviewExpected: prepared.visualPreviewExpected,
         visualPreviewSynced: prepared.visualPreviewSynced,
@@ -744,30 +1308,58 @@ export class PublisherService {
   }
 
   private async executeUpdateBody(input: {
+    run: Awaited<ReturnType<RunStore["get"]>>;
     plan: z.infer<typeof PublishPlanSchema>;
+    fence: PublicationExecutionFence;
+    token: string;
+    remoteName: string;
+    credentialSource: "env" | "cli";
     requestNumber: string;
     timestamp: string;
     signal: AbortSignal | undefined;
   }): Promise<PublishResult> {
     try {
+      this.metrics.increment("publisher.http_count", 1, { host: input.plan.target.host });
       input.signal?.throwIfAborted();
-      const token = readPublisherToken(
-        input.plan.target.host,
-        new URL(input.plan.target.webBaseUrl).hostname,
+      assertPublicationFenceMatchesPlan(
+        input.fence,
+        input.plan,
+        input.remoteName,
+        input.credentialSource,
       );
+      await this.assertPublicationFenceCurrent(input);
       const publisher = this.publishers[input.plan.target.host];
-      const run = await this.runStore.get(input.plan.runId);
       const prepared = await this.preparePayloadForPublish({
-        run,
+        run: input.run,
         plan: input.plan,
         publisher,
-        token: token.token,
+        token: input.token,
+        timestamp: input.timestamp,
         signal: input.signal,
+        assertFenceCurrent: async () => {
+          await this.assertPublicationFenceCurrent(input);
+        },
       });
+      try {
+        assertPublishedAssetUrlsInBody(prepared.payload.body, prepared.publishedAssets);
+      } catch (error: unknown) {
+        return partialAssetPublishResult({
+          runId: input.plan.runId,
+          target: input.plan.target,
+          reportArtifactId: input.plan.payload.reportArtifactId,
+          prepared,
+          partialReasons: [
+            ...prepared.partialReasons,
+            error instanceof Error ? error.message : "PUBLISH_ASSET_BODY_SYNC_INCOMPLETE",
+          ],
+          retryable: false,
+          publishedAt: input.timestamp,
+        });
+      }
       const existing = await publisher.findExisting({
         target: input.plan.target,
         payload: prepared.payload,
-        token: token.token,
+        token: input.token,
         ...(input.signal === undefined ? {} : { signal: input.signal }),
       });
       if (existing === undefined || existing.number !== input.requestNumber) {
@@ -776,15 +1368,56 @@ export class PublisherService {
       if (!existing.draft) {
         throw new Error(`Refusing to update non-draft review request ${existing.number}`);
       }
+      await this.assertPublicationFenceCurrent(input);
       const request = await publisher.update({
         target: input.plan.target,
         requestNumber: input.requestNumber,
         update: reviewRequestUpdateFromPayload(prepared.payload),
-        token: token.token,
+        token: input.token,
         ...(input.signal === undefined ? {} : { signal: input.signal }),
       });
       if (!request.draft) {
         throw new Error(`Review request ${request.number} is not a draft after body update`);
+      }
+      if (prepared.publishedAssets.length > 0) {
+        try {
+          if (publisher.readBody === undefined) {
+            throw new Error("PUBLISH_ASSET_BODY_SYNC_UNVERIFIED");
+          }
+          const remoteBody = await publisher.readBody({
+            target: input.plan.target,
+            requestNumber: request.number,
+            token: input.token,
+            ...(input.signal === undefined ? {} : { signal: input.signal }),
+          });
+          assertPublishedAssetUrlsInBody(remoteBody, prepared.publishedAssets);
+        } catch (error: unknown) {
+          return partialAssetPublishResult({
+            runId: input.plan.runId,
+            target: input.plan.target,
+            request,
+            reportArtifactId: input.plan.payload.reportArtifactId,
+            prepared,
+            partialReasons: [
+              ...prepared.partialReasons,
+              error instanceof Error ? error.message : "PUBLISH_ASSET_BODY_SYNC_UNVERIFIED",
+            ],
+            retryable: true,
+            publishedAt: input.timestamp,
+          });
+        }
+      }
+      if (!prepared.assetUploadComplete) {
+        return partialAssetPublishResult({
+          runId: input.plan.runId,
+          target: input.plan.target,
+          request,
+          reportArtifactId: input.plan.payload.reportArtifactId,
+          prepared,
+          partialReasons: prepared.partialReasons,
+          retryable: prepared.assetUploadRetryable,
+          publishedAt: input.timestamp,
+        });
       }
 
       return PublishResultSchema.parse({
@@ -794,6 +1427,7 @@ export class PublisherService {
         request,
         reportArtifactId: input.plan.payload.reportArtifactId,
         publishedAssets: prepared.publishedAssets,
+        uploadReceiptArtifactIds: prepared.uploadReceiptArtifactIds,
         requestSynced: true,
         visualPreviewExpected: prepared.visualPreviewExpected,
         visualPreviewSynced: prepared.visualPreviewSynced,
@@ -824,10 +1458,15 @@ export class PublisherService {
     plan: z.infer<typeof PublishPlanSchema>;
     publisher: ReviewRequestPublisher;
     token: string;
+    timestamp: string;
     signal: AbortSignal | undefined;
+    assertFenceCurrent?: (() => Promise<void>) | undefined;
   }): Promise<{
     payload: ReviewRequestPayload;
     publishedAssets: PublishedReviewAsset[];
+    uploadReceiptArtifactIds: string[];
+    assetUploadComplete: boolean;
+    assetUploadRetryable: boolean;
     visualPreviewExpected: boolean;
     visualPreviewSynced: boolean;
     featureVideoExpected: boolean;
@@ -836,7 +1475,11 @@ export class PublisherService {
     fallbackReason?: string;
     partialReasons: string[];
   }> {
-    const visualPreview = await this.collectVisualPreviewAssets(input.run, input.plan.payload);
+    const visualPreview = await this.collectVisualPreviewAssets(
+      input.run,
+      input.plan.payload,
+      input.plan.intent,
+    );
     const featureVideo = await this.collectFeatureVideoAsset(input.run, input.plan.payload);
     const assets = [...visualPreview.assets, ...(featureVideo === undefined ? [] : [featureVideo])];
     const visualPreviewExpected =
@@ -847,6 +1490,9 @@ export class PublisherService {
       return {
         payload: input.plan.payload,
         publishedAssets: [],
+        uploadReceiptArtifactIds: [],
+        assetUploadComplete: true,
+        assetUploadRetryable: false,
         visualPreviewExpected: false,
         visualPreviewSynced: false,
         featureVideoExpected: false,
@@ -856,53 +1502,122 @@ export class PublisherService {
       };
     }
 
-    let publishedAssets: PublishedReviewAsset[];
+    const receiptAssets = await this.loadPublishedAssetsFromReceipts({
+      run: input.run,
+      target: input.plan.target,
+      payload: input.plan.payload,
+      assets,
+      timestamp: input.timestamp,
+    });
+    const publishedByKey = new Map(
+      receiptAssets.map((entry) => [reviewAssetKey(entry.asset), entry]),
+    );
+    let missingAssets = assets.filter((asset) => !publishedByKey.has(reviewAssetKey(asset)));
     let fallbackMode: "none" | "gitlab-raw-evidence" = "none";
     let fallbackReason: string | undefined;
     const partialReasons: string[] = [];
-    try {
-      publishedAssets = await input.publisher.publishAssets({
+    let terminalFailure: Extract<ReviewAssetPublishOutcome, { status: "failed" }> | undefined;
+    let lastTransientFailures: Array<Extract<ReviewAssetPublishOutcome, { status: "failed" }>> = [];
+    let thrownUploadError: unknown;
+
+    for (let attempt = 1; attempt <= 3 && missingAssets.length > 0; attempt += 1) {
+      if (attempt > 1) {
+        this.metrics.increment("publisher.retry_count", 1, { host: input.plan.target.host });
+      }
+      let outcomes: ReviewAssetPublishOutcome[];
+      try {
+        await input.assertFenceCurrent?.();
+        outcomes = await input.publisher.publishAssets({
+          target: input.plan.target,
+          payload: input.plan.payload,
+          token: input.token,
+          assets: missingAssets,
+          maxConcurrency: 3,
+          ...(input.signal === undefined ? {} : { signal: input.signal }),
+        });
+      } catch (error: unknown) {
+        thrownUploadError = error;
+        break;
+      }
+      await input.assertFenceCurrent?.();
+      const settled = settleAssetPublishOutcomes(missingAssets, outcomes);
+      const newlyPublished = settled
+        .filter(
+          (outcome): outcome is Extract<ReviewAssetPublishOutcome, { status: "published" }> =>
+            outcome.status === "published",
+        )
+        .map((outcome) => outcome.asset);
+      const newReceipts = await this.persistAssetUploadReceipts({
+        runId: input.plan.runId,
         target: input.plan.target,
         payload: input.plan.payload,
-        token: input.token,
-        assets,
-        ...(input.signal === undefined ? {} : { signal: input.signal }),
+        assets: missingAssets,
+        publishedAssets: newlyPublished,
+        timestamp: input.timestamp,
       });
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
+      for (const receiptAsset of newReceipts) {
+        publishedByKey.set(reviewAssetKey(receiptAsset.asset), receiptAsset);
+      }
+
+      const failures = settled.filter(
+        (outcome): outcome is Extract<ReviewAssetPublishOutcome, { status: "failed" }> =>
+          outcome.status === "failed",
+      );
+      terminalFailure = failures.find(
+        (outcome) => outcome.failure === "permanent" || outcome.failure === "uncertain",
+      );
+      lastTransientFailures = failures.filter((outcome) => outcome.failure === "transient");
+      if (terminalFailure !== undefined) break;
+      missingAssets = missingAssets.filter((asset) =>
+        lastTransientFailures.some((failure) => failure.artifactId === asset.artifactId),
+      );
+    }
+
+    let publishedAssets = assets.flatMap((asset) => {
+      const entry = publishedByKey.get(reviewAssetKey(asset));
+      return entry === undefined ? [] : [entry.asset];
+    });
+    let assetUploadComplete = publishedAssets.length === assets.length;
+    let assetUploadRetryable =
+      !assetUploadComplete && terminalFailure === undefined && thrownUploadError === undefined;
+
+    if (!assetUploadComplete) {
+      const fallbackError =
+        thrownUploadError ??
+        (terminalFailure?.status === "failed" && terminalFailure.failure !== "permanent"
+          ? new GitLabAssetUploadError(terminalFailure.message)
+          : lastTransientFailures[0]?.status === "failed"
+            ? new GitLabAssetUploadError(lastTransientFailures[0].message, 503)
+            : undefined);
       const rawFallback = await this.tryGitLabRawVisualFallback({
         run: input.run,
         target: input.plan.target,
         payload: input.plan.payload,
         visualPreview,
         featureVideo,
-        error,
+        error: fallbackError,
       });
       if (rawFallback !== undefined) {
         publishedAssets = rawFallback;
         fallbackMode = "gitlab-raw-evidence";
-        fallbackReason = `GitLab review-asset upload failed; used immutable raw visual evidence instead: ${redactSecrets(message)}`;
+        fallbackReason =
+          "GitLab review-asset upload failed; used immutable raw visual evidence instead";
+        assetUploadComplete = true;
+        assetUploadRetryable = false;
       } else {
         const label = visualPreviewExpected ? "visual evidence" : "feature video";
-        throw new PublishPreparationError(`${label} upload failed: ${message}`, {
-          visualPreviewExpected,
-          featureVideoExpected,
-          partialReasons: [`${label} upload failed: ${redactSecrets(message)}`],
-        });
+        const failureMessage =
+          terminalFailure?.status === "failed"
+            ? terminalFailure.message
+            : lastTransientFailures[0]?.status === "failed"
+              ? lastTransientFailures[0].message
+              : thrownUploadError instanceof Error
+                ? redactSecrets(thrownUploadError.message)
+                : "upload outcome was uncertain";
+        partialReasons.push(
+          `${label} upload incomplete: ${publishedAssets.length}/${assets.length} asset(s) confirmed; ${failureMessage}`,
+        );
       }
-    }
-
-    if (fallbackMode === "none" && publishedAssets.length !== assets.length) {
-      throw new PublishPreparationError(
-        `review evidence upload incomplete: ${publishedAssets.length}/${assets.length} asset(s) uploaded`,
-        {
-          visualPreviewExpected,
-          featureVideoExpected,
-          partialReasons: [
-            `review evidence upload incomplete: ${publishedAssets.length}/${assets.length} asset(s) uploaded`,
-          ],
-        },
-      );
     }
 
     const visualAssets = publishedAssets.filter((asset) => asset.role !== "e2e-video");
@@ -919,21 +1634,177 @@ export class PublisherService {
     if (videoAsset !== undefined) {
       body = injectFeatureVideoEvidence(body, videoAsset);
     }
-
     return {
       payload: ReviewRequestPayloadSchema.parse({
         ...input.plan.payload,
         body,
       }),
       publishedAssets,
+      uploadReceiptArtifactIds: assets.flatMap((asset) => {
+        const entry = publishedByKey.get(reviewAssetKey(asset));
+        return entry === undefined ? [] : [entry.receiptArtifactId];
+      }),
+      assetUploadComplete,
+      assetUploadRetryable,
       visualPreviewExpected,
-      visualPreviewSynced: visualPreviewExpected,
+      visualPreviewSynced:
+        visualPreviewExpected &&
+        (fallbackMode === "gitlab-raw-evidence" ||
+          visualPreview.assets.every((asset) => publishedByKey.has(reviewAssetKey(asset)))),
       featureVideoExpected,
-      featureVideoSynced: featureVideoExpected,
+      featureVideoSynced:
+        featureVideoExpected &&
+        featureVideo !== undefined &&
+        publishedByKey.has(reviewAssetKey(featureVideo)),
       fallbackMode,
       ...(fallbackReason === undefined ? {} : { fallbackReason }),
       partialReasons,
     };
+  }
+
+  private async loadPublishedAssetsFromReceipts(input: {
+    run: Awaited<ReturnType<RunStore["get"]>>;
+    target: PublishTarget;
+    payload: ReviewRequestPayload;
+    assets: ReviewRequestAsset[];
+    timestamp: string;
+  }): Promise<ReceiptPublishedAsset[]> {
+    const results: ReceiptPublishedAsset[] = [];
+    for (const asset of input.assets) {
+      const expected = assetUploadReceipt({
+        target: input.target,
+        payload: input.payload,
+        asset,
+        url: "receipt-identity-placeholder",
+        embeddable: false,
+        confirmedAt: input.timestamp,
+      });
+      const receiptArtifactId = reviewAssetUploadReceiptArtifactId(expected);
+      const artifact = input.run.artifacts.find(
+        (candidate) =>
+          candidate.id === receiptArtifactId &&
+          candidate.metadata["reportKind"] === "review-asset-upload-receipt",
+      );
+      if (artifact === undefined) continue;
+
+      let receipt: ReviewAssetUploadReceipt;
+      try {
+        receipt = ReviewAssetUploadReceiptSchema.parse(
+          JSON.parse((await this.artifactStore.readContent(artifact.digest)).toString("utf8")),
+        );
+      } catch {
+        continue;
+      }
+      if (reviewAssetUploadReceiptArtifactId(receipt) !== receiptArtifactId) continue;
+      results.push({
+        receiptArtifactId,
+        asset: {
+          artifactId: receipt.artifactId,
+          artifactDigest: receipt.artifactDigest,
+          targetId: receipt.targetId,
+          role: receipt.role,
+          label: asset.label,
+          url: receipt.url,
+          embeddable: receipt.embeddable,
+        },
+      });
+    }
+    return results;
+  }
+
+  private async persistAssetUploadReceipts(input: {
+    runId: string;
+    target: PublishTarget;
+    payload: ReviewRequestPayload;
+    assets: ReviewRequestAsset[];
+    publishedAssets: PublishedReviewAsset[];
+    timestamp: string;
+  }): Promise<ReceiptPublishedAsset[]> {
+    if (input.publishedAssets.length === 0) return [];
+    const sourceAssets = new Map(input.assets.map((asset) => [reviewAssetKey(asset), asset]));
+    const receipts = input.publishedAssets.map((published) => {
+      const source = sourceAssets.get(reviewAssetKey(published));
+      if (source === undefined || source.artifactDigest !== published.artifactDigest) {
+        throw new Error("PUBLISH_ASSET_OUTCOME_IDENTITY_MISMATCH");
+      }
+      const receipt = assetUploadReceipt({
+        target: input.target,
+        payload: input.payload,
+        asset: source,
+        url: published.url,
+        embeddable: published.embeddable,
+        confirmedAt: input.timestamp,
+      });
+      return {
+        receipt,
+        receiptArtifactId: reviewAssetUploadReceiptArtifactId(receipt),
+        asset: published,
+      };
+    });
+    const artifactRefs: ArtifactRef[] = [];
+    for (const entry of receipts) {
+      const content = Buffer.from(`${JSON.stringify(entry.receipt, null, 2)}\n`, "utf8");
+      const blob = await this.artifactStore.writeBlob({
+        content,
+        mediaType: "application/json",
+        storedAt: input.timestamp,
+        label: "review-asset-upload-receipt",
+      });
+      artifactRefs.push(
+        ArtifactRefSchema.parse({
+          id: entry.receiptArtifactId,
+          kind: "agent-result-report",
+          uri: blob.uri,
+          mediaType: "application/json",
+          digest: blob.digest,
+          producedBy: "pr-publisher",
+          evidenceIds: [],
+          createdAt: input.timestamp,
+          metadata: {
+            adapter: PUBLISHER_ADAPTER,
+            reportKind: "review-asset-upload-receipt",
+            receiptIdentity: reviewAssetUploadReceiptIdentity(entry.receipt),
+            targetKey: entry.receipt.targetKey,
+            reportArtifactId: entry.receipt.reportArtifactId,
+            artifactId: entry.receipt.artifactId,
+            artifactDigest: entry.receipt.artifactDigest,
+            targetId: entry.receipt.targetId,
+            role: entry.receipt.role,
+          },
+        }),
+      );
+    }
+
+    let run = await this.runStore.get(RunIdSchema.parse(input.runId));
+    for (let attempt = 0; attempt < MAX_PUBLISH_RESULT_SAVE_ATTEMPTS; attempt += 1) {
+      const missing = artifactRefs.filter(
+        (artifact) => !run.artifacts.some((existing) => existing.id === artifact.id),
+      );
+      if (missing.length === 0) break;
+      const nextRun = RunManifestSchema.parse({
+        ...run,
+        revision: run.revision + 1,
+        updatedAt:
+          Date.parse(input.timestamp) >= Date.parse(run.updatedAt)
+            ? input.timestamp
+            : run.updatedAt,
+        artifacts: [...run.artifacts, ...missing],
+      });
+      try {
+        await this.runStore.save(nextRun, run.revision);
+        run = nextRun;
+        break;
+      } catch (error: unknown) {
+        if (!(error instanceof RevisionConflictError)) throw error;
+        run = await this.runStore.get(RunIdSchema.parse(input.runId));
+      }
+    }
+    for (const entry of receipts) {
+      if (!run.artifacts.some((artifact) => artifact.id === entry.receiptArtifactId)) {
+        throw new Error("Could not persist review asset upload receipts");
+      }
+    }
+    return receipts.map(({ asset, receiptArtifactId }) => ({ asset, receiptArtifactId }));
   }
 
   private async tryGitLabRawVisualFallback(input: {
@@ -944,6 +1815,7 @@ export class PublisherService {
       report?: VisualPreviewReport;
       assets: ReviewRequestAsset[];
       locale?: "ko" | "en";
+      requiresGeneratedDiagnostics: boolean;
     };
     featureVideo: ReviewRequestAsset | undefined;
     error: unknown;
@@ -953,6 +1825,10 @@ export class PublisherService {
       input.payload.headSha === undefined ||
       input.visualPreview.report === undefined ||
       input.featureVideo !== undefined ||
+      input.visualPreview.requiresGeneratedDiagnostics ||
+      input.visualPreview.assets.some(
+        (asset) => asset.role !== "figma" && asset.role !== "browser",
+      ) ||
       !canUseGitLabRawEvidenceFallback(input.error)
     ) {
       return undefined;
@@ -1038,6 +1914,7 @@ export class PublisherService {
       if (url === undefined) return undefined;
       rawAssets.push({
         artifactId: asset.artifactId,
+        artifactDigest: asset.artifactDigest,
         targetId: asset.targetId,
         role: asset.role,
         label: asset.label,
@@ -1055,15 +1932,15 @@ export class PublisherService {
     run: Awaited<ReturnType<RunStore["get"]>>,
     payload: ReviewRequestPayload,
   ): Promise<ReviewRequestAsset | undefined> {
-    const reportArtifact = requireArtifact(run.artifacts, payload.reportArtifactId);
-    const reviewPacketId = reportArtifact.metadata["reviewPacketId"];
+    const reviewPacketId = payload.reviewPacketId;
+    if (reviewPacketId === undefined) return undefined;
     const artifact = [...run.artifacts]
       .reverse()
       .find(
         (item) =>
           item.metadata["workflowSubmissionKind"] === "implementation" &&
           item.metadata["featureEvidenceRole"] === "video" &&
-          (reviewPacketId === undefined || item.metadata["reviewPacketId"] === reviewPacketId),
+          item.metadata["reviewPacketId"] === reviewPacketId,
       );
 
     if (artifact === undefined) return undefined;
@@ -1074,6 +1951,7 @@ export class PublisherService {
     const extension = artifact.mediaType === "video/mp4" ? ".mp4" : ".webm";
     return {
       artifactId: artifact.id,
+      artifactDigest: artifact.digest as ReviewRequestAsset["artifactDigest"],
       targetId: "feature-e2e",
       role: "e2e-video",
       label: "Feature E2E video",
@@ -1086,19 +1964,22 @@ export class PublisherService {
   private async collectVisualPreviewAssets(
     run: Awaited<ReturnType<RunStore["get"]>>,
     payload: ReviewRequestPayload,
+    intent: PublishIntent,
   ): Promise<{
     report?: VisualPreviewReport;
     assets: ReviewRequestAsset[];
     locale?: "ko" | "en";
+    requiresGeneratedDiagnostics: boolean;
   }> {
     const prReportArtifact = requireArtifact(run.artifacts, payload.reportArtifactId);
     const locale = ReportLocaleSchema.safeParse(prReportArtifact.metadata["locale"]);
-    const reviewPacketId = prReportArtifact.metadata["reviewPacketId"];
-    const reportArtifact = latestVisualReportArtifact(run.artifacts, reviewPacketId);
+    const binding = await this.resolvePublicationReportBinding(run, prReportArtifact, intent);
+    const reportArtifact = binding.visualReportArtifact;
 
     if (reportArtifact === undefined) {
       return {
         assets: [],
+        requiresGeneratedDiagnostics: false,
       };
     }
 
@@ -1109,9 +1990,15 @@ export class PublisherService {
     const policy = await this.readVisualPreviewPolicy(run.artifacts);
     const assets: ReviewRequestAsset[] = [];
     const labels = visualPreviewLabels(report);
+    const requiresGeneratedDiagnostics =
+      intent === "blocked-diagnostic" &&
+      report.publicationTargets.some((target) => target.status === "failed");
 
-    for (const result of report.results) {
-      if (includeVisualRole(policy, "figma")) {
+    for (const [index, result] of report.results.entries()) {
+      const target = report.publicationTargets[index];
+      if (target === undefined) throw new Error("Visual publication target is missing");
+
+      if (requiresGeneratedDiagnostics || includeVisualRole(policy, "figma")) {
         assets.push(
           await this.visualAssetFromArtifact({
             artifacts: run.artifacts,
@@ -1124,7 +2011,7 @@ export class PublisherService {
         );
       }
 
-      if (includeVisualRole(policy, "browser")) {
+      if (requiresGeneratedDiagnostics || includeVisualRole(policy, "browser")) {
         assets.push(
           await this.visualAssetFromArtifact({
             artifacts: run.artifacts,
@@ -1137,7 +2024,19 @@ export class PublisherService {
         );
       }
 
-      if (result.diffArtifactId !== undefined && includeVisualRole(policy, "diff")) {
+      if (requiresGeneratedDiagnostics && result.diffArtifactId === undefined) {
+        throw new Error(`Blocked visual report is missing a diff artifact for ${result.targetId}`);
+      }
+      if (requiresGeneratedDiagnostics && result.overlayArtifactId === undefined) {
+        throw new Error(
+          `Blocked visual report is missing an overlay artifact for ${result.targetId}`,
+        );
+      }
+
+      if (
+        result.diffArtifactId !== undefined &&
+        (requiresGeneratedDiagnostics || includeVisualRole(policy, "diff"))
+      ) {
         assets.push(
           await this.visualAssetFromArtifact({
             artifacts: run.artifacts,
@@ -1149,11 +2048,25 @@ export class PublisherService {
           }),
         );
       }
+
+      if (result.overlayArtifactId !== undefined && requiresGeneratedDiagnostics) {
+        assets.push(
+          await this.visualAssetFromArtifact({
+            artifacts: run.artifacts,
+            artifactId: result.overlayArtifactId,
+            targetId: result.targetId,
+            role: "overlay",
+            label: "Overlay",
+            payload,
+          }),
+        );
+      }
     }
 
     return {
       report,
       assets,
+      requiresGeneratedDiagnostics,
       ...(locale.success ? { locale: locale.data } : {}),
     };
   }
@@ -1199,6 +2112,7 @@ export class PublisherService {
 
     return {
       artifactId: artifact.id,
+      artifactDigest: artifact.digest as ReviewRequestAsset["artifactDigest"],
       targetId: input.targetId,
       role: input.role,
       label: input.label,
@@ -1225,8 +2139,29 @@ export class PublisherService {
     remoteName: string;
     pushBranch: boolean;
     addPublishingAgentResult: boolean;
+    fence?: PublicationExecutionFence;
+    plan?: z.infer<typeof PublishPlanSchema>;
+    credentialSource?: "env" | "cli";
   }) {
-    let run = await this.runStore.get(RunIdSchema.parse(input.runId));
+    const fenced =
+      input.fence !== undefined || input.plan !== undefined || input.credentialSource !== undefined;
+    if (
+      fenced &&
+      (input.fence === undefined ||
+        input.plan === undefined ||
+        input.credentialSource === undefined)
+    ) {
+      throw new Error("Publication result fence inputs must be supplied together");
+    }
+    let run =
+      input.fence === undefined || input.plan === undefined || input.credentialSource === undefined
+        ? await this.runStore.get(RunIdSchema.parse(input.runId))
+        : await this.assertPublicationFenceCurrent({
+            fence: input.fence,
+            plan: input.plan,
+            remoteName: input.remoteName,
+            credentialSource: input.credentialSource,
+          });
     const reportArtifact = requireArtifact(run.artifacts, input.payload.reportArtifactId);
     const publishResultArtifact = await this.writeJsonArtifact({
       label: "publish-result",
@@ -1321,7 +2256,17 @@ export class PublisherService {
         });
       } catch (error: unknown) {
         if (!(error instanceof RevisionConflictError)) throw error;
-        run = await this.runStore.get(RunIdSchema.parse(input.runId));
+        run =
+          input.fence === undefined ||
+          input.plan === undefined ||
+          input.credentialSource === undefined
+            ? await this.runStore.get(RunIdSchema.parse(input.runId))
+            : await this.assertPublicationFenceCurrent({
+                fence: input.fence,
+                plan: input.plan,
+                remoteName: input.remoteName,
+                credentialSource: input.credentialSource,
+              });
       }
     }
 
@@ -1392,6 +2337,138 @@ async function defaultGitCommandRunner(
     stdout: Buffer.isBuffer(result.stdout) ? result.stdout.toString(encoding) : result.stdout,
     stderr: Buffer.isBuffer(result.stderr) ? result.stderr.toString(encoding) : result.stderr,
   };
+}
+
+function publicationRemoteTargetKey(target: PublishTarget): string {
+  return `sha256:${createHash("sha256")
+    .update(
+      JSON.stringify({
+        host: target.host,
+        webBaseUrl: target.webBaseUrl,
+        apiBaseUrl: target.apiBaseUrl,
+        owner: target.owner,
+        repo: target.repo,
+        projectPath: target.projectPath,
+        projectId: target.projectId,
+      }),
+    )
+    .digest("hex")}`;
+}
+
+function publisherCredentialSource(source: string): "env" | "cli" {
+  return /^(?:gh|glab)\s/.test(source) ? "cli" : "env";
+}
+
+function assertPublicationFenceMatchesPlan(
+  fence: PublicationExecutionFence,
+  plan: z.infer<typeof PublishPlanSchema>,
+  remoteName: string,
+  credentialSource: "env" | "cli",
+): void {
+  if (
+    fence.reportArtifactId !== plan.payload.reportArtifactId ||
+    fence.reviewPacketId !== plan.payload.reviewPacketId ||
+    (plan.payload.headSha !== undefined && fence.headSha !== plan.payload.headSha) ||
+    fence.sourceBranch !== plan.payload.sourceBranch ||
+    fence.targetBranch !== plan.payload.targetBranch ||
+    fence.remoteName !== remoteName ||
+    fence.remoteTargetKey !== publicationRemoteTargetKey(plan.target) ||
+    fence.credentialSource !== credentialSource
+  ) {
+    throw new Error(
+      "PUBLISH_EXECUTION_FENCE_STALE: report, packet, head, branch, or remote binding changed",
+    );
+  }
+}
+
+function publicationRunSemanticDigest(
+  run: Awaited<ReturnType<RunStore["get"]>>,
+): `sha256:${string}` {
+  const diagnosticClaims = new Map<
+    string,
+    {
+      diagnosticExecutionKey: string;
+      claimState: string;
+      ownerClaimId: string;
+    }
+  >();
+  const semanticArtifacts = run.artifacts.filter((artifact) => {
+    const reportKind = artifact.metadata["reportKind"];
+    if (reportKind === "review-asset-upload-receipt") return false;
+    if (reportKind !== "diagnostic-publish-claim") return true;
+
+    const diagnosticExecutionKey = artifact.metadata["diagnosticExecutionKey"];
+    const claimState = artifact.metadata["claimState"];
+    const ownerClaimId = artifact.metadata["ownerClaimId"];
+    if (
+      typeof diagnosticExecutionKey !== "string" ||
+      typeof claimState !== "string" ||
+      typeof ownerClaimId !== "string"
+    ) {
+      return true;
+    }
+    diagnosticClaims.set(diagnosticExecutionKey, {
+      diagnosticExecutionKey,
+      claimState,
+      ownerClaimId,
+    });
+    return false;
+  });
+  const semanticRun = {
+    ...run,
+    revision: 0,
+    updatedAt: "publication-semantic-snapshot",
+    stages: run.stages.map((stage) =>
+      stage.lease === undefined
+        ? stage
+        : {
+            ...stage,
+            lease: {
+              ...stage.lease,
+              heartbeatAt: "publication-lease-heartbeat",
+              expiresAt: "publication-lease-expiry",
+            },
+          },
+    ),
+    artifacts: semanticArtifacts,
+    diagnosticPublishClaims: [...diagnosticClaims.values()].sort((left, right) =>
+      left.diagnosticExecutionKey.localeCompare(right.diagnosticExecutionKey),
+    ),
+  };
+  return `sha256:${createHash("sha256").update(JSON.stringify(semanticRun)).digest("hex")}`;
+}
+
+function assertPublicationRunMatchesFence(
+  run: Awaited<ReturnType<RunStore["get"]>>,
+  fence: PublicationExecutionFence,
+  plan: z.infer<typeof PublishPlanSchema>,
+): void {
+  if (
+    run.revision < fence.runRevision ||
+    publicationRunSemanticDigest(run) !== fence.runSemanticDigest
+  ) {
+    throw new Error("PUBLISH_EXECUTION_FENCE_STALE: Run semantic binding changed");
+  }
+  const report = run.artifacts.find(
+    (artifact) => artifact.id === fence.reportArtifactId && artifact.digest === fence.reportDigest,
+  );
+  if (report === undefined || fence.reportArtifactId !== plan.payload.reportArtifactId) {
+    throw new Error("PUBLISH_EXECUTION_FENCE_STALE: report binding changed");
+  }
+  if (fence.reviewPacketId === undefined) return;
+
+  const implementation = run.stages.find((stage) => stage.name === "implementation");
+  const packet = ImplementationReviewPacketSchema.safeParse(
+    implementation?.checkpoint?.data["reviewPacket"],
+  );
+  if (
+    !packet.success ||
+    packet.data.id !== fence.reviewPacketId ||
+    packet.data.headSha !== fence.headSha ||
+    packet.data.diffDigest !== fence.diffDigest
+  ) {
+    throw new Error("PUBLISH_EXECUTION_FENCE_STALE: review packet, head, or diff binding changed");
+  }
 }
 
 function resolvePrReportArtifact(
@@ -1519,24 +2596,36 @@ function latestPublishResultArtifact(artifacts: ArtifactRef[]): ArtifactRef {
   return artifact;
 }
 
-function latestVisualReportArtifact(
-  artifacts: ArtifactRef[],
-  reviewPacketId: unknown,
-): ArtifactRef | undefined {
-  return artifacts
-    .filter(
-      (item) =>
-        item.kind === "visual-report" &&
-        (item.metadata["reportKind"] === "visual-report-json" ||
-          item.metadata["reportKind"] === "visual-report-v2-json") &&
-        (reviewPacketId === undefined || item.metadata["reviewPacketId"] === reviewPacketId),
-    )
-    .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))[0];
-}
-
 function normalizeVisualReport(rawReport: unknown): VisualPreviewReport {
   const legacy = VisualReportSchema.safeParse(rawReport);
-  if (legacy.success) return legacy.data;
+  if (legacy.success) {
+    return {
+      ...legacy.data,
+      publicationTargets: legacy.data.results.map((result) => ({
+        attempt: 1,
+        targetId: result.targetId,
+        name: result.targetId,
+        route: "-",
+        state: "-",
+        fixture: "-",
+        viewport: { width: result.metrics.width, height: result.metrics.height },
+        deviceScaleFactor: 1,
+        status: result.status === "passed" ? "passed" : "failed",
+        metrics: {
+          reviewMatchRatio: result.metrics.reviewMatchRatio,
+          exactMatchRatio: result.metrics.exactMatchRatio,
+          maskedAreaRatio: result.metrics.maskedAreaRatio ?? 0,
+          threshold: result.metrics.threshold ?? 0,
+        },
+        baselineArtifactId: result.figmaScreenshotArtifactId,
+        actualArtifactId: result.browserScreenshotArtifactId,
+        ...(result.diffArtifactId === undefined ? {} : { diffArtifactId: result.diffArtifactId }),
+        ...(result.overlayArtifactId === undefined
+          ? {}
+          : { overlayArtifactId: result.overlayArtifactId }),
+      })),
+    };
+  }
   if (typeof rawReport !== "object" || rawReport === null || Array.isArray(rawReport)) {
     throw new Error("Visual report is not a supported report object");
   }
@@ -1579,12 +2668,46 @@ function normalizeVisualReport(rawReport: unknown): VisualPreviewReport {
     reviewNeededCount: results.filter((result) => result.status === "review-needed").length,
     results,
   });
+  const attempt =
+    typeof report["attempt"] === "number" && Number.isInteger(report["attempt"])
+      ? report["attempt"]
+      : 1;
+  const publicationTargets = normalized.results.map((result, index) => {
+    const rawResult = rawResults[index] as Record<string, unknown>;
+    const context = contexts[index];
+    const fixture = typeof rawResult["fixture"] === "string" ? rawResult["fixture"] : "-";
+
+    return {
+      attempt,
+      targetId: result.targetId,
+      name: context?.name ?? result.targetId,
+      route: context?.route ?? "-",
+      state: context?.state ?? "-",
+      fixture,
+      viewport: context?.viewport ?? { width: result.metrics.width, height: result.metrics.height },
+      deviceScaleFactor: context?.deviceScaleFactor ?? 1,
+      status: result.status === "passed" ? "passed" : "failed",
+      metrics: {
+        reviewMatchRatio: result.metrics.reviewMatchRatio,
+        exactMatchRatio: result.metrics.exactMatchRatio,
+        maskedAreaRatio: result.metrics.maskedAreaRatio ?? 0,
+        threshold: result.metrics.threshold ?? 0,
+      },
+      baselineArtifactId: result.figmaScreenshotArtifactId,
+      actualArtifactId: result.browserScreenshotArtifactId,
+      ...(result.diffArtifactId === undefined ? {} : { diffArtifactId: result.diffArtifactId }),
+      ...(result.overlayArtifactId === undefined
+        ? {}
+        : { overlayArtifactId: result.overlayArtifactId }),
+    } satisfies PublicationVisualTarget;
+  });
   return {
     ...normalized,
     results: normalized.results.map((result, index) => ({
       ...result,
       ...(contexts[index] === undefined ? {} : { context: contexts[index] }),
     })),
+    publicationTargets,
   };
 }
 
@@ -1676,38 +2799,43 @@ function renderVisualEvidencePreview(
     assetByTargetAndRole.set(`${asset.targetId}:${asset.role}`, asset);
   }
 
-  const rows = report.results.map((result, index) => {
+  const blocks = report.results.map((result, index) => {
+    const publicationTarget = report.publicationTargets[index];
+    if (publicationTarget === undefined) return "";
     const figma = assetByTargetAndRole.get(`${result.targetId}:figma`);
     const browser = assetByTargetAndRole.get(`${result.targetId}:browser`);
     const diff = assetByTargetAndRole.get(`${result.targetId}:diff`);
-    const reviewMatch = `${(result.metrics.reviewMatchRatio * 100).toFixed(2)}%`;
-    const exactMatch = `${(result.metrics.exactMatchRatio * 100).toFixed(2)}%`;
+    const overlay = assetByTargetAndRole.get(`${result.targetId}:overlay`);
+    const reviewMatch = `${(publicationTarget.metrics.reviewMatchRatio * 100).toFixed(2)}%`;
+    const mismatch = `${((1 - publicationTarget.metrics.reviewMatchRatio) * 100).toFixed(2)}%`;
+    const exactMatch = `${(publicationTarget.metrics.exactMatchRatio * 100).toFixed(2)}%`;
+    const maskedArea = `${(publicationTarget.metrics.maskedAreaRatio * 100).toFixed(2)}%`;
+    const threshold = `${(publicationTarget.metrics.threshold * 100).toFixed(2)}%`;
     const target = visualTargetDisplay(result, index, locale);
+    const route = escapeMarkdownTableCell(redactSecretShapes(publicationTarget.route));
+    const state = escapeMarkdownTableCell(redactSecretShapes(publicationTarget.state));
+    const fixture = escapeMarkdownTableCell(redactSecretShapes(publicationTarget.fixture));
+    const diagnostics = [
+      diagnosticLink(diff, "Diff", target.name),
+      diagnosticLink(overlay, "Overlay", target.name),
+    ].filter((item): item is string => item !== undefined);
 
-    const screenCell =
-      target.context === undefined
-        ? escapeMarkdownTableCell(target.name)
-        : `${escapeMarkdownTableCell(target.name)}<br>${escapeMarkdownTableCell(target.context)}`;
-
-    return locale === "ko"
-      ? [
-          screenCell,
-          imageCell(figma, labels.baseline, target.name),
-          imageCell(browser, labels.actual, target.name),
-          imageCell(diff, "차이", target.name),
-          reviewMatch,
-          exactMatch,
-          koreanVisualStatus(result.status),
-        ]
-      : [
-          screenCell,
-          imageCell(figma, labels.baseline, target.name),
-          imageCell(browser, labels.actual, target.name),
-          imageCell(diff, "Diff", target.name),
-          reviewMatch,
-          exactMatch,
-          result.status,
-        ];
+    return [
+      `#### ${escapeMarkdownTableCell(target.name)} · ${fixture}`,
+      "",
+      locale === "ko"
+        ? "| 경로 | 상태 | Fixture | 화면 | DPR | 시도 | 검토 일치율 | 불일치율 | 픽셀 일치율 | 마스킹 | 기준 | 결과 |"
+        : "| Route | State | Fixture | Viewport | DPR | Attempt | Review match | Mismatch | Pixel match | Masked | Threshold | Status |",
+      "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+      `| ${route} | ${state} | ${fixture} | ${publicationTarget.viewport.width}×${publicationTarget.viewport.height} | ${publicationTarget.deviceScaleFactor} | ${publicationTarget.attempt} | ${reviewMatch} | ${mismatch} | ${exactMatch} | ${maskedArea} | ${threshold} | ${locale === "ko" ? koreanVisualStatus(result.status) : result.status} |`,
+      "",
+      `| ${labels.baseline} | ${labels.actual} |`,
+      "| --- | --- |",
+      `| ${imageCell(figma, labels.baseline, target.name, 320)} | ${imageCell(browser, labels.actual, target.name, 320)} |`,
+      ...(diagnostics.length === 0
+        ? []
+        : ["", `${locale === "ko" ? "진단" : "Diagnostics"}: ${diagnostics.join(" · ")}`]),
+    ].join("\n");
   });
 
   const hasNonEmbeddable = assets.some((asset) => asset.embeddable === false);
@@ -1728,11 +2856,7 @@ function renderVisualEvidencePreview(
     visualPreviewDescription(report, assets, locale),
     fallbackNote,
     "",
-    locale === "ko"
-      ? `| 화면 | ${labels.baseline} | ${labels.actual} | 차이 | 검토 일치율 | 픽셀 일치율 | 결과 |`
-      : `| Screen | ${labels.baseline} | ${labels.actual} | Diff | Review match | Exact match | Status |`,
-    "| --- | --- | --- | --- | ---: | ---: | --- |",
-    ...rows.map((row) => `| ${row.join(" | ")} |`),
+    ...blocks.filter((block) => block !== ""),
     VISUAL_PREVIEW_END,
   ].join("\n");
 }
@@ -1824,6 +2948,7 @@ function imageCell(
   asset: PublishedReviewAsset | undefined,
   altPrefix: string,
   targetName: string,
+  width = 320,
 ): string {
   if (asset === undefined) {
     return "-";
@@ -1835,7 +2960,19 @@ function imageCell(
     return `[${escapeMarkdownTableCell(`${altPrefix} · ${targetName} ↗`)}](${asset.url})`;
   }
 
-  return `<img src="${escapeHtmlAttribute(asset.url)}" alt="${escapeHtmlAttribute(`${altPrefix} · ${targetName}`)}" width="260" />`;
+  return `<img src="${escapeHtmlAttribute(asset.url)}" alt="${escapeHtmlAttribute(`${altPrefix} · ${targetName}`)}" width="${width}" />`;
+}
+
+function diagnosticLink(
+  asset: PublishedReviewAsset | undefined,
+  label: string,
+  targetName: string,
+): string | undefined {
+  if (asset === undefined) return undefined;
+  if (asset.embeddable === false) {
+    return `[${escapeMarkdownTableCell(`${label} · ${targetName} ↗`)}](${asset.url})`;
+  }
+  return `[${label}](${asset.url})`;
 }
 
 function extensionForMediaType(mediaType: string): string {
@@ -1907,6 +3044,145 @@ function failedPublishResult(input: {
     retryable: synchronizationDetails?.phase !== "reviewers",
     publishedAt: input.publishedAt,
   });
+}
+
+function partialAssetPublishResult(input: {
+  runId: string;
+  target: PublishTarget;
+  request?: PublishedReviewRequest;
+  reportArtifactId: string;
+  prepared: {
+    publishedAssets: PublishedReviewAsset[];
+    uploadReceiptArtifactIds: string[];
+    visualPreviewExpected: boolean;
+    featureVideoExpected: boolean;
+    fallbackMode: "none" | "gitlab-raw-evidence";
+    fallbackReason?: string;
+  };
+  partialReasons: string[];
+  retryable: boolean;
+  publishedAt: string;
+}): PublishResult {
+  const partialReasons =
+    input.partialReasons.length > 0
+      ? input.partialReasons.map((reason) => redactSecrets(reason))
+      : ["review asset publication is incomplete"];
+  return PublishResultSchema.parse({
+    runId: input.runId,
+    status: "blocked",
+    target: input.target,
+    ...(input.request === undefined ? {} : { request: input.request }),
+    reportArtifactId: input.reportArtifactId,
+    publishedAssets: input.prepared.publishedAssets,
+    uploadReceiptArtifactIds: input.prepared.uploadReceiptArtifactIds,
+    requestSynced: false,
+    visualPreviewExpected: input.prepared.visualPreviewExpected,
+    visualPreviewSynced: false,
+    featureVideoExpected: input.prepared.featureVideoExpected,
+    featureVideoSynced: false,
+    fallbackMode: input.prepared.fallbackMode,
+    ...(input.prepared.fallbackReason === undefined
+      ? {}
+      : { fallbackReason: input.prepared.fallbackReason }),
+    partialReasons,
+    errorCode: "PUBLISH_PARTIAL_SYNC",
+    errorMessage: partialReasons.join("; "),
+    retryable: input.retryable,
+    publishedAt: input.publishedAt,
+  });
+}
+
+function assetUploadReceipt(input: {
+  target: PublishTarget;
+  payload: ReviewRequestPayload;
+  asset: ReviewRequestAsset;
+  url: string;
+  embeddable: boolean;
+  confirmedAt: string;
+}): ReviewAssetUploadReceipt {
+  return ReviewAssetUploadReceiptSchema.parse({
+    schemaVersion: "review-asset-upload-v1",
+    runId: input.payload.runId,
+    host: input.target.host,
+    targetKey: reviewAssetUploadTargetKey(input.target),
+    reportArtifactId: input.payload.reportArtifactId,
+    ...(input.payload.reviewPacketId === undefined
+      ? {}
+      : { reviewPacketId: input.payload.reviewPacketId }),
+    ...(input.payload.headSha === undefined ? {} : { headSha: input.payload.headSha }),
+    artifactId: input.asset.artifactId,
+    artifactDigest: input.asset.artifactDigest,
+    targetId: input.asset.targetId,
+    role: input.asset.role,
+    url: input.url,
+    embeddable: input.embeddable,
+    confirmedAt: input.confirmedAt,
+  });
+}
+
+function reviewAssetKey(asset: {
+  artifactId: string;
+  artifactDigest: string;
+  targetId: string;
+  role: string;
+}): string {
+  return [asset.artifactId, asset.artifactDigest, asset.targetId, asset.role].join("\u0000");
+}
+
+function settleAssetPublishOutcomes(
+  assets: ReviewRequestAsset[],
+  outcomes: ReviewAssetPublishOutcome[],
+): ReviewAssetPublishOutcome[] {
+  if (outcomes.length !== assets.length) {
+    return assets.map((asset) => ({
+      status: "failed",
+      artifactId: asset.artifactId,
+      failure: "uncertain",
+      message: "Publisher returned an incomplete asset outcome set",
+    }));
+  }
+  const remaining = [...outcomes];
+  return assets.map((asset) => {
+    const index = remaining.findIndex((outcome) =>
+      outcome.status === "published"
+        ? outcome.asset.artifactId === asset.artifactId
+        : outcome.artifactId === asset.artifactId,
+    );
+    if (index < 0) {
+      return {
+        status: "failed",
+        artifactId: asset.artifactId,
+        failure: "uncertain",
+        message: "Publisher returned a mismatched asset outcome",
+      };
+    }
+    const [outcome] = remaining.splice(index, 1);
+    if (
+      outcome === undefined ||
+      (outcome.status === "published" &&
+        (outcome.asset.artifactDigest !== asset.artifactDigest ||
+          outcome.asset.targetId !== asset.targetId ||
+          outcome.asset.role !== asset.role))
+    ) {
+      return {
+        status: "failed",
+        artifactId: asset.artifactId,
+        failure: "uncertain",
+        message: "Publisher returned a mismatched asset outcome",
+      };
+    }
+    return outcome;
+  });
+}
+
+function assertPublishedAssetUrlsInBody(
+  body: string,
+  requiredAssets: PublishedReviewAsset[],
+): void {
+  const missing = requiredAssets.filter((asset) => !body.includes(asset.url));
+  if (missing.length > 0) {
+    throw new Error("PUBLISH_ASSET_BODY_SYNC_INCOMPLETE");
+  }
 }
 
 function defaultTitle(runId: string): string {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { buildDelegationPolicy, buildDeliveryProfile } from "../../src/workflow/index.js";
-import { resolveDeliveryPolicy } from "../../src/workflow/delivery-mode-policy.js";
+import { VISUAL_POLICY, resolveDeliveryPolicy } from "../../src/workflow/delivery-mode-policy.js";
 
 const uiScope = {
   code: true,
@@ -21,6 +21,10 @@ const fullDeliverySources = {
 };
 
 describe("delivery policy", () => {
+  it("sets the runtime-owned visual review gate to 92 percent", () => {
+    expect(VISUAL_POLICY.reviewThreshold).toBe(0.92);
+  });
+
   it("resolves one explicit four-mode matrix including section applicability", () => {
     const brief = resolveDeliveryPolicy({
       mode: "brief",

@@ -32,11 +32,19 @@ import NextStep from "@site/src/components/guide/NextStep";
 
 Runtime uses the `pngjs`-based bounded decoder to read both images as RGBA and rejects dimension mismatch. Every mask needs a reason and coordinates; masking more than `20%` or every pixel fails.
 
-For each compared pixel, sRGB channels move into linear color space, alpha is premultiplied, and normalized Euclidean RGBA distance is calculated. Byte-identical pixels count as exact matches; distance at or below `0.02` counts as a review match. `reviewMatchRatio` must reach at least `98%`.
+For each compared pixel, sRGB channels move into linear color space, alpha is premultiplied, and normalized Euclidean RGBA distance is calculated. Byte-identical pixels count as exact matches; distance at or below `0.02` counts as a review match. `reviewMatchRatio` must reach the fixed `92%` threshold; exactly 92% passes the numeric gate but cannot waive a focused UI assertion.
 
 :::info[Repair is deliberately bounded]
-There are three total comparisons: the initial comparison plus at most two repairs. Runtime rejects caller-supplied scores. Capture produces baseline and actual PNGs under the same target contract; the production comparator accepts those two PNGs and returns `diff.png`, `overlay.png`, and metrics. The report binds capture and comparison paths and digests into one packet.
+Three valid numeric comparisons run automatically: the initial attempt and at most two repairs, without pausing for user approval. Invalid geometry, fixture, or renderer-lineage acquisition consumes no attempt. A third valid failure leaves the Run blocked and skips design review; when publication preconditions allow, the diagnostic draft shows equal-size baseline/current media and separately inspectable `diff.png` and `overlay.png`. Runtime rejects caller-supplied scores.
 :::
+
+## Defects the aggregate score cannot waive
+
+- Reacquire a native export instead of stretching a provider thumbnail to the target frame.
+- Bind distinct captured state facts to distinct fixture digests; prose assumptions do not override them.
+- Map internal `Spot`, `Circle`, and `Close` exports and semantic tokens such as `semantic/text/tertiary` exactly.
+- Treat baseline PNGs as evidence only, never product DOM, CSS, SVG, canvas, proxy, or overlay layers.
+- Verify image geometry, table borders, copy control, icon geometry/color, focus, headings, accessible names, and actions with focused assertions.
 
 ## Who verifies that the proof is trustworthy?
 

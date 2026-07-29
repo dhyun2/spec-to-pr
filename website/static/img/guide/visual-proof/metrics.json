@@ -1,7 +1,7 @@
 {
   "schemaVersion": "guide-visual-proof-v1",
   "provider": "playwright-chromium",
-  "capturedAt": "2026-07-23T04:11:22.904Z",
+  "capturedAt": "2026-07-28T10:17:33.490Z",
   "status": "passed",
   "attempt": 1,
   "target": {
@@ -25,17 +25,17 @@
     "meanDistance": 0.0024418626045661436,
     "maxDistance": 0.2815072144964247,
     "pixelTolerance": 0.02,
-    "threshold": 0.98
+    "threshold": 0.92
   },
   "maskReasons": [],
   "files": {
     "baseline": {
       "path": "baseline.png",
-      "digest": "sha256:7e61012ccecff9c3ac5ab34a9a855f5619bf253d6b72e4748251e70e14a8de79"
+      "digest": "sha256:f0c0fc9b2991eaf9d753dd046cfb86773bd47f6288474b148c6becc3c51d4c03"
     },
     "actual": {
       "path": "actual.png",
-      "digest": "sha256:b446052a2d7872c3aed642d78982ffcc86091c4574928a3aac542ebb1e6f45a5"
+      "digest": "sha256:d6880a7809ffd286d85b54a4e8e9dd0c1231ae5f2d10a7cb788c1373d5c7fe18"
     },
     "diff": {
       "path": "diff.png",
@@ -43,7 +43,7 @@
     },
     "overlay": {
       "path": "overlay.png",
-      "digest": "sha256:e486ad5214c4846d49c9d13fb272b3379cfbc0134b10ba69013310154f1233bd"
+      "digest": "sha256:ba662368ff461a6ac8a03bdd315cec6a5a7bfe7233f4bba49565b6daac86b159"
     }
   }
 }

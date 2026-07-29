@@ -22,6 +22,7 @@ type ParsedArgs = {
   publication?: SpecToPrCodexRunInput["publication"];
   noReviewAgents?: boolean;
   maxTurns?: number;
+  blockedDiagnosticTokenReserve?: number;
   usageHistory?: string;
   noUsageCalibration?: boolean;
 };
@@ -87,6 +88,9 @@ if (args.noReviewAgents !== undefined) {
 }
 if (args.maxTurns !== undefined) {
   input.maxTurns = args.maxTurns;
+}
+if (args.blockedDiagnosticTokenReserve !== undefined) {
+  input.blockedDiagnosticTokenReserve = args.blockedDiagnosticTokenReserve;
 }
 if (args.usageHistory !== undefined) {
   input.usageHistoryPath = args.usageHistory;
@@ -201,6 +205,9 @@ function parseArgs(argv: string[]): ParsedArgs {
       case "--max-turns":
         parsed.maxTurns = parsePositiveInteger(value, arg);
         break;
+      case "--blocked-diagnostic-token-reserve":
+        parsed.blockedDiagnosticTokenReserve = parsePositiveInteger(value, arg);
+        break;
       case "--usage-history":
         parsed.usageHistory = value;
         break;
@@ -251,6 +258,8 @@ Options:
   --resume <thread-id>  Resume an existing Codex thread
   --model <model>       Optional Codex model override
   --max-turns <n>       Maximum workflow boundary turns (default: 12)
+  --blocked-diagnostic-token-reserve <n>
+                        Tokens held for finalizing a blocked draft (default: 24000)
   --usage-history <p>   Numeric-only calibration JSONL path
   --no-usage-calibration  Disable calibration reads and writes
   --mode <mode>         auto, brief, legacy, feature, or figma

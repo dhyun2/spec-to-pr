@@ -1,0 +1,336 @@
+{
+  "schemaVersion": "runtime-reduction-benchmark-v1",
+  "nodeVersion": "v24.12.0",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "cpuCount": 14,
+  "warmupIterations": 1,
+  "measuredIterations": 5,
+  "fixtures": [
+    {
+      "name": "mixed-intake",
+      "fixtureDigest": "sha256:01f8dcbc7f6ad711167479dab0af3e4e6720d228f30d5f94b50fc74285cdc470",
+      "p50WallMs": 258.801958,
+      "p95WallMs": 281.36687500000016,
+      "peakRssBytes": 424181760,
+      "environment": {
+        "nodeVersion": "v24.12.0",
+        "platform": "darwin",
+        "architecture": "arm64",
+        "cpuCount": 14
+      },
+      "metricCounters": {
+        "localDocuments": 20,
+        "parserSafeChunks": 4,
+        "openApiSources": 4,
+        "maxSourceConcurrency": 4,
+        "intakeRunSaves": 2
+      }
+    },
+    {
+      "name": "legacy",
+      "fixtureDigest": "sha256:34f75192ee4936af70d2b63387c004fd500252299099c0da221fc1fa2274d440",
+      "p50WallMs": 183.39204199999995,
+      "p95WallMs": 196.63916599999993,
+      "peakRssBytes": 496369664,
+      "environment": {
+        "nodeVersion": "v24.12.0",
+        "platform": "darwin",
+        "architecture": "arm64",
+        "cpuCount": 14
+      },
+      "metricCounters": {
+        "files": 250,
+        "terminalApiCalls": 40,
+        "sharedAdapters": 5,
+        "coldReads": 250,
+        "coldParses": 250,
+        "warmReads": 250,
+        "warmParses": 0,
+        "warmRebuilds": 0,
+        "changeReads": 500,
+        "changeParses": 1,
+        "changeRebuilds": 1
+      }
+    },
+    {
+      "name": "packet-evidence",
+      "fixtureDigest": "sha256:984048b78a6e5195ac01fb04a2e8bf19eb81e33fbf0f2f9276ee511bcddf8175",
+      "p50WallMs": 109.32941699999992,
+      "p95WallMs": 111.3144169999996,
+      "peakRssBytes": 499204096,
+      "environment": {
+        "nodeVersion": "v24.12.0",
+        "platform": "darwin",
+        "architecture": "arm64",
+        "cpuCount": 14
+      },
+      "metricCounters": {
+        "workflowPath": ["implementation", "functional-review", "report"],
+        "reuseHits": 2,
+        "gitCommands": 6,
+        "binaryDiffRecaptures": 0
+      }
+    },
+    {
+      "name": "status-action",
+      "fixtureDigest": "sha256:8c57658706741c9bb691092107bc1a5c5bbdfa938b070a4489eb0deedc70a59a",
+      "p50WallMs": 0.27070800000001327,
+      "p95WallMs": 0.3377920000002632,
+      "peakRssBytes": 487768064,
+      "environment": {
+        "nodeVersion": "v24.12.0",
+        "platform": "darwin",
+        "architecture": "arm64",
+        "cpuCount": 14
+      },
+      "metricCounters": {
+        "legacyFiles": 250,
+        "artifactReads": 0,
+        "actionSerializedBytes": 1276,
+        "detailSerializedBytes": 41897
+      }
+    },
+    {
+      "name": "mutating-action",
+      "fixtureDigest": "sha256:7c7e79a685dd9ae96576e3c3f943f872ea7893f93a5c46df249dc25e1d569f13",
+      "p50WallMs": 98.18037499999991,
+      "p95WallMs": 112.34816599999976,
+      "peakRssBytes": 501776384,
+      "environment": {
+        "nodeVersion": "v24.12.0",
+        "platform": "darwin",
+        "architecture": "arm64",
+        "cpuCount": 14
+      },
+      "metricCounters": {
+        "legacyFiles": 250,
+        "inventoryReads": 0,
+        "startSerializedBytes": 1276,
+        "advanceSerializedBytes": 1276,
+        "submitSerializedBytes": 1761
+      }
+    },
+    {
+      "name": "visual-paired-serial",
+      "fixtureDigest": "sha256:438c2cdd00288d68ba8464fedade92b544223a7ddac6efef832667b93a15ad76",
+      "p50WallMs": 382.30524999999943,
+      "p95WallMs": 388.85858299999927,
+      "peakRssBytes": 747814912,
+      "environment": {
+        "nodeVersion": "v24.12.0",
+        "platform": "darwin",
+        "architecture": "arm64",
+        "cpuCount": 14
+      },
+      "metricCounters": {
+        "inputKind": "pre-normalized-png",
+        "workloadDigest": "sha256:015ad7ce7efe59cdf281cf9edafbbf2045c66d02700472a1e671a6cd3a95fd17",
+        "targets": 2,
+        "comparisons": 6,
+        "implementation": "serial",
+        "throughputComparisonsPerSecond": 15.429773862031512
+      }
+    },
+    {
+      "name": "visual-paired-pool",
+      "fixtureDigest": "sha256:a4b9b77e3bbc355bd07e8d2312e69e94367a578eab0da0653051acfea0748c0c",
+      "p50WallMs": 207.33645799999977,
+      "p95WallMs": 212.38012499999968,
+      "peakRssBytes": 747814912,
+      "environment": {
+        "nodeVersion": "v24.12.0",
+        "platform": "darwin",
+        "architecture": "arm64",
+        "cpuCount": 14
+      },
+      "metricCounters": {
+        "inputKind": "pre-normalized-png",
+        "workloadDigest": "sha256:015ad7ce7efe59cdf281cf9edafbbf2045c66d02700472a1e671a6cd3a95fd17",
+        "targets": 2,
+        "comparisons": 6,
+        "implementation": "reused-worker-pool",
+        "throughputComparisonsPerSecond": 28.251231135681877
+      }
+    },
+    {
+      "name": "visual-cold",
+      "fixtureDigest": "sha256:ea8587c5d7b5dfa8e45bb758d3590029e2b955c7d1c6ae30b098b11827cfdaec",
+      "p50WallMs": 344.0242080000007,
+      "p95WallMs": 352.81825000000026,
+      "peakRssBytes": 927711232,
+      "environment": {
+        "nodeVersion": "v24.12.0",
+        "platform": "darwin",
+        "architecture": "arm64",
+        "cpuCount": 14
+      },
+      "metricCounters": {
+        "targets": 2,
+        "comparisons": 1,
+        "pixelsPerTarget": 659160,
+        "mode": "cold",
+        "cacheHits": 1,
+        "cacheMisses": 1,
+        "cacheSingleFlights": 0,
+        "cacheBypasses": 2,
+        "cacheResidentBytes": 2642443,
+        "peakWorkers": 2,
+        "peakActivePixels": 1318320,
+        "projectedBatchInputBytes": 21139544,
+        "callerSourceBytes": 10569772,
+        "ownedSnapshotBytes": 10569772,
+        "batchInputBudgetBytes": 320262144,
+        "peakAdmittedInputBytes": 21139544,
+        "terminalAdmittedInputBytes": 0,
+        "activeAllocationBudgetBytes": 328262144,
+        "peakComparisonManagedBytes": 33021302,
+        "comparisonManagedMemoryBudgetBytes": 648524288,
+        "peakManagedBytes": 35663745,
+        "managedMemoryBudgetBytes": 782742016,
+        "rssBaselineBytes": 886521856,
+        "inFlightPeakRssBytes": 927711232,
+        "inFlightRssDeltaBytes": 41189376
+      }
+    },
+    {
+      "name": "visual-warm",
+      "fixtureDigest": "sha256:b8fcfb17bd329485972ddfbd82fd9fffdc5d158a6f66214c99b7d9a54e512e97",
+      "p50WallMs": 262.2152079999996,
+      "p95WallMs": 264.4652079999996,
+      "peakRssBytes": 927956992,
+      "environment": {
+        "nodeVersion": "v24.12.0",
+        "platform": "darwin",
+        "architecture": "arm64",
+        "cpuCount": 14
+      },
+      "metricCounters": {
+        "targets": 2,
+        "comparisons": 2,
+        "pixelsPerTarget": 659160,
+        "mode": "warm",
+        "cacheHits": 4,
+        "cacheMisses": 0,
+        "cacheSingleFlights": 0,
+        "cacheBypasses": 4,
+        "cacheResidentBytes": 2642443,
+        "peakWorkers": 2,
+        "peakActivePixels": 1318320,
+        "projectedBatchInputBytes": 21139544,
+        "callerSourceBytes": 10569772,
+        "ownedSnapshotBytes": 10569772,
+        "batchInputBudgetBytes": 320262144,
+        "peakAdmittedInputBytes": 21139544,
+        "terminalAdmittedInputBytes": 0,
+        "activeAllocationBudgetBytes": 328262144,
+        "peakComparisonManagedBytes": 33012863,
+        "comparisonManagedMemoryBudgetBytes": 648524288,
+        "peakManagedBytes": 35655306,
+        "managedMemoryBudgetBytes": 782742016,
+        "rssBaselineBytes": 843235328,
+        "inFlightPeakRssBytes": 874872832,
+        "inFlightRssDeltaBytes": 31637504
+      }
+    },
+    {
+      "name": "visual",
+      "fixtureDigest": "sha256:4e2efa1c8f3c35cfa2e590ae89e18d50f325bae3499e130c7018baa78860a288",
+      "p50WallMs": 608.3952079999981,
+      "p95WallMs": 609.1923749999987,
+      "peakRssBytes": 927956992,
+      "environment": {
+        "nodeVersion": "v24.12.0",
+        "platform": "darwin",
+        "architecture": "arm64",
+        "cpuCount": 14
+      },
+      "metricCounters": {
+        "targets": 2,
+        "comparisons": 3,
+        "pixelsPerTarget": 659160,
+        "mode": "total",
+        "cacheHits": 5,
+        "cacheMisses": 1,
+        "cacheSingleFlights": 0,
+        "cacheBypasses": 6,
+        "cacheResidentBytes": 2642443,
+        "peakWorkers": 2,
+        "peakActivePixels": 1318320,
+        "projectedBatchInputBytes": 21139544,
+        "callerSourceBytes": 10569772,
+        "ownedSnapshotBytes": 10569772,
+        "batchInputBudgetBytes": 320262144,
+        "peakAdmittedInputBytes": 21139544,
+        "terminalAdmittedInputBytes": 0,
+        "activeAllocationBudgetBytes": 328262144,
+        "peakComparisonManagedBytes": 33021302,
+        "comparisonManagedMemoryBudgetBytes": 648524288,
+        "peakManagedBytes": 35663745,
+        "managedMemoryBudgetBytes": 782742016,
+        "rssBaselineBytes": 807927808,
+        "inFlightPeakRssBytes": 874872832,
+        "inFlightRssDeltaBytes": 66945024
+      }
+    }
+  ],
+  "metricCounters": {
+    "mixedIntakeDocuments": 20,
+    "mixedIntakeMaxSourceConcurrency": 4,
+    "mixedIntakeRunSaves": 2,
+    "legacyFiles": 250,
+    "legacyTerminalApiCalls": 40,
+    "legacyColdReads": 250,
+    "legacyColdParses": 250,
+    "legacyWarmReads": 250,
+    "legacyWarmParses": 0,
+    "legacyWarmRebuilds": 0,
+    "legacyChangeReads": 500,
+    "legacyChangeParses": 1,
+    "legacyChangeRebuilds": 1,
+    "statusActionArtifactReads": 0,
+    "statusActionSerializedBytes": 1276,
+    "statusDetailSerializedBytes": 41897,
+    "mutatingActionInventoryReads": 0,
+    "mutatingStartSerializedBytes": 1276,
+    "mutatingAdvanceSerializedBytes": 1276,
+    "mutatingSubmitSerializedBytes": 1761,
+    "packetEvidenceWorkflowPath": ["implementation", "functional-review", "report"],
+    "packetEvidenceReuseHits": 2,
+    "packetEvidenceGitCommands": 6,
+    "packetEvidenceBinaryDiffRecaptures": 0,
+    "visualPairedWorkloadDigest": "sha256:015ad7ce7efe59cdf281cf9edafbbf2045c66d02700472a1e671a6cd3a95fd17",
+    "visualPairedSerialP95Ms": 388.85858299999927,
+    "visualPairedPoolP95Ms": 212.38012499999968,
+    "visualPairedSerialThroughput": 15.429773862031512,
+    "visualPairedPoolThroughput": 28.251231135681877,
+    "visualPairedMaximumRegressionRatio": 1.1,
+    "visualComparisons": 3,
+    "visualColdCacheHits": 1,
+    "visualColdCacheMisses": 1,
+    "visualColdCacheSingleFlights": 0,
+    "visualColdCacheBypasses": 2,
+    "visualWarmCacheHits": 4,
+    "visualWarmCacheMisses": 0,
+    "visualWarmCacheSingleFlights": 0,
+    "visualWarmCacheBypasses": 4,
+    "visualCacheResidentBytes": 2642443,
+    "visualPeakWorkers": 2,
+    "visualPeakActivePixels": 1318320,
+    "visualProjectedBatchInputBytes": 21139544,
+    "visualCallerSourceBytes": 10569772,
+    "visualOwnedSnapshotBytes": 10569772,
+    "visualBatchInputBudgetBytes": 320262144,
+    "visualPeakAdmittedInputBytes": 21139544,
+    "visualTerminalAdmittedInputBytes": 0,
+    "visualActiveAllocationBudgetBytes": 328262144,
+    "visualPeakComparisonManagedBytes": 33021302,
+    "visualComparisonManagedMemoryBudgetBytes": 648524288,
+    "visualPeakManagedBytes": 35663745,
+    "visualManagedMemoryBudgetBytes": 782742016,
+    "visualManagedMemoryBudgetFormula": "128MiB cache + 320262144B batch caller+owned snapshots + 328262144B active decode/mask/raw/encoded/response allocations; transferred inputs remain in owned snapshots",
+    "visualInFlightPeakRssBytes": 874872832,
+    "visualInFlightRssDeltaBytes": 66945024,
+    "visualRssSamplePolicy": "maximum-delta-same-iteration"
+  }
+}

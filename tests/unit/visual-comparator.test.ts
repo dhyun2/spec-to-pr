@@ -2,7 +2,9 @@ import { PNG } from "pngjs";
 import { describe, expect, it } from "vitest";
 
 import {
+  compareVisualRgba,
   compareVisualPngs,
+  normalizeVisualTargetManifest,
   VisualTargetManifestSchema,
 } from "../../src/visual/visual-comparator.js";
 import { VisualComparisonMetricsSchema } from "../../src/visual/visual-model.js";
@@ -23,12 +25,65 @@ describe("visual comparator v2", () => {
       maskedPixelCount: 0,
       exactMatchRatio: 0.99,
       reviewMatchRatio: 1,
-      threshold: 0.98,
+      threshold: 0.92,
     });
     expect(comparison.status).toBe("passed");
     expect(() => VisualComparisonMetricsSchema.parse(comparison.metrics)).not.toThrow();
     expect(() => PNG.sync.read(comparison.diff)).not.toThrow();
     expect(() => PNG.sync.read(comparison.overlay)).not.toThrow();
+  });
+
+  it("compares validated decoded RGBA without decoding normalized PNGs again", async () => {
+    const baseline = Buffer.from([0, 0, 0, 255, 0, 0, 0, 255]);
+    const actual = Buffer.from(baseline);
+    actual[4] = 255;
+
+    const comparison = await compareVisualRgba({
+      baseline: { data: baseline, width: 2, height: 1 },
+      actual: { data: actual, width: 2, height: 1 },
+    });
+
+    expect(comparison.metrics).toMatchObject({
+      width: 2,
+      height: 1,
+      exactMatchRatio: 0.5,
+      reviewMatchRatio: 0.5,
+    });
+  });
+
+  it("checkpoints the actual comparator-owned input, mask, and output buffers", async () => {
+    const checkpoints: Array<{
+      stage: string;
+      managedBytes: number;
+      rssBytes: number;
+      ownership: Record<string, number>;
+    }> = [];
+    await compareVisualRgba({
+      baseline: { data: Buffer.alloc(8), width: 2, height: 1 },
+      actual: { data: Buffer.alloc(8), width: 2, height: 1 },
+      onMemoryCheckpoint: (checkpoint) => checkpoints.push(checkpoint),
+    });
+
+    expect(checkpoints).toContainEqual({
+      stage: "comparator-rgba-outputs",
+      managedBytes: 34,
+      rssBytes: expect.any(Number),
+      ownership: {
+        decodedInputs: 16,
+        mask: 2,
+        diffRgba: 8,
+        overlayRgba: 8,
+      },
+    });
+    expect(checkpoints.at(-1)).toMatchObject({
+      stage: "comparator-encoded-outputs",
+      ownership: {
+        decodedInputs: 16,
+        mask: 2,
+        diffRgba: 8,
+        overlayRgba: 8,
+      },
+    });
   });
 
   it("rejects dimension mismatch instead of cropping or resizing", async () => {
@@ -102,14 +157,33 @@ describe("visual comparator v2", () => {
     ).rejects.toThrow(/VISUAL_ALL_PIXELS_MASKED/);
   });
 
-  it("does not allow a caller to lower the runtime 98 percent threshold", async () => {
-    await expect(
-      compareVisualPngs({
-        baseline: solidPng(1, 1, [0, 0, 0, 255]),
-        actual: solidPng(1, 1, [0, 0, 0, 255]),
-        reviewThreshold: 0.5,
-      }),
-    ).rejects.toThrow();
+  it("passes exactly 0.92 and fails 0.9199", async () => {
+    const baseline = solidPng(100, 100, [0, 0, 0, 255]);
+    const atBoundary = await compareVisualPngs({
+      baseline,
+      actual: pngWithChangedPixels(100, 100, 800),
+    });
+    const belowBoundary = await compareVisualPngs({
+      baseline,
+      actual: pngWithChangedPixels(100, 100, 801),
+    });
+
+    expect(atBoundary.metrics.reviewMatchRatio).toBe(0.92);
+    expect(atBoundary.metrics.threshold).toBe(0.92);
+    expect(atBoundary.status).toBe("passed");
+    expect(belowBoundary.metrics.reviewMatchRatio).toBe(0.9199);
+    expect(belowBoundary.status).toBe("failed");
+  });
+
+  it("does not allow an untyped caller override to change the runtime visual gate", async () => {
+    const comparison = await compareVisualPngs({
+      baseline: solidPng(100, 100, [0, 0, 0, 255]),
+      actual: pngWithChangedPixels(100, 100, 800),
+      reviewThreshold: 1,
+    } as unknown as Parameters<typeof compareVisualPngs>[0]);
+
+    expect(comparison.metrics.threshold).toBe(0.92);
+    expect(comparison.status).toBe("passed");
   });
 
   it("uses one baseline-neutral target contract for Figma and legacy screenshots", () => {
@@ -134,6 +208,31 @@ describe("visual comparator v2", () => {
         baselineKind: "legacy-screenshot",
       }).baselineKind,
     ).toBe("legacy-screenshot");
+    expect(() =>
+      VisualTargetManifestSchema.parse({
+        ...common,
+        baselineKind: "figma",
+        reviewThreshold: 0.98,
+      }),
+    ).toThrow();
+  });
+
+  it("normalizes a stored legacy target threshold before a new comparison", () => {
+    expect(
+      normalizeVisualTargetManifest({
+        targetId: "checkout-default",
+        name: "Checkout",
+        state: "default",
+        route: "/checkout",
+        baselineKind: "figma",
+        baselinePath: "visual/baseline.png",
+        viewport: { width: 1440, height: 900 },
+        deviceScaleFactor: 1,
+        fixture: "fixtures/checkout.json",
+        masks: [],
+        reviewThreshold: 0.98,
+      }).reviewThreshold,
+    ).toBe(0.92);
   });
 });
 
@@ -144,6 +243,17 @@ function solidPng(width: number, height: number, rgba: [number, number, number, 
     image.data[offset + 1] = rgba[1];
     image.data[offset + 2] = rgba[2];
     image.data[offset + 3] = rgba[3];
+  }
+  return PNG.sync.write(image);
+}
+
+function pngWithChangedPixels(width: number, height: number, changedPixels: number): Buffer {
+  const image = new PNG({ width, height });
+  for (let pixel = 0; pixel < width * height; pixel += 1) {
+    image.data[pixel * 4 + 3] = 255;
+  }
+  for (let pixel = 0; pixel < changedPixels; pixel += 1) {
+    image.data[pixel * 4] = 255;
   }
   return PNG.sync.write(image);
 }

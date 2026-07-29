@@ -1,0 +1,9 @@
+{
+  "name": "@frontend/ui",
+  "version": "1.2.3",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./icons/vue": "./icons/vue.js"
+  }
+}

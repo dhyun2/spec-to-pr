@@ -17,7 +17,17 @@ import {
   LEGACY_SOURCE_DIGEST_ALGORITHM_V1,
   LEGACY_SOURCE_DIGEST_ALGORITHM_V2,
   discoverLegacySourceGraph,
+  discoverLegacySourceGraphFromSnapshot,
 } from "./legacy-source-graph.js";
+import {
+  LegacySourceCache,
+  LegacySourceEnvironmentReferenceSchema,
+  LegacySourceManifestSchema,
+  LegacyResolutionDecisionSchema,
+  MAX_LEGACY_RESOLUTION_DECISIONS,
+  currentLegacySourceManifest,
+  type LegacySourceManifest,
+} from "./legacy-source-cache.js";
 
 const MAX_LEGACY_FILE_BYTES = 2 * 1024 * 1024;
 export type LegacyInventoryLimits = {
@@ -100,6 +110,16 @@ export const LegacyInventorySchema = z
     sourceDigestAlgorithm: z
       .enum([LEGACY_SOURCE_DIGEST_ALGORITHM_V1, LEGACY_SOURCE_DIGEST_ALGORITHM_V2])
       .optional(),
+    sourceManifest: LegacySourceManifestSchema.optional(),
+    sourceManifestDigest: z
+      .string()
+      .regex(/^sha256:[a-f0-9]{64}$/)
+      .optional(),
+    sourceEnvironmentRefs: z.array(LegacySourceEnvironmentReferenceSchema).optional(),
+    sourceResolutionDecisions: z
+      .array(LegacyResolutionDecisionSchema)
+      .max(MAX_LEGACY_RESOLUTION_DECISIONS)
+      .optional(),
     visitedDirectories: z.number().int().nonnegative().default(0),
     visitedEntries: z.number().int().nonnegative().default(0),
     scannedFiles: z.number().int().nonnegative(),
@@ -117,55 +137,55 @@ export const LegacyInventorySchema = z
 
 export type LegacyFeatureEntry = z.infer<typeof LegacyFeatureEntrySchema>;
 export type LegacyInventory = z.infer<typeof LegacyInventorySchema>;
+export type LegacyInventoryBuildOptions = {
+  sourceCache?: LegacySourceCache;
+};
 
 export async function buildLegacyInventory(
   root: string,
   limitOverrides: Partial<LegacyInventoryLimits> = {},
+  options: LegacyInventoryBuildOptions = {},
 ): Promise<LegacyInventory> {
   const limits = { ...DEFAULT_LEGACY_INVENTORY_LIMITS, ...limitOverrides };
-  const graph = await discoverLegacySourceGraph(root, {
-    maxFiles: limits.maxSourceFiles,
-    maxBytes: limits.maxSourceBytes,
-    maxDepth: limits.maxDepth,
-    maxElapsedMs: limits.maxElapsedMs,
-  });
-  const apiCandidates = discoverLegacyApiCandidates(graph);
-  const productionFeaturePaths = new Set(
-    productionReachableOwnedFiles(graph).map((file) =>
-      path.relative(graph.featureRoot, file.absolutePath).split(path.sep).join("/"),
-    ),
+  const sourceCache = options.sourceCache ?? new LegacySourceCache();
+  sourceCache.beginSnapshot();
+  sourceCache.recordSemanticRebuild();
+  const graph = await discoverLegacySourceGraphFromSnapshot(
+    root,
+    {
+      maxFiles: limits.maxSourceFiles,
+      maxBytes: limits.maxSourceBytes,
+      maxDepth: limits.maxDepth,
+      maxElapsedMs: limits.maxElapsedMs,
+      maxDirectories: limits.maxDirectories,
+      maxEntries: limits.maxEntries,
+    },
+    { sourceCache },
   );
-  const files = await collectSourceFiles(root, limits);
+  const apiCandidates = discoverLegacyApiCandidates(graph);
+  const productionFiles = productionReachableOwnedFiles(graph);
   const entries = new Map<string, LegacyFeatureEntry>();
   let scannedBytes = 0;
   let scannedFiles = 0;
-  let truncated = files.truncated || graph.truncated;
+  let truncated = graph.truncated;
 
-  scan: for (const relativePath of files.paths) {
-    if (!productionFeaturePaths.has(relativePath)) continue;
-    const absolutePath = path.join(root, relativePath);
-    if (files.startedAt + limits.maxElapsedMs <= Date.now()) {
+  scan: for (const file of productionFiles) {
+    const relativePath = path
+      .relative(graph.featureRoot, file.absolutePath)
+      .split(path.sep)
+      .join("/");
+    const byteLength = Buffer.byteLength(file.content, "utf8");
+    if (byteLength > MAX_LEGACY_FILE_BYTES) {
       truncated = true;
       break;
     }
-    const details = await lstat(absolutePath);
-    if (!details.isFile() || details.isSymbolicLink() || details.size > MAX_LEGACY_FILE_BYTES) {
+    if (scannedBytes + byteLength > limits.maxSourceBytes) {
       truncated = true;
       break;
     }
-    if (scannedBytes + details.size > limits.maxSourceBytes) {
-      truncated = true;
-      break;
-    }
-    const bytes = await readFile(absolutePath);
-    if (scannedBytes + bytes.byteLength > limits.maxSourceBytes) {
-      truncated = true;
-      break;
-    }
-    const content = bytes.toString("utf8");
-    scannedBytes += bytes.byteLength;
+    scannedBytes += byteLength;
     scannedFiles += 1;
-    for (const entry of discoverFeatures(relativePath, content)) {
+    for (const entry of discoverFeatures(relativePath, file.content)) {
       if (
         entry.category === "api" &&
         entry.apiAdapter !== "source-generated-client" &&
@@ -220,13 +240,17 @@ export async function buildLegacyInventory(
       }),
     ];
   });
-  return LegacyInventorySchema.parse({
+  const inventory = LegacyInventorySchema.parse({
     version: 3,
     rootDigest,
     sourceDigest: rootDigest,
     sourceDigestAlgorithm: graph.digestAlgorithm,
-    visitedDirectories: files.visitedDirectories,
-    visitedEntries: files.visitedEntries,
+    sourceManifest: graph.sourceManifest,
+    sourceManifestDigest: graph.sourceManifest.manifestDigest,
+    sourceEnvironmentRefs: graph.environmentRefs,
+    sourceResolutionDecisions: graph.resolutionDecisions,
+    visitedDirectories: graph.visitedDirectories,
+    visitedEntries: graph.visitedEntries,
     scannedFiles: Math.max(scannedFiles, graph.files.length),
     scannedBytes: Math.max(
       scannedBytes,
@@ -241,6 +265,7 @@ export async function buildLegacyInventory(
     apiCandidates,
     supportingDependencies,
   });
+  return freezeInventoryManifest(inventory);
 }
 
 function semanticAdapter(
@@ -255,11 +280,52 @@ function semanticAdapter(
 export async function assertLegacyInventoryFresh(
   root: string,
   pinned: LegacyInventory,
+  options: LegacyInventoryBuildOptions = {},
 ): Promise<LegacyInventory> {
   if (pinned.truncated) {
     throw new Error("LEGACY_INVENTORY_TRUNCATED: narrow the migration scope and restart intake");
   }
-  const current = await buildLegacyInventory(root);
+  const sourceCache = options.sourceCache ?? new LegacySourceCache();
+  if (
+    pinned.version === 3 &&
+    pinned.sourceDigestAlgorithm === LEGACY_SOURCE_DIGEST_ALGORITHM_V2 &&
+    pinned.sourceManifest !== undefined &&
+    pinned.sourceEnvironmentRefs !== undefined &&
+    pinned.sourceResolutionDecisions !== undefined &&
+    pinned.sourceManifestDigest === pinned.sourceManifest.manifestDigest
+  ) {
+    const currentManifest = await currentLegacySourceManifest(
+      root,
+      pinned.sourceManifest,
+      sourceCache,
+      {
+        maxFiles: DEFAULT_LEGACY_INVENTORY_LIMITS.maxSourceFiles,
+        maxBytes: DEFAULT_LEGACY_INVENTORY_LIMITS.maxSourceBytes,
+        maxDepth: DEFAULT_LEGACY_INVENTORY_LIMITS.maxDepth,
+        maxElapsedMs: DEFAULT_LEGACY_INVENTORY_LIMITS.maxElapsedMs,
+        maxDirectories: DEFAULT_LEGACY_INVENTORY_LIMITS.maxDirectories,
+        maxEntries: DEFAULT_LEGACY_INVENTORY_LIMITS.maxEntries,
+      },
+      {
+        environmentReferences: pinned.sourceEnvironmentRefs ?? [],
+        resolutionDecisions: pinned.sourceResolutionDecisions,
+      },
+    );
+    if (currentManifest.truncated) {
+      throw new Error("LEGACY_INVENTORY_TRUNCATED: narrow the migration scope and restart intake");
+    }
+    if (currentManifest.manifest.manifestDigest === pinned.sourceManifestDigest) {
+      return pinned;
+    }
+    const rebuilt = await buildLegacyInventory(root, {}, { sourceCache });
+    if (rebuilt.truncated) {
+      throw new Error("LEGACY_INVENTORY_TRUNCATED: narrow the migration scope and restart intake");
+    }
+    throw new Error(
+      "LEGACY_SOURCE_CHANGED: restore the legacy source or restart intake from its new state",
+    );
+  }
+  const current = await buildLegacyInventory(root, {}, { sourceCache });
   if (current.truncated) {
     throw new Error("LEGACY_INVENTORY_TRUNCATED: narrow the migration scope and restart intake");
   }
@@ -277,6 +343,15 @@ export async function assertLegacyInventoryFresh(
     );
   }
   return current;
+}
+
+function freezeInventoryManifest(inventory: LegacyInventory): LegacyInventory {
+  if (inventory.sourceManifest === undefined) return inventory;
+  const manifest = inventory.sourceManifest as LegacySourceManifest;
+  manifest.files.forEach((file) => Object.freeze(file));
+  Object.freeze(manifest.files);
+  Object.freeze(manifest);
+  return inventory;
 }
 
 async function legacyV2SourceDigest(root: string): Promise<`sha256:${string}`> {

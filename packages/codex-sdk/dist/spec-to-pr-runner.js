@@ -7,6 +7,7 @@ import { executeBudgetedBoundaryTurns, } from "./boundary-runner.js";
 import { UsageCalibrationStore, calibrateTokenRange, isUsageCalibrationReadEnabled, isUsageCalibrationEligible, readCalibrationBestEffort, recordCalibrationBestEffort, } from "./usage-calibration.js";
 import { defaultTokenRangeForWorkload, effectiveHardLimitForWorkload, estimateSdkWorkload, } from "./workload-budget.js";
 import { CODEX_WORKFLOW_TOOL_NAMES, buildCodexActionEnvelopeInstructions, } from "./workflow-policy.js";
+export const DEFAULT_BLOCKED_DIAGNOSTIC_TOKEN_RESERVE = 24_000;
 export async function runSpecToPrWithCodex(input) {
     validateSpecToPrRunInput(input);
     const composableSources = normalizeComposableSources(input);
@@ -63,6 +64,7 @@ export async function runSpecToPrWithCodex(input) {
         ])),
         requiredValidations,
         maxTurns: input.maxTurns ?? 12,
+        blockedDiagnosticTokenReserve: input.blockedDiagnosticTokenReserve ?? DEFAULT_BLOCKED_DIAGNOSTIC_TOKEN_RESERVE,
         inspectBlockedDiagnosticPreflight: () => inspectBlockedDiagnosticPreflight(input.workingDirectory, input.env),
     });
     const usage = sdkUsage(result.usage);
@@ -198,13 +200,14 @@ export function buildSpecToPrPrompt(input) {
         "When submitting evidence, include an optional skill in guidanceTrace.appliedSkills only when it was actually applied. Do not copy unused skill hints or recommendations.",
         "Use workflow_advance until it returns an external action or terminal status. Fulfill external actions and return compact evidence with workflow_submit; use workflow_status to resume or inspect blockers.",
         "When workflow_status includes workspaceBinding, treat its repositoryRoot, sourceBranch, targetBranch, remoteName, remoteUrl, baseSha, and publicationTarget as immutable. Use those exact values for workflow_publish preview and execute; never infer or substitute a different branch, remote, host, or repository.",
+        "SDK publication preflight is advisory only and cannot authorize a later mutation; workflow_publish must resolve its own authoritative execution fence after all read-only checks.",
         buildCodexActionEnvelopeInstructions({
             publication,
             includeReviewAgents: input.enableReviewAgents !== false,
             includeDesignReview: hasUiScope,
         }),
         'For API-backed UI, generate distinct physical non-empty project-local types, schemas, wrappers, mocks, and a passing JSON contract-test result before UI work and UI completion evidence; path, symlink, and hard-link aliases do not count separately. Submit workflow_submit with kind: "api-ready", status: "passed", one stable implementationContextId, artifactPaths, apiArtifacts with nonempty types/schemas/wrappers/mocks/contractTests arrays, and operation-aware operations. Continue UI in the same context and repeat that implementationContextId on final implementation only after workflow_status records the checkpoint; apiReady: true alone is not evidence. Final implementation must include apiCoverage mapping every documented operation to production call sites, mock handlers, and executable evidence, or an explicit blocking gap.',
-        "Treat deliveryProfile.sourceProvenance as immutable pinned input evidence. For each UI state, declare visualTargets with baseline kind/path, route, state, fixture, viewport, deviceScaleFactor, and only justified masks. After capturing a target screenshot, answer compare-visuals with a capture manifest that repeats targetId, route, state, viewport, deviceScaleFactor, and fixture and records provider, ISO capturedAt, actualPath, and its sha256 actualDigest. The runtime rejects target drift or digest mismatch, then computes alpha-aware exact/review scores, diff, and overlay, requires at least 98%, and permits three total comparison attempts: the initial comparison plus at most two repairs. Never submit caller-computed scores or verdicts.",
+        "Treat deliveryProfile.sourceProvenance as immutable pinned input evidence. For each UI state, declare visualTargets with baseline kind/path, route, state, fixture, viewport, deviceScaleFactor, and only justified masks. After capturing a target screenshot, answer compare-visuals with a capture manifest that repeats targetId, route, state, viewport, deviceScaleFactor, and fixture and records provider, ISO capturedAt, actualPath, and its sha256 actualDigest. The runtime rejects target drift or digest mismatch without consuming an attempt, then computes alpha-aware exact/review scores, diff, and overlay at the fixed 92% threshold. Run the initial comparison plus at most two repairs automatically without pausing; a third valid failure leaves the Run blocked and proceeds only to truthful blocked-diagnostic reporting/publication when preconditions allow. Focused design-system, geometry, interaction, and accessibility assertions remain independent gates. Never submit caller-computed scores or verdicts.",
         "When deliveryProfile.draftEvidenceBundle is present, use it as the stable feature-scoped review bundle. Keep product code and test source in their existing project paths; store only compact final contracts, JSON evidence, final visual PNGs, and reviewer report material below the bundle root. The manifest records run ID and digests, but no directory name includes a run ID. For legacy migration, create and submit the bundle manifest plus an OpenSpec proposal, delta spec, and tasks document as draftBundle contract evidence. Never place credentials, headers, full HAR files, raw browser logs, or transient output in that bundle.",
         "For brief, legacy, and feature delivery, include measured lab performance and Web Vitals evidence plus an explicit field-data source or unavailable reason. The final canonical pr-report-v2.1 binds source provenance, requirements, changed files, API coverage/gaps, legacy coverage, visual ratios/assets, both independent reviews, performance, feature evidence when applicable, blockers, risks, rollback, and the evidence index to the immutable review packet. Every section is complete, not-run, blocked, or not-applicable; stale packet paths are omitted. A blocked diagnostic uses the same 15-section PR shape and identifies the stopped stage and exact unblock action.",
         "Run the fast default gates selected by workflow applicability. Run full matrices, hardening suites, package verification, and cross-host manifest validation only for an explicit release workflow.",
@@ -296,6 +299,17 @@ export function validateSpecToPrRunInput(input) {
     }
     if (input.maxTurns !== undefined && (!Number.isInteger(input.maxTurns) || input.maxTurns <= 0)) {
         throw new Error("maxTurns must be a positive integer");
+    }
+    if ((input.publication ?? "draft") === "draft" &&
+        input.maxTurns !== undefined &&
+        input.maxTurns < 2) {
+        throw new Error("draft publication requires maxTurns to be at least 2");
+    }
+    if (input.blockedDiagnosticTokenReserve !== undefined &&
+        (!Number.isInteger(input.blockedDiagnosticTokenReserve) ||
+            input.blockedDiagnosticTokenReserve <= 0 ||
+            input.blockedDiagnosticTokenReserve >= effectiveHardLimitForWorkload("XS"))) {
+        throw new Error("blockedDiagnosticTokenReserve must be a positive integer below the smallest supported hard limit");
     }
     if (input.usageCalibration !== false) {
         const usageHistoryPath = resolveUsageHistoryPath(input);
@@ -417,16 +431,16 @@ function gitOutput(workingDirectory, args, env) {
 function supportedReviewHost(remoteUrl, env) {
     if (remoteUrl === undefined)
         return undefined;
-    const host = remoteHost(remoteUrl);
-    if (host === undefined)
+    const hostname = remoteHost(remoteUrl);
+    if (hostname === undefined)
         return undefined;
     const override = env["SPEC_TO_PR_GIT_HOST"]?.trim().toLowerCase();
     if (override === "github" || override === "gitlab")
-        return override;
-    if (host === "github.com")
-        return "github";
-    if (host === "gitlab.com")
-        return "gitlab";
+        return { provider: override, hostname };
+    if (hostname === "github.com")
+        return { provider: "github", hostname };
+    if (hostname === "gitlab.com")
+        return { provider: "gitlab", hostname };
     return undefined;
 }
 function remoteHost(remoteUrl) {
@@ -442,21 +456,32 @@ function remoteHost(remoteUrl) {
     }
 }
 function hasExistingPublisherCredential(host, env) {
-    const names = host === "github" ? ["GITHUB_TOKEN", "GH_TOKEN"] : ["GITLAB_TOKEN", "GITLAB_PRIVATE_TOKEN"];
+    const names = host.provider === "github"
+        ? ["GITHUB_TOKEN", "GH_TOKEN"]
+        : ["GITLAB_TOKEN", "GITLAB_PRIVATE_TOKEN"];
     if (names.some((name) => (env[name]?.trim().length ?? 0) > 0))
         return true;
-    const command = host === "github" ? "gh" : "glab";
+    const credential = credentialCommand(host.provider, host.hostname);
     try {
-        return (execFileSync(command, ["auth", "token"], {
+        return isCredentialOutputAvailable(execFileSync(credential.command, credential.args, {
             encoding: "utf8",
             env,
             stdio: ["ignore", "pipe", "ignore"],
             timeout: 10_000,
-        }).trim().length > 0);
+        }));
     }
     catch {
         return false;
     }
+}
+function credentialCommand(provider, hostname) {
+    return provider === "github"
+        ? { command: "gh", args: ["auth", "token", "--hostname", hostname] }
+        : { command: "glab", args: ["config", "get", "token", "--host", hostname] };
+}
+function isCredentialOutputAvailable(output) {
+    const normalized = output.trim();
+    return normalized.length > 0 && !/^usage:/im.test(normalized) && !/^help:/im.test(normalized);
 }
 function requiredValidationsForInput(input) {
     const prompt = input.prompt ?? "";
@@ -744,7 +769,7 @@ function modeInstructions(mode) {
         ].join(" ");
     }
     if (mode === "figma") {
-        return "Figma mode: before the one durable workflow_start, resolve the canonical clean codex/* workspace from the requested target, pin its base/remote and every supplied Figma URL. Use the connected Figma capability to capture every URL's real nodes, logical geometry, export scale/bitmap, variables, screenshots, components, fonts, and assets. Then, before contracts, submit exactly one figma-bundle with provider=host-connected-figma, ISO capturedAt, complete fileUrls/nodeIds, capturedComponents, strict designMapping, manifestPath, actual PNG artifacts, and visualTargets. Map every component to a verifiable design-system export, digest-bound canonical asset, or explicit exception. Implement deterministic mock data using {deterministic:true, fixtures:[{id,path,sha256}]} and bind every target to a consumed named fixture. Capture at logical geometry only after fixtures/fonts/assets load and emit current-packet receipts. Runtime owns sRGB normalization and the 98% comparison. On a valid failure, modify and commit implementation, submit a fresh packet, and recapture through implementation-repair; acquisition errors consume no attempt and valid comparisons are capped at three. Publish pr-report-v2.1 only with the exact pinned workspace branches and remote; do not add real API, full performance, or feature-video work by default.";
+        return "Figma mode: before the one durable workflow_start, resolve the canonical clean codex/* workspace from the requested target, pin its base/remote and every supplied Figma URL. Use the connected Figma capability to capture every URL's real nodes, logical geometry, export scale/bitmap, variables, screenshots, components, fonts, and assets. Then, before contracts, submit exactly one figma-bundle with provider=host-connected-figma, ISO capturedAt, complete fileUrls/nodeIds, capturedComponents, strict designMapping, manifestPath, actual PNG artifacts, and visualTargets. Map every component to a verifiable design-system export, digest-bound canonical asset, or explicit exception. Implement deterministic mock data using {deterministic:true, fixtures:[{id,path,sha256}]} and bind every target to a consumed named fixture. Capture at logical geometry only after fixtures/fonts/assets load and emit current-packet receipts. Runtime owns sRGB normalization and the fixed 92% comparison. On either of the first two valid failures, modify and commit implementation, submit a fresh packet, and recapture through implementation-repair without pausing for the user; acquisition errors consume no attempt. A third valid failure terminally blocks the Run, skips design review, and preserves equal-size baseline/current plus separate diff/overlay media in a truthful blocked draft when publication preconditions allow. Focused design-system and accessibility assertions remain independent gates. Publish pr-report-v2.1 only with the exact pinned workspace branches and remote; do not add real API, full performance, or feature-video work by default.";
     }
     return "Auto mode: keep evidence proportional to the classified change and do not activate mode-specific gates without explicit input.";
 }

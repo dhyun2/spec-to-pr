@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { link, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, link, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -281,6 +281,71 @@ describe("Codex SDK workflow policy", () => {
       ).toEqual({ eligible: false, reason: "working-tree-not-clean" });
     } finally {
       await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("treats SDK publication preflight as advisory instead of mutation authority", () => {
+    const prompt = buildSpecToPrPrompt({
+      workingDirectory: "/tmp/project",
+      prompt: "Implement and publish the change.",
+      publication: "draft",
+    });
+
+    expect(prompt).toContain("SDK publication preflight is advisory only");
+    expect(prompt).toContain("workflow_publish must resolve its own authoritative execution fence");
+  });
+
+  it("uses an exact-host GitLab credential command for blocked diagnostic preflight", async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-sdk-glab-"));
+    const binDirectory = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-sdk-glab-bin-"));
+    const commandLog = path.join(binDirectory, "glab-args.txt");
+    const git = (...args: string[]) =>
+      execFileSync("git", args, {
+        cwd: directory,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
+    try {
+      const glab = path.join(binDirectory, "glab");
+      await writeFile(
+        glab,
+        [
+          "#!/bin/sh",
+          `printf '%s\\n' \"$@\" > \"${commandLog}\"`,
+          '[ "$1" = "config" ] && [ "$2" = "get" ] && [ "$3" = "token" ] && [ "$4" = "--host" ] && [ "$5" = "gitlab.internal.example" ] || exit 1',
+          "printf 'glpat-keyring-token\\n'",
+        ].join("\n"),
+      );
+      await chmod(glab, 0o755);
+      git("init", "--initial-branch=main");
+      git("config", "user.email", "sdk-test@example.test");
+      git("config", "user.name", "SDK Test");
+      await writeFile(path.join(directory, "app.ts"), "export const value = 1;\n");
+      git("add", "app.ts");
+      git("commit", "-m", "base");
+      git("remote", "add", "origin", "git@gitlab.internal.example:team/repo.git");
+      git("checkout", "-b", "codex/sdk-glab-preflight");
+      await writeFile(path.join(directory, "app.ts"), "export const value = 2;\n");
+      git("add", "app.ts");
+      git("commit", "-m", "feature");
+
+      const result = inspectBlockedDiagnosticPreflight(directory, {
+        PATH: `${binDirectory}:${process.env.PATH ?? ""}`,
+        SPEC_TO_PR_GIT_HOST: "gitlab",
+      });
+
+      expect(result).toMatchObject({
+        eligible: true,
+        sourceBranch: "codex/sdk-glab-preflight",
+        targetBranch: "main",
+      });
+      expect(await readFile(commandLog, "utf8")).toBe(
+        "config\nget\ntoken\n--host\ngitlab.internal.example\n",
+      );
+      expect(JSON.stringify(result)).not.toContain("glpat-keyring-token");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+      await rm(binDirectory, { recursive: true, force: true });
     }
   });
 
@@ -618,6 +683,8 @@ describe("Codex SDK workflow policy", () => {
       "react-best-practices",
       "--skill",
       "api-generator",
+      "--blocked-diagnostic-token-reserve",
+      "24000",
     ];
 
     try {
@@ -641,8 +708,31 @@ describe("Codex SDK workflow policy", () => {
         openApiUrls: ["https://api.example.com/openapi.yaml"],
         guidancePaths: ["AGENTS.md", "docs/architecture/ARCHITECTURE.md"],
         skillHints: ["react-best-practices", "api-generator"],
+        blockedDiagnosticTokenReserve: 24_000,
       }),
     ]);
+  });
+
+  it("rejects a draft run without a finalization turn before Codex starts", () => {
+    expect(() =>
+      validateSpecToPrRunInput({
+        workingDirectory: "/tmp/project",
+        publication: "draft",
+        maxTurns: 1,
+      }),
+    ).toThrow(/draft publication requires maxTurns to be at least 2/);
+  });
+
+  it("requires a bounded positive blocked-diagnostic reserve", () => {
+    for (const blockedDiagnosticTokenReserve of [0, 24_000.5, 50_000]) {
+      expect(() =>
+        validateSpecToPrRunInput({
+          workingDirectory: "/tmp/project",
+          publication: "none",
+          blockedDiagnosticTokenReserve,
+        }),
+      ).toThrow(/blockedDiagnosticTokenReserve/);
+    }
   });
 
   it("always activates UI validation for the full brief contract", () => {
@@ -733,7 +823,7 @@ describe("Codex SDK workflow policy", () => {
     expect(prompt).toContain("figma-bundle");
     expect(prompt).toContain("before contracts");
     expect(prompt).toContain("deterministic mock data");
-    expect(prompt).toContain("98%");
+    expect(prompt).toContain("92%");
     expect(prompt).toContain("compare-visuals");
   });
 

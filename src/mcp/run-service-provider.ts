@@ -11,9 +11,11 @@ import { StageService } from "../application/stage-service.js";
 import { WorkflowService } from "../application/workflow-service.js";
 import { SourceSnapshotStore } from "../source-registry/snapshot-store.js";
 import { SqliteRunStore } from "../store/sqlite-run-store.js";
+import { RuntimeMetricsRecorder } from "../runtime/performance-instrumentation.js";
 
 export type Services = {
   workflowService: WorkflowService;
+  metrics: RuntimeMetricsRecorder;
 };
 
 export type ServicesProvider = () => Promise<Services>;
@@ -27,16 +29,24 @@ export function createLazyServicesProvider(): ServicesProvider {
     }
 
     const dataDirectory = resolveDataDirectory();
-    const runStore = new SqliteRunStore(path.join(dataDirectory, "runs.sqlite3"));
-    const artifactStore = new ArtifactBlobStore(path.join(dataDirectory, "artifacts"));
+    const metrics = new RuntimeMetricsRecorder();
+    const runStore = new SqliteRunStore(path.join(dataDirectory, "runs.sqlite3"), metrics);
+    const artifactStore = new ArtifactBlobStore(path.join(dataDirectory, "artifacts"), metrics);
     const runService = new RunService(runStore, { pluginVersion: packageJson.version });
     const intakeRequestService = new IntakeRequestService(
       runStore,
       new SourceSnapshotStore(path.join(dataDirectory, "source-snapshots")),
       artifactStore,
     );
-    const stageService = new StageService(runStore);
-    const publisherService = new PublisherService(runStore, artifactStore);
+    const stageService = new StageService(runStore, undefined, metrics);
+    const publisherService = new PublisherService(
+      runStore,
+      artifactStore,
+      undefined,
+      undefined,
+      undefined,
+      metrics,
+    );
     const archiveService = new OpenSpecArchiveService(runStore, artifactStore);
 
     services = {
@@ -48,7 +58,9 @@ export function createLazyServicesProvider(): ServicesProvider {
         stageService,
         publisherService,
         archiveService,
+        metrics,
       }),
+      metrics,
     };
 
     return services;

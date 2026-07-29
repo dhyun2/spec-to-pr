@@ -50,29 +50,30 @@ node dist/cli.js \
 
 Options:
 
-| Option                   | Meaning                                                                           |
-| ------------------------ | --------------------------------------------------------------------------------- |
-| `--cwd <path>`           | target repository; required                                                       |
-| `--prompt <text>`        | requested change or extra constraints                                             |
-| `--mode <mode>`          | `auto`, `brief`, `legacy`, `feature`, or `figma`                                  |
-| `--change-kind <kind>`   | `auto`, `feature`, `fix`, `refactor`, `migration`, `design`, or `docs`            |
-| `--brief <path>`         | brief/spec source                                                                 |
-| `--legacy-project <p>`   | separate read-only legacy project root                                            |
-| `--legacy-network <p>`   | project-local bounded HAR/request JSON for the scoped legacy flow                 |
-| `--docs <path>`          | repeatable supporting documentation source                                        |
-| `--figma <url>`          | Figma file or node URL                                                            |
-| `--openapi <path>`       | repeatable OpenAPI source                                                         |
-| `--openapi-url <url>`    | repeatable HTTPS OpenAPI or Swagger UI source                                     |
-| `--guidance <path>`      | repeatable explicit project-guidance source                                       |
-| `--skill <name>`         | repeatable optional installed-skill hint                                          |
-| `--publish`              | create or update a draft PR/MR when ready                                         |
-| `--no-publish`           | stop after evidence-backed implementation and review                              |
-| `--resume <task-id>`     | resume an existing Codex task                                                     |
-| `--model <model>`        | optional model override                                                           |
-| `--max-turns <n>`        | maximum total SDK turns, including optional finalization/formatting; default `12` |
-| `--usage-history <p>`    | numeric-only JSONL calibration path                                               |
-| `--no-usage-calibration` | disable calibration reads and writes                                              |
-| `--no-review-agents`     | omit independent reviewer instructions                                            |
+| Option                                   | Meaning                                                                           |
+| ---------------------------------------- | --------------------------------------------------------------------------------- |
+| `--cwd <path>`                           | target repository; required                                                       |
+| `--prompt <text>`                        | requested change or extra constraints                                             |
+| `--mode <mode>`                          | `auto`, `brief`, `legacy`, `feature`, or `figma`                                  |
+| `--change-kind <kind>`                   | `auto`, `feature`, `fix`, `refactor`, `migration`, `design`, or `docs`            |
+| `--brief <path>`                         | brief/spec source                                                                 |
+| `--legacy-project <p>`                   | separate read-only legacy project root                                            |
+| `--legacy-network <p>`                   | project-local bounded HAR/request JSON for the scoped legacy flow                 |
+| `--docs <path>`                          | repeatable supporting documentation source                                        |
+| `--figma <url>`                          | Figma file or node URL                                                            |
+| `--openapi <path>`                       | repeatable OpenAPI source                                                         |
+| `--openapi-url <url>`                    | repeatable HTTPS OpenAPI or Swagger UI source                                     |
+| `--guidance <path>`                      | repeatable explicit project-guidance source                                       |
+| `--skill <name>`                         | repeatable optional installed-skill hint                                          |
+| `--publish`                              | create or update a draft PR/MR when ready                                         |
+| `--no-publish`                           | stop after evidence-backed implementation and review                              |
+| `--resume <task-id>`                     | resume an existing Codex task                                                     |
+| `--model <model>`                        | optional model override                                                           |
+| `--max-turns <n>`                        | maximum total SDK turns, including optional finalization/formatting; default `12` |
+| `--blocked-diagnostic-token-reserve <n>` | tokens held for finalizing an eligible blocked draft; default `24000`             |
+| `--usage-history <p>`                    | numeric-only JSONL calibration path                                               |
+| `--no-usage-calibration`                 | disable calibration reads and writes                                              |
+| `--no-review-agents`                     | omit independent reviewer instructions                                            |
 
 Without an explicit mode, a legacy root resolves to `legacy`, a brief resolves to `brief`, a Figma URL resolves to `figma`, and other requests resolve to `auto`. All four explicit profiles request draft publication unless `--no-publish` is supplied.
 
@@ -96,7 +97,7 @@ It never asks for the full-project E2E suite by default. A broad command, missin
 
 The runner does not call a SpecToPR Figma microtool. Whenever `figmaUrl` is supplied, Codex uses the Figma capability connected to its host, captures real nodes/screenshots/variables/assets/component context, writes project-local evidence, and submits exactly one `figma-bundle` through `workflow_submit`. The bundle declares `provider: host-connected-figma`, ISO `capturedAt`, matching `fileUrl`, non-empty `nodeIds`, `manifestPath`, and one or more real PNG artifacts. The strict manifest repeats the provenance and lists the PNG `visualPaths`. URL-only assertions, malformed images, repeated bundles, and provider polling are rejected.
 
-Intake pins timestamped `sourceProvenance`. Brief/feature pin the supplied OpenAPI operations; legacy derives bounded API candidates through reported source adapters and uses optional OpenAPI only as enrichment. `--legacy-network` accepts standard HAR JSON, `{requests:[{method,url}]}`, or `[{method,url}]`, bounded to 1 MB and 1,000 requests; runtime binds its digest and adapter into the inventory. A zero-operation legacy inventory produces a complete API section bound to the adapter list and inventory digest. An ambiguous method/path resolves only from a unique scoped OpenAPI/runtime match; otherwise intake returns a durable blocker with no downstream action or submission bypass. Figma and running-legacy baselines declare `visualTargets`; every `compare-visuals` capture repeats target route/state/viewport/device-scale/fixture and records provider, ISO capture time, actual PNG path, and `sha256:` digest. Runtime rejects target drift or digest mismatch and computes alpha-aware exact/review ratios, diff, overlay, a minimum 98% threshold, at most 20% justified masking, and three total comparison attempts (the initial comparison plus at most two repairs). Figma-only uses digest-bound JSON fixtures. Canonical `pr-report-v2.1` JSON and Markdown use 15 sections with explicit section status and stale-packet exclusion; historical v2.1 remains readable, but current publication requires the adapter/digest evidence. GitHub media reuses `spec-to-pr/evidence` and returns upload-commit-SHA-pinned URLs.
+Intake pins timestamped `sourceProvenance`. Brief/feature pin the supplied OpenAPI operations; legacy derives bounded API candidates through reported source adapters and uses optional OpenAPI only as enrichment. `--legacy-network` accepts standard HAR JSON, `{requests:[{method,url}]}`, or `[{method,url}]`, bounded to 1 MB and 1,000 requests; runtime binds its digest and adapter into the inventory. A zero-operation legacy inventory produces a complete API section bound to the adapter list and inventory digest. An ambiguous method/path resolves only from a unique scoped OpenAPI/runtime match; otherwise intake returns a durable blocker with no downstream action or submission bypass. Figma and running-legacy baselines declare `visualTargets`; every `compare-visuals` capture repeats target route/state/viewport/device-scale/fixture and records provider, ISO capture time, actual PNG path, and `sha256:` digest. Runtime rejects target drift or digest mismatch without consuming an attempt and computes alpha-aware exact/review ratios, diff, overlay, a fixed 92% threshold, at most 20% justified masking, and three automatic valid comparison attempts (the initial comparison plus at most two repairs). A third valid failure leaves the Run blocked and preserves the failed media for blocked-diagnostic publication when preconditions allow. Focused design-system and accessibility assertions remain independent gates. Figma-only uses digest-bound JSON fixtures. Canonical `pr-report-v2.1` JSON and Markdown use 15 sections with explicit section status and stale-packet exclusion; historical v2.1 remains readable, but current publication requires the adapter/digest evidence. GitHub media reuses `spec-to-pr/evidence` and returns upload-commit-SHA-pinned URLs.
 
 ## Workflow contract
 
@@ -134,7 +135,7 @@ The SDK pins the first accepted durable Run ID and stops with `run-mismatch` if 
 
 `workflow_publish` is draft-only. Before publication, the runner instructs Codex to use a non-target `codex/*` source branch, commit only intended changes, and require a clean tree with at least one commit beyond the target; runtime preflight enforces the committed delta. It never merges, approves, closes, or marks a review request ready. `workflow_archive` is explicit and requires verified post-merge evidence.
 
-When a draft-intent Run becomes blocked, the SDK may use exactly one remaining turn to publish the blocked diagnostic through `workflow_publish` with `intent: "blocked-diagnostic"`. It does so only when its live local preflight already finds a clean non-target `codex/*` branch, at least one committed change beyond the target, a supported GitHub/GitLab `origin`, existing non-interactive credentials, complete usage below the hard limit, and a remaining `maxTurns` slot. Canonical `github.com` and `gitlab.com` hosts are recognized automatically; every enterprise/custom hostname requires an explicit `SPEC_TO_PR_GIT_HOST` override. Lookalike hostnames are not inferred from substrings. Publication `none`, an existing diagnostic request, a `publish-precondition` blocker, missing usage/budget, or any failed git/credential check receives no finalization turn; the local diagnostic remains authoritative. The finalization status can remain blocked and is never retried recursively.
+When the first authoritative status reports draft publication, the SDK holds one of `maxTurns` and `24000` tokens by default for blocked-diagnostic finalization. Normal work therefore stops/checkpoints at `maxTurns - 1` and the active hard limit less than the reserve; `--blocked-diagnostic-token-reserve <positive-int>` can tune the hold but must remain below the smallest supported hard limit. A draft invocation needs at least two turns. An eligible blocked Run may use the held capacity exactly once to publish through `workflow_publish` with `intent: "blocked-diagnostic"`; completed Runs release it. Preflight failure returns the local blocked result without another model turn. Canonical `github.com` and `gitlab.com` hosts are recognized automatically; every enterprise/custom hostname requires an explicit `SPEC_TO_PR_GIT_HOST` override. Lookalike hostnames are not inferred from substrings. Publication `none`, an existing diagnostic request, a `publish-precondition` blocker, missing usage/budget, or any failed git/credential check receives no finalization turn; the local diagnostic remains authoritative. The finalization status can remain blocked and is never retried recursively, and optional output formatting runs only after finalization.
 
 ## Programmatic use
 

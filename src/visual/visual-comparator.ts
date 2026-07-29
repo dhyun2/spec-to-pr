@@ -4,11 +4,22 @@ import { FigmaCaptureGeometrySchema } from "../figma/figma-capture-contract.js";
 import { IsoDateTimeSchema, Sha256DigestSchema } from "../runtime/scalars.js";
 import { VISUAL_POLICY } from "../workflow/delivery-mode-policy.js";
 import { decodeBoundedPng } from "./png-decoder.js";
+import type { PngImage } from "./png-codec.js";
+import { emitVisualMemoryCheckpoint, type VisualMemoryCheckpointSink } from "./visual-memory.js";
 
 export const DEFAULT_VISUAL_REVIEW_THRESHOLD = VISUAL_POLICY.reviewThreshold;
 export const DEFAULT_VISUAL_PIXEL_TOLERANCE = 0.02;
 export const MAX_VISUAL_MASK_AREA_RATIO = VISUAL_POLICY.maxMaskedAreaRatio;
 export const MAX_VISUAL_REPAIR_ATTEMPTS = VISUAL_POLICY.maxComparisonAttempts;
+
+export const VisualRendererLineageBindingSchema = z
+  .object({
+    visualLineageId: z
+      .string()
+      .regex(/^packet_[a-f0-9]{64}$/, "Expected packet_<64 lowercase hex characters>"),
+    rendererLineageId: Sha256DigestSchema,
+  })
+  .strict();
 
 export const VisualMaskSchema = z
   .object({
@@ -20,7 +31,7 @@ export const VisualMaskSchema = z
   })
   .strict();
 
-export const VisualTargetManifestSchema = z
+export const VisualTargetManifestCoreSchema = z
   .object({
     targetId: z
       .string()
@@ -46,13 +57,16 @@ export const VisualTargetManifestSchema = z
     fixture: z.string().trim().min(1).max(2_000),
     figmaCapture: FigmaCaptureGeometrySchema.optional(),
     masks: z.array(VisualMaskSchema).max(50).default([]),
-    reviewThreshold: z
-      .number()
-      .min(DEFAULT_VISUAL_REVIEW_THRESHOLD)
-      .max(1)
-      .default(DEFAULT_VISUAL_REVIEW_THRESHOLD),
   })
   .strict();
+
+export const VisualTargetManifestCompatibilitySchema = VisualTargetManifestCoreSchema.extend({
+  reviewThreshold: z.number().min(0).max(1).optional(),
+}).strict();
+
+export const VisualTargetManifestSchema = VisualTargetManifestCoreSchema.extend({
+  reviewThreshold: z.literal(VISUAL_POLICY.reviewThreshold).default(VISUAL_POLICY.reviewThreshold),
+}).strict();
 
 export const VisualCaptureSchema = z
   .object({
@@ -74,6 +88,24 @@ export const VisualCaptureSchema = z
       .trim()
       .regex(/\.png$/i),
     actualDigest: Sha256DigestSchema,
+    assertionReportPath: z
+      .string()
+      .trim()
+      .regex(/\.json$/i)
+      .optional(),
+    assertionReportDigest: Sha256DigestSchema.optional(),
+    assertionResultPath: z
+      .string()
+      .trim()
+      .regex(/\.json$/i)
+      .optional(),
+    assertionResultDigest: Sha256DigestSchema.optional(),
+    assertionObservationPath: z
+      .string()
+      .trim()
+      .regex(/\.json$/i)
+      .optional(),
+    assertionObservationDigest: Sha256DigestSchema.optional(),
     receiptPath: z
       .string()
       .trim()
@@ -88,6 +120,25 @@ export const VisualCaptureSchema = z
         code: "custom",
         path: ["receiptPath"],
         message: "Visual receipt path and digest must be supplied together",
+      });
+    }
+    const assertionFields = [
+      capture.assertionReportPath,
+      capture.assertionReportDigest,
+      capture.assertionResultPath,
+      capture.assertionResultDigest,
+      capture.assertionObservationPath,
+      capture.assertionObservationDigest,
+    ];
+    if (
+      assertionFields.some((value) => value === undefined) &&
+      assertionFields.some((value) => value !== undefined)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["assertionReportPath"],
+        message:
+          "UI assertion report, Playwright CLI result, and observation paths and digests must be supplied together",
       });
     }
   });
@@ -109,8 +160,21 @@ export const VisualComparisonMetricsV2Schema = z
   .strict();
 
 export type VisualMask = z.infer<typeof VisualMaskSchema>;
-export type VisualTargetManifest = z.infer<typeof VisualTargetManifestSchema>;
+export type VisualTargetManifest = Omit<
+  z.infer<typeof VisualTargetManifestCompatibilitySchema>,
+  "reviewThreshold"
+> & {
+  reviewThreshold: typeof VISUAL_POLICY.reviewThreshold;
+};
 export type VisualComparisonMetricsV2 = z.infer<typeof VisualComparisonMetricsV2Schema>;
+
+export function normalizeVisualTargetManifest(raw: unknown): VisualTargetManifest {
+  const parsed = VisualTargetManifestCompatibilitySchema.parse(raw);
+  return {
+    ...parsed,
+    reviewThreshold: VISUAL_POLICY.reviewThreshold,
+  };
+}
 
 export type VisualComparisonOutput = {
   status: "passed" | "failed";
@@ -120,18 +184,77 @@ export type VisualComparisonOutput = {
   overlay: Buffer;
 };
 
+export type { VisualMemoryCheckpoint, VisualMemoryCheckpointSink } from "./visual-memory.js";
+
 export async function compareVisualPngs(input: {
   baseline: Buffer;
   actual: Buffer;
   masks?: VisualMask[];
-  reviewThreshold?: number;
   pixelTolerance?: number;
+  onMemoryCheckpoint?: VisualMemoryCheckpointSink;
 }): Promise<VisualComparisonOutput> {
   const [{ createPng, encodePng }, baseline, actual] = await Promise.all([
     import("./png-codec.js"),
     readPng(input.baseline, "baseline"),
     readPng(input.actual, "actual"),
   ]);
+  return compareDecodedVisualPngs({
+    baseline,
+    actual,
+    createPng,
+    encodePng,
+    ...(input.masks === undefined ? {} : { masks: input.masks }),
+    ...(input.pixelTolerance === undefined ? {} : { pixelTolerance: input.pixelTolerance }),
+    ...(input.onMemoryCheckpoint === undefined
+      ? {}
+      : { onMemoryCheckpoint: input.onMemoryCheckpoint }),
+    inputOwnership: {
+      encodedInputs: input.baseline.byteLength + input.actual.byteLength,
+      decodedInputs: baseline.data.byteLength + actual.data.byteLength,
+    },
+    threshold: VISUAL_POLICY.reviewThreshold,
+  });
+}
+
+export async function compareVisualRgba(input: {
+  baseline: PngImage;
+  actual: PngImage;
+  masks?: VisualMask[];
+  pixelTolerance?: number;
+  onMemoryCheckpoint?: VisualMemoryCheckpointSink;
+}): Promise<VisualComparisonOutput> {
+  const { createPng, encodePng } = await import("./png-codec.js");
+  const baseline = validateDecodedVisual(input.baseline, "baseline");
+  const actual = validateDecodedVisual(input.actual, "actual");
+  return compareDecodedVisualPngs({
+    baseline,
+    actual,
+    createPng,
+    encodePng,
+    ...(input.masks === undefined ? {} : { masks: input.masks }),
+    ...(input.pixelTolerance === undefined ? {} : { pixelTolerance: input.pixelTolerance }),
+    ...(input.onMemoryCheckpoint === undefined
+      ? {}
+      : { onMemoryCheckpoint: input.onMemoryCheckpoint }),
+    inputOwnership: {
+      decodedInputs: baseline.data.byteLength + actual.data.byteLength,
+    },
+    threshold: VISUAL_POLICY.reviewThreshold,
+  });
+}
+
+function compareDecodedVisualPngs(input: {
+  baseline: PngImage;
+  actual: PngImage;
+  createPng: (width: number, height: number) => PngImage;
+  encodePng: (image: PngImage) => Buffer;
+  masks?: VisualMask[];
+  pixelTolerance?: number;
+  onMemoryCheckpoint?: VisualMemoryCheckpointSink;
+  inputOwnership: Record<string, number>;
+  threshold: typeof VISUAL_POLICY.reviewThreshold;
+}): VisualComparisonOutput {
+  const { baseline, actual, createPng, encodePng, threshold } = input;
   if (baseline.width !== actual.width || baseline.height !== actual.height) {
     throw new Error(
       `VISUAL_DIMENSION_MISMATCH: baseline is ${baseline.width}x${baseline.height}, actual is ${actual.width}x${actual.height}`,
@@ -143,6 +266,10 @@ export async function compareVisualPngs(input: {
     .max(50)
     .parse(input.masks ?? []);
   const masked = buildMaskBitmap(baseline.width, baseline.height, masks);
+  emitMemoryCheckpoint(input, "comparator-mask", {
+    ...input.inputOwnership,
+    mask: masked.byteLength,
+  });
   const totalPixelCount = baseline.width * baseline.height;
   const maskedPixelCount = masked.reduce((total, value) => total + value, 0);
   const comparedPixelCount = totalPixelCount - maskedPixelCount;
@@ -158,11 +285,6 @@ export async function compareVisualPngs(input: {
     );
   }
 
-  const threshold = z
-    .number()
-    .min(DEFAULT_VISUAL_REVIEW_THRESHOLD)
-    .max(1)
-    .parse(input.reviewThreshold ?? DEFAULT_VISUAL_REVIEW_THRESHOLD);
   const pixelTolerance = z
     .number()
     .min(0)
@@ -170,6 +292,13 @@ export async function compareVisualPngs(input: {
     .parse(input.pixelTolerance ?? DEFAULT_VISUAL_PIXEL_TOLERANCE);
   const diff = createPng(baseline.width, baseline.height);
   const overlay = createPng(baseline.width, baseline.height);
+  const rgbaOutputOwnership = {
+    ...input.inputOwnership,
+    mask: masked.byteLength,
+    diffRgba: diff.data.byteLength,
+    overlayRgba: overlay.data.byteLength,
+  };
+  emitMemoryCheckpoint(input, "comparator-rgba-outputs", rgbaOutputOwnership);
   let exactMatches = 0;
   let reviewMatches = 0;
   let distanceTotal = 0;
@@ -206,13 +335,46 @@ export async function compareVisualPngs(input: {
     threshold,
   });
 
+  const encodedDiff = encodePng(diff);
+  const encodedOverlay = encodePng(overlay);
+  emitMemoryCheckpoint(input, "comparator-encoded-outputs", {
+    ...rgbaOutputOwnership,
+    encodedOutputs: encodedDiff.byteLength + encodedOverlay.byteLength,
+  });
   return {
     status: metrics.reviewMatchRatio >= threshold ? "passed" : "failed",
     metrics,
     maskReasons: [...new Set(masks.map((mask) => mask.reason))],
-    diff: encodePng(diff),
-    overlay: encodePng(overlay),
+    diff: encodedDiff,
+    overlay: encodedOverlay,
   };
+}
+
+function validateDecodedVisual(image: PngImage, role: string): PngImage {
+  if (
+    !Number.isSafeInteger(image.width) ||
+    image.width < 1 ||
+    !Number.isSafeInteger(image.height) ||
+    image.height < 1 ||
+    image.width > Math.floor(Number.MAX_SAFE_INTEGER / image.height / 4) ||
+    !Buffer.isBuffer(image.data) ||
+    image.data.byteLength !== image.width * image.height * 4
+  ) {
+    throw new Error(`VISUAL_INVALID_RGBA: ${role} must contain width x height x 4 decoded bytes`);
+  }
+  return {
+    width: image.width,
+    height: image.height,
+    data: image.data,
+  };
+}
+
+function emitMemoryCheckpoint(
+  input: { onMemoryCheckpoint?: VisualMemoryCheckpointSink },
+  stage: string,
+  ownership: Record<string, number>,
+): void {
+  emitVisualMemoryCheckpoint(input.onMemoryCheckpoint, stage, ownership);
 }
 
 function readPng(content: Buffer, role: string) {

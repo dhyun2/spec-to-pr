@@ -44,7 +44,7 @@ mode: figma
 scope: ui
 figmaUrls: [https://www.figma.com/design/FILE/shop?node-id=12-345, https://www.figma.com/design/FILE/shop?node-id=12-678]
 publication: draft
-Figma를 고정된 모의 데이터로 구현하고 결과 화면과 98% 기준으로 비교한 뒤 초안 PR로 발행해줘.
+Figma를 고정된 모의 데이터로 구현하고 결과 화면과 92% 기준으로 비교한 뒤 초안 PR로 발행해줘.
 ```
 
 ## 전체 프롬프트 예시 <span id="full-prompt-figma"></span>
@@ -70,10 +70,18 @@ publication: draft
 2. **Figma 계약 확정:** 연결된 호스트에서 모든 URL의 노드 ID, 논리 프레임 크기, export bitmap 크기/배율, 변수, 컴포넌트, 화면, 글꼴과 자산을 읽습니다. 썸네일 크기를 브라우저 viewport로 사용하지 않습니다.
 3. **디자인 시스템 연결:** 새 마크업 전에 각 Figma 컴포넌트를 설치된 사내 컴포넌트 export, 해시로 고정한 canonical asset, 또는 명시적 예외에 정확히 한 번 대응시킵니다. `Logo/Normal/nxplus_park` 같은 이름을 CSS로 추측하지 않습니다.
 4. **구현:** `{deterministic:true, fixtures:[{id,path,sha256}]}` 형태의 엄격한 모의 데이터 매니페스트와 별도 JSON fixture를 제출합니다. 모든 화면 상태가 이름 있는 fixture ID와 해시에 연결되어야 합니다.
-5. **화면 비교 및 보정:** 브라우저는 fixture·`document.fonts.ready`·자산 로드를 기다리고 현재 패킷/HEAD, 논리 크기, DPR, 자료 제공자와 실행 환경, 글꼴·자산·fixture 해시, PNG 해시를 담은 receipt를 만듭니다. 런타임이 sRGB 정규화와 98% 비교를 소유합니다. 유효한 비교가 실패하면 `implementation-repair`에 따라 코드를 수정·커밋하고 새 패킷으로 다시 캡처합니다. 잘못된 receipt나 geometry는 시도 횟수를 소비하지 않고, 유효 비교는 최초 비교 1회와 보정 후 최대 2회, 합쳐 모두 3회입니다.
-6. **검토·보고서·발행:** 두 독립 검토와 `pr-report-v2.1` 15개 섹션을 만든 뒤, 시작 시 고정한 source/target/remote가 그대로일 때만 초안 PR을 발행합니다.
+5. **화면 비교 및 보정:** 브라우저는 fixture·`document.fonts.ready`·자산 로드를 기다리고 현재 패킷/HEAD, 논리 크기, DPR, 자료 제공자와 실행 환경, 글꼴·자산·fixture 해시, PNG 해시를 담은 receipt를 만듭니다. 런타임이 sRGB 정규화와 고정 92% 비교를 소유합니다. 최초 비교와 첫 두 유효 실패의 `implementation-repair`는 사용자에게 묻지 않고 코드를 수정·커밋한 새 패킷으로 자동 진행합니다. 잘못된 receipt나 geometry는 시도 횟수를 소비하지 않습니다. 세 번째 유효 비교도 실패하면 실행은 `blocked`가 되고 디자인 검토는 실행하지 않습니다.
+6. **검토·보고서·발행:** 통과한 실행은 두 독립 검토와 `pr-report-v2.1` 15개 섹션을 만든 뒤, 시작 시 고정한 source/target/remote가 그대로일 때만 초안 PR을 발행합니다. 세 번째 유효 비교에서 막힌 실행도 발행 조건을 만족하면 같은 템플릿에 동일 크기의 기준/결과와 별도 차이·겹침 이미지를 포함한 진단 초안을 발행합니다.
 
 각 보고서 섹션은 `complete`, `not-run`, `blocked`, `not-applicable` 중 하나입니다. 현재 검토 묶음에 속하지 않는 이전 검증 자료는 PR에서 제외합니다. 초안 PR에는 Figma 기준·결과·차이 이미지와 일치율을 제공합니다. GitHub용 이미지는 실행마다 새 브랜치를 만들지 않고 관리 브랜치 `spec-to-pr/evidence`의 변경되지 않는 경로에 올린 뒤 업로드 커밋 SHA로 고정합니다.
+
+### 실제 구현에서 놓치기 쉬운 항목
+
+- 연결된 호스트가 내려 준 축소 썸네일은 목표 프레임으로 확대하지 않고 native export를 다시 얻습니다.
+- 화면 설명보다 캡처한 state facts가 우선하며, 사실이 다른 상태마다 별도 fixture와 digest를 사용합니다.
+- `Spot`, `Circle`, `Close`는 사내 패키지의 정확한 공개 export와 `semantic/text/tertiary` 같은 semantic token으로 연결합니다. 외부 SVG나 비슷한 hex 색은 자동 대체가 아닙니다.
+- baseline PNG는 비교 증거이며 제품 DOM·CSS·SVG·canvas의 레이어로 넣지 않습니다.
+- 좌우 이미지 geometry, 표의 위아래 border, 복사 버튼, 아이콘 geometry/color, focus, heading, accessible name, action을 집중 assertion으로 검증합니다. 이 검증은 92% 총점과 별개입니다.
 
 ## 단계와 작업 담당
 
@@ -116,7 +124,7 @@ publication: draft
 | --------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | Figma 자료 묶음 | `evidence/figma/figma-bundle.json`                                   | 모든 `fileUrls`, 노드, native geometry, design mapping, 글꼴·자산 출처가 연결됨 |
 | 화면 목록       | `evidence/figma/manifest.json`, `evidence/figma/checkout-mobile.png` | 논리 프레임과 export bitmap을 구분한 실제 PNG `visualPaths`                     |
-| 화면 비교       | `evidence/visual/figma-report.json`                                  | 검토 일치율 98% 이상, 기준·결과·차이·겹침 이미지                                |
+| 화면 비교       | `evidence/visual/figma-report.json`                                  | 검토 일치율 92% 이상, 기준·결과·차이·겹침 이미지                                |
 | 모의 데이터     | `evidence/fixtures/checkout.json`                                    | 이름·경로·해시가 receipt까지 이어지는 고정 상태                                 |
 | 캡처 receipt    | `evidence/visual/<packet>/checkout.json`                             | 현재 패킷/HEAD, 환경, geometry, fixture, 글꼴·자산, PNG 해시가 일치             |
 | 반응형·상호작용 | `evidence/design/responsive.json`, `interaction.json`                | 지정한 화면 크기와 상태 전이를 검증함                                           |
@@ -148,7 +156,7 @@ Figma 방식은 기능 개발용 E2E와 영상을 자동으로 요구하지 않�
 
 ## 디자인 검증
 
-- 정확 일치율: 97.84%, 검토 일치율: 99.12%, 통과 기준: 98%
+- 정확 일치율: 97.84%, 검토 일치율: 99.12%, 통과 기준: 92%
 - 기준 / 결과 / 차이 이미지와 일치율
 - 반응형 / 상호작용 / 접근성: 통과
 - design-reviewer: approved

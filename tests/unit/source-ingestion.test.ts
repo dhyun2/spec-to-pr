@@ -2,13 +2,41 @@ import { createHash } from "node:crypto";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { extractPdfText, fetchOpenApiDocument } from "../../src/source-ingestion/source-loader.js";
+import {
+  extractPdfText,
+  fetchOpenApiDocument,
+  orderedConcurrentMap,
+} from "../../src/source-ingestion/source-loader.js";
 import {
   normalizePublicHttpsUrl,
   resolvePublicAddresses,
 } from "../../src/source-ingestion/safe-https-client.js";
 
 describe("source ingestion", () => {
+  it("maps independent source loads in declaration order with at most four active", async () => {
+    let active = 0;
+    let maxActive = 0;
+    const release: Array<() => void> = [];
+    const inputs = Array.from({ length: 20 }, (_unused, index) => index);
+
+    const pending = orderedConcurrentMap(inputs, 4, async (input) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise<void>((resolve) => release.push(resolve));
+      active -= 1;
+      return `source-${input}`;
+    });
+
+    await vi.waitFor(() => expect(active).toBe(4));
+    while (release.length > 0 || active > 0) {
+      release.splice(0).forEach((resolve) => resolve());
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    await expect(pending).resolves.toEqual(inputs.map((input) => `source-${input}`));
+    expect(maxActive).toBe(4);
+  });
+
   it("extracts page-aware text from a real PDF instead of decoding binary bytes", async () => {
     const pdf = minimalTextPdf("Acceptance criterion: checkout submits once.");
 

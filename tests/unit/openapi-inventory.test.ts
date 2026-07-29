@@ -1,8 +1,34 @@
 import { describe, expect, it } from "vitest";
 
-import { inventoryOpenApiOperations } from "../../src/source-ingestion/openapi-inventory.js";
+import {
+  inventoryOpenApiOperations,
+  openApiClassificationSummary,
+} from "../../src/source-ingestion/openapi-inventory.js";
 
 describe("OpenAPI operation inventory", () => {
+  it("renders compact canonical operation summaries without full OpenAPI bodies", () => {
+    const largeDescription = "internal implementation details ".repeat(500);
+    const operations = inventoryOpenApiOperations([
+      {
+        path: "openapi.yaml",
+        text: `openapi: 3.1.0
+paths:
+  /shops/{shopId}:
+    get:
+      operationId: getShop
+      description: ${largeDescription}
+`,
+      },
+    ]);
+
+    const summary = openApiClassificationSummary(operations);
+
+    expect(summary).toBe(
+      '{"method":"GET","path":"/shops/{shopId}","operationId":"getShop","sourceLocator":"openapi.yaml"}',
+    );
+    expect(summary).not.toContain(largeDescription);
+  });
+
   it("resolves local Path Item refs and keeps the referring path", () => {
     const operations = inventoryOpenApiOperations([
       {

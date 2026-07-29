@@ -9,6 +9,7 @@ import { RunService } from "../../src/application/run-service.js";
 import { ArtifactBlobStore } from "../../src/artifact-registry/artifact-blob-store.js";
 import { SourceSnapshotStore } from "../../src/source-registry/snapshot-store.js";
 import { SqliteRunStore } from "../../src/store/sqlite-run-store.js";
+import type { RunStore } from "../../src/store/run-store.js";
 
 let directory: string;
 let projectRoot: string;
@@ -53,6 +54,112 @@ afterEach(async () => {
 });
 
 describe("IntakeRequestService", () => {
+  it("parses a declared batch in order with one optimistic Run save", async () => {
+    const run = await runService.createRun({ projectRoot });
+    let saveCount = 0;
+    const countingStore: RunStore = {
+      create: (manifest) => store.create(manifest),
+      get: (runId) => store.get(runId),
+      save: async (manifest, expectedRevision) => {
+        saveCount += 1;
+        await store.save(manifest, expectedRevision);
+      },
+      list: (filter) => store.list(filter),
+      close: async () => {},
+    };
+    const batchedService = new IntakeRequestService(
+      countingStore,
+      new SourceSnapshotStore(path.join(dataRoot, "batch-source-snapshots")),
+      new ArtifactBlobStore(path.join(dataRoot, "batch-artifacts")),
+      () => "2026-06-29T00:00:00.000Z",
+    );
+    const requests = Array.from({ length: 20 }, (_unused, index) => ({
+      requestText: `Requirement ${index + 1}`,
+      label: `declared-${String(index + 1).padStart(2, "0")}`,
+    }));
+
+    const results = await batchedService.parseIntakeRequests({
+      runId: run.id,
+      requests,
+    });
+
+    expect(
+      results.map((result) =>
+        result.source.locator.type === "inline" ? result.source.locator.label : "unexpected",
+      ),
+    ).toEqual(requests.map((request) => request.label));
+    expect(saveCount).toBe(1);
+    const loaded = await store.get(run.id);
+    expect(loaded.revision).toBe(1);
+    expect(loaded.sources).toHaveLength(20);
+    expect(loaded.artifacts).toHaveLength(20);
+  });
+
+  it("rejects intake batches above the bounded 200-request limit", async () => {
+    const run = await runService.createRun({ projectRoot });
+
+    await expect(
+      intakeRequestService.parseIntakeRequests({
+        runId: run.id,
+        requests: Array.from({ length: 201 }, (_unused, index) => ({
+          requestText: `Requirement ${index + 1}`,
+        })),
+      }),
+    ).rejects.toThrow();
+    expect((await store.get(run.id)).revision).toBe(0);
+  });
+
+  it("retries a conflicted batch against the latest Run without duplicating sources", async () => {
+    const run = await runService.createRun({ projectRoot });
+    const conflictWriter = new IntakeRequestService(
+      store,
+      new SourceSnapshotStore(path.join(dataRoot, "conflict-writer-snapshots")),
+      new ArtifactBlobStore(path.join(dataRoot, "conflict-writer-artifacts")),
+      () => "2026-06-29T00:00:00.000Z",
+    );
+    let injectedConflict = false;
+    let saveAttempts = 0;
+    const conflictingStore: RunStore = {
+      create: (manifest) => store.create(manifest),
+      get: (runId) => store.get(runId),
+      save: async (manifest, expectedRevision) => {
+        saveAttempts += 1;
+        if (!injectedConflict) {
+          injectedConflict = true;
+          await conflictWriter.parseIntakeRequest({
+            runId: run.id,
+            requestText: "Shared requirement",
+            label: "shared",
+          });
+        }
+        await store.save(manifest, expectedRevision);
+      },
+      list: (filter) => store.list(filter),
+      close: async () => {},
+    };
+    const serviceWithConflict = new IntakeRequestService(
+      conflictingStore,
+      new SourceSnapshotStore(path.join(dataRoot, "conflicted-snapshots")),
+      new ArtifactBlobStore(path.join(dataRoot, "conflicted-artifacts")),
+      () => "2026-06-29T00:00:00.000Z",
+    );
+
+    const [result] = await serviceWithConflict.parseIntakeRequests({
+      runId: run.id,
+      requests: [{ requestText: "Shared requirement", label: "shared" }],
+    });
+
+    expect(saveAttempts).toBe(2);
+    expect(result?.duplicateSource).toBe(true);
+    const loaded = await store.get(run.id);
+    expect(
+      loaded.sources.filter(
+        (source) => source.locator.type === "inline" && source.locator.label === "shared",
+      ),
+    ).toHaveLength(1);
+    expect(loaded.artifacts).toHaveLength(2);
+  });
+
   it("snapshots the user request as instruction evidence and parses workflow hints", async () => {
     const run = await runService.createRun({
       projectRoot,

@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { link, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -10,11 +10,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ArtifactBlobStore } from "../../src/artifact-registry/artifact-blob-store.js";
 import { IntakeRequestService } from "../../src/application/intake-request-service.js";
+import {
+  figmaPublicApiCatalogDigest,
+  figmaStateFactsDigest,
+} from "../../src/figma/figma-capture-contract.js";
 import type { OpenSpecArchiveService } from "../../src/application/openspec-archive-service.js";
 import { PublisherService } from "../../src/application/publisher-service.js";
 import { RunService } from "../../src/application/run-service.js";
 import { StageService } from "../../src/application/stage-service.js";
 import {
+  buildParserSafeChunks,
   WorkflowPublishInputSchema,
   WorkflowService,
   type WorkflowServiceDependencies,
@@ -31,12 +36,147 @@ import type {
 } from "../../src/publisher/index.js";
 import { ArtifactRefSchema } from "../../src/runtime/artifact.js";
 import { createArtifactId } from "../../src/runtime/id-factory.js";
+import { RuntimeMetricsRecorder } from "../../src/runtime/performance-instrumentation.js";
+import type { RunManifest } from "../../src/run/index.js";
 import { createDraftEvidenceBundle } from "../../src/workflow/draft-evidence-bundle.js";
+import { defaultVisualComparisonPool } from "../../src/visual/visual-comparison-pool.js";
+import { defaultVisualNormalizationCache } from "../../src/visual/visual-normalizer.js";
 
 const FIGMA_URL = "https://www.figma.com/design/abc/file?node-id=1-2";
 const FIGMA_URL_SECOND_STATE = "https://www.figma.com/design/abc/file?node-id=3-4";
 const FEATURE_CONTEXT_ID = `ctx_${"x".repeat(124)}`;
 const execFileAsync = promisify(execFile);
+const UI_ROOT_BARREL_PATH = "test-ui-package/index.js";
+const UI_ICON_BARREL_PATH = "test-ui-package/icons/vue.js";
+const UI_CODE_CONNECT_PATH = "test-ui-package/code-connect.manifest.json";
+const UI_PACKAGE_MANIFEST_PATH = "test-ui-package/package.json";
+const UI_ROOT_BARREL_BYTES = Buffer.from("export const IconButton = {};\n", "utf8");
+const UI_ICON_BARREL_BYTES = Buffer.from(
+  "export const Spot = {}; export const Circle = {}; export const Close = {};\n",
+  "utf8",
+);
+const UI_CODE_CONNECT_BYTES = Buffer.from(
+  JSON.stringify({ mappings: [], packageName: "@frontend/ui", packageVersion: "1.2.3" }),
+  "utf8",
+);
+const UI_PACKAGE_MANIFEST_BYTES = Buffer.from(
+  JSON.stringify({
+    name: "@frontend/ui",
+    version: "1.2.3",
+    exports: {
+      ".": "./index.js",
+      "./icons/vue": "./icons/vue.js",
+    },
+  }),
+  "utf8",
+);
+
+async function writeBaselineIsolationEvidence(input: {
+  directory: string;
+  run: RunManifest;
+  reviewPacketId: string;
+  mutate?: (evidence: Record<string, unknown>) => void;
+}) {
+  const implementationReport = [...input.run.artifacts].reverse().find((artifact) => {
+    const packet = artifact.metadata["reviewPacket"];
+    return (
+      artifact.metadata["workflowSubmissionKind"] === "implementation" &&
+      typeof packet === "object" &&
+      packet !== null &&
+      "id" in packet &&
+      packet.id === input.reviewPacketId
+    );
+  });
+  const packet = implementationReport?.metadata["reviewPacket"] as
+    { id?: unknown; headSha?: unknown; changedFiles?: unknown } | undefined;
+  if (
+    implementationReport === undefined ||
+    packet?.id !== input.reviewPacketId ||
+    typeof packet.headSha !== "string" ||
+    !Array.isArray(packet.changedFiles) ||
+    packet.changedFiles.some((value) => typeof value !== "string")
+  ) {
+    throw new Error("Missing implementation packet for baseline isolation");
+  }
+  const visualTargets = [...input.run.artifacts]
+    .reverse()
+    .find(
+      (artifact) =>
+        (artifact.metadata["workflowSubmissionKind"] === "figma-bundle" ||
+          artifact.metadata["workflowSubmissionKind"] === "contracts") &&
+        Array.isArray(artifact.metadata["visualTargets"]) &&
+        artifact.metadata["visualTargets"].length > 0,
+    )?.metadata["visualTargets"] as Array<{ baselinePath?: unknown }> | undefined;
+  if (visualTargets === undefined) throw new Error("Missing visual targets");
+  const baselineArtifacts = visualTargets.map((target) => {
+    if (typeof target.baselinePath !== "string") throw new Error("Missing baseline path");
+    const artifact = [...input.run.artifacts]
+      .reverse()
+      .find((candidate) => candidate.metadata["projectRelativePath"] === target.baselinePath);
+    if (artifact === undefined) throw new Error(`Missing baseline ${target.baselinePath}`);
+    return {
+      artifactId: artifact.id,
+      path: target.baselinePath,
+      digest: artifact.digest,
+    };
+  });
+  const declaredFiles = implementationReport.metadata["changedFiles"] as string[];
+  const designSystemEvidence = implementationReport.metadata["designSystemEvidence"] as
+    { usages?: Array<{ sourceFile?: unknown }> } | undefined;
+  const evidenceArtifactIds = new Set(
+    Array.isArray(implementationReport.metadata["evidenceArtifactIds"])
+      ? (implementationReport.metadata["evidenceArtifactIds"] as string[])
+      : [],
+  );
+  const browserBundles = input.run.artifacts.flatMap((artifact) => {
+    const projectRelativePath = artifact.metadata["projectRelativePath"];
+    return evidenceArtifactIds.has(artifact.id) &&
+      typeof projectRelativePath === "string" &&
+      /\.(?:js|mjs|cjs|css)$/i.test(projectRelativePath)
+      ? [projectRelativePath]
+      : [];
+  });
+  const sourcePaths = [
+    ...(packet.changedFiles as string[]),
+    ...declaredFiles,
+    ...(designSystemEvidence?.usages?.flatMap((usage) =>
+      typeof usage.sourceFile === "string" ? [usage.sourceFile] : [],
+    ) ?? []),
+    ...browserBundles,
+  ].filter((sourcePath) => /\.(?:js|jsx|ts|tsx|vue|svelte|css|scss|mjs|cjs)$/i.test(sourcePath));
+  const checkedSourceFiles = await Promise.all(
+    [...new Set(sourcePaths)].sort().map(async (sourcePath) => {
+      const content = await readFile(path.join(input.directory, sourcePath));
+      return {
+        path: sourcePath,
+        digest: `sha256:${createHash("sha256").update(content).digest("hex")}`,
+      };
+    }),
+  );
+  const evidence: Record<string, unknown> = {
+    schemaVersion: "baseline-isolation-v1",
+    reviewPacketId: input.reviewPacketId,
+    headSha: packet.headSha,
+    baselineArtifacts: [...new Map(baselineArtifacts.map((item) => [item.path, item])).values()],
+    checkedSourceFiles,
+    requestedResources: [],
+    renderedMedia: [],
+    violations: [],
+    status: "passed",
+  };
+  input.mutate?.(evidence);
+  const baselineIsolationPath =
+    `visual/actual/${input.reviewPacketId}/baseline-isolation.json` as const;
+  const bytes = Buffer.from(JSON.stringify(evidence), "utf8");
+  await mkdir(path.dirname(path.join(input.directory, baselineIsolationPath)), {
+    recursive: true,
+  });
+  await writeFile(path.join(input.directory, baselineIsolationPath), bytes);
+  return {
+    baselineIsolationPath,
+    baselineIsolationDigest: `sha256:${createHash("sha256").update(bytes).digest("hex")}` as const,
+  };
+}
 
 describe("WorkflowService", () => {
   let directory: string;
@@ -68,6 +208,9 @@ describe("WorkflowService", () => {
       "openspec/changes/migrate-shop-vue3/tasks.md",
       "docs/openapi.yaml",
       "figma/design-context.json",
+      UI_ROOT_BARREL_PATH,
+      UI_ICON_BARREL_PATH,
+      UI_CODE_CONNECT_PATH,
       "mocks/manifest.json",
       "mocks/checkout.json",
       "test-results/checkout.json",
@@ -125,6 +268,7 @@ describe("WorkflowService", () => {
             id: "mock:checkout",
             path: "mocks/checkout.json",
             sha256: `sha256:${createHash("sha256").update(mockFixture).digest("hex")}`,
+            stateContractDigest: figmaStateContracts()[0]!.digest,
           },
         ],
       }),
@@ -146,6 +290,10 @@ describe("WorkflowService", () => {
       JSON.stringify(figmaManifest()),
       "utf8",
     );
+    await writeFile(path.join(directory, UI_ROOT_BARREL_PATH), UI_ROOT_BARREL_BYTES);
+    await writeFile(path.join(directory, UI_ICON_BARREL_PATH), UI_ICON_BARREL_BYTES);
+    await writeFile(path.join(directory, UI_CODE_CONNECT_PATH), UI_CODE_CONNECT_BYTES);
+    await writeFile(path.join(directory, UI_PACKAGE_MANIFEST_PATH), UI_PACKAGE_MANIFEST_BYTES);
     await writeFile(
       path.join(directory, "visual/diff.png"),
       PNG.sync.write(new PNG({ width: 1, height: 1 })),
@@ -325,6 +473,7 @@ describe("WorkflowService", () => {
           capturedComponents: figmaCapturedComponents(),
           designMapping: figmaDesignMapping(),
           manifestPath: "figma/design-context.json",
+          stateContracts: figmaStateContracts(),
           visualTargets: figmaVisualTargets(),
           artifactPaths: ["figma/design-context.json", "visual/diff.png"],
         },
@@ -1688,7 +1837,7 @@ describe("WorkflowService", () => {
       },
     });
 
-    const status = await service.status({ runId: started.runId });
+    const status = await service.status({ runId: started.runId, view: "detail" });
     expect(status.resumeContext.evidencePaths).toContain(safePath);
     expect(status.blockerDetails[0]?.evidencePaths).toContain(safePath);
     expect(JSON.stringify(status)).not.toContain(secretPath);
@@ -2717,6 +2866,7 @@ describe("WorkflowService", () => {
         capturedComponents: figmaCapturedComponents(),
         designMapping: figmaDesignMapping(),
         manifestPath: "figma/design-context.json",
+        stateContracts: figmaStateContracts(),
         visualTargets: figmaVisualTargets(),
         artifactPaths: ["figma/design-context.json", "visual/diff.png"],
       },
@@ -2803,6 +2953,7 @@ describe("WorkflowService", () => {
         capturedComponents: figmaCapturedComponents(),
         designMapping: figmaDesignMapping(),
         manifestPath: "figma/design-context.json",
+        stateContracts: figmaStateContracts(),
         visualTargets: figmaVisualTargets(),
         artifactPaths: ["figma/design-context.json", "visual/diff.png"],
       },
@@ -3008,6 +3159,178 @@ describe("WorkflowService", () => {
           "performance-evidence",
           "draft-publication-preflight",
         ]),
+      );
+    } finally {
+      await rm(legacyRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("projects action and checkpoint status without reading the 250-file legacy inventory", async () => {
+    const legacyRoot = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-status-legacy-"));
+    try {
+      await Promise.all(
+        Array.from({ length: 250 }, async (_, index) => {
+          const relativePath = path.join(
+            "src",
+            index % 2 === 0 ? "components" : "views",
+            `feature-${String(index + 1).padStart(3, "0")}.${index % 2 === 0 ? "vue" : "js"}`,
+          );
+          const absolutePath = path.join(legacyRoot, relativePath);
+          await mkdir(path.dirname(absolutePath), { recursive: true });
+          await writeFile(
+            absolutePath,
+            relativePath.endsWith(".vue")
+              ? `<script>export const feature${index} = ${index};</script><template />\n`
+              : `export const feature${index} = ${index};\n`,
+            "utf8",
+          );
+        }),
+      );
+
+      const readContent = vi.spyOn(artifactStore, "readContent");
+      const started = await service.start(
+        {
+          projectRoot: directory,
+          legacyProjectRoot: legacyRoot,
+          requestText: "Migrate the bounded legacy feature inventory",
+          mode: "legacy",
+          changeKind: "migration",
+          publication: "none",
+        },
+        "action",
+      );
+      const originalRun = await store.get(started.runId);
+      const inventoryArtifact = originalRun.artifacts.find(
+        (artifact) => artifact.kind === "legacy-feature-inventory",
+      );
+      if (inventoryArtifact === undefined) throw new Error("Missing legacy inventory artifact");
+      expect(started.view).toBe("action");
+      expect(started).not.toHaveProperty("legacyInventory");
+      expect(readContent.mock.calls.some(([digest]) => digest === inventoryArtifact.digest)).toBe(
+        false,
+      );
+
+      readContent.mockClear();
+      const advanced = await service.advance({ runId: started.runId }, "action");
+      expect(advanced.view).toBe("action");
+      expect(readContent.mock.calls.some(([digest]) => digest === inventoryArtifact.digest)).toBe(
+        false,
+      );
+
+      readContent.mockClear();
+      const submitted = await service.submit(
+        {
+          runId: started.runId,
+          submission: {
+            kind: "contracts",
+            status: "blocked",
+            summary: "Approval is required before migration.",
+            blocker: {
+              stage: "contracts",
+              code: "MISSING_APPROVAL",
+              kind: "missing-input",
+              summary: "Approval is required before migration.",
+              retryable: false,
+              resumable: true,
+              completedWork: ["Legacy intake passed."],
+              evidencePaths: [],
+              attemptedRecovery: [],
+              unrunValidations: ["functional"],
+              exactUnblockAction: "Provide migration approval.",
+            },
+          },
+        },
+        "action",
+      );
+      expect(submitted.view).toBe("action");
+      expect(readContent.mock.calls.some(([digest]) => digest === inventoryArtifact.digest)).toBe(
+        false,
+      );
+
+      const runAfterMutations = await store.get(started.runId);
+      const template = originalRun.artifacts[0]!;
+      const appendedArtifacts = Array.from({ length: 20 }, (_, index) =>
+        ArtifactRefSchema.parse({
+          ...template,
+          id: createArtifactId(),
+          kind: "agent-result-report",
+          metadata: {
+            adapter: "workflow-v2",
+            workflowSubmissionKind: `status-${String(index + 1).padStart(2, "0")}`,
+            summary: `Status submission ${index + 1}`,
+            status: "passed",
+            projectRelativePath: `test-results/status-${String(index + 1).padStart(2, "0")}.json`,
+          },
+        }),
+      );
+      await store.save(
+        {
+          ...runAfterMutations,
+          revision: runAfterMutations.revision + 1,
+          artifacts: [...runAfterMutations.artifacts, ...appendedArtifacts],
+        },
+        runAfterMutations.revision,
+      );
+
+      readContent.mockClear();
+      const action = await service.status({ runId: started.runId, view: "action" });
+      expect(action).toMatchObject({
+        view: "action",
+        runId: started.runId,
+        deliveryProfile: { publication: "none", recommendedSkills: expect.any(Array) },
+        workload: { size: expect.stringMatching(/^(XS|S|M|L|XL)$/) },
+        delegationPolicy: { singleWriter: true, allowNested: false },
+        nextActions: expect.any(Array),
+        blockerDetails: expect.any(Array),
+      });
+      expect(action).not.toHaveProperty("scope");
+      expect(action).not.toHaveProperty("resumeContext");
+      expect(action).not.toHaveProperty("legacyInventory");
+      expect(action.stages.every((item) => !("checkpoint" in item))).toBe(true);
+      expect(readContent.mock.calls.some(([digest]) => digest === inventoryArtifact.digest)).toBe(
+        false,
+      );
+
+      readContent.mockClear();
+      const checkpoint = await service.status({ runId: started.runId, view: "checkpoint" });
+      expect(checkpoint).toMatchObject({
+        view: "checkpoint",
+        resumeContext: {
+          goal: "Migrate the bounded legacy feature inventory",
+          evidencePaths: expect.any(Array),
+        },
+      });
+      expect(checkpoint.resumeContext.submissions).toHaveLength(16);
+      expect(checkpoint.resumeContext.submissions.map((item) => item.kind)).toEqual(
+        Array.from({ length: 16 }, (_, index) => `status-${String(index + 5).padStart(2, "0")}`),
+      );
+      expect(checkpoint.stages.find((item) => item.name === "intake")?.checkpoint).toEqual(
+        expect.any(String),
+      );
+      expect(checkpoint).not.toHaveProperty("scope");
+      expect(checkpoint).not.toHaveProperty("legacyInventory");
+      expect(readContent.mock.calls.some(([digest]) => digest === inventoryArtifact.digest)).toBe(
+        false,
+      );
+
+      readContent.mockClear();
+      const detail = await service.status({ runId: started.runId, view: "detail" });
+      expect(detail).toMatchObject({
+        view: "detail",
+        scope: { ui: true, hasVisualBaseline: true },
+        deliveryProfile: { mode: "legacy", publication: "none" },
+        legacyInventory: {
+          artifactId: inventoryArtifact.id,
+          version: 3,
+          entries: expect.any(Array),
+        },
+      });
+      expect(detail.resumeContext.submissions).toHaveLength(16);
+      expect(readContent.mock.calls.some(([digest]) => digest === inventoryArtifact.digest)).toBe(
+        true,
+      );
+      expect(Buffer.byteLength(JSON.stringify(action), "utf8")).toBeLessThanOrEqual(
+        Buffer.byteLength(JSON.stringify(detail), "utf8") * 0.25,
       );
     } finally {
       await rm(legacyRoot, { recursive: true, force: true });
@@ -3656,6 +3979,89 @@ describe("WorkflowService", () => {
     expect(labels.filter((label) => label === "docs:docs/business-rules.md")).toHaveLength(1);
   });
 
+  it("composes HTTPS OpenAPI operation sources with four-way loading and two intake saves", async () => {
+    let active = 0;
+    let maxActive = 0;
+    let intakeSaveCount = 0;
+    const intakeStore: RunStore = {
+      create: (run) => store.create(run),
+      get: (runId) => store.get(runId),
+      save: async (run, expectedRevision) => {
+        intakeSaveCount += 1;
+        await store.save(run, expectedRevision);
+      },
+      list: (filter) => store.list(filter),
+      close: async () => {},
+    };
+    dependencies.intakeRequestService = new IntakeRequestService(
+      intakeStore,
+      new SourceSnapshotStore(path.join(directory, "bounded-sources")),
+      artifactStore,
+    );
+    dependencies.fetchOpenApiSource = async ({ url }) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      active -= 1;
+      const index = Number(new URL(url).pathname.match(/\d+/u)?.[0]);
+      const text = `openapi: 3.1.0\npaths:\n  /shops/${index}:\n    get:\n      operationId: getShop${index}\n`;
+      return {
+        originalUrl: url,
+        resolvedUrl: url,
+        mediaType: "application/yaml",
+        text,
+        sha256: `sha256:${createHash("sha256").update(text).digest("hex")}`,
+      };
+    };
+    service = new WorkflowService(dependencies);
+    const openApiUrls = Array.from(
+      { length: 20 },
+      (_unused, index) => `https://api.example.com/openapi-${index + 1}.yaml`,
+    );
+
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Implement the declared shop operations",
+      openApiUrls,
+    });
+
+    expect(maxActive).toBe(4);
+    expect(started.deliveryProfile.openApiUrls).toEqual(openApiUrls);
+    expect(
+      started.deliveryProfile.openApiOperations.map((operation) => operation.operationKey),
+    ).toEqual(Array.from({ length: 20 }, (_unused, index) => `GET /shops/${index + 1}`));
+    expect(intakeSaveCount).toBeLessThanOrEqual(2);
+  });
+
+  it("classifies from compact OpenAPI operation summaries instead of full descriptions", async () => {
+    await mkdir(path.join(directory, "docs"), { recursive: true });
+    const description = "authentication security performance telemetry ".repeat(500);
+    await writeFile(
+      path.join(directory, "docs", "compact-classification.yaml"),
+      `openapi: 3.1.0\npaths:\n  /shops/{shopId}:\n    get:\n      operationId: getShop\n      description: ${description}\n`,
+      "utf8",
+    );
+
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Document the declared shop operation",
+      openApiPaths: ["docs/compact-classification.yaml"],
+    });
+
+    expect(started.deliveryProfile.openApiOperations).toEqual([
+      expect.objectContaining({
+        operationKey: "GET /shops/{shopId}",
+        operationId: "getShop",
+      }),
+    ]);
+    expect(started.scope).toMatchObject({
+      api: true,
+      securitySensitive: false,
+      performanceSensitive: false,
+      observabilityRequested: false,
+    });
+  });
+
   it("discovers only fixed project guidance without activating unrelated gates", async () => {
     await mkdir(path.join(directory, "docs", "etc"), { recursive: true });
     await writeFile(
@@ -3930,6 +4336,12 @@ describe("WorkflowService", () => {
     });
   });
 
+  it("rejects a parser-safe chunk plan when one grapheme exceeds the parser limit", () => {
+    const oversizedGrapheme = `a${"\u0301".repeat(200_000)}`;
+
+    expect(() => buildParserSafeChunks(oversizedGrapheme)).toThrow(/grapheme.*parser limit/i);
+  });
+
   it("rejects invalid chunk plans before creating a durable Run", async () => {
     await mkdir(path.join(directory, "docs"), { recursive: true });
     await writeFile(path.join(directory, "docs", "blank.md"), " ".repeat(300_000), "utf8");
@@ -3973,7 +4385,7 @@ describe("WorkflowService", () => {
       run.revision,
     );
 
-    await expect(service.status({ runId: started.runId })).resolves.toMatchObject({
+    await expect(service.status({ runId: started.runId, view: "detail" })).resolves.toMatchObject({
       deliveryProfile: { mode: "auto", publication: "draft" },
     });
   });
@@ -4049,7 +4461,7 @@ describe("WorkflowService", () => {
         run.revision,
       );
 
-      const resumed = await service.status({ runId: started.runId });
+      const resumed = await service.status({ runId: started.runId, view: "detail" });
       expect(resumed.deliveryProfile.publication).toBe("none");
       expect(resumed.deliveryProfile.draftEvidenceBundle).toBeUndefined();
 
@@ -4409,6 +4821,7 @@ describe("WorkflowService", () => {
         capturedComponents: figmaCapturedComponents(),
         designMapping: figmaDesignMapping(),
         manifestPath: "figma/design-context.json",
+        stateContracts: figmaStateContracts(),
         visualTargets: figmaVisualTargets(),
         artifactPaths: ["figma/design-context.json", "visual/diff.png"],
       },
@@ -4432,6 +4845,7 @@ describe("WorkflowService", () => {
           capturedComponents: figmaCapturedComponents(),
           designMapping: figmaDesignMapping(),
           manifestPath: "figma/design-context.json",
+          stateContracts: figmaStateContracts(),
           visualTargets: figmaVisualTargets(),
           artifactPaths: ["figma/design-context.json", "visual/diff.png"],
         },
@@ -4451,6 +4865,78 @@ describe("WorkflowService", () => {
     expect(accepted.nextActions[0]?.kind).toBe("implement");
   });
 
+  it("CALLER_CATALOG_AND_UNVERIFIED_VERSION_EXPORT_ACCEPTED", async () => {
+    const { digest: _catalogDigest, ...baseCatalogFields } = figmaPublicApiCatalog();
+    const callerCatalogFields = {
+      ...baseCatalogFields,
+      packageVersion: "999.0.0",
+      exports: [
+        {
+          figmaComponent: "button/invented",
+          nodeId: "999:1",
+          module: "@frontend/ui" as const,
+          exportName: "DefinitelyNotInBarrel",
+          allowedProps: ["size"],
+        },
+      ],
+    };
+    const callerCatalog = {
+      ...callerCatalogFields,
+      digest: figmaPublicApiCatalogDigest(callerCatalogFields),
+    };
+    const callerMapping = {
+      ...figmaDesignMapping(),
+      designSystem: {
+        ...figmaDesignMapping().designSystem,
+        packageVersion: "999.0.0",
+        catalogDigest: callerCatalog.digest,
+      },
+      publicApiCatalog: callerCatalog,
+    };
+    await writeFile(
+      path.join(directory, "figma/design-context.json"),
+      JSON.stringify({
+        ...figmaManifest(),
+        designMapping: callerMapping,
+      }),
+      "utf8",
+    );
+    await execFileAsync("git", ["add", "figma/design-context.json"], { cwd: directory });
+    await execFileAsync("git", ["commit", "-qm", "claim unverified UI catalog"], {
+      cwd: directory,
+    });
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: `Implement ${FIGMA_URL}`,
+      scope: "ui",
+      mode: "figma",
+      changeKind: "design",
+      figmaUrl: FIGMA_URL,
+    });
+
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "figma-bundle",
+          provider: "host-connected-figma",
+          capturedAt: "2026-07-13T00:00:00.000Z",
+          fileUrl: FIGMA_URL,
+          fileUrls: [FIGMA_URL],
+          nodeIds: ["1:2"],
+          capturedComponents: figmaCapturedComponents(),
+          designMapping: callerMapping,
+          manifestPath: "figma/design-context.json",
+          stateContracts: figmaStateContracts(),
+          visualTargets: figmaVisualTargets(),
+          artifactPaths: ["figma/design-context.json", "visual/diff.png"],
+        },
+      }),
+    ).rejects.toThrow(
+      /FIGMA_DESIGN_MAPPING_INCOMPLETE.*package|version|DefinitelyNotInBarrel|barrel|Code Connect/i,
+    );
+  });
+
   it("binds captured Figma components and named fixtures to implementation evidence", async () => {
     const capturedComponents = [{ name: "Logo/Normal/nxplus_park", nodeId: "1:2" }];
     const logoBytes = Buffer.from("canonical nxplus park webp fixture", "utf8");
@@ -4459,24 +4945,21 @@ describe("WorkflowService", () => {
     await execFileAsync("git", ["add", "assets/nxplus_park.webp"], { cwd: directory });
     await execFileAsync("git", ["commit", "-qm", "add canonical logo asset"], { cwd: directory });
     const designMapping = {
-      designSystem: {
-        packageName: "@frontend/ui",
-        packageVersion: "1.2.3",
-        guidanceSkill: "design-system",
-      },
+      ...figmaDesignMapping(),
       components: [
         {
+          id: "nxplus-park-logo",
           figmaComponent: "Logo/Normal/nxplus_park",
           nodeId: "1:2",
+          role: "component" as const,
           resolution: {
             kind: "asset" as const,
             path: "assets/nxplus_park.webp",
             digest: `sha256:${createHash("sha256").update(logoBytes).digest("hex")}`,
           },
+          semanticTokens: [],
         },
       ],
-      fonts: [],
-      tokens: [],
     };
     await writeFile(
       path.join(directory, "figma/design-context.json"),
@@ -4489,6 +4972,7 @@ describe("WorkflowService", () => {
         capturedComponents,
         designMapping,
         visualPaths: ["visual/diff.png"],
+        stateContracts: figmaStateContracts(),
         visualTargets: figmaVisualTargets(),
       }),
       "utf8",
@@ -4529,6 +5013,7 @@ describe("WorkflowService", () => {
             ],
           },
           manifestPath: "figma/design-context.json",
+          stateContracts: figmaStateContracts(),
           visualTargets: figmaVisualTargets(),
           artifactPaths: ["figma/design-context.json", "visual/diff.png"],
         },
@@ -4546,6 +5031,7 @@ describe("WorkflowService", () => {
         capturedComponents,
         designMapping,
         manifestPath: "figma/design-context.json",
+        stateContracts: figmaStateContracts(),
         visualTargets: figmaVisualTargets(),
         artifactPaths: ["figma/design-context.json", "visual/diff.png"],
       },
@@ -4571,13 +5057,37 @@ describe("WorkflowService", () => {
       artifactPaths: ["test-results/unit.json", "mocks/manifest.json", "mocks/checkout.json"],
       mockDataEvidence: {
         manifestPath: "mocks/manifest.json",
-        fixtures: [{ id: "mock:checkout", path: "mocks/checkout.json" }],
+        fixtures: [
+          {
+            id: "mock:checkout",
+            path: "mocks/checkout.json",
+            stateContractDigest: figmaStateContracts()[0]!.digest,
+          },
+        ],
       },
     } as const;
 
     await expect(
+      service.submit({
+        runId: started.runId,
+        submission: {
+          ...implementation,
+          mockDataEvidence: {
+            manifestPath: "mocks/manifest.json",
+            fixtures: [
+              {
+                id: "mock:checkout",
+                path: "mocks/checkout.json",
+                stateContractDigest: `sha256:${"0".repeat(64)}`,
+              },
+            ],
+          },
+        },
+      }),
+    ).rejects.toThrow(/FIGMA_STATE_CONTRACT_INVALID.*digest/i);
+    await expect(
       service.submit({ runId: started.runId, submission: implementation }),
-    ).rejects.toThrow(/FIGMA_DESIGN_SYSTEM_EVIDENCE_INVALID.*Logo\/Normal\/nxplus_park/);
+    ).rejects.toThrow(/FIGMA_DESIGN_SYSTEM_EVIDENCE_INVALID.*nxplus-park-logo/);
     await expect(
       service.submit({
         runId: started.runId,
@@ -4586,10 +5096,13 @@ describe("WorkflowService", () => {
           designSystemEvidence: {
             usages: [
               {
-                figmaComponent: "Logo/Normal/nxplus_park",
+                mappingId: "nxplus-park-logo",
                 sourceFile: "src/checkout.tsx",
-                resolutionKind: "asset",
-                assetPath: "assets/wrong.webp",
+                resolution: {
+                  kind: "asset",
+                  path: "assets/wrong.webp",
+                  digest: designMapping.components[0]!.resolution.digest,
+                },
               },
             ],
           },
@@ -4603,10 +5116,9 @@ describe("WorkflowService", () => {
         designSystemEvidence: {
           usages: [
             {
-              figmaComponent: "Logo/Normal/nxplus_park",
+              mappingId: "nxplus-park-logo",
               sourceFile: "src/checkout.tsx",
-              resolutionKind: "asset",
-              assetPath: "assets/nxplus_park.webp",
+              resolution: designMapping.components[0]!.resolution,
             },
           ],
         },
@@ -4649,6 +5161,8 @@ describe("WorkflowService", () => {
       guidancePaths: ["docs/architecture/ARCHITECTURE.md", markdownBearingGuidancePath],
       skillHints: ["react-best-practices", "api-generator", "not-installed"],
     });
+    expect(started.workload.size).toBe("L");
+    expect(started.delegationPolicy.parallelReviewers).toBe(true);
     await service.submit({
       runId: started.runId,
       submission: {
@@ -4661,6 +5175,7 @@ describe("WorkflowService", () => {
         capturedComponents: figmaCapturedComponents(),
         designMapping: figmaDesignMapping(),
         manifestPath: "figma/design-context.json",
+        stateContracts: figmaStateContracts(),
         visualTargets: figmaVisualTargets(),
         artifactPaths: ["figma/design-context.json", "visual/diff.png"],
       },
@@ -4777,7 +5292,13 @@ describe("WorkflowService", () => {
       },
       mockDataEvidence: {
         manifestPath: "mocks/manifest.json",
-        fixtures: [{ id: "mock:checkout", path: "mocks/checkout.json" }],
+        fixtures: [
+          {
+            id: "mock:checkout",
+            path: "mocks/checkout.json",
+            stateContractDigest: figmaStateContracts()[0]!.digest,
+          },
+        ],
       },
     } as const;
 
@@ -4828,6 +5349,77 @@ describe("WorkflowService", () => {
       "compare-visuals",
       "review-functional",
     ]);
+    const functionalAction = implemented.nextActions.find(
+      (action) => action.kind === "review-functional",
+    );
+    expect(functionalAction).toMatchObject({
+      evidenceIndex: [
+        {
+          command: "playwright test e2e/checkout.spec.ts",
+          selector: "e2e/checkout.spec.ts",
+          resultDigest: expect.stringMatching(/^sha256:/),
+          artifactId: expect.stringMatching(/^art_/),
+          headSha: expect.stringMatching(/^[a-f0-9]{40}$/),
+          diffDigest: expect.stringMatching(/^sha256:/),
+          adapterVersion: "workflow-v2-evidence",
+        },
+      ],
+    });
+    const implementedRun = await store.get(started.runId);
+    const implementationStage = implementedRun.stages.find(
+      (stage) => stage.name === "implementation",
+    );
+    const originalPacket = structuredClone(
+      implementationStage?.checkpoint?.data["reviewPacket"],
+    ) as Record<string, unknown>;
+    const originalEvidenceIndex = structuredClone(originalPacket["evidenceIndex"]);
+    const saveEvidenceIndex = async (evidenceIndex: unknown) => {
+      const current = await store.get(started.runId);
+      await store.save(
+        {
+          ...current,
+          revision: current.revision + 1,
+          updatedAt: new Date().toISOString(),
+          stages: current.stages.map((stage) =>
+            stage.name === "implementation"
+              ? {
+                  ...stage,
+                  checkpoint: {
+                    ...stage.checkpoint!,
+                    data: {
+                      ...stage.checkpoint!.data,
+                      reviewPacket: {
+                        ...originalPacket,
+                        evidenceIndex,
+                      },
+                    },
+                  },
+                }
+              : stage,
+          ),
+        },
+        current.revision,
+      );
+    };
+    const originalEntry = (originalEvidenceIndex as Array<Record<string, unknown>>)[0]!;
+    await saveEvidenceIndex([
+      {
+        ...originalEntry,
+        resultDigest: `sha256:${"a".repeat(64)}`,
+      },
+    ]);
+    const staleEvidenceStatus = await service.status({ runId: started.runId });
+    expect(
+      staleEvidenceStatus.nextActions.find((action) => action.kind === "review-functional"),
+    ).not.toHaveProperty("evidenceIndex");
+
+    await saveEvidenceIndex([{ command: "" }]);
+    const malformedEvidenceStatus = await service.status({ runId: started.runId });
+    expect(
+      malformedEvidenceStatus.nextActions.find((action) => action.kind === "review-functional"),
+    ).not.toHaveProperty("evidenceIndex");
+    await saveEvidenceIndex(originalEvidenceIndex);
+
     const visualAction = implemented.nextActions.find(
       (action) => action.kind === "compare-visuals",
     );
@@ -4851,27 +5443,51 @@ describe("WorkflowService", () => {
     if (typeof featurePacket?.headSha !== "string") {
       throw new Error("Missing feature implementation packet head");
     }
+    const featureIsolation = await writeBaselineIsolationEvidence({
+      directory,
+      run: featureRun,
+      reviewPacketId: visualAction.reviewPacketId,
+    });
     const featureActualDigest =
       `sha256:${createHash("sha256").update(featureActualBytes).digest("hex")}` as const;
     const featureReceiptPath =
       `visual/actual/${visualAction.reviewPacketId}/checkout.json` as const;
     const featureReceiptBytes = Buffer.from(
       JSON.stringify({
+        schemaVersion: "visual-capture-receipt-v2",
         reviewPacketId: visualAction.reviewPacketId,
         headSha: featurePacket.headSha,
+        stateContractDigest: figmaStateContracts()[0]!.digest,
         targetId: "checkout-default",
-        route: "/checkout",
+        route: "http://127.0.0.1:4173/checkout",
         state: "default",
         captureKind: "viewport",
         logicalSize: { width: 1, height: 1 },
         deviceScaleFactor: 1,
-        playwrightVersion: "1.54.1",
-        browserName: "chromium",
-        browserVersion: "138.0.7204.168",
-        locale: "ko-KR",
-        colorScheme: "light",
-        timezone: "Asia/Seoul",
-        userAgent: "Mozilla/5.0 Chromium",
+        environment: {
+          browser: {
+            family: "chromium",
+            channel: "chromium",
+            version: "138.0.7204.168",
+            userAgent: "Mozilla/5.0 Chromium",
+          },
+          renderer: {
+            adapter: "spec-to-pr-playwright",
+            adapterVersion: "capture-runner-v2",
+            playwrightVersion: "1.61.1",
+          },
+          locale: "ko-KR",
+          timezone: "Asia/Seoul",
+          colorScheme: "light",
+          reducedMotion: "reduce",
+          serverOrigin: "http://127.0.0.1:4173",
+          readiness: {
+            documentReadyState: "complete",
+            fontsReady: true,
+            imagesReady: true,
+            assetsReady: true,
+          },
+        },
         fonts: [],
         fixture: {
           id: "mock:checkout",
@@ -4880,19 +5496,145 @@ describe("WorkflowService", () => {
             .digest("hex")}`,
         },
         assets: [],
-        assetsComplete: true,
         actual: {
           path: featureActualPath,
           digest: featureActualDigest,
           bitmapSize: { width: 1, height: 1 },
         },
-        runnerVersion: "capture-runner-v1",
         normalizerVersion: "visual-normalizer-v1",
         capturedAt: "2026-07-20T00:00:00.000Z",
       }),
       "utf8",
     );
     await writeFile(path.join(directory, featureReceiptPath), featureReceiptBytes);
+    const featureReceiptDigest =
+      `sha256:${createHash("sha256").update(featureReceiptBytes).digest("hex")}` as const;
+    const featureAssertionResultPath =
+      `visual/actual/${visualAction.reviewPacketId}/checkout.playwright.json` as const;
+    const featureAssertionTestId = "checkout compatibility assertions";
+    const featureAssertionProjectName = "ui-chromium";
+    const featureAssertionObservationPath =
+      `visual/actual/${visualAction.reviewPacketId}/checkout.observation.json` as const;
+    const featureAssertionObservationBytes = Buffer.from(
+      JSON.stringify({
+        schemaVersion: "ui-assertion-observation-v1",
+        targetId: "checkout-default",
+        state: "default",
+        fixtureId: "mock:checkout",
+        screenshot: {
+          path: featureActualPath,
+          digest: featureActualDigest,
+        },
+        observations: {
+          "assert-checkout-default": "rendered",
+        },
+      }),
+      "utf8",
+    );
+    const featureAssertionObservationDigest =
+      `sha256:${createHash("sha256").update(featureAssertionObservationBytes).digest("hex")}` as const;
+    const featureProducerBinding = {
+      targetId: "checkout-default",
+      state: "default",
+      fixtureId: "mock:checkout",
+      observation: {
+        path: featureAssertionObservationPath,
+        digest: featureAssertionObservationDigest,
+      },
+      screenshot: {
+        path: featureActualPath,
+        digest: featureActualDigest,
+      },
+    };
+    const featureBindingAnnotation = {
+      type: "spec-to-pr-ui-binding",
+      description: JSON.stringify(featureProducerBinding),
+    };
+    const featureAssertionResultBytes = Buffer.from(
+      JSON.stringify({
+        config: { version: "1.61.1" },
+        suites: [
+          {
+            title: "checkout.spec.ts",
+            specs: [
+              {
+                title: featureAssertionTestId,
+                ok: true,
+                tests: [
+                  {
+                    expectedStatus: "passed",
+                    projectId: featureAssertionProjectName,
+                    projectName: featureAssertionProjectName,
+                    results: [
+                      {
+                        status: "passed",
+                        errors: [],
+                        annotations: [featureBindingAnnotation],
+                        attachments: [
+                          {
+                            name: "spec-to-pr-ui-observation",
+                            contentType: "application/vnd.spec-to-pr.ui-observation+json",
+                            body: featureAssertionObservationBytes.toString("base64"),
+                          },
+                        ],
+                      },
+                    ],
+                    status: "expected",
+                    annotations: [featureBindingAnnotation],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        errors: [],
+        stats: { expected: 1, unexpected: 0, flaky: 0, skipped: 0 },
+      }),
+      "utf8",
+    );
+    const featureAssertionResultDigest =
+      `sha256:${createHash("sha256").update(featureAssertionResultBytes).digest("hex")}` as const;
+    await writeFile(path.join(directory, featureAssertionResultPath), featureAssertionResultBytes);
+    await writeFile(
+      path.join(directory, featureAssertionObservationPath),
+      featureAssertionObservationBytes,
+    );
+    const featureAssertionReportPath =
+      `visual/actual/${visualAction.reviewPacketId}/checkout.assertions.json` as const;
+    const featureAssertionReportBytes = Buffer.from(
+      JSON.stringify({
+        schemaVersion: "ui-assertions-v1",
+        reviewPacketId: visualAction.reviewPacketId,
+        headSha: featurePacket.headSha,
+        targetId: "checkout-default",
+        fixtureId: "mock:checkout",
+        stateContractDigest: figmaStateContracts()[0]!.digest,
+        captureReceiptDigest: featureReceiptDigest,
+        producer: {
+          kind: "playwright-test-cli",
+          testId: featureAssertionTestId,
+          projectName: featureAssertionProjectName,
+          resultPath: featureAssertionResultPath,
+          resultDigest: featureAssertionResultDigest,
+          binding: featureProducerBinding,
+        },
+        assertions: [
+          {
+            id: "assert-checkout-default",
+            kind: "interaction",
+            selector: "[data-ui=checkout]",
+            subject: "checkout state rendered",
+            action: "click",
+            expected: "rendered",
+            observed: "rendered",
+            status: "passed",
+          },
+        ],
+        status: "passed",
+      }),
+      "utf8",
+    );
+    await writeFile(path.join(directory, featureAssertionReportPath), featureAssertionReportBytes);
     const featureCapture = {
       targetId: "checkout-default",
       route: "/checkout",
@@ -4904,9 +5646,15 @@ describe("WorkflowService", () => {
       capturedAt: "2026-07-20T00:00:00.000Z",
       actualPath: featureActualPath,
       actualDigest: featureActualDigest,
+      assertionReportPath: featureAssertionReportPath,
+      assertionReportDigest:
+        `sha256:${createHash("sha256").update(featureAssertionReportBytes).digest("hex")}` as const,
+      assertionResultPath: featureAssertionResultPath,
+      assertionResultDigest: featureAssertionResultDigest,
+      assertionObservationPath: featureAssertionObservationPath,
+      assertionObservationDigest: featureAssertionObservationDigest,
       receiptPath: featureReceiptPath,
-      receiptDigest:
-        `sha256:${createHash("sha256").update(featureReceiptBytes).digest("hex")}` as const,
+      receiptDigest: featureReceiptDigest,
     };
     await expect(
       service.submit({
@@ -4915,7 +5663,15 @@ describe("WorkflowService", () => {
           kind: "visual-comparison",
           reviewPacketId: visualAction.reviewPacketId,
           captures: [{ ...featureCapture, route: "/wrong" }],
-          artifactPaths: [featureActualPath, featureReceiptPath],
+          ...featureIsolation,
+          artifactPaths: [
+            featureActualPath,
+            featureAssertionReportPath,
+            featureAssertionResultPath,
+            featureAssertionObservationPath,
+            featureReceiptPath,
+            featureIsolation.baselineIsolationPath,
+          ],
         },
       }),
     ).rejects.toThrow(/capture manifest.*target/i);
@@ -4926,7 +5682,15 @@ describe("WorkflowService", () => {
           kind: "visual-comparison",
           reviewPacketId: visualAction.reviewPacketId,
           captures: [{ ...featureCapture, actualDigest: `sha256:${"0".repeat(64)}` }],
-          artifactPaths: [featureActualPath, featureReceiptPath],
+          ...featureIsolation,
+          artifactPaths: [
+            featureActualPath,
+            featureAssertionReportPath,
+            featureAssertionResultPath,
+            featureAssertionObservationPath,
+            featureReceiptPath,
+            featureIsolation.baselineIsolationPath,
+          ],
         },
       }),
     ).rejects.toThrow(/VISUAL_CAPTURE_DIGEST_MISMATCH/);
@@ -4936,24 +5700,48 @@ describe("WorkflowService", () => {
         kind: "visual-comparison",
         reviewPacketId: visualAction.reviewPacketId,
         captures: [featureCapture],
-        artifactPaths: [featureActualPath, featureReceiptPath],
+        ...featureIsolation,
+        artifactPaths: [
+          featureActualPath,
+          featureAssertionReportPath,
+          featureAssertionResultPath,
+          featureAssertionObservationPath,
+          featureReceiptPath,
+          featureIsolation.baselineIsolationPath,
+        ],
       },
     });
     expect(visuallyCompared.nextActions.map((action) => action.kind).sort()).toEqual([
       "review-design",
       "review-functional",
     ]);
-    await expect(
-      service.submit({
-        runId: started.runId,
-        submission: {
-          kind: "visual-comparison",
-          reviewPacketId: visualAction.reviewPacketId,
-          captures: [featureCapture],
-          artifactPaths: [featureActualPath, featureReceiptPath],
-        },
-      }),
-    ).rejects.toThrow(/already has a passing visual comparison/);
+    const beforePassingReplay = await store.get(started.runId);
+    const passingReportCount = beforePassingReplay.artifacts.filter(
+      (artifact) => artifact.kind === "visual-report",
+    ).length;
+    const passingReplay = await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "visual-comparison",
+        reviewPacketId: visualAction.reviewPacketId,
+        captures: [featureCapture],
+        ...featureIsolation,
+        artifactPaths: [
+          featureActualPath,
+          featureAssertionReportPath,
+          featureAssertionResultPath,
+          featureAssertionObservationPath,
+          featureReceiptPath,
+          featureIsolation.baselineIsolationPath,
+        ],
+      },
+    });
+    const afterPassingReplay = await store.get(started.runId);
+    expect(passingReplay.revision).toBe(beforePassingReplay.revision);
+    expect(afterPassingReplay.revision).toBe(beforePassingReplay.revision);
+    expect(
+      afterPassingReplay.artifacts.filter((artifact) => artifact.kind === "visual-report"),
+    ).toHaveLength(passingReportCount);
     await service.submit({
       runId: started.runId,
       submission: {
@@ -5066,7 +5854,7 @@ describe("WorkflowService", () => {
         results: [
           expect.objectContaining({
             targetId: "checkout-default",
-            metrics: expect.objectContaining({ threshold: 0.98 }),
+            metrics: expect.objectContaining({ threshold: 0.92 }),
           }),
         ],
       },
@@ -5101,6 +5889,7 @@ describe("WorkflowService", () => {
       capturedComponents: figmaCapturedComponents(),
       designMapping: figmaDesignMapping(),
       manifestPath: "figma/design-context.json",
+      stateContracts: figmaStateContracts(),
       visualTargets: figmaVisualTargets(),
       artifactPaths: ["figma/design-context.json", "visual/diff.png"],
     } as const;
@@ -5109,6 +5898,17 @@ describe("WorkflowService", () => {
     await expect(service.submit({ runId: started.runId, submission })).rejects.toThrow(
       /Figma manifest/i,
     );
+
+    for (const nodeIds of [[], ["9:9"], ["1:2", "9:9"], ["1:2", "1:2"]]) {
+      await writeFile(
+        path.join(directory, submission.manifestPath),
+        JSON.stringify({ ...figmaManifest(), nodeIds }),
+        "utf8",
+      );
+      await expect(service.submit({ runId: started.runId, submission })).rejects.toThrow(
+        /FIGMA_STATE_CONTRACT_INVALID.*nodeIds/i,
+      );
+    }
 
     await writeFile(
       path.join(directory, submission.manifestPath),
@@ -5121,7 +5921,7 @@ describe("WorkflowService", () => {
     );
   });
 
-  it("rejects a scaled Figma thumbnail declared as the browser viewport", async () => {
+  it("requires reacquisition for historical v1 Figma geometry before attempt reservation", async () => {
     const figmaUrl = "https://www.figma.com/design/abc/file?node-id=2558-4382";
     const target = {
       targetId: "shop-list",
@@ -5156,6 +5956,12 @@ describe("WorkflowService", () => {
         capturedComponents: figmaCapturedComponents(),
         designMapping: figmaDesignMapping(),
         visualPaths: [target.baselinePath],
+        stateContracts: figmaStateContracts({
+          targetId: target.targetId,
+          nodeId: target.figmaCapture.nodeId,
+          state: target.state,
+          fixtureId: target.fixture,
+        }),
         visualTargets: [target],
       }),
       "utf8",
@@ -5182,12 +5988,172 @@ describe("WorkflowService", () => {
           capturedComponents: figmaCapturedComponents(),
           designMapping: figmaDesignMapping(),
           manifestPath: "figma/design-context.json",
+          stateContracts: figmaStateContracts({
+            targetId: target.targetId,
+            nodeId: target.figmaCapture.nodeId,
+            state: target.state,
+            fixtureId: target.fixture,
+          }),
           visualTargets: [target],
           artifactPaths: ["figma/design-context.json", target.baselinePath],
         },
       }),
-    ).rejects.toThrow(/FIGMA_CAPTURE_GEOMETRY_INVALID/);
+    ).rejects.toThrow(/FIGMA_CAPTURE_GEOMETRY_REACQUISITION_REQUIRED/);
+    const afterRejection = await store.get(started.runId);
+    expect(
+      afterRejection.artifacts.filter(
+        (artifact) => artifact.metadata["adapter"] === "visual-attempt-reservation-v3",
+      ),
+    ).toHaveLength(0);
   });
+
+  it.each(["v1", "omitted"])(
+    "rejects persisted Figma target with %s geometry without mutating attempt state",
+    async (geometry) => {
+      const started = await service.start({
+        projectRoot: directory,
+        requestText: `Implement ${FIGMA_URL}`,
+        scope: "ui",
+        mode: "figma",
+        changeKind: "design",
+        figmaUrl: FIGMA_URL,
+      });
+      await service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "figma-bundle",
+          provider: "host-connected-figma",
+          capturedAt: "2026-07-13T00:00:00.000Z",
+          fileUrl: FIGMA_URL,
+          fileUrls: [FIGMA_URL],
+          nodeIds: ["1:2"],
+          capturedComponents: figmaCapturedComponents(),
+          designMapping: figmaDesignMapping(),
+          manifestPath: "figma/design-context.json",
+          stateContracts: figmaStateContracts(),
+          visualTargets: figmaVisualTargets(),
+          artifactPaths: ["figma/design-context.json", "visual/diff.png"],
+        },
+      });
+      await service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "contracts",
+          status: "passed",
+          summary: "Figma state contract ready.",
+          artifactPaths: ["contracts/requirements.json"],
+          requirementManifest: requirements("figma-screen"),
+        },
+      });
+      await changeSource(directory, "src/checkout.tsx", "export const checkout = 'v1-seed';\n");
+      const implemented = await service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "implementation",
+          status: "passed",
+          summary: "Implementation ready for visual comparison.",
+          apiReady: false,
+          uiChanged: true,
+          changedFiles: ["src/checkout.tsx"],
+          artifactPaths: ["test-results/unit.json", "mocks/manifest.json", "mocks/checkout.json"],
+          mockDataEvidence: {
+            manifestPath: "mocks/manifest.json",
+            fixtures: [
+              {
+                id: "mock:checkout",
+                path: "mocks/checkout.json",
+                stateContractDigest: figmaStateContracts()[0]!.digest,
+              },
+            ],
+          },
+        },
+      });
+      const compareAction = implemented.nextActions.find(
+        (action) => action.kind === "compare-visuals",
+      );
+      if (compareAction === undefined || !("reviewPacketId" in compareAction)) {
+        throw new Error("Missing visual comparison action");
+      }
+
+      const seededRun = await store.get(started.runId);
+      const bundleIndex = seededRun.artifacts.findIndex(
+        (artifact) =>
+          artifact.metadata["workflowSubmissionKind"] === "figma-bundle" &&
+          Array.isArray(artifact.metadata["visualTargets"]),
+      );
+      if (bundleIndex < 0) throw new Error("Missing persisted Figma targets");
+      const bundle = seededRun.artifacts[bundleIndex]!;
+      const persistedTarget: Record<string, unknown> = {
+        ...figmaVisualTargets()[0]!,
+      };
+      if (geometry === "v1") {
+        persistedTarget["figmaCapture"] = {
+          nodeId: "1:2",
+          captureKind: "viewport",
+          logicalSize: { width: 1, height: 1 },
+          exportScale: 1,
+          bitmapSize: { width: 1, height: 1 },
+          colorSpace: "srgb",
+        };
+      } else {
+        delete persistedTarget["figmaCapture"];
+      }
+      seededRun.artifacts[bundleIndex] = ArtifactRefSchema.parse({
+        ...bundle,
+        metadata: {
+          ...bundle.metadata,
+          visualTargets: [persistedTarget],
+        },
+      });
+      seededRun.revision += 1;
+      seededRun.updatedAt = new Date().toISOString();
+      await store.save(seededRun, seededRun.revision - 1);
+
+      const before = await store.get(started.runId);
+      const beforeBytes = JSON.stringify(before);
+      const actualPath = `visual/actual/${compareAction.reviewPacketId}/checkout-default.png`;
+      await expect(
+        service.submit({
+          runId: started.runId,
+          submission: {
+            kind: "visual-comparison",
+            reviewPacketId: compareAction.reviewPacketId,
+            captures: [
+              {
+                targetId: "checkout-default",
+                route: "/checkout",
+                state: "default",
+                viewport: { width: 1, height: 1 },
+                deviceScaleFactor: 1,
+                fixture: "mock:checkout",
+                provider: "playwright",
+                capturedAt: "2026-07-20T00:00:00.000Z",
+                actualPath,
+                actualDigest: `sha256:${"a".repeat(64)}`,
+              },
+            ],
+            baselineIsolationPath: `visual/actual/${compareAction.reviewPacketId}/baseline-isolation.json`,
+            baselineIsolationDigest: `sha256:${"b".repeat(64)}`,
+            artifactPaths: [
+              actualPath,
+              `visual/actual/${compareAction.reviewPacketId}/baseline-isolation.json`,
+            ],
+          },
+        }),
+      ).rejects.toThrow(/FIGMA_CAPTURE_GEOMETRY_REACQUISITION_REQUIRED/);
+      const after = await store.get(started.runId);
+      expect(JSON.stringify(after)).toBe(beforeBytes);
+      expect(
+        after.artifacts.filter(
+          (artifact) => artifact.metadata["adapter"] === "visual-attempt-reservation-v3",
+        ),
+      ).toEqual(
+        before.artifacts.filter(
+          (artifact) => artifact.metadata["adapter"] === "visual-attempt-reservation-v3",
+        ),
+      );
+    },
+  );
 
   it("records at most one Figma bundle under concurrent submissions", async () => {
     const started = await service.start({
@@ -5210,6 +6176,7 @@ describe("WorkflowService", () => {
         capturedComponents: figmaCapturedComponents(),
         designMapping: figmaDesignMapping(),
         manifestPath: "figma/design-context.json",
+        stateContracts: figmaStateContracts(),
         visualTargets: figmaVisualTargets(),
         artifactPaths: ["figma/design-context.json", "visual/diff.png"],
       },
@@ -5224,7 +6191,527 @@ describe("WorkflowService", () => {
     ).toHaveLength(1);
   });
 
-  it("repairs implementation across visual packets and caps valid comparisons at three", async () => {
+  it.each([
+    {
+      name: "review packet ID",
+      mutate: (run: Awaited<ReturnType<typeof store.get>>) => ({
+        ...run,
+        stages: run.stages.map((item) =>
+          item.name === "implementation"
+            ? {
+                ...item,
+                checkpoint: {
+                  ...item.checkpoint!,
+                  data: {
+                    ...item.checkpoint!.data,
+                    reviewPacket: {
+                      ...(item.checkpoint!.data["reviewPacket"] as Record<string, unknown>),
+                      id: `packet_${"a".repeat(64)}`,
+                    },
+                  },
+                },
+              }
+            : item,
+        ),
+      }),
+    },
+    {
+      name: "review packet head",
+      mutate: (run: Awaited<ReturnType<typeof store.get>>) => ({
+        ...run,
+        stages: run.stages.map((item) =>
+          item.name === "implementation"
+            ? {
+                ...item,
+                checkpoint: {
+                  ...item.checkpoint!,
+                  data: {
+                    ...item.checkpoint!.data,
+                    reviewPacket: {
+                      ...(item.checkpoint!.data["reviewPacket"] as Record<string, unknown>),
+                      headSha: "a".repeat(40),
+                    },
+                  },
+                },
+              }
+            : item,
+        ),
+      }),
+    },
+    {
+      name: "review packet diff",
+      mutate: (run: Awaited<ReturnType<typeof store.get>>) => ({
+        ...run,
+        stages: run.stages.map((item) =>
+          item.name === "implementation"
+            ? {
+                ...item,
+                checkpoint: {
+                  ...item.checkpoint!,
+                  data: {
+                    ...item.checkpoint!.data,
+                    reviewPacket: {
+                      ...(item.checkpoint!.data["reviewPacket"] as Record<string, unknown>),
+                      diffDigest: `sha256:${"a".repeat(64)}`,
+                    },
+                  },
+                },
+              }
+            : item,
+        ),
+      }),
+    },
+    {
+      name: "implementation state",
+      mutate: (run: Awaited<ReturnType<typeof store.get>>) => ({
+        ...run,
+        stages: run.stages.map((item) =>
+          item.name === "implementation"
+            ? {
+                ...item,
+                status: "failed" as const,
+                completedAt: new Date().toISOString(),
+                error: {
+                  code: "IMPLEMENTATION_REPLACED",
+                  message: "Implementation was superseded while review evidence was being stored.",
+                  retryable: true,
+                },
+              }
+            : item,
+        ),
+      }),
+    },
+    {
+      name: "terminal visual threshold",
+      mutate: (run: Awaited<ReturnType<typeof store.get>>) => ({
+        ...run,
+        status: "blocked" as const,
+        stages: run.stages.map((item) => {
+          if (item.name === "implementation") {
+            return {
+              ...item,
+              status: "failed" as const,
+              completedAt: new Date().toISOString(),
+              checkpoint: {
+                name: "visual-threshold-not-met",
+                data: {
+                  ...item.checkpoint!.data,
+                  visualTerminalIdentity: `sha256:${"a".repeat(64)}`,
+                },
+                updatedAt: new Date().toISOString(),
+              },
+              error: {
+                code: "VISUAL_REVIEW_THRESHOLD_NOT_MET",
+                message: "The visual threshold was not met.",
+                retryable: false,
+              },
+            };
+          }
+          if (item.name === "functional-review" || item.name === "design-review") {
+            return {
+              ...item,
+              status: "pending" as const,
+              attempt: 0,
+              startedAt: undefined,
+              completedAt: undefined,
+              lease: undefined,
+              checkpoint: undefined,
+              artifactIds: [],
+              gapIds: [],
+              error: undefined,
+            };
+          }
+          return item;
+        }),
+      }),
+    },
+  ])("rejects late reviewer evidence after a changed $name", async ({ mutate }) => {
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Refactor the parser with covered behavior.",
+      scope: "non-ui",
+      publication: "none",
+    });
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "contracts",
+        status: "passed",
+        summary: "Parser contract ready.",
+        artifactPaths: ["contracts/requirements.json"],
+        requirementManifest: requirements("parser"),
+      },
+    });
+    await changeSource(directory, "src/parser.ts", "export const parser = 'review-race';\n");
+    const implemented = await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "implementation",
+        status: "passed",
+        summary: "Parser implemented.",
+        apiReady: false,
+        uiChanged: false,
+        changedFiles: ["src/parser.ts"],
+        artifactPaths: ["test-results/unit.json"],
+      },
+    });
+    const reviewerEvidenceIngested = deferred<void>();
+    const releaseReviewerEvidence = deferred<void>();
+    const originalWriteBlob = artifactStore.writeBlob.bind(artifactStore);
+    const writeBlobSpy = vi.spyOn(artifactStore, "writeBlob").mockImplementation(async (input) => {
+      if (input.label === "unit.json") {
+        reviewerEvidenceIngested.resolve();
+        await releaseReviewerEvidence.promise;
+      }
+      return originalWriteBlob(input);
+    });
+    const lateReview = service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "functional-review",
+        reviewPacketId: reviewPacketId(implemented, "review-functional"),
+        verdict: "approved",
+        summary: "Functional evidence passed.",
+        findings: [],
+        requirements: [{ id: "parser", verdict: "accepted" }],
+        artifactPaths: ["test-results/unit.json"],
+        gateResults: [
+          { id: "functional", status: "passed", evidencePaths: ["test-results/unit.json"] },
+        ],
+      },
+    });
+
+    await reviewerEvidenceIngested.promise;
+    const current = await store.get(started.runId);
+    const terminal = mutate(current);
+    await store.save(
+      { ...terminal, revision: current.revision + 1, updatedAt: new Date().toISOString() },
+      current.revision,
+    );
+    const expectedTerminal = await store.get(started.runId);
+    releaseReviewerEvidence.resolve();
+    await expect(lateReview).rejects.toThrow(/REVIEW_PACKET_STALE|visual threshold/i);
+    writeBlobSpy.mockRestore();
+
+    const afterLateReview = await store.get(started.runId);
+    expect(afterLateReview).toEqual(expectedTerminal);
+  });
+
+  it("accepts a sibling reviewer after another reviewer advances the same packet revision", async () => {
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Implement a large enough UI change to use parallel reviewers.",
+      scope: "ui",
+      publication: "none",
+    });
+    const startedRun = await store.get(started.runId);
+    await store.save(
+      {
+        ...startedRun,
+        revision: startedRun.revision + 1,
+        stages: startedRun.stages.map((item) =>
+          item.name === "intake"
+            ? {
+                ...item,
+                checkpoint: {
+                  ...item.checkpoint!,
+                  data: {
+                    ...item.checkpoint!.data,
+                    workload: {
+                      size: "L",
+                      score: 51,
+                      confidence: "high",
+                      source: "contracts",
+                      tokenRange: { min: 160_000, max: 320_000 },
+                      budget: {
+                        checkpointPercent: 80,
+                        checkpointAtTokens: 256_000,
+                        hardLimitTokens: 320_000,
+                      },
+                      sampleCount: 1,
+                      reasons: ["parallel reviewer coverage"],
+                    },
+                  },
+                },
+              }
+            : item,
+        ),
+      },
+      startedRun.revision,
+    );
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "contracts",
+        status: "passed",
+        summary: "UI contract ready.",
+        artifactPaths: ["contracts/requirements.json"],
+        requirementManifest: requirements("checkout"),
+      },
+    });
+    await changeSource(directory, "src/checkout.tsx", "export const checkout = 'parallel';\n");
+    const implemented = await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "implementation",
+        status: "passed",
+        summary: "Checkout implemented.",
+        apiReady: false,
+        uiChanged: true,
+        changedFiles: ["src/checkout.tsx"],
+        artifactPaths: ["test-results/unit.json"],
+      },
+    });
+    const packetId = reviewPacketId(implemented, "review-functional");
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "functional-review",
+        reviewPacketId: packetId,
+        verdict: "approved",
+        summary: "Functional evidence passed.",
+        findings: [],
+        requirements: [{ id: "checkout", verdict: "accepted" }],
+        artifactPaths: ["test-results/unit.json"],
+        gateResults: [
+          { id: "functional", status: "passed", evidencePaths: ["test-results/unit.json"] },
+        ],
+      },
+    });
+    const design = await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "design-review",
+        reviewPacketId: packetId,
+        verdict: "approved",
+        summary: "Design evidence passed.",
+        requirements: [{ id: "checkout", verdict: "accepted" }],
+        artifactPaths: ["visual/diff.png"],
+        gateResults: [
+          { id: "visual", status: "passed", evidencePaths: ["visual/diff.png"] },
+          { id: "accessibility", status: "passed", evidencePaths: ["visual/diff.png"] },
+        ],
+      },
+    });
+
+    expect(design.stages).toEqual(
+      expect.arrayContaining([
+        { name: "functional-review", status: "passed" },
+        { name: "design-review", status: "passed" },
+      ]),
+    );
+  });
+
+  it("captures one binary diff for two reviewers and the report on one clean packet", async () => {
+    const workspace = await prepareStrictWorkspace(directory);
+    const metrics = new RuntimeMetricsRecorder();
+    service = new WorkflowService({ ...dependencies, metrics });
+    const started = await service.start({
+      projectRoot: path.join(directory, "src/pages/shop"),
+      requestText: "Implement and independently review a responsive shop page.",
+      scope: "ui",
+      publication: "none",
+      workspace: {
+        sourceBranch: "codex/shop",
+        targetBranch: "release-qa",
+        remoteName: "origin",
+      },
+    });
+    const startedRun = await store.get(started.runId);
+    await store.save(
+      {
+        ...startedRun,
+        revision: startedRun.revision + 1,
+        stages: startedRun.stages.map((item) =>
+          item.name === "intake"
+            ? {
+                ...item,
+                checkpoint: {
+                  ...item.checkpoint!,
+                  data: {
+                    ...item.checkpoint!.data,
+                    workload: {
+                      size: "L",
+                      score: 51,
+                      confidence: "high",
+                      source: "contracts",
+                      tokenRange: { min: 160_000, max: 320_000 },
+                      budget: {
+                        checkpointPercent: 80,
+                        checkpointAtTokens: 256_000,
+                        hardLimitTokens: 320_000,
+                      },
+                      sampleCount: 1,
+                      reasons: ["parallel reviewer coverage"],
+                    },
+                  },
+                },
+              }
+            : item,
+        ),
+      },
+      startedRun.revision,
+    );
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "contracts",
+        status: "passed",
+        summary: "Shop contract ready.",
+        artifactPaths: ["contracts/requirements.json"],
+        requirementManifest: requirements("shop"),
+      },
+    });
+    await changeSource(
+      directory,
+      "src/pages/shop/App.ts",
+      "export const shop = 'packet-evidence';\n",
+    );
+    await execFileAsync("git", ["add", "src/pages/shop/App.ts"], { cwd: directory });
+    await execFileAsync("git", ["commit", "-qm", "implement shop"], { cwd: directory });
+    const implemented = await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "implementation",
+        status: "passed",
+        summary: "Shop implemented.",
+        apiReady: false,
+        uiChanged: true,
+        changedFiles: ["src/pages/shop/App.ts"],
+        artifactPaths: ["test-results/unit.json"],
+      },
+    });
+    const implementationMetrics = metrics.snapshot({
+      runId: started.runId,
+      fixtureDigest: `sha256:${"f".repeat(64)}`,
+      collectedAt: "2026-07-29T00:00:00.000Z",
+    });
+    const implementationDiffBytes = implementationMetrics.samples.find(
+      (sample) => sample.name === "git.binary_diff_bytes",
+    )?.value;
+    const packetId = reviewPacketId(implemented, "review-functional");
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "functional-review",
+        reviewPacketId: packetId,
+        verdict: "approved",
+        summary: "Functional behavior passed.",
+        findings: [],
+        requirements: [{ id: "shop", verdict: "accepted" }],
+        artifactPaths: ["test-results/unit.json"],
+        gateResults: [
+          { id: "functional", status: "passed", evidencePaths: ["test-results/unit.json"] },
+        ],
+      },
+    });
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "design-review",
+        reviewPacketId: packetId,
+        verdict: "approved",
+        summary: "Design and accessibility passed.",
+        findings: [],
+        requirements: [{ id: "shop", verdict: "accepted" }],
+        artifactPaths: ["visual/diff.png"],
+        gateResults: [
+          { id: "visual", status: "passed", evidencePaths: ["visual/diff.png"] },
+          { id: "accessibility", status: "passed", evidencePaths: ["visual/diff.png"] },
+        ],
+      },
+    });
+    await service.advance({ runId: started.runId, until: "report" });
+
+    const snapshot = metrics.snapshot({
+      runId: started.runId,
+      fixtureDigest: `sha256:${"f".repeat(64)}`,
+      collectedAt: "2026-07-29T00:00:00.000Z",
+    });
+    expect(snapshot.samples.find((sample) => sample.name === "git.binary_diff_bytes")?.value).toBe(
+      implementationDiffBytes,
+    );
+    expect(
+      snapshot.samples.find((sample) => sample.name === "git.command_count")?.value,
+    ).toBeLessThanOrEqual(14);
+    expect(workspace.releaseQaSha).toHaveLength(40);
+  });
+
+  it("invalidates a strict review packet when an untracked file is added or changed", async () => {
+    await prepareStrictWorkspace(directory);
+    const started = await service.start({
+      projectRoot: path.join(directory, "src/pages/shop"),
+      requestText: "Implement and review a shop change.",
+      scope: "non-ui",
+      publication: "none",
+      workspace: {
+        sourceBranch: "codex/shop",
+        targetBranch: "release-qa",
+        remoteName: "origin",
+      },
+    });
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "contracts",
+        status: "passed",
+        summary: "Shop contract ready.",
+        artifactPaths: ["contracts/requirements.json"],
+        requirementManifest: requirements("shop"),
+      },
+    });
+    await changeSource(directory, "src/pages/shop/App.ts", "export const shop = 'clean';\n");
+    await execFileAsync("git", ["add", "src/pages/shop/App.ts"], { cwd: directory });
+    await execFileAsync("git", ["commit", "-qm", "implement shop"], { cwd: directory });
+    const implemented = await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "implementation",
+        status: "passed",
+        summary: "Shop implemented.",
+        apiReady: false,
+        uiChanged: false,
+        changedFiles: ["src/pages/shop/App.ts"],
+        artifactPaths: ["test-results/unit.json"],
+      },
+    });
+    const packetId = reviewPacketId(implemented, "review-functional");
+    const review = () =>
+      service.submit({
+        runId: started.runId,
+        submission: {
+          kind: "functional-review" as const,
+          reviewPacketId: packetId,
+          verdict: "approved" as const,
+          summary: "Functional behavior passed.",
+          findings: [],
+          requirements: [{ id: "shop", verdict: "accepted" as const }],
+          artifactPaths: ["test-results/unit.json"],
+          gateResults: [
+            {
+              id: "functional" as const,
+              status: "passed" as const,
+              evidencePaths: ["test-results/unit.json"],
+            },
+          ],
+        },
+      });
+
+    await writeFile(
+      path.join(directory, "src/pages/shop/untracked.ts"),
+      "export const value = 1;\n",
+    );
+    await expect(review()).rejects.toThrow(/review packet is stale/i);
+
+    await writeFile(
+      path.join(directory, "src/pages/shop/untracked.ts"),
+      "export const value = 2;\n",
+    );
+    await expect(review()).rejects.toThrow(/review packet is stale/i);
+  });
+
+  it("enforces baseline isolation and renderer lineage, reuses baselines, and keeps full fresh coverage across three visual failures", async () => {
+    defaultVisualNormalizationCache.clear();
     const baseline = new PNG({ width: 1, height: 1 });
     baseline.data.set([0, 0, 0, 255]);
     await writeFile(path.join(directory, "visual/diff.png"), PNG.sync.write(baseline));
@@ -5250,10 +6737,55 @@ describe("WorkflowService", () => {
         capturedComponents: figmaCapturedComponents(),
         designMapping: figmaDesignMapping(),
         manifestPath: "figma/design-context.json",
+        stateContracts: figmaStateContracts(),
         visualTargets: figmaVisualTargets(),
         artifactPaths: ["figma/design-context.json", "visual/diff.png"],
       },
     });
+    const secondTarget = {
+      ...figmaVisualTargets()[0]!,
+      targetId: "checkout-summary",
+      name: "Checkout summary",
+      state: "summary",
+      fixture: "mock:summary",
+      figmaCapture: {
+        ...figmaVisualTargets()[0]!.figmaCapture,
+        nodeId: "1:3",
+        state: "summary",
+      },
+    };
+    const runWithTwoTargets = await store.get(started.runId);
+    const figmaBundleArtifactIndex = runWithTwoTargets.artifacts.findIndex(
+      (artifact) =>
+        artifact.metadata["workflowSubmissionKind"] === "figma-bundle" &&
+        Array.isArray(artifact.metadata["visualTargets"]),
+    );
+    if (figmaBundleArtifactIndex < 0) throw new Error("Missing persisted Figma bundle");
+    const originalFigmaBundleArtifact = runWithTwoTargets.artifacts[figmaBundleArtifactIndex]!;
+    const originalVisualTargets = originalFigmaBundleArtifact.metadata["visualTargets"];
+    if (!Array.isArray(originalVisualTargets)) throw new Error("Missing persisted visual targets");
+    const originalStateContracts = originalFigmaBundleArtifact.metadata["stateContracts"];
+    if (!Array.isArray(originalStateContracts))
+      throw new Error("Missing persisted state contracts");
+    runWithTwoTargets.artifacts[figmaBundleArtifactIndex] = ArtifactRefSchema.parse({
+      ...originalFigmaBundleArtifact,
+      metadata: {
+        ...originalFigmaBundleArtifact.metadata,
+        visualTargets: [...originalVisualTargets, secondTarget],
+        stateContracts: [
+          ...originalStateContracts,
+          ...figmaStateContracts({
+            targetId: secondTarget.targetId,
+            nodeId: secondTarget.figmaCapture.nodeId,
+            state: secondTarget.state,
+            fixtureId: secondTarget.fixture,
+          }),
+        ],
+      },
+    });
+    runWithTwoTargets.revision += 1;
+    runWithTwoTargets.updatedAt = new Date().toISOString();
+    await store.save(runWithTwoTargets, runWithTwoTargets.revision - 1);
     await service.submit({
       runId: started.runId,
       submission: {
@@ -5265,6 +6797,14 @@ describe("WorkflowService", () => {
       },
     });
     await changeSource(directory, "src/checkout.tsx", "export const checkout = 'visual';\n");
+    await mkdir(path.join(directory, "src/fixtures"), { recursive: true });
+    await changeSource(
+      directory,
+      "src/fixtures/runtime.ts",
+      "export const runtimeFixture = 'production';\n",
+    );
+    const summaryFixture = Buffer.from(JSON.stringify([{ state: "summary" }]), "utf8");
+    await writeFile(path.join(directory, "mocks/summary.json"), summaryFixture);
     await expect(
       service.submit({
         runId: started.runId,
@@ -5285,11 +6825,38 @@ describe("WorkflowService", () => {
       summary: "Rendered the checkout target.",
       apiReady: false,
       uiChanged: true,
-      changedFiles: ["mocks/checkout.json", "mocks/manifest.json", "src/checkout.tsx"],
-      artifactPaths: ["test-results/unit.json", "mocks/manifest.json", "mocks/checkout.json"],
+      changedFiles: [
+        "mocks/checkout.json",
+        "mocks/manifest.json",
+        "mocks/summary.json",
+        "src/checkout.tsx",
+        "src/fixtures/runtime.ts",
+      ],
+      artifactPaths: [
+        "test-results/unit.json",
+        "mocks/manifest.json",
+        "mocks/checkout.json",
+        "mocks/summary.json",
+      ],
       mockDataEvidence: {
         manifestPath: "mocks/manifest.json",
-        fixtures: [{ id: "mock:checkout", path: "mocks/checkout.json" }],
+        fixtures: [
+          {
+            id: "mock:checkout",
+            path: "mocks/checkout.json",
+            stateContractDigest: figmaStateContracts()[0]!.digest,
+          },
+          {
+            id: "mock:summary",
+            path: "mocks/summary.json",
+            stateContractDigest: figmaStateContracts({
+              targetId: secondTarget.targetId,
+              nodeId: secondTarget.figmaCapture.nodeId,
+              state: secondTarget.state,
+              fixtureId: secondTarget.fixture,
+            })[0]!.digest,
+          },
+        ],
       },
     } as const;
     await expect(
@@ -5321,6 +6888,18 @@ describe("WorkflowService", () => {
             id: "mock:checkout",
             path: "mocks/checkout.json",
             sha256: `sha256:${"0".repeat(64)}`,
+            stateContractDigest: figmaStateContracts()[0]!.digest,
+          },
+          {
+            id: "mock:summary",
+            path: "mocks/summary.json",
+            sha256: `sha256:${createHash("sha256").update(summaryFixture).digest("hex")}`,
+            stateContractDigest: figmaStateContracts({
+              targetId: secondTarget.targetId,
+              nodeId: secondTarget.figmaCapture.nodeId,
+              state: secondTarget.state,
+              fixtureId: secondTarget.fixture,
+            })[0]!.digest,
           },
         ],
       }),
@@ -5355,6 +6934,18 @@ describe("WorkflowService", () => {
             id: "mock:checkout",
             path: "mocks/checkout.json",
             sha256: `sha256:${createHash("sha256").update(validFixture).digest("hex")}`,
+            stateContractDigest: figmaStateContracts()[0]!.digest,
+          },
+          {
+            id: "mock:summary",
+            path: "mocks/summary.json",
+            sha256: `sha256:${createHash("sha256").update(summaryFixture).digest("hex")}`,
+            stateContractDigest: figmaStateContracts({
+              targetId: secondTarget.targetId,
+              nodeId: secondTarget.figmaCapture.nodeId,
+              state: secondTarget.state,
+              fixtureId: secondTarget.fixture,
+            })[0]!.digest,
           },
         ],
       }),
@@ -5393,82 +6984,940 @@ describe("WorkflowService", () => {
       rgba: [number, number, number, number],
       withReceipt = true,
       fixtureDigestOverride?: string,
+      secondRgba: [number, number, number, number] = rgba,
     ) => {
-      const image = new PNG({ width: 1, height: 1 });
-      image.data.set(rgba);
-      const actualPath = `visual/actual/${action.reviewPacketId}/${name}.png`;
-      const bytes = PNG.sync.write(image);
-      await mkdir(path.dirname(path.join(directory, actualPath)), { recursive: true });
-      await writeFile(path.join(directory, actualPath), bytes);
-      const actualDigest = `sha256:${createHash("sha256").update(bytes).digest("hex")}` as const;
-      const receiptPath = `visual/actual/${action.reviewPacketId}/${name}.json`;
-      const receiptBytes = Buffer.from(
-        JSON.stringify({
-          reviewPacketId: action.reviewPacketId,
-          headSha: packetHeadSha,
-          targetId: "checkout-default",
-          route: "/checkout",
-          state: "default",
-          captureKind: "viewport",
-          logicalSize: { width: 1, height: 1 },
-          deviceScaleFactor: 1,
-          playwrightVersion: "1.54.1",
-          browserName: "chromium",
-          browserVersion: "138.0.7204.168",
-          locale: "ko-KR",
-          colorScheme: "light",
-          timezone: "Asia/Seoul",
-          userAgent: "Mozilla/5.0 Chromium",
-          fonts: [],
-          fixture: {
-            id: "mock:checkout",
-            digest:
-              fixtureDigestOverride ??
-              `sha256:${createHash("sha256").update(validFixture).digest("hex")}`,
+      const captureFor = async (
+        targetId: string,
+        suffix: string,
+        pixels: [number, number, number, number],
+      ) => {
+        const isSummary = targetId === "checkout-summary";
+        const targetState = isSummary ? "summary" : "default";
+        const fixtureId = isSummary ? "mock:summary" : "mock:checkout";
+        const fixtureBytes = isSummary ? summaryFixture : validFixture;
+        const stateContract = figmaStateContracts({
+          targetId,
+          nodeId: isSummary ? "1:3" : "1:2",
+          state: targetState,
+          fixtureId,
+        })[0]!;
+        const image = new PNG({ width: 1, height: 1 });
+        image.data.set(pixels);
+        const actualPath = `visual/actual/${action.reviewPacketId}/${name}-${suffix}.png`;
+        const bytes = PNG.sync.write(image);
+        await mkdir(path.dirname(path.join(directory, actualPath)), { recursive: true });
+        await writeFile(path.join(directory, actualPath), bytes);
+        const actualDigest = `sha256:${createHash("sha256").update(bytes).digest("hex")}` as const;
+        const receiptPath = `visual/actual/${action.reviewPacketId}/${name}-${suffix}.json`;
+        const receiptBytes = Buffer.from(
+          JSON.stringify({
+            schemaVersion: "visual-capture-receipt-v2",
+            reviewPacketId: action.reviewPacketId,
+            headSha: packetHeadSha,
+            stateContractDigest: stateContract.digest,
+            targetId,
+            route: "http://127.0.0.1:4173/checkout",
+            state: targetState,
+            captureKind: "viewport",
+            logicalSize: { width: 1, height: 1 },
+            deviceScaleFactor: 1,
+            environment: {
+              browser: {
+                family: "chromium",
+                channel: "chromium",
+                version: "138.0.7204.168",
+                userAgent: "Mozilla/5.0 Chromium",
+              },
+              renderer: {
+                adapter: "spec-to-pr-playwright",
+                adapterVersion: "capture-runner-v2",
+                playwrightVersion: "1.61.1",
+              },
+              locale: "ko-KR",
+              timezone: "Asia/Seoul",
+              colorScheme: "light",
+              reducedMotion: "reduce",
+              serverOrigin: "http://127.0.0.1:4173",
+              readiness: {
+                documentReadyState: "complete",
+                fontsReady: true,
+                imagesReady: true,
+                assetsReady: true,
+              },
+            },
+            fonts: [],
+            fixture: {
+              id: fixtureId,
+              digest:
+                fixtureDigestOverride ??
+                `sha256:${createHash("sha256").update(fixtureBytes).digest("hex")}`,
+            },
+            assets: [],
+            actual: {
+              path: actualPath,
+              digest: actualDigest,
+              bitmapSize: { width: 1, height: 1 },
+            },
+            normalizerVersion: "visual-normalizer-v1",
+            capturedAt: "2026-07-20T00:00:00.000Z",
+          }),
+          "utf8",
+        );
+        const receiptDigest =
+          `sha256:${createHash("sha256").update(receiptBytes).digest("hex")}` as const;
+        const assertionTestId = `${targetId} focused UI assertions`;
+        const assertionProjectName = "ui-chromium";
+        const assertionObservationPath = `visual/actual/${action.reviewPacketId}/${name}-${suffix}.observation.json`;
+        const assertionObservationBytes = Buffer.from(
+          JSON.stringify({
+            schemaVersion: "ui-assertion-observation-v1",
+            targetId,
+            state: targetState,
+            fixtureId,
+            screenshot: {
+              path: actualPath,
+              digest: actualDigest,
+            },
+            observations: {
+              [`assert-checkout-${targetState}`]: "rendered",
+            },
+          }),
+          "utf8",
+        );
+        const assertionObservationDigest =
+          `sha256:${createHash("sha256").update(assertionObservationBytes).digest("hex")}` as const;
+        const producerBinding = {
+          targetId,
+          state: targetState,
+          fixtureId,
+          observation: {
+            path: assertionObservationPath,
+            digest: assertionObservationDigest,
           },
-          assets: [],
-          assetsComplete: true,
-          actual: {
+          screenshot: {
             path: actualPath,
             digest: actualDigest,
-            bitmapSize: { width: 1, height: 1 },
           },
-          runnerVersion: "capture-runner-v1",
-          normalizerVersion: "visual-normalizer-v1",
+        };
+        const bindingAnnotation = {
+          type: "spec-to-pr-ui-binding",
+          description: JSON.stringify(producerBinding),
+        };
+        const assertionResultPath = `visual/actual/${action.reviewPacketId}/${name}-${suffix}.playwright.json`;
+        const assertionResultBytes = Buffer.from(
+          JSON.stringify({
+            config: { version: "1.61.1" },
+            suites: [
+              {
+                title: "checkout.spec.ts",
+                specs: [
+                  {
+                    title: assertionTestId,
+                    ok: true,
+                    tests: [
+                      {
+                        expectedStatus: "passed",
+                        projectId: assertionProjectName,
+                        projectName: assertionProjectName,
+                        results: [
+                          {
+                            status: "passed",
+                            errors: [],
+                            annotations: [bindingAnnotation],
+                            attachments: [
+                              {
+                                name: "spec-to-pr-ui-observation",
+                                contentType: "application/vnd.spec-to-pr.ui-observation+json",
+                                body: assertionObservationBytes.toString("base64"),
+                              },
+                            ],
+                          },
+                        ],
+                        status: "expected",
+                        annotations: [bindingAnnotation],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+            errors: [],
+            stats: { expected: 1, unexpected: 0, flaky: 0, skipped: 0 },
+          }),
+          "utf8",
+        );
+        const assertionResultDigest =
+          `sha256:${createHash("sha256").update(assertionResultBytes).digest("hex")}` as const;
+        const assertionReportPath = `visual/actual/${action.reviewPacketId}/${name}-${suffix}.assertions.json`;
+        const assertionReportBytes = Buffer.from(
+          JSON.stringify({
+            schemaVersion: "ui-assertions-v1",
+            reviewPacketId: action.reviewPacketId,
+            headSha: packetHeadSha,
+            targetId,
+            fixtureId,
+            stateContractDigest: stateContract.digest,
+            captureReceiptDigest: receiptDigest,
+            producer: {
+              kind: "playwright-test-cli",
+              testId: assertionTestId,
+              projectName: assertionProjectName,
+              resultPath: assertionResultPath,
+              resultDigest: assertionResultDigest,
+              binding: producerBinding,
+            },
+            assertions: [
+              {
+                id: `assert-checkout-${targetState}`,
+                kind: "interaction",
+                selector: "[data-ui=checkout]",
+                subject: "checkout state rendered",
+                action: "click",
+                expected: "rendered",
+                observed: "rendered",
+                status: "passed",
+              },
+            ],
+            status: "passed",
+          }),
+          "utf8",
+        );
+        if (withReceipt) {
+          await writeFile(path.join(directory, receiptPath), receiptBytes);
+        }
+        await writeFile(path.join(directory, assertionResultPath), assertionResultBytes);
+        await writeFile(path.join(directory, assertionObservationPath), assertionObservationBytes);
+        await writeFile(path.join(directory, assertionReportPath), assertionReportBytes);
+        return {
+          targetId,
+          route: "/checkout",
+          state: targetState,
+          viewport: { width: 1, height: 1 },
+          deviceScaleFactor: 1,
+          fixture: fixtureId,
+          provider: "playwright",
           capturedAt: "2026-07-20T00:00:00.000Z",
-        }),
-        "utf8",
-      );
-      if (withReceipt) {
-        await writeFile(path.join(directory, receiptPath), receiptBytes);
-      }
+          actualPath,
+          actualDigest,
+          assertionReportPath,
+          assertionReportDigest:
+            `sha256:${createHash("sha256").update(assertionReportBytes).digest("hex")}` as const,
+          assertionResultPath,
+          assertionResultDigest,
+          assertionObservationPath,
+          assertionObservationDigest,
+          ...(withReceipt
+            ? {
+                receiptPath,
+                receiptDigest,
+              }
+            : {}),
+        };
+      };
+      const captures = [
+        await captureFor("checkout-default", "default", rgba),
+        await captureFor("checkout-summary", "summary", secondRgba),
+      ];
+      const baselineIsolation = await writeBaselineIsolationEvidence({
+        directory,
+        run: await store.get(started.runId),
+        reviewPacketId: action.reviewPacketId,
+      });
       return {
         kind: "visual-comparison" as const,
         reviewPacketId: action.reviewPacketId,
-        captures: [
-          {
-            targetId: "checkout-default",
-            route: "/checkout",
-            state: "default",
-            viewport: { width: 1, height: 1 },
-            deviceScaleFactor: 1,
-            fixture: "mock:checkout",
-            provider: "playwright",
-            capturedAt: "2026-07-20T00:00:00.000Z",
-            actualPath,
-            actualDigest,
-            ...(withReceipt
-              ? {
-                  receiptPath,
-                  receiptDigest:
-                    `sha256:${createHash("sha256").update(receiptBytes).digest("hex")}` as const,
-                }
-              : {}),
-          },
-        ],
-        artifactPaths: withReceipt ? [actualPath, receiptPath] : [actualPath],
+        captures,
+        ...baselineIsolation,
+        artifactPaths: captures
+          .flatMap((capture) => [
+            capture.actualPath,
+            capture.assertionReportPath,
+            capture.assertionResultPath,
+            capture.assertionObservationPath,
+            ...(capture.receiptPath === undefined ? [] : [capture.receiptPath]),
+          ])
+          .concat(baselineIsolation.baselineIsolationPath),
       };
     };
+    const mutateReceiptAt = async (
+      submission: Awaited<ReturnType<typeof visualSubmission>>,
+      receiptIndex: number,
+      mutate: (receipt: Record<string, unknown>) => void,
+    ) => {
+      const capture = submission.captures[receiptIndex]!;
+      if (capture.receiptPath === undefined) throw new Error("Missing receipt path");
+      const receipt = JSON.parse(
+        await readFile(path.join(directory, capture.receiptPath), "utf8"),
+      ) as Record<string, unknown>;
+      mutate(receipt);
+      const receiptBytes = Buffer.from(JSON.stringify(receipt), "utf8");
+      await writeFile(path.join(directory, capture.receiptPath), receiptBytes);
+      const receiptDigest =
+        `sha256:${createHash("sha256").update(receiptBytes).digest("hex")}` as const;
+      const assertionReport = JSON.parse(
+        await readFile(path.join(directory, capture.assertionReportPath), "utf8"),
+      ) as Record<string, unknown>;
+      assertionReport["captureReceiptDigest"] = receiptDigest;
+      const assertionReportBytes = Buffer.from(JSON.stringify(assertionReport), "utf8");
+      await writeFile(path.join(directory, capture.assertionReportPath), assertionReportBytes);
+      return {
+        ...submission,
+        captures: submission.captures.map((candidate, index) =>
+          index === receiptIndex
+            ? {
+                ...candidate,
+                receiptDigest,
+                assertionReportDigest:
+                  `sha256:${createHash("sha256").update(assertionReportBytes).digest("hex")}` as const,
+              }
+            : candidate,
+        ),
+      };
+    };
+    const mutateAssertionAt = async (
+      submission: Awaited<ReturnType<typeof visualSubmission>>,
+      assertionIndex: number,
+      mutate: (report: Record<string, unknown>) => void,
+    ) => {
+      const capture = submission.captures[assertionIndex]!;
+      const report = JSON.parse(
+        await readFile(path.join(directory, capture.assertionReportPath), "utf8"),
+      ) as Record<string, unknown>;
+      mutate(report);
+      const reportBytes = Buffer.from(JSON.stringify(report), "utf8");
+      await writeFile(path.join(directory, capture.assertionReportPath), reportBytes);
+      return {
+        ...submission,
+        captures: submission.captures.map((candidate, index) =>
+          index === assertionIndex
+            ? {
+                ...candidate,
+                assertionReportDigest:
+                  `sha256:${createHash("sha256").update(reportBytes).digest("hex")}` as const,
+              }
+            : candidate,
+        ),
+      };
+    };
+    const mutateAssertionResultAt = async (
+      submission: Awaited<ReturnType<typeof visualSubmission>>,
+      assertionIndex: number,
+      mutate: (result: Record<string, unknown>) => void,
+    ) => {
+      const capture = submission.captures[assertionIndex]!;
+      const result = JSON.parse(
+        await readFile(path.join(directory, capture.assertionResultPath), "utf8"),
+      ) as Record<string, unknown>;
+      mutate(result);
+      const resultBytes = Buffer.from(JSON.stringify(result), "utf8");
+      await writeFile(path.join(directory, capture.assertionResultPath), resultBytes);
+      const assertionResultDigest =
+        `sha256:${createHash("sha256").update(resultBytes).digest("hex")}` as const;
+      const report = JSON.parse(
+        await readFile(path.join(directory, capture.assertionReportPath), "utf8"),
+      ) as Record<string, unknown>;
+      (report["producer"] as Record<string, unknown>)["resultDigest"] = assertionResultDigest;
+      const reportBytes = Buffer.from(JSON.stringify(report), "utf8");
+      await writeFile(path.join(directory, capture.assertionReportPath), reportBytes);
+      return {
+        ...submission,
+        captures: submission.captures.map((candidate, index) =>
+          index === assertionIndex
+            ? {
+                ...candidate,
+                assertionResultDigest,
+                assertionReportDigest:
+                  `sha256:${createHash("sha256").update(reportBytes).digest("hex")}` as const,
+              }
+            : candidate,
+        ),
+      };
+    };
+    const mutateBaselineIsolation = async (
+      submission: Awaited<ReturnType<typeof visualSubmission>>,
+      mutate: (evidence: Record<string, unknown>) => void,
+    ) => {
+      const evidence = JSON.parse(
+        await readFile(path.join(directory, submission.baselineIsolationPath), "utf8"),
+      ) as Record<string, unknown>;
+      mutate(evidence);
+      const bytes = Buffer.from(JSON.stringify(evidence), "utf8");
+      await writeFile(path.join(directory, submission.baselineIsolationPath), bytes);
+      return {
+        ...submission,
+        baselineIsolationDigest:
+          `sha256:${createHash("sha256").update(bytes).digest("hex")}` as const,
+      };
+    };
+    const visualReservationCount = async () =>
+      (await store.get(started.runId)).artifacts.filter(
+        (artifact) => artifact.metadata["adapter"] === "visual-attempt-reservation-v3",
+      ).length;
+    const replacePersistedDesignMapping = async (designMapping: unknown) => {
+      const current = await store.get(started.runId);
+      let bundleIndex = -1;
+      for (let index = current.artifacts.length - 1; index >= 0; index -= 1) {
+        if (current.artifacts[index]?.metadata["workflowSubmissionKind"] === "figma-bundle") {
+          bundleIndex = index;
+          break;
+        }
+      }
+      if (bundleIndex < 0) throw new Error("Missing persisted Figma design mapping");
+      const bundle = current.artifacts[bundleIndex]!;
+      current.artifacts[bundleIndex] = ArtifactRefSchema.parse({
+        ...bundle,
+        metadata: { ...bundle.metadata, designMapping },
+      });
+      current.revision += 1;
+      current.updatedAt = new Date().toISOString();
+      await store.save(current, current.revision - 1);
+    };
+
+    const originalCheckoutSource = await readFile(path.join(directory, "src/checkout.tsx"), "utf8");
+    const originalRuntimeSource = await readFile(
+      path.join(directory, "src/fixtures/runtime.ts"),
+      "utf8",
+    );
+    const sourceReferenceCases = [
+      "import baseline from '../visual/diff.png'; export { baseline };\n",
+      "export const css = `background-image:url('../visual/diff.png')`;\n",
+      "export const image = <img src='/visual/diff.png' alt='' />;\n",
+      "export const vector = <svg><image href='/visual/diff.png' /></svg>;\n",
+      "const image = new Image(); image.src='/visual/diff.png'; context.drawImage(image,0,0);\n",
+      "export const Overlay = <img style={{position:'fixed',inset:0,width:'100vw',height:'100vh'}} src='/visual/diff.png' />;\n",
+      "export const deeplyEncoded = '%252525252Fvisual%252525252Fdiff.png';\n",
+    ];
+    for (const [index, source] of sourceReferenceCases.entries()) {
+      const candidate = await visualSubmission(
+        compareAction,
+        implementationPacket.headSha,
+        `baseline-source-${String(index)}`,
+        [255, 255, 255, 255],
+      );
+      await writeFile(path.join(directory, "src/checkout.tsx"), source, "utf8");
+      const invalid = await mutateBaselineIsolation(candidate, (evidence) => {
+        const checked = evidence["checkedSourceFiles"] as Array<Record<string, unknown>>;
+        const checkout = checked.find((item) => item["path"] === "src/checkout.tsx");
+        if (checkout === undefined) throw new Error("Missing checked checkout source");
+        checkout["digest"] = `sha256:${createHash("sha256").update(source).digest("hex")}`;
+      });
+      const reservationsBefore = await visualReservationCount();
+      try {
+        await expect(service.submit({ runId: started.runId, submission: invalid })).rejects.toThrow(
+          /VISUAL_BASELINE_ISOLATION_INVALID/,
+        );
+        expect(await visualReservationCount()).toBe(reservationsBefore);
+      } finally {
+        await writeFile(path.join(directory, "src/checkout.tsx"), originalCheckoutSource, "utf8");
+      }
+    }
+
+    const runtimeCandidate = await visualSubmission(
+      compareAction,
+      implementationPacket.headSha,
+      "baseline-runtime-fixture-directory",
+      [255, 255, 255, 255],
+    );
+    const maliciousRuntimeSource = "export const runtimeFixture = '/visual/diff.png';\n";
+    await writeFile(
+      path.join(directory, "src/fixtures/runtime.ts"),
+      maliciousRuntimeSource,
+      "utf8",
+    );
+    const invalidRuntime = await mutateBaselineIsolation(runtimeCandidate, (evidence) => {
+      const checked = evidence["checkedSourceFiles"] as Array<Record<string, unknown>>;
+      const runtime = checked.find((item) => item["path"] === "src/fixtures/runtime.ts");
+      if (runtime === undefined) throw new Error("Missing checked runtime source");
+      runtime["digest"] = `sha256:${createHash("sha256")
+        .update(maliciousRuntimeSource)
+        .digest("hex")}`;
+    });
+    const reservationsBeforeRuntime = await visualReservationCount();
+    try {
+      await expect(
+        service.submit({ runId: started.runId, submission: invalidRuntime }),
+      ).rejects.toThrow(/VISUAL_BASELINE_ISOLATION_INVALID/);
+      expect(await visualReservationCount()).toBe(reservationsBeforeRuntime);
+    } finally {
+      await writeFile(
+        path.join(directory, "src/fixtures/runtime.ts"),
+        originalRuntimeSource,
+        "utf8",
+      );
+    }
+
+    const baselineArtifact = (await store.get(started.runId)).artifacts.find(
+      (artifact) => artifact.metadata["projectRelativePath"] === "visual/diff.png",
+    );
+    if (baselineArtifact === undefined) throw new Error("Missing immutable visual baseline");
+    const evidenceCases: Array<(evidence: Record<string, unknown>) => void> = [
+      (evidence) => {
+        evidence["requestedResources"] = [{ url: "https://app.example/visual/diff.png" }];
+      },
+      (evidence) => {
+        evidence["requestedResources"] = [{ url: baselineArtifact.uri }];
+      },
+      (evidence) => {
+        evidence["requestedResources"] = [{ url: "https://app.example/%252Fvisual%252Fdiff.png" }];
+      },
+      (evidence) => {
+        evidence["renderedMedia"] = [
+          {
+            selector: "img#encoded-overlay",
+            sourceUrl: "https://app.example/%252E%252Fvisual%252Fdiff.png",
+          },
+        ];
+      },
+      (evidence) => {
+        evidence["requestedResources"] = [{ url: "https://app.example/proxy/visual%2Fdiff%2Epng" }];
+      },
+      (evidence) => {
+        evidence["requestedResources"] = [
+          {
+            url: "https://app.example/proxy?asset=%2Fproxy%2Fvisual%2Fdiff%2Epng",
+          },
+        ];
+      },
+      (evidence) => {
+        evidence["renderedMedia"] = [
+          {
+            selector: "img#proxy-query-overlay",
+            sourceUrl: "https://app.example/proxy?asset=visual%2Fdiff%2Epng",
+          },
+        ];
+      },
+      (evidence) => {
+        evidence["requestedResources"] = [
+          {
+            url: "https://app.example/proxy?asset=https%3A%2F%2Fcdn.example%2Fvisual%2Fdiff.png%3Fv%3D1",
+          },
+        ];
+      },
+      (evidence) => {
+        evidence["renderedMedia"] = [
+          {
+            selector: "img#nested-url-overlay",
+            sourceUrl:
+              "https://app.example/proxy?asset=https%3A%2F%2Fcdn.example%2Fvisual%2Fdiff.png%3Fv%3D1",
+          },
+        ];
+      },
+      (evidence) => {
+        evidence["renderedMedia"] = [
+          {
+            selector: "img#nested-path-fragment-overlay",
+            sourceUrl: "https://app.example/proxy?asset=%2Fproxy%2Fvisual%2Fdiff.png%23preview",
+          },
+        ];
+      },
+      (evidence) => {
+        evidence["requestedResources"] = [
+          {
+            url: "https://app.example/proxy?asset=https://a.example/one?next=https://b.example/two?next=https://c.example/three?next=https://d.example/four",
+          },
+        ];
+      },
+      (evidence) => {
+        evidence["requestedResources"] = [
+          {
+            url: "https://app.example/assets/diff.png?probe=%252525252Fstill-encoded",
+          },
+        ];
+      },
+      (evidence) => {
+        evidence["requestedResources"] = [
+          {
+            url: "https://app.example/assets/renamed-reference.png",
+            digest: baselineArtifact.digest,
+          },
+        ];
+      },
+      (evidence) => {
+        evidence["renderedMedia"] = [
+          {
+            selector: "img#baseline-overlay",
+            sourceUrl: "https://app.example/visual/diff.png",
+          },
+        ];
+      },
+      (evidence) => {
+        evidence["renderedMedia"] = [
+          {
+            selector: "canvas#comparison",
+            sourceUrl: "https://app.example/assets/renamed-reference.png",
+            digest: baselineArtifact.digest,
+          },
+        ];
+      },
+      (evidence) => {
+        evidence["violations"] = [
+          { kind: "rendered-baseline", evidence: "full-frame overlay detected" },
+        ];
+      },
+    ];
+    for (const [index, mutate] of evidenceCases.entries()) {
+      const candidate = await visualSubmission(
+        compareAction,
+        implementationPacket.headSha,
+        `baseline-evidence-${String(index)}`,
+        [255, 255, 255, 255],
+      );
+      const invalid = await mutateBaselineIsolation(candidate, mutate);
+      const reservationsBefore = await visualReservationCount();
+      await expect(service.submit({ runId: started.runId, submission: invalid })).rejects.toThrow(
+        /VISUAL_BASELINE_ISOLATION_INVALID/,
+      );
+      expect(await visualReservationCount()).toBe(reservationsBefore);
+    }
+
+    const appendVisualReservation = async (input: {
+      submissionIdentity: string;
+      ownerToken: string;
+      status: "in-progress" | "aborted";
+    }) => {
+      const timestamp = new Date().toISOString();
+      const reservation = {
+        reviewPacketId: compareAction.reviewPacketId,
+        visualLineageId: compareAction.reviewPacketId,
+        submissionIdentity: input.submissionIdentity,
+        attempt: 1,
+        status: input.status,
+        ownerToken: input.ownerToken,
+        reservedAt: timestamp,
+        updatedAt: timestamp,
+      };
+      const blob = await artifactStore.writeBlob({
+        content: Buffer.from(`${JSON.stringify(reservation)}\n`, "utf8"),
+        mediaType: "application/json",
+        storedAt: timestamp,
+        label: `manual-${input.status}.json`,
+      });
+      const current = await store.get(started.runId);
+      await store.save(
+        {
+          ...current,
+          revision: current.revision + 1,
+          updatedAt: timestamp,
+          artifacts: [
+            ...current.artifacts,
+            ArtifactRefSchema.parse({
+              id: createArtifactId(),
+              kind: "other",
+              uri: blob.uri,
+              mediaType: "application/json",
+              digest: blob.digest,
+              producedBy: "orchestrator",
+              evidenceIds: [],
+              createdAt: timestamp,
+              metadata: {
+                adapter: "visual-attempt-reservation-v3",
+                reviewPacketId: compareAction.reviewPacketId,
+                visualLineageId: compareAction.reviewPacketId,
+                submissionIdentity: input.submissionIdentity,
+                visualComparisonAttempt: 1,
+                reservationStatus: input.status,
+                ownerToken: input.ownerToken,
+                reservedAt: timestamp,
+                updatedAt: timestamp,
+              },
+            }),
+          ],
+        },
+        current.revision,
+      );
+    };
+
+    let busySubmission = await visualSubmission(
+      compareAction,
+      implementationPacket.headSha,
+      "busy",
+      [255, 255, 255, 255],
+    );
+    const unrelatedBasenameSource = "export const runtimeFixture = '/assets/diff.png';\n";
+    await writeFile(
+      path.join(directory, "src/fixtures/runtime.ts"),
+      unrelatedBasenameSource,
+      "utf8",
+    );
+    busySubmission = await mutateBaselineIsolation(busySubmission, (evidence) => {
+      const checked = evidence["checkedSourceFiles"] as Array<Record<string, unknown>>;
+      const runtime = checked.find((item) => item["path"] === "src/fixtures/runtime.ts");
+      if (runtime === undefined) throw new Error("Missing checked runtime source");
+      runtime["digest"] = `sha256:${createHash("sha256")
+        .update(unrelatedBasenameSource)
+        .digest("hex")}`;
+      evidence["requestedResources"] = [
+        { url: "https://app.example/assets/diff.png" },
+        {
+          url: "https://app.example/proxy?asset=assets%2Fdiff.png",
+        },
+        {
+          url: "https://app.example/proxy?asset=https%3A%2F%2Fcdn.example%2Fassets%2Fdiff.png%3Fv%3D1",
+        },
+      ];
+      evidence["renderedMedia"] = [
+        {
+          selector: "img#unrelated",
+          sourceUrl: "https://app.example/assets/diff.png",
+        },
+        {
+          selector: "img#unrelated-query",
+          sourceUrl: "https://app.example/proxy?asset=assets%2Fdiff.png",
+        },
+        {
+          selector: "img#prefix-confusion",
+          sourceUrl:
+            "https://app.example/proxy?asset=https%3A%2F%2Fcdn.example%2Fproxy%2Fnotvisual%2Fdiff.png%23preview",
+        },
+      ];
+    });
+    await appendVisualReservation({
+      submissionIdentity: "manual-active-submission",
+      ownerToken: "manual-active-owner",
+      status: "in-progress",
+    });
+    const busyWriteSpy = vi.spyOn(artifactStore, "writeBlob");
+    try {
+      await expect(
+        service.submit({ runId: started.runId, submission: busySubmission }),
+      ).rejects.toThrow(/VISUAL_ATTEMPT_IN_PROGRESS/);
+    } finally {
+      await writeFile(
+        path.join(directory, "src/fixtures/runtime.ts"),
+        originalRuntimeSource,
+        "utf8",
+      );
+    }
+    expect(busyWriteSpy).not.toHaveBeenCalled();
+    busyWriteSpy.mockRestore();
+    await appendVisualReservation({
+      submissionIdentity: "manual-active-submission",
+      ownerToken: "manual-active-owner",
+      status: "aborted",
+    });
+
+    const invalidReceiptCases: Array<{
+      name: string;
+      mutate: (receipt: Record<string, unknown>) => void;
+    }> = [
+      {
+        name: "missing browser channel",
+        mutate: (receipt) => {
+          delete (
+            (receipt["environment"] as Record<string, unknown>)["browser"] as Record<
+              string,
+              unknown
+            >
+          )["channel"];
+        },
+      },
+      {
+        name: "missing reduced motion",
+        mutate: (receipt) => {
+          delete (receipt["environment"] as Record<string, unknown>)["reducedMotion"];
+        },
+      },
+      {
+        name: "wrong renderer adapter",
+        mutate: (receipt) => {
+          (
+            (receipt["environment"] as Record<string, unknown>)["renderer"] as Record<
+              string,
+              unknown
+            >
+          )["adapter"] = "custom-screenshotter";
+        },
+      },
+      {
+        name: "wrong server origin",
+        mutate: (receipt) => {
+          (receipt["environment"] as Record<string, unknown>)["serverOrigin"] =
+            "http://127.0.0.1:5173";
+        },
+      },
+      {
+        name: "wrong route",
+        mutate: (receipt) => {
+          receipt["route"] = "http://127.0.0.1:4173/wrong";
+        },
+      },
+      {
+        name: "incomplete document readiness",
+        mutate: (receipt) => {
+          (
+            (receipt["environment"] as Record<string, unknown>)["readiness"] as Record<
+              string,
+              unknown
+            >
+          )["documentReadyState"] = "interactive";
+        },
+      },
+      ...(["fontsReady", "imagesReady", "assetsReady"] as const).map((field) => ({
+        name: `${field} false`,
+        mutate: (receipt: Record<string, unknown>) => {
+          (
+            (receipt["environment"] as Record<string, unknown>)["readiness"] as Record<
+              string,
+              unknown
+            >
+          )[field] = false;
+        },
+      })),
+      {
+        name: "wrong actual PNG digest",
+        mutate: (receipt) => {
+          (receipt["actual"] as Record<string, unknown>)["digest"] = `sha256:${"9".repeat(64)}`;
+        },
+      },
+      {
+        name: "unexpected font digest",
+        mutate: (receipt) => {
+          receipt["fonts"] = [{ family: "Unbound Font", digest: `sha256:${"9".repeat(64)}` }];
+        },
+      },
+      {
+        name: "unexpected asset digest",
+        mutate: (receipt) => {
+          receipt["assets"] = [{ path: "assets/unbound.png", digest: `sha256:${"9".repeat(64)}` }];
+        },
+      },
+    ];
+    for (const invalidCase of invalidReceiptCases) {
+      const candidate = await visualSubmission(
+        compareAction,
+        implementationPacket.headSha,
+        `invalid-${invalidCase.name.replaceAll(" ", "-")}`,
+        [255, 255, 255, 255],
+      );
+      const invalid = await mutateReceiptAt(candidate, 0, invalidCase.mutate);
+      const reservationsBefore = await visualReservationCount();
+      await expect(
+        service.submit({ runId: started.runId, submission: invalid }),
+        invalidCase.name,
+      ).rejects.toThrow(/VISUAL_CAPTURE_PROVENANCE_INVALID/);
+      expect(await visualReservationCount(), invalidCase.name).toBe(reservationsBefore);
+    }
+    const mixedRendererSubmission = await visualSubmission(
+      compareAction,
+      implementationPacket.headSha,
+      "mixed-renderer",
+      [255, 255, 255, 255],
+    );
+    const mixedRenderer = await mutateReceiptAt(mixedRendererSubmission, 0, (receipt) => {
+      ((receipt["environment"] as Record<string, unknown>)["browser"] as Record<string, unknown>)[
+        "channel"
+      ] = "chrome";
+    });
+    const reservationsBeforeMixedRenderer = await visualReservationCount();
+    await expect(
+      service.submit({ runId: started.runId, submission: mixedRenderer }),
+    ).rejects.toThrow(/VISUAL_CAPTURE_RENDERER_DRIFT/);
+    expect(await visualReservationCount()).toBe(reservationsBeforeMixedRenderer);
+
+    const pageScoreAboveThreshold = 0.93;
+    const failedAssertionSubmission = await mutateAssertionAt(
+      await visualSubmission(
+        compareAction,
+        implementationPacket.headSha,
+        "failed-required-ui-assertion",
+        [255, 255, 255, 255],
+      ),
+      0,
+      (report) => {
+        const reportAssertions = report["assertions"] as Array<Record<string, unknown>>;
+        reportAssertions[0]!["observed"] = "wrong-result";
+      },
+    );
+    const reservationsBeforeFailedAssertion = await visualReservationCount();
+    expect(pageScoreAboveThreshold).toBeGreaterThan(0.92);
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: failedAssertionSubmission,
+      }),
+    ).rejects.toThrow(/UI_ASSERTION_REPORT_INVALID/);
+    expect(await visualReservationCount()).toBe(reservationsBeforeFailedAssertion);
+
+    const substitutedAssertionSubmission = await mutateAssertionAt(
+      await visualSubmission(
+        compareAction,
+        implementationPacket.headSha,
+        "substituted-required-ui-assertion",
+        [255, 255, 255, 255],
+      ),
+      0,
+      (report) => {
+        const reportAssertions = report["assertions"] as Array<Record<string, unknown>>;
+        reportAssertions[0]!["selector"] = "[data-ui=unrelated]";
+        reportAssertions[0]!["subject"] = "unrelated action";
+        reportAssertions[0]!["expected"] = "opened";
+        reportAssertions[0]!["observed"] = "opened";
+      },
+    );
+    const reservationsBeforeSubstitution = await visualReservationCount();
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: substitutedAssertionSubmission,
+      }),
+    ).rejects.toThrow(/UI_ASSERTION_REPORT_INVALID.*definition|immutable|substituted/i);
+    expect(await visualReservationCount()).toBe(reservationsBeforeSubstitution);
+
+    const failedProducerSubmission = await mutateAssertionResultAt(
+      await visualSubmission(
+        compareAction,
+        implementationPacket.headSha,
+        "failed-playwright-producer",
+        [255, 255, 255, 255],
+      ),
+      0,
+      (result) => {
+        const stats = result["stats"] as Record<string, unknown>;
+        stats["expected"] = 0;
+        stats["unexpected"] = 1;
+      },
+    );
+    const reservationsBeforeFailedProducer = await visualReservationCount();
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: failedProducerSubmission,
+      }),
+    ).rejects.toThrow(/UI_ASSERTION_REPORT_INVALID.*Playwright CLI result/i);
+    expect(await visualReservationCount()).toBe(reservationsBeforeFailedProducer);
+
+    const invalidPng = await visualSubmission(
+      compareAction,
+      implementationPacket.headSha,
+      "invalid-png",
+      [255, 255, 255, 255],
+    );
+    const invalidPngBytes = Buffer.from("not a png", "utf8");
+    await writeFile(path.join(directory, invalidPng.captures[0]!.actualPath), invalidPngBytes);
+    invalidPng.captures[0]!.actualDigest =
+      `sha256:${createHash("sha256").update(invalidPngBytes).digest("hex")}` as const;
+    const beforeInvalidPng = await store.get(started.runId);
+    const reservationCountBeforeInvalidPng = beforeInvalidPng.artifacts.filter(
+      (artifact) => artifact.metadata["adapter"] === "visual-attempt-reservation-v3",
+    ).length;
+    await expect(service.submit({ runId: started.runId, submission: invalidPng })).rejects.toThrow(
+      /PNG/i,
+    );
+    const afterInvalidPng = await store.get(started.runId);
+    expect(
+      afterInvalidPng.artifacts
+        .filter((artifact) => artifact.metadata["adapter"] === "visual-attempt-reservation-v3")
+        .slice(reservationCountBeforeInvalidPng)
+        .map((artifact) => ({
+          attempt: artifact.metadata["visualComparisonAttempt"],
+          status: artifact.metadata["reservationStatus"],
+        })),
+    ).toEqual([]);
+    expect(
+      (await service.status({ runId: started.runId })).nextActions.find(
+        (action) => action.kind === "compare-visuals",
+      ),
+    ).toMatchObject({ attempt: 1 });
 
     const receiptless = await visualSubmission(
       compareAction,
@@ -5481,11 +7930,14 @@ describe("WorkflowService", () => {
       /VISUAL_CAPTURE_PROVENANCE_INVALID/,
     );
     const beforeValidCapture = await store.get(started.runId);
-    expect(
-      beforeValidCapture.artifacts.filter(
-        (artifact) => artifact.metadata["adapter"] === "visual-attempt-reservation-v2",
+    const receiptlessReservations = beforeValidCapture.artifacts.filter(
+      (artifact) => artifact.metadata["adapter"] === "visual-attempt-reservation-v3",
+    );
+    expect(receiptlessReservations).toEqual(
+      beforeInvalidPng.artifacts.filter(
+        (artifact) => artifact.metadata["adapter"] === "visual-attempt-reservation-v3",
       ),
-    ).toHaveLength(0);
+    );
     const wrongFixtureReceipt = await visualSubmission(
       compareAction,
       implementationPacket.headSha,
@@ -5498,11 +7950,10 @@ describe("WorkflowService", () => {
       service.submit({ runId: started.runId, submission: wrongFixtureReceipt }),
     ).rejects.toThrow(/MOCK_FIXTURE_NOT_CONSUMED/);
     const afterWrongFixture = await store.get(started.runId);
-    expect(
-      afterWrongFixture.artifacts.filter(
-        (artifact) => artifact.metadata["adapter"] === "visual-attempt-reservation-v2",
-      ),
-    ).toHaveLength(0);
+    const wrongFixtureReservations = afterWrongFixture.artifacts.filter(
+      (artifact) => artifact.metadata["adapter"] === "visual-attempt-reservation-v3",
+    );
+    expect(wrongFixtureReservations).toEqual(receiptlessReservations);
 
     const packetHeadFor = async (reviewPacketId: string) => {
       const current = await store.get(started.runId);
@@ -5518,26 +7969,386 @@ describe("WorkflowService", () => {
       return candidate.headSha;
     };
 
-    const firstAttempt = await visualSubmission(
+    const persistedTargets = await store.get(started.runId);
+    let figmaBundleIndex = -1;
+    for (let index = persistedTargets.artifacts.length - 1; index >= 0; index -= 1) {
+      if (
+        persistedTargets.artifacts[index]?.metadata["workflowSubmissionKind"] === "figma-bundle"
+      ) {
+        figmaBundleIndex = index;
+        break;
+      }
+    }
+    if (figmaBundleIndex < 0) throw new Error("Missing persisted Figma target manifest");
+    const figmaBundleArtifact = persistedTargets.artifacts[figmaBundleIndex]!;
+    expect(figmaBundleArtifact.metadata["visualTargets"]).toEqual([
+      expect.objectContaining({ reviewThreshold: 0.92 }),
+      expect.objectContaining({ targetId: "checkout-summary" }),
+    ]);
+    const storedTargets = figmaBundleArtifact.metadata["visualTargets"];
+    if (!Array.isArray(storedTargets)) throw new Error("Missing persisted visual targets");
+    persistedTargets.artifacts[figmaBundleIndex] = ArtifactRefSchema.parse({
+      ...figmaBundleArtifact,
+      metadata: {
+        ...figmaBundleArtifact.metadata,
+        visualTargets: storedTargets.map((target) => ({
+          ...(target as Record<string, unknown>),
+          reviewThreshold: 0.98,
+        })),
+      },
+    });
+    persistedTargets.revision += 1;
+    persistedTargets.updatedAt = new Date().toISOString();
+    await store.save(persistedTargets, persistedTargets.revision - 1);
+
+    const sharedAsset = {
+      path: "assets/shared.svg",
+      digest: `sha256:${"8".repeat(64)}` as const,
+    };
+    const sharedAssetComponents = [
+      {
+        id: "shared-asset-a",
+        figmaComponent: "Shared asset A",
+        nodeId: "1:10",
+        role: "component" as const,
+        resolution: { kind: "asset" as const, ...sharedAsset },
+        semanticTokens: [],
+      },
+      {
+        id: "shared-asset-b",
+        figmaComponent: "Shared asset B",
+        nodeId: "1:11",
+        role: "component" as const,
+        resolution: { kind: "asset" as const, ...sharedAsset },
+        semanticTokens: [],
+      },
+    ];
+    await replacePersistedDesignMapping({
+      ...figmaDesignMapping(),
+      components: [
+        sharedAssetComponents[0],
+        {
+          ...sharedAssetComponents[1],
+          resolution: {
+            ...sharedAssetComponents[1]!.resolution,
+            digest: `sha256:${"9".repeat(64)}`,
+          },
+        },
+      ],
+    });
+    const conflictingAssetSubmission = await visualSubmission(
+      compareAction,
+      implementationPacket.headSha,
+      "conflicting-shared-asset",
+      [255, 255, 255, 255],
+    );
+    const reservationsBeforeAssetConflict = await visualReservationCount();
+    await expect(
+      service.submit({ runId: started.runId, submission: conflictingAssetSubmission }),
+    ).rejects.toThrow(/VISUAL_CAPTURE_PROVENANCE_INVALID.*assets\/shared\.svg.*conflicting/i);
+    expect(await visualReservationCount()).toBe(reservationsBeforeAssetConflict);
+
+    await replacePersistedDesignMapping({
+      ...figmaDesignMapping(),
+      components: sharedAssetComponents,
+    });
+    let firstAttempt = await visualSubmission(
       compareAction,
       implementationPacket.headSha,
       "attempt-1",
       [255, 255, 255, 255],
+      true,
+      undefined,
+      [0, 0, 0, 255],
     );
+    firstAttempt = await mutateReceiptAt(firstAttempt, 0, (receipt) => {
+      receipt["assets"] = [sharedAsset];
+    });
+    firstAttempt = await mutateReceiptAt(firstAttempt, 1, (receipt) => {
+      receipt["assets"] = [sharedAsset];
+    });
+    const beforeAdmissionFailure = await store.get(started.runId);
+    const poolCapacity = defaultVisualComparisonPool as unknown as {
+      maximumBatchInputBytes: number;
+    };
+    const originalBatchInputCapacity = poolCapacity.maximumBatchInputBytes;
+    poolCapacity.maximumBatchInputBytes = 1;
+    try {
+      await expect(
+        service.submit({
+          runId: started.runId,
+          submission: firstAttempt,
+        }),
+      ).rejects.toThrow(/VISUAL_COMPARISON_BATCH_BYTE_BUDGET/);
+    } finally {
+      poolCapacity.maximumBatchInputBytes = originalBatchInputCapacity;
+    }
+    const afterAdmissionFailure = await store.get(started.runId);
+    const admissionFailureArtifacts = afterAdmissionFailure.artifacts.slice(
+      beforeAdmissionFailure.artifacts.length,
+    );
+    expect(
+      admissionFailureArtifacts.map((artifact) => ({
+        adapter: artifact.metadata["adapter"],
+        attempt: artifact.metadata["visualComparisonAttempt"],
+        status: artifact.metadata["reservationStatus"],
+      })),
+    ).toEqual([
+      {
+        adapter: "visual-attempt-reservation-v3",
+        attempt: 1,
+        status: "in-progress",
+      },
+      {
+        adapter: "visual-attempt-reservation-v3",
+        attempt: 1,
+        status: "aborted",
+      },
+    ]);
+    expect(
+      admissionFailureArtifacts.filter(
+        (artifact) =>
+          artifact.kind === "visual-report" ||
+          ["diff", "overlay"].includes(String(artifact.metadata["visualRole"])),
+      ),
+    ).toEqual([]);
+    expect(defaultVisualComparisonPool.snapshotStats()).toMatchObject({
+      admittedInputBytes: 0,
+      currentManagedBytes: 0,
+    });
+    expect(
+      (await service.status({ runId: started.runId })).nextActions.find(
+        (action) => action.kind === "compare-visuals",
+      ),
+    ).toMatchObject({ attempt: 1 });
+
+    const originalWriteBlob = artifactStore.writeBlob.bind(artifactStore);
+    let failVisualDiffWrite = true;
+    const writeBlobSpy = vi.spyOn(artifactStore, "writeBlob").mockImplementation(async (input) => {
+      if (failVisualDiffWrite && input.label === "checkout-default.diff.png") {
+        failVisualDiffWrite = false;
+        throw new Error("injected visual diff blob failure");
+      }
+      return originalWriteBlob(input);
+    });
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: firstAttempt,
+      }),
+    ).rejects.toThrow(/injected visual diff blob failure/);
+    writeBlobSpy.mockRestore();
+    const afterAbortedAttempt = await store.get(started.runId);
+    expect(
+      afterAbortedAttempt.artifacts
+        .filter((artifact) => artifact.metadata["adapter"] === "visual-attempt-reservation-v3")
+        .slice(-2)
+        .map((artifact) => ({
+          attempt: artifact.metadata["visualComparisonAttempt"],
+          status: artifact.metadata["reservationStatus"],
+        })),
+    ).toEqual([
+      { attempt: 1, status: "in-progress" },
+      { attempt: 1, status: "aborted" },
+    ]);
+    expect(
+      (await service.status({ runId: started.runId })).nextActions.find(
+        (action) => action.kind === "compare-visuals",
+      ),
+    ).toMatchObject({ attempt: 1 });
+
     const afterFirstFailure = await service.submit({
       runId: started.runId,
       submission: firstAttempt,
     });
+    const cacheAfterFirst = defaultVisualNormalizationCache.snapshotStats();
+    expect(cacheAfterFirst.misses).toBe(1);
+    expect(cacheAfterFirst.hits).toBeGreaterThanOrEqual(3);
+    expect(cacheAfterFirst.bypasses).toBe(6);
+    const afterCommittedAttempt = await store.get(started.runId);
+    const revisionBeforeReplay = afterCommittedAttempt.revision;
+    const reportCountBeforeReplay = afterCommittedAttempt.artifacts.filter(
+      (artifact) => artifact.kind === "visual-report",
+    ).length;
+    const malformedCommittedReplay = {
+      ...firstAttempt,
+      captures: firstAttempt.captures.map((capture) => ({
+        ...capture,
+        route: "/wrong",
+      })),
+    };
+    const replayWriteSpy = vi.spyOn(artifactStore, "writeBlob");
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: malformedCommittedReplay,
+      }),
+    ).rejects.toThrow(/capture manifest.*target/i);
+    expect(replayWriteSpy).not.toHaveBeenCalled();
+    replayWriteSpy.mockRestore();
+    await service.submit({
+      runId: started.runId,
+      submission: firstAttempt,
+    });
+    const afterReplay = await store.get(started.runId);
+    expect(afterReplay.revision).toBe(revisionBeforeReplay);
+    expect(
+      afterReplay.artifacts.filter((artifact) => artifact.kind === "visual-report"),
+    ).toHaveLength(reportCountBeforeReplay);
+    await replacePersistedDesignMapping(figmaDesignMapping());
     const firstRepair = afterFirstFailure.nextActions.find(
       (action) => action.kind === "implementation-repair",
     );
     expect(firstRepair).toMatchObject({
+      repairEvidenceVersion: "v2",
       reviewPacketId: compareAction.reviewPacketId,
       nextAttempt: 2,
       failedTargets: [
         expect.objectContaining({ targetId: "checkout-default", reviewMatchRatio: 0 }),
       ],
+      repairEvidenceArtifactId: expect.stringMatching(/^art_[a-f0-9]{32}$/),
     });
+    if (
+      firstRepair === undefined ||
+      firstRepair.kind !== "implementation-repair" ||
+      firstRepair.repairEvidenceVersion !== "v2"
+    ) {
+      throw new Error("Missing v2 repair evidence action");
+    }
+    const afterFirstFailureRun = await store.get(started.runId);
+    const repairEvidenceArtifact = afterFirstFailureRun.artifacts.find(
+      (artifact) => artifact.id === firstRepair.repairEvidenceArtifactId,
+    );
+    if (repairEvidenceArtifact === undefined) throw new Error("Missing rich repair evidence");
+    expect(
+      JSON.parse((await artifactStore.readContent(repairEvidenceArtifact.digest)).toString("utf8")),
+    ).toMatchObject({
+      schemaVersion: "visual-repair-evidence-v2",
+      lineageId: firstRepair.lineageId,
+      reviewPacketId: firstRepair.reviewPacketId,
+      headSha: implementationPacket.headSha,
+      rendererLineageId: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+      attempt: 1,
+      failedTargets: [
+        {
+          targetId: "checkout-default",
+          metrics: expect.objectContaining({ reviewMatchRatio: 0, threshold: 0.92 }),
+          diffArtifactId: expect.stringMatching(/^art_[a-f0-9]{32}$/),
+          overlayArtifactId: expect.stringMatching(/^art_[a-f0-9]{32}$/),
+          captureSummary: {
+            provider: "playwright",
+            browser: "chromium 138.0.7204.168",
+            fontsReady: true,
+            assetsReady: true,
+          },
+          causeHints: ["implementation"],
+        },
+      ],
+    });
+    const originalRepairEvidencePayload = JSON.parse(
+      (await artifactStore.readContent(repairEvidenceArtifact.digest)).toString("utf8"),
+    ) as Record<string, unknown>;
+    const replaceRepairEvidencePayload = async (payload: unknown) => {
+      const timestamp = new Date().toISOString();
+      const blob = await artifactStore.writeBlob({
+        content: Buffer.from(`${JSON.stringify(payload, null, 2)}\n`, "utf8"),
+        mediaType: "application/json",
+        storedAt: timestamp,
+        label: "tampered-visual-repair-evidence.json",
+      });
+      const current = await store.get(started.runId);
+      current.artifacts = current.artifacts.map((artifact) =>
+        artifact.id === repairEvidenceArtifact.id
+          ? ArtifactRefSchema.parse({ ...artifact, uri: blob.uri, digest: blob.digest })
+          : artifact,
+      );
+      current.revision += 1;
+      current.updatedAt = timestamp;
+      await store.save(current, current.revision - 1);
+    };
+    const { headSha: _headSha, ...missingHeadPayload } = originalRepairEvidencePayload;
+    await replaceRepairEvidencePayload(missingHeadPayload);
+    await expect(service.status({ runId: started.runId })).rejects.toThrow(
+      /VISUAL_REPAIR_EVIDENCE_INVALID/,
+    );
+    await replaceRepairEvidencePayload({
+      ...originalRepairEvidencePayload,
+      headSha: "f".repeat(40),
+    });
+    await expect(service.status({ runId: started.runId })).rejects.toThrow(
+      /VISUAL_REPAIR_EVIDENCE_INVALID/,
+    );
+    await replaceRepairEvidencePayload(originalRepairEvidencePayload);
+
+    const malformedTimestamp = new Date().toISOString();
+    const malformedBlob = await artifactStore.writeBlob({
+      content: Buffer.from("{}\n", "utf8"),
+      mediaType: "application/json",
+      storedAt: malformedTimestamp,
+      label: "malformed-newest-visual-repair-evidence.json",
+    });
+    const malformedArtifactId = createArtifactId();
+    const runWithMalformedNewest = await store.get(started.runId);
+    runWithMalformedNewest.artifacts.push(
+      ArtifactRefSchema.parse({
+        ...repairEvidenceArtifact,
+        id: malformedArtifactId,
+        uri: malformedBlob.uri,
+        digest: malformedBlob.digest,
+        createdAt: malformedTimestamp,
+        metadata: {
+          ...repairEvidenceArtifact.metadata,
+          visualLineageAttempt: 2,
+          repairEvidenceArtifactId: malformedArtifactId,
+        },
+      }),
+    );
+    runWithMalformedNewest.revision += 1;
+    runWithMalformedNewest.updatedAt = malformedTimestamp;
+    await store.save(runWithMalformedNewest, runWithMalformedNewest.revision - 1);
+    await expect(service.status({ runId: started.runId })).rejects.toThrow(
+      /VISUAL_REPAIR_EVIDENCE_INVALID/,
+    );
+    const malformedRun = await store.get(started.runId);
+    malformedRun.artifacts = malformedRun.artifacts.filter(
+      (artifact) => artifact.id !== malformedArtifactId,
+    );
+    malformedRun.revision += 1;
+    malformedRun.updatedAt = new Date().toISOString();
+    await store.save(malformedRun, malformedRun.revision - 1);
+    const originalRepairEvidenceArtifact = repairEvidenceArtifact;
+    const {
+      repairEvidenceArtifactId: _repairEvidenceArtifactId,
+      schemaVersion: _schemaVersion,
+      ...legacyMetadata
+    } = repairEvidenceArtifact.metadata;
+    const legacyCandidateRun = await store.get(started.runId);
+    legacyCandidateRun.artifacts = legacyCandidateRun.artifacts.map((artifact) =>
+      artifact.id === repairEvidenceArtifact.id
+        ? ArtifactRefSchema.parse({
+            ...artifact,
+            metadata: {
+              ...legacyMetadata,
+              adapter: "visual-repair-lineage-v1",
+            },
+          })
+        : artifact,
+    );
+    legacyCandidateRun.revision += 1;
+    legacyCandidateRun.updatedAt = new Date().toISOString();
+    await store.save(legacyCandidateRun, legacyCandidateRun.revision - 1);
+    const legacyRepair = (await service.status({ runId: started.runId })).nextActions.find(
+      (action) => action.kind === "implementation-repair",
+    );
+    expect(legacyRepair).toMatchObject({ repairEvidenceVersion: "legacy-v1" });
+    expect(legacyRepair).not.toHaveProperty("repairEvidenceArtifactId");
+    const legacyRun = await store.get(started.runId);
+    legacyRun.artifacts = legacyRun.artifacts.map((artifact) =>
+      artifact.id === originalRepairEvidenceArtifact.id ? originalRepairEvidenceArtifact : artifact,
+    );
+    legacyRun.revision += 1;
+    legacyRun.updatedAt = new Date().toISOString();
+    await store.save(legacyRun, legacyRun.revision - 1);
     expect(afterFirstFailure.nextActions.map((action) => action.kind)).not.toContain(
       "compare-visuals",
     );
@@ -5560,10 +8371,148 @@ describe("WorkflowService", () => {
       "attempt-2",
       [192, 192, 192, 255],
     );
+    await replacePersistedDesignMapping({
+      ...figmaDesignMapping(),
+      fonts: [{ family: "Pretendard", source: "assets/fonts/pretendard.woff2" }],
+    });
+    const reservationsBeforeMissingFontDigest = await visualReservationCount();
+    await expect(
+      service.submit({ runId: started.runId, submission: secondAttempt }),
+    ).rejects.toThrow(/VISUAL_CAPTURE_PROVENANCE_INVALID.*Pretendard.*digest/i);
+    expect(await visualReservationCount()).toBe(reservationsBeforeMissingFontDigest);
+    await replacePersistedDesignMapping(figmaDesignMapping());
+    const rendererDrifts: Array<{
+      name: string;
+      mutate: (receipt: Record<string, unknown>) => void;
+    }> = [
+      {
+        name: "browser family",
+        mutate: (receipt) => {
+          (
+            (receipt["environment"] as Record<string, unknown>)["browser"] as Record<
+              string,
+              unknown
+            >
+          )["family"] = "firefox";
+        },
+      },
+      {
+        name: "browser channel",
+        mutate: (receipt) => {
+          (
+            (receipt["environment"] as Record<string, unknown>)["browser"] as Record<
+              string,
+              unknown
+            >
+          )["channel"] = "chrome";
+        },
+      },
+      {
+        name: "browser version",
+        mutate: (receipt) => {
+          (
+            (receipt["environment"] as Record<string, unknown>)["browser"] as Record<
+              string,
+              unknown
+            >
+          )["version"] = "139.0.0.0";
+        },
+      },
+      {
+        name: "adapter version",
+        mutate: (receipt) => {
+          (
+            (receipt["environment"] as Record<string, unknown>)["renderer"] as Record<
+              string,
+              unknown
+            >
+          )["adapterVersion"] = "capture-runner-v3";
+        },
+      },
+      {
+        name: "Playwright version",
+        mutate: (receipt) => {
+          (
+            (receipt["environment"] as Record<string, unknown>)["renderer"] as Record<
+              string,
+              unknown
+            >
+          )["playwrightVersion"] = "1.62.0";
+        },
+      },
+      {
+        name: "locale",
+        mutate: (receipt) => {
+          (receipt["environment"] as Record<string, unknown>)["locale"] = "en-US";
+        },
+      },
+      {
+        name: "timezone",
+        mutate: (receipt) => {
+          (receipt["environment"] as Record<string, unknown>)["timezone"] = "UTC";
+        },
+      },
+      {
+        name: "color scheme",
+        mutate: (receipt) => {
+          (receipt["environment"] as Record<string, unknown>)["colorScheme"] = "dark";
+        },
+      },
+      {
+        name: "reduced motion",
+        mutate: (receipt) => {
+          (receipt["environment"] as Record<string, unknown>)["reducedMotion"] = "no-preference";
+        },
+      },
+      {
+        name: "server origin",
+        mutate: (receipt) => {
+          (receipt["environment"] as Record<string, unknown>)["serverOrigin"] =
+            "http://127.0.0.1:5173";
+          receipt["route"] = "http://127.0.0.1:5173/checkout";
+        },
+      },
+    ];
+    for (const drift of rendererDrifts) {
+      let drifted = await visualSubmission(
+        compareSecond,
+        await packetHeadFor(compareSecond.reviewPacketId),
+        `drift-${drift.name.replaceAll(" ", "-")}`,
+        [192, 192, 192, 255],
+      );
+      drifted = await mutateReceiptAt(drifted, 0, drift.mutate);
+      drifted = await mutateReceiptAt(drifted, 1, drift.mutate);
+      const reservationsBefore = await visualReservationCount();
+      await expect(
+        service.submit({ runId: started.runId, submission: drifted }),
+        drift.name,
+      ).rejects.toThrow(/VISUAL_CAPTURE_RENDERER_DRIFT/);
+      expect(await visualReservationCount(), drift.name).toBe(reservationsBefore);
+    }
+    await expect(
+      service.submit({
+        runId: started.runId,
+        submission: {
+          ...secondAttempt,
+          captures: secondAttempt.captures.slice(0, 1),
+          artifactPaths: [
+            secondAttempt.captures[0]!.actualPath,
+            secondAttempt.captures[0]!.assertionReportPath,
+            secondAttempt.captures[0]!.assertionResultPath,
+            secondAttempt.captures[0]!.assertionObservationPath,
+            secondAttempt.captures[0]!.receiptPath!,
+            secondAttempt.baselineIsolationPath,
+          ],
+        },
+      }),
+    ).rejects.toThrow(/missing: checkout-summary/);
     const afterSecondFailure = await service.submit({
       runId: started.runId,
       submission: secondAttempt,
     });
+    const cacheAfterSecond = defaultVisualNormalizationCache.snapshotStats();
+    expect(cacheAfterSecond.hits - cacheAfterFirst.hits).toBe(2);
+    expect(cacheAfterSecond.bypasses - cacheAfterFirst.bypasses).toBe(2);
     expect(
       afterSecondFailure.nextActions.find((action) => action.kind === "implementation-repair"),
     ).toMatchObject({ nextAttempt: 3, lineageId: firstRepair?.lineageId });
@@ -5587,25 +8536,49 @@ describe("WorkflowService", () => {
       "attempt-3",
       [128, 128, 128, 255],
     );
+    const beforeThirdFailure = await store.get(started.runId);
     const afterThirdFailure = await service.submit({
       runId: started.runId,
       submission: thirdAttempt,
     });
-    expect(afterThirdFailure.nextActions.map((action) => action.kind)).not.toContain(
-      "implementation-repair",
+    const cacheAfterThird = defaultVisualNormalizationCache.snapshotStats();
+    expect(cacheAfterThird.hits - cacheAfterSecond.hits).toBe(2);
+    expect(cacheAfterThird.bypasses - cacheAfterSecond.bypasses).toBe(2);
+    expect(afterThirdFailure.revision).toBe(beforeThirdFailure.revision + 2);
+    expect(afterThirdFailure.status).toBe("blocked");
+    expect(afterThirdFailure.blockerDetails).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          stage: "implementation",
+          code: "VISUAL_REVIEW_THRESHOLD_NOT_MET",
+          kind: "verification",
+          retryable: false,
+          exactUnblockAction:
+            "Inspect the failed 92% visual comparison in the draft, correct the implementation or evidence source, and start a new approved Run for further work.",
+        }),
+      ]),
     );
-    expect(afterThirdFailure.nextActions.map((action) => action.kind)).not.toContain(
-      "compare-visuals",
-    );
-    const fourthAttempt = await visualSubmission(
-      compareThird,
-      thirdPacketHead,
-      "attempt-4",
-      [64, 64, 64, 255],
-    );
-    await expect(
-      service.submit({ runId: started.runId, submission: fourthAttempt }),
-    ).rejects.toThrow(/VISUAL_ATTEMPT_LIMIT_REACHED/);
+    expect(
+      afterThirdFailure.nextActions
+        .map((action) => action.kind)
+        .filter((kind) =>
+          [
+            "compare-visuals",
+            "implementation-repair",
+            "review-functional",
+            "review-design",
+          ].includes(kind),
+        ),
+    ).toEqual([]);
+    const beforeReplay = await store.get(started.runId);
+    const replayedThirdFailure = await service.submit({
+      runId: started.runId,
+      submission: thirdAttempt,
+    });
+    const terminalAfterReplay = await store.get(started.runId);
+    expect(replayedThirdFailure.revision).toBe(beforeReplay.revision);
+    expect(terminalAfterReplay.revision).toBe(beforeReplay.revision);
+    expect(terminalAfterReplay.artifacts).toEqual(beforeReplay.artifacts);
 
     const run = await store.get(started.runId);
     const reports = run.artifacts.filter((artifact) => artifact.kind === "visual-report");
@@ -5616,11 +8589,12 @@ describe("WorkflowService", () => {
           artifact.metadata["visualRole"] === "baseline-normalized" ||
           artifact.metadata["visualRole"] === "actual-normalized",
       ),
-    ).toHaveLength(6);
+    ).toHaveLength(12);
     expect(
       reports.every(
         (artifact) =>
           artifact.metadata["visualLineageId"] === firstRepair?.lineageId &&
+          typeof artifact.metadata["rendererLineageId"] === "string" &&
           artifact.metadata["visualStatus"] === "failed",
       ),
     ).toBe(true);
@@ -5628,6 +8602,41 @@ describe("WorkflowService", () => {
       (artifact) => artifact.metadata["visualComparisonAttempt"] === 3,
     );
     if (thirdReport === undefined) throw new Error("Missing third visual report");
+    const terminalIdentity = `sha256:${createHash("sha256")
+      .update(
+        JSON.stringify({
+          runId: started.runId,
+          lineageId: firstRepair?.lineageId,
+          reviewPacketId: compareThird.reviewPacketId,
+          attempt: 3,
+          visualReportDigest: thirdReport.digest,
+        }),
+      )
+      .digest("hex")}`;
+    const implementationStage = run.stages.find((item) => item.name === "implementation");
+    expect(implementationStage).toMatchObject({
+      status: "failed",
+      checkpoint: {
+        name: "visual-threshold-not-met",
+        data: {
+          visualTerminalIdentity: terminalIdentity,
+          visualReportArtifactId: thirdReport.id,
+          visualReportDigest: thirdReport.digest,
+        },
+      },
+    });
+    const terminalArtifactIds = run.artifacts
+      .filter(
+        (artifact) =>
+          artifact.id === thirdReport.id ||
+          (artifact.metadata["visualComparisonAttempt"] === 3 &&
+            (artifact.metadata["reservationStatus"] === "committed" ||
+              artifact.metadata["visualRole"] !== undefined)) ||
+          (artifact.metadata["visualLineageAttempt"] === 3 &&
+            artifact.metadata["visualLineageStatus"] === "exhausted"),
+      )
+      .map((artifact) => artifact.id);
+    expect(implementationStage?.artifactIds).toEqual(expect.arrayContaining(terminalArtifactIds));
     const lastReport = JSON.parse(
       (await artifactStore.readContent(thirdReport.digest)).toString("utf8"),
     ) as Record<string, unknown>;
@@ -5636,12 +8645,13 @@ describe("WorkflowService", () => {
       status: "failed",
       reviewPacketId: compareThird.reviewPacketId,
       visualLineageId: firstRepair?.lineageId,
-      results: [
+      rendererLineageId: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+      results: expect.arrayContaining([
         expect.objectContaining({
           targetId: "checkout-default",
-          metrics: expect.objectContaining({ reviewMatchRatio: 0, threshold: 0.98 }),
+          metrics: expect.objectContaining({ reviewMatchRatio: 0, threshold: 0.92 }),
         }),
-      ],
+      ]),
     });
 
     await expect(
@@ -5665,6 +8675,65 @@ describe("WorkflowService", () => {
         },
       }),
     ).rejects.toThrow(/VISUAL_ATTEMPT_LIMIT_REACHED/);
+
+    const diagnosticReport = await service.ensureBlockedDiagnosticReport({
+      runId: started.runId,
+    });
+    expect(diagnosticReport.metadata["idempotencyKey"]).toBe(
+      `implementation:VISUAL_REVIEW_THRESHOLD_NOT_MET:${terminalIdentity}`,
+    );
+    const runWithDiagnostic = await store.get(started.runId);
+    const diagnosticJsonArtifact = runWithDiagnostic.artifacts.find(
+      (artifact) => artifact.id === diagnosticReport.metadata["reportJsonArtifactId"],
+    );
+    if (diagnosticJsonArtifact === undefined) {
+      throw new Error("Missing canonical blocked diagnostic JSON");
+    }
+    const diagnosticJson = JSON.parse(
+      (await artifactStore.readContent(diagnosticJsonArtifact.digest)).toString("utf8"),
+    ) as Record<string, unknown>;
+    expect(diagnosticJson).toMatchObject({
+      schemaVersion: "pr-report-v2.1",
+      runId: started.runId,
+      decision: "blocked",
+      binding: {
+        reviewPacketId: compareThird.reviewPacketId,
+        headSha: thirdPacketHead,
+        diffDigest: expect.stringMatching(/^sha256:/),
+      },
+      visual: {
+        applicable: true,
+        reportArtifactId: thirdReport.id,
+        attempt: 3,
+        status: "failed",
+        results: expect.arrayContaining([
+          expect.objectContaining({
+            targetId: "checkout-default",
+            status: "failed",
+            metrics: expect.objectContaining({ threshold: 0.92 }),
+          }),
+        ]),
+      },
+    });
+    expect(diagnosticReport.metadata).toMatchObject({
+      locale: "ko",
+      reviewPacketId: compareThird.reviewPacketId,
+      headSha: thirdPacketHead,
+      diffDigest: (diagnosticJson["binding"] as Record<string, unknown>)["diffDigest"],
+      visualReportArtifactId: thirdReport.id,
+    });
+    expect(diagnosticJsonArtifact.metadata).toMatchObject({
+      reviewPacketId: compareThird.reviewPacketId,
+      headSha: thirdPacketHead,
+      diffDigest: (diagnosticJson["binding"] as Record<string, unknown>)["diffDigest"],
+      visualReportArtifactId: thirdReport.id,
+    });
+    const revisionWithDiagnostic = (await store.get(started.runId)).revision;
+    const replayedDiagnosticReport = await service.ensureBlockedDiagnosticReport({
+      runId: started.runId,
+    });
+    expect(replayedDiagnosticReport.id).toBe(diagnosticReport.id);
+    expect((await store.get(started.runId)).revision).toBe(revisionWithDiagnostic);
   });
 
   it("enforces contracts and API-ready before accepting UI implementation", async () => {
@@ -6735,6 +9804,7 @@ function figmaManifest() {
     capturedComponents: figmaCapturedComponents(),
     designMapping: figmaDesignMapping(),
     visualPaths: ["visual/diff.png"],
+    stateContracts: figmaStateContracts(),
     visualTargets: figmaVisualTargets(),
   };
 }
@@ -6743,13 +9813,49 @@ function figmaCapturedComponents() {
   return [];
 }
 
+function figmaPublicApiCatalog() {
+  const fields = {
+    schemaVersion: "figma-public-api-catalog-v1" as const,
+    packageName: "@frontend/ui" as const,
+    packageVersion: "1.2.3",
+    packageManifest: {
+      path: UI_PACKAGE_MANIFEST_PATH,
+      digest:
+        `sha256:${createHash("sha256").update(UI_PACKAGE_MANIFEST_BYTES).digest("hex")}` as const,
+    },
+    publicBarrels: [
+      {
+        module: "@frontend/ui" as const,
+        path: UI_ROOT_BARREL_PATH,
+        digest:
+          `sha256:${createHash("sha256").update(UI_ROOT_BARREL_BYTES).digest("hex")}` as const,
+      },
+      {
+        module: "@frontend/ui/icons/vue" as const,
+        path: UI_ICON_BARREL_PATH,
+        digest:
+          `sha256:${createHash("sha256").update(UI_ICON_BARREL_BYTES).digest("hex")}` as const,
+      },
+    ],
+    codeConnectManifest: {
+      path: UI_CODE_CONNECT_PATH,
+      digest: `sha256:${createHash("sha256").update(UI_CODE_CONNECT_BYTES).digest("hex")}` as const,
+    },
+    exports: [],
+  };
+  return { ...fields, digest: figmaPublicApiCatalogDigest(fields) };
+}
+
 function figmaDesignMapping() {
+  const publicApiCatalog = figmaPublicApiCatalog();
   return {
     designSystem: {
-      packageName: "@frontend/ui",
+      packageName: "@frontend/ui" as const,
       packageVersion: "1.2.3",
+      catalogDigest: publicApiCatalog.digest,
       guidanceSkill: "design-system",
     },
+    publicApiCatalog,
     components: [],
     fonts: [],
     tokens: [],
@@ -6769,7 +9875,10 @@ function figmaVisualTargets() {
       deviceScaleFactor: 1,
       fixture: "mock:checkout",
       figmaCapture: {
+        schemaVersion: "figma-capture-geometry-v2" as const,
+        provider: "host-connected-figma-native-export" as const,
         nodeId: "1:2",
+        state: "default",
         captureKind: "viewport" as const,
         logicalSize: { width: 1, height: 1 },
         exportScale: 1,
@@ -6779,6 +9888,57 @@ function figmaVisualTargets() {
       masks: [],
     },
   ];
+}
+
+function figmaStateContracts(
+  overrides: Partial<{
+    targetId: string;
+    nodeId: string;
+    state: string;
+    fixtureId: string;
+  }> = {},
+) {
+  const contractState = overrides.state ?? "default";
+  const isAvailable = contractState === "default" || contractState === "available";
+  const fields = {
+    targetId: "checkout-default",
+    nodeId: "1:2",
+    state: contractState,
+    fixtureId: "mock:checkout",
+    facts: [
+      {
+        id: "cinema",
+        kind: "variant" as const,
+        subject: "CINEMA 4K",
+        value: isAvailable ? "available" : contractState,
+      },
+      {
+        id: "money",
+        kind: "visibility" as const,
+        subject: "G패스 머니",
+        value: isAvailable,
+      },
+      {
+        id: "parking",
+        kind: "text" as const,
+        subject: "주차",
+        value: isAvailable ? "가능" : "불가",
+      },
+    ],
+    requiredAssertions: [
+      {
+        id: `assert-checkout-${contractState}`,
+        kind: "interaction" as const,
+        selector: "[data-ui=checkout]",
+        subject: "checkout state rendered",
+        action: "click" as const,
+        expected: "rendered",
+      },
+    ],
+    designBindingIds: [],
+    ...overrides,
+  };
+  return [{ ...fields, digest: figmaStateFactsDigest(fields) }];
 }
 
 function requirements(...ids: string[]) {
@@ -6835,6 +9995,16 @@ function reviewPacketId(
     throw new Error(`Missing ${kind} packet`);
   }
   return action.reviewPacketId;
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
 }
 
 async function reportMarkdown(

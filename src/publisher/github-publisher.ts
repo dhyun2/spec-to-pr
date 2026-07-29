@@ -2,14 +2,16 @@ import {
   PublishedReviewAssetSchema,
   PublishedReviewRequestSchema,
   ReviewRequestUpdateSchema,
-  type PublishedReviewAsset,
   type PublishedReviewRequest,
   type PublishTarget,
   type ReviewRequestPayload,
   type ReviewRequestUpdate,
 } from "./publish-contracts.js";
 import {
+  classifyAssetUploadFailure,
+  mapWithBoundedConcurrency,
   ReviewRequestSynchronizationError,
+  type ReviewAssetPublishOutcome,
   type ReviewRequestAsset,
   type ReviewRequestPublisher,
 } from "./publisher-port.js";
@@ -167,32 +169,49 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
     payload: ReviewRequestPayload;
     token: string;
     assets: ReviewRequestAsset[];
+    maxConcurrency: number;
     signal?: AbortSignal | undefined;
-  }): Promise<PublishedReviewAsset[]> {
+  }): Promise<ReviewAssetPublishOutcome[]> {
     assertGitHub(input.target);
+    const target = input.target;
     if (input.payload.headSha === undefined || input.payload.reviewPacketId === undefined) {
-      throw new Error(
-        "EVIDENCE_REF_CONFLICT: review assets require a packet-bound head SHA and packet ID",
-      );
+      return input.assets.map((asset) => ({
+        status: "failed",
+        artifactId: asset.artifactId,
+        failure: "uncertain",
+        message: "GitHub prepare review asset upload failed",
+      }));
     }
-
-    const published: PublishedReviewAsset[] = [];
 
     // Private repositories cannot render raw.githubusercontent.com images without
     // auth, so we detect visibility once and fall back to plain links for them.
-    const isPrivate = await this.isPrivateRepo({
-      target: input.target,
-      token: input.token,
-      signal: input.signal,
-    });
-    const assetBranch = await this.ensureEvidenceBranch({
-      target: input.target,
-      payload: input.payload,
-      token: input.token,
-      signal: input.signal,
-    });
+    let isPrivate: boolean;
+    let assetBranch: typeof GITHUB_EVIDENCE_BRANCH;
+    try {
+      isPrivate = await this.isPrivateRepo({
+        target,
+        token: input.token,
+        signal: input.signal,
+      });
+      assetBranch = await this.ensureEvidenceBranch({
+        target,
+        payload: input.payload,
+        token: input.token,
+        signal: input.signal,
+      });
+    } catch {
+      return input.assets.map((asset) => ({
+        status: "failed",
+        artifactId: asset.artifactId,
+        failure: "uncertain",
+        message: "GitHub prepare review asset upload failed",
+      }));
+    }
 
-    for (const asset of input.assets) {
+    // Every Contents API PUT commits against the same managed branch. Keep the
+    // read/modify/write transaction serial so concurrent assets cannot repeatedly
+    // invalidate one another's parent ref and exhaust the bounded 409 retries.
+    return mapWithBoundedConcurrency(input.assets, 1, async (asset) => {
       const assetPath = [
         ".spec-to-pr",
         asset.role === "e2e-video" ? "feature-evidence" : "visual-assets",
@@ -202,46 +221,105 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
         asset.artifactId,
         asset.filename,
       ].join("/");
-      const response = await this.uploadEvidenceAsset({
-        target: input.target,
-        asset,
-        assetPath,
-        assetBranch,
-        token: input.token,
-        signal: input.signal,
-      });
+      let response: Response;
+      try {
+        response = await this.uploadEvidenceAsset({
+          target,
+          asset,
+          assetPath,
+          assetBranch,
+          token: input.token,
+          signal: input.signal,
+        });
+      } catch {
+        return {
+          status: "failed",
+          artifactId: asset.artifactId,
+          failure: classifyAssetUploadFailure({ networkError: true }),
+          message: "GitHub upload review asset network failure",
+        };
+      }
+      if (!response.ok) {
+        return {
+          status: "failed",
+          artifactId: asset.artifactId,
+          failure: classifyAssetUploadFailure({ status: response.status }),
+          message: `GitHub upload review asset failed with HTTP ${response.status}`,
+        };
+      }
 
-      const uploaded = (await response.json()) as Record<string, unknown>;
-      const content = uploaded["content"] as Record<string, unknown> | undefined;
+      let uploaded: Record<string, unknown>;
+      try {
+        const body = await response.json();
+        if (typeof body !== "object" || body === null) throw new Error("malformed");
+        uploaded = body as Record<string, unknown>;
+      } catch {
+        return {
+          status: "failed",
+          artifactId: asset.artifactId,
+          failure: classifyAssetUploadFailure({ responseMalformed: true }),
+          message: "GitHub upload review asset returned a malformed response",
+        };
+      }
+      const content = uploaded["content"];
       const commit = uploaded["commit"] as Record<string, unknown> | undefined;
-      const commitSha = GitObjectIdSchema.safeParse(commit?.["sha"]);
-      if (!commitSha.success) {
-        throw new Error("GitHub upload review asset did not return a valid commit SHA");
+      const contentSha = isPlainRecord(content) ? fullGitHubObjectId(content["sha"]) : undefined;
+      const commitSha = fullGitHubObjectId(commit?.["sha"]);
+      if (contentSha === undefined || commitSha === undefined) {
+        return {
+          status: "failed",
+          artifactId: asset.artifactId,
+          failure: classifyAssetUploadFailure({ responseMalformed: true }),
+          message: "GitHub upload review asset returned a malformed response",
+        };
       }
 
       // Public repos: pin the raw URL to the commit SHA so it survives branch
       // deletion after merge. Private repos: raw URLs 404 for unauthenticated
-      // camo fetches, so link to the viewable blob instead and mark it as
-      // non-embeddable for the review-body renderer.
-      const embeddable = !isPrivate && asset.role !== "e2e-video";
-      const url = isPrivate
-        ? `${input.target.webBaseUrl}/${input.target.owner}/${input.target.repo}/blob/${commitSha.data}/${assetPath}`
-        : `https://raw.githubusercontent.com/${input.target.owner}/${input.target.repo}/${commitSha.data}/${assetPath}`;
-      void content;
-
-      published.push(
-        PublishedReviewAssetSchema.parse({
+      // camo fetches. GitHub Enterprise also has no raw.githubusercontent.com
+      // authority, so keep its evidence on the exact configured host as a
+      // non-embeddable, commit-pinned blob link.
+      const publicGitHubCom =
+        !isPrivate && new URL(target.webBaseUrl).hostname.toLowerCase() === "github.com";
+      const embeddable = publicGitHubCom && asset.role !== "e2e-video";
+      const url = publicGitHubCom
+        ? `https://raw.githubusercontent.com/${target.owner}/${target.repo}/${commitSha}/${assetPath}`
+        : `${target.webBaseUrl.replace(/\/+$/, "")}/${target.owner}/${target.repo}/blob/${commitSha}/${assetPath}`;
+      return {
+        status: "published",
+        asset: PublishedReviewAssetSchema.parse({
           artifactId: asset.artifactId,
+          artifactDigest: asset.artifactDigest,
           targetId: asset.targetId,
           role: asset.role,
           label: asset.label,
           url,
           embeddable,
         }),
-      );
-    }
+      } satisfies ReviewAssetPublishOutcome;
+    });
+  }
 
-    return published;
+  public async readBody(input: {
+    target: PublishTarget;
+    requestNumber: string;
+    token: string;
+    signal?: AbortSignal | undefined;
+  }): Promise<string> {
+    assertGitHub(input.target);
+    const response = await this.githubFetch(
+      `${input.target.apiBaseUrl}/repos/${input.target.owner}/${input.target.repo}/pulls/${input.requestNumber}`,
+      input.token,
+      { method: "GET", signal: input.signal },
+    );
+    if (!response.ok) {
+      throw new Error(`GitHub read PR body failed with HTTP ${response.status}`);
+    }
+    const body = (await response.json()) as Record<string, unknown>;
+    if (typeof body["body"] !== "string") {
+      throw new Error("GitHub read PR body returned a malformed response");
+    }
+    return body["body"];
   }
 
   private async ensureEvidenceBranch(input: {
@@ -334,11 +412,9 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
       );
       if (response.ok) return response;
       if (response.status === 409 && attempt < MAX_EVIDENCE_UPLOAD_ATTEMPTS) continue;
-      throw new Error(
-        `GitHub upload review asset failed: ${response.status} ${await response.text()}`,
-      );
+      return response;
     }
-    throw new Error("GitHub upload review asset failed after bounded conflict retries");
+    return new Response(null, { status: 409 });
   }
 
   private async isPrivateRepo(input: {
@@ -520,4 +596,14 @@ function validateEvidenceRef(raw: unknown): ValidatedEvidenceRef {
     throw new Error("EVIDENCE_REF_CONFLICT: managed evidence ref is not the expected commit ref");
   }
   return { ref: GITHUB_EVIDENCE_REF, sha: sha.data };
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function fullGitHubObjectId(value: unknown): string | undefined {
+  return typeof value === "string" && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(value)
+    ? value
+    : undefined;
 }

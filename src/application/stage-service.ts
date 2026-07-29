@@ -8,6 +8,10 @@ import {
   WorkerIdSchema,
 } from "../run/stages.js";
 import { ArtifactIdSchema, GapIdSchema, RunIdSchema } from "../runtime/ids.js";
+import {
+  NoopRuntimeMetrics,
+  type RuntimeMetricsSink,
+} from "../runtime/performance-instrumentation.js";
 import { createResumePlan } from "../state/resume-plan.js";
 import {
   blockStage,
@@ -31,6 +35,7 @@ export const StartStageInputSchema = z
     runId: RunIdSchema,
     stageName: RunStageNameSchema,
     workerId: WorkerIdSchema,
+    expectedRevision: z.number().int().nonnegative().optional(),
     leaseTtlMs: z
       .number()
       .int()
@@ -113,9 +118,14 @@ export class StageService {
   public constructor(
     private readonly store: RunStore,
     private readonly now: () => string = () => new Date().toISOString(),
+    private readonly metrics: RuntimeMetricsSink = new NoopRuntimeMetrics(),
   ) {}
 
   public async start(rawInput: unknown) {
+    return this.measureTransition(rawInput, () => this.startUninstrumented(rawInput));
+  }
+
+  private async startUninstrumented(rawInput: unknown) {
     const input = StartStageInputSchema.parse(rawInput);
     const run = await this.store.get(input.runId);
     const result = startStage(
@@ -128,12 +138,16 @@ export class StageService {
       this.now,
     );
 
-    await this.store.save(result.run, run.revision);
+    await this.store.save(result.run, input.expectedRevision ?? run.revision);
 
     return result;
   }
 
   public async heartbeat(rawInput: unknown) {
+    return this.measureTransition(rawInput, () => this.heartbeatUninstrumented(rawInput));
+  }
+
+  private async heartbeatUninstrumented(rawInput: unknown) {
     const input = HeartbeatStageInputSchema.parse(rawInput);
     const run = await this.store.get(input.runId);
     const result = heartbeatStage(
@@ -154,6 +168,10 @@ export class StageService {
   }
 
   public async complete(rawInput: unknown) {
+    return this.measureTransition(rawInput, () => this.completeUninstrumented(rawInput));
+  }
+
+  private async completeUninstrumented(rawInput: unknown) {
     const input = CompleteStageInputSchema.parse(rawInput);
     const run = await this.store.get(input.runId);
     const result = completeStage(
@@ -174,6 +192,10 @@ export class StageService {
   }
 
   public async fail(rawInput: unknown) {
+    return this.measureTransition(rawInput, () => this.failUninstrumented(rawInput));
+  }
+
+  private async failUninstrumented(rawInput: unknown) {
     const input = FailStageInputSchema.parse(rawInput);
     const run = await this.store.get(input.runId);
     const result = failStage(
@@ -195,6 +217,10 @@ export class StageService {
   }
 
   public async block(rawInput: unknown) {
+    return this.measureTransition(rawInput, () => this.blockUninstrumented(rawInput));
+  }
+
+  private async blockUninstrumented(rawInput: unknown) {
     const input = BlockStageInputSchema.parse(rawInput);
     const run = await this.store.get(input.runId);
     const result = blockStage(
@@ -217,6 +243,10 @@ export class StageService {
   }
 
   public async skip(rawInput: unknown) {
+    return this.measureTransition(rawInput, () => this.skipUninstrumented(rawInput));
+  }
+
+  private async skipUninstrumented(rawInput: unknown) {
     const input = SkipStageInputSchema.parse(rawInput);
     const run = await this.store.get(input.runId);
     const result = skipStage(
@@ -241,5 +271,14 @@ export class StageService {
     const run = RunManifestSchema.parse(await this.store.get(input.runId));
 
     return createResumePlan(run, this.now());
+  }
+
+  private async measureTransition<T>(rawInput: unknown, operation: () => Promise<T>): Promise<T> {
+    const parsed = z.object({ stageName: RunStageNameSchema }).passthrough().safeParse(rawInput);
+    return this.metrics.time(
+      "stage.wall_ms",
+      parsed.success ? { stage: parsed.data.stageName } : {},
+      operation,
+    );
   }
 }

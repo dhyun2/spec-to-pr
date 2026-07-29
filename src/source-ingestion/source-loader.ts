@@ -41,6 +41,29 @@ export type ExtractedPdf = z.infer<typeof ExtractedPdfSchema>;
 export type RemoteOpenApiSource = z.infer<typeof RemoteOpenApiSourceSchema>;
 export type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
+export async function orderedConcurrentMap<T, R>(
+  inputs: readonly T[],
+  maxConcurrency: number,
+  operation: (input: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  if (!Number.isInteger(maxConcurrency) || maxConcurrency < 1) {
+    throw new Error("maxConcurrency must be a positive integer");
+  }
+  const results = new Array<R>(inputs.length);
+  let nextIndex = 0;
+  const worker = async (): Promise<void> => {
+    while (nextIndex < inputs.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await operation(inputs[index]!, index);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(maxConcurrency, inputs.length) }, async () => worker()),
+  );
+  return results;
+}
+
 export async function extractPdfText(content: Buffer): Promise<ExtractedPdf> {
   installTextOnlyPdfGlobals();
   // pdfjs ships this runtime worker entry without a declaration file.

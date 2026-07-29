@@ -5,6 +5,11 @@ import { z } from "zod";
 
 import { PublishTargetSchema } from "./publish-contracts.js";
 import type { PublishTarget } from "./publish-contracts.js";
+import {
+  credentialCommand,
+  environmentCredentialAvailability,
+  isCredentialOutputAvailable,
+} from "./token-provider.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -20,7 +25,7 @@ export type PublishPreflightEnvironment = Record<string, string | undefined>;
 export type PublishAuthProbe = (input: {
   provider: "github" | "gitlab";
   hostname: string;
-}) => Promise<{ hostname: string; token: string }>;
+}) => Promise<{ available: boolean; source: string }>;
 
 export function detectPublishTargetFromRemote(
   remote: GitRemoteInfo,
@@ -40,11 +45,16 @@ export function detectPublishTargetFromRemote(
 
     return PublishTargetSchema.parse({
       host: "github",
-      webBaseUrl: envUrl(environment, "SPEC_TO_PR_WEB_BASE_URL") ?? `https://${normalized.host}`,
+      webBaseUrl:
+        envUrl(environment, "SPEC_TO_PR_WEB_BASE_URL", normalized.host) ??
+        `https://${normalized.host}`,
       // github.com uses api.github.com; GitHub Enterprise uses https://<host>/api/v3.
       apiBaseUrl:
-        envUrl(environment, "SPEC_TO_PR_API_BASE_URL") ??
-        (enterprise ? `https://${normalized.host}/api/v3` : "https://api.github.com"),
+        envUrl(
+          environment,
+          "SPEC_TO_PR_API_BASE_URL",
+          enterprise ? normalized.host : "api.github.com",
+        ) ?? (enterprise ? `https://${normalized.host}/api/v3` : "https://api.github.com"),
       owner,
       repo,
     });
@@ -57,9 +67,12 @@ export function detectPublishTargetFromRemote(
 
     return PublishTargetSchema.parse({
       host: "gitlab",
-      webBaseUrl: envUrl(environment, "SPEC_TO_PR_WEB_BASE_URL") ?? `https://${normalized.host}`,
+      webBaseUrl:
+        envUrl(environment, "SPEC_TO_PR_WEB_BASE_URL", normalized.host) ??
+        `https://${normalized.host}`,
       apiBaseUrl:
-        envUrl(environment, "SPEC_TO_PR_API_BASE_URL") ?? `https://${normalized.host}/api/v4`,
+        envUrl(environment, "SPEC_TO_PR_API_BASE_URL", normalized.host) ??
+        `https://${normalized.host}/api/v4`,
       projectPath: normalized.pathParts.join("/"),
     });
   }
@@ -74,7 +87,7 @@ export function detectPublishTargetFromRemote(
 export async function preflightPublishTarget(
   remote: GitRemoteInfo,
   environment: PublishPreflightEnvironment = process.env,
-  authProbe: PublishAuthProbe = defaultAuthProbe,
+  authProbe?: PublishAuthProbe,
 ): Promise<{
   public: PublishTarget;
   remoteHost: string;
@@ -103,15 +116,18 @@ export async function preflightPublishTarget(
     SPEC_TO_PR_API_BASE_URL: apiBaseUrl,
   });
 
-  let auth: { hostname: string; token: string };
+  let auth: { available: boolean; source: string };
   try {
-    auth = await authProbe({ provider, hostname: normalized.host });
+    auth = await (authProbe ?? ((input) => defaultAuthProbe(input, environment)))({
+      provider,
+      hostname: normalized.host,
+    });
   } catch {
     throw preflightError(
       `${provider === "github" ? "gh" : "glab"} auth token probe failed for ${normalized.host}`,
     );
   }
-  if (auth.hostname.toLowerCase() !== normalized.host || auth.token.trim() === "") {
+  if (!auth.available) {
     throw preflightError("authentication must resolve the exact remote hostname");
   }
   return {
@@ -142,10 +158,31 @@ function resolveHostKind(
   return undefined;
 }
 
-function envUrl(environment: PublishPreflightEnvironment, name: string): string | undefined {
+function envUrl(
+  environment: PublishPreflightEnvironment,
+  name: string,
+  expectedHost?: string,
+): string | undefined {
   const value = environment[name]?.trim();
 
-  return value !== undefined && value.length > 0 ? value : undefined;
+  if (value === undefined || value.length === 0) return undefined;
+  if (expectedHost === undefined) return value;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw preflightError(`${name} must be a valid HTTPS URL`);
+  }
+  if (
+    parsed.protocol !== "https:" ||
+    parsed.username !== "" ||
+    parsed.password !== "" ||
+    parsed.hostname.toLowerCase() !== expectedHost
+  ) {
+    throw preflightError(`${name} must use HTTPS on the exact remote hostname`);
+  }
+  return parsed.toString().replace(/\/$/, "");
 }
 
 function requireCustomBaseUrl(
@@ -174,16 +211,25 @@ function requireCustomBaseUrl(
   return parsed.toString().replace(/\/$/, "");
 }
 
-async function defaultAuthProbe(input: {
-  provider: "github" | "gitlab";
-  hostname: string;
-}): Promise<{ hostname: string; token: string }> {
-  const executable = input.provider === "github" ? "gh" : "glab";
-  const result = await execFileAsync(executable, ["auth", "token", "--hostname", input.hostname], {
+async function defaultAuthProbe(
+  input: {
+    provider: "github" | "gitlab";
+    hostname: string;
+  },
+  environment: PublishPreflightEnvironment,
+): Promise<{ available: boolean; source: string }> {
+  const fromEnvironment = environmentCredentialAvailability(input.provider, environment);
+  if (fromEnvironment !== undefined) return fromEnvironment;
+
+  const credential = credentialCommand(input.provider, input.hostname);
+  const result = await execFileAsync(credential.command, credential.args, {
     encoding: "utf8",
     maxBuffer: 1024 * 1024,
   });
-  return { hostname: input.hostname, token: result.stdout.trim() };
+  return {
+    available: isCredentialOutputAvailable(result.stdout),
+    source: `${credential.command} ${credential.args.join(" ")}`,
+  };
 }
 
 function preflightError(message: string): Error {

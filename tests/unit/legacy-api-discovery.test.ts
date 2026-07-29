@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { discoverLegacyApiCandidates } from "../../src/legacy/legacy-api-discovery.js";
+import { LegacySourceCache } from "../../src/legacy/legacy-source-cache.js";
 import { discoverLegacySourceGraph } from "../../src/legacy/legacy-source-graph.js";
 
 const temporaryRoots: string[] = [];
@@ -15,6 +16,28 @@ afterEach(async () => {
 });
 
 describe("semantic legacy API discovery", () => {
+  it("reuses graph ASTs instead of parsing source files again", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-api-cache-"));
+    temporaryRoots.push(root);
+    await mkdir(path.join(root, "src"), { recursive: true });
+    await writeFile(path.join(root, "package.json"), '{"name":"legacy-api-cache"}\n', "utf8");
+    await Promise.all(
+      Array.from({ length: 250 }, (_, index) =>
+        writeFile(
+          path.join(root, "src", `file-${String(index).padStart(3, "0")}.ts`),
+          `export const load${index} = () => fetch("/api/${index}");\n`,
+          "utf8",
+        ),
+      ),
+    );
+    const cache = new LegacySourceCache();
+    const graph = await discoverLegacySourceGraph(root, {}, { sourceCache: cache });
+    const parsesAfterGraph = cache.snapshotStats().astParses;
+
+    expect(discoverLegacyApiCandidates(graph)).toHaveLength(250);
+    expect(cache.snapshotStats().astParses).toBe(parsesAfterGraph);
+  });
+
   it("does not infer HTTP transports from ordinary receiver names", async () => {
     const graph = await fixture({
       "src/modules/shop/profile.ts": `

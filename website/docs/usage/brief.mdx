@@ -75,7 +75,7 @@ API 계약 자료를 먼저 만든 뒤 같은 구현 맥락에서 UI를 구현�
 1. **접수:** 경로와 발행 의도를 정리하고 예상 작업량, 토큰 범위, 신뢰도를 보여 줍니다.
 2. **계약 확정:** 원본 해시가 있는 `sourceProvenance`, 수용 조건, API 작업, Figma `visualTargets`를 고정합니다.
 3. **구현:** 같은 `implementationContextId`에서 API 타입·스키마·호출 모듈·모의 응답·계약 테스트를 먼저 만들고 UI를 연결합니다. 최종 `apiCoverage`에는 API 작업별 실제 호출, 모의 응답, 실행 가능한 검증을 연결합니다.
-4. **화면 비교 및 성능 측정:** 같은 경로·상태·테스트 데이터·화면 크기에서 Figma PNG와 결과 화면을 `compare-visuals`로 비교합니다. 각 결과 화면에는 기준과 같은 조건, 자료 제공자, ISO 형식의 촬영 시각, PNG 경로, `sha256:` 해시를 기록합니다. 실행 엔진은 비교 조건이나 해시가 달라지면 거부하고 정확 일치율·검토 일치율·차이 이미지·겹침 이미지를 계산합니다. 기준은 일치율 98% 이상, 근거가 있는 마스킹 영역 20% 이하이며, 최초 비교 1회와 보정 후 최대 2회를 합쳐 모두 3번까지 비교할 수 있습니다. 실험실 LCP·CLS·TBT 또는 상호작용 지표와 현장 Web Vitals도 기록하고, 수집할 수 없으면 그 이유를 남깁니다.
+4. **화면 비교 및 성능 측정:** 같은 경로·상태·테스트 데이터·화면 크기에서 Figma PNG와 결과 화면을 `compare-visuals`로 비교합니다. 각 결과 화면에는 기준과 같은 조건, 자료 제공자, ISO 형식의 촬영 시각, PNG 경로, `sha256:` 해시를 기록합니다. 실행 엔진은 비교 조건이나 해시가 달라지면 시도 횟수를 소비하지 않고 거부하며 정확 일치율·검토 일치율·차이 이미지·겹침 이미지를 계산합니다. 고정 기준은 일치율 92% 이상, 근거가 있는 마스킹 영역 20% 이하입니다. 최초 비교와 보정 후 최대 2회를 자동으로 수행하며 세 번째 유효 실패는 실패 이미지를 보존한 채 실행을 차단합니다. 집중 UI 검증은 전체 점수와 별도로 통과해야 합니다. 실험실 LCP·CLS·TBT 또는 상호작용 지표와 현장 Web Vitals도 기록하고, 수집할 수 없으면 그 이유를 남깁니다.
 5. **독립 검토:** `functional-reviewer`와 `design-reviewer`가 변경할 수 없는 동일한 검토 묶음을 각각 판정합니다.
 6. **보고서 및 발행:** 검토 묶음에 연결된 `pr-report-v2.1` JSON·Markdown의 15개 섹션을 만든 뒤 초안 PR을 발행합니다.
 
@@ -128,7 +128,7 @@ API 계약 자료를 먼저 만든 뒤 같은 구현 맥락에서 UI를 구현�
 | API 준비   | `evidence/api/contract-test.json`                      | API 작업이면 `status: passed`, 실제 파일, 같은 `implementationContextId` |
 | 관련 검사  | `evidence/tests/focused-checks.json`                   | 적용 가능한 명령이 성공하고 건너뛰거나 빈 결과가 아님                    |
 | Figma      | `evidence/figma/figma-bundle.json`                     | URL을 제공했다면 연결된 호스트의 출처 정보와 실제 PNG가 있음             |
-| 화면 비교  | `evidence/visual/checkout-report.json`                 | Figma와 결과 화면의 검토 일치율이 98% 이상이고 차이·겹침 이미지가 있음   |
+| 화면 비교  | `evidence/visual/checkout-report.json`                 | Figma와 결과 화면의 검토 일치율이 92% 이상이고 차이·겹침 이미지가 있음   |
 | API 현황   | `evidence/api/coverage.json`                           | 모든 API 작업이 실제 호출·모의 응답·테스트에 연결되거나 차단 사유가 있음 |
 | Web Vitals | `evidence/performance/checkout.json`                   | 실험실 기준과 현장 자료 또는 수집하지 못한 이유가 있음                   |
 | 독립 검토  | `evidence/reviews/functional.json`, UI면 `design.json` | 적용 가능한 독립 판정이 모두 승인됨                                      |

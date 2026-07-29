@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 import { promisify } from "node:util";
 
 import { parse as parseYaml } from "yaml";
@@ -14,6 +15,8 @@ import {
   WorkflowReportMetadataSchema,
   assertCurrentPrReportV2,
   type PrReportSectionStatus,
+  type PrReportV2,
+  type WorkflowReportIntent,
 } from "../pr-report/pr-report-model.js";
 import { publicSourceRows } from "../pr-report/public-provenance.js";
 import {
@@ -35,13 +38,23 @@ import { ArtifactRefSchema, type ArtifactRef } from "../runtime/artifact.js";
 import { GapSchema } from "../runtime/gap.js";
 import { createArtifactId, createGapId } from "../runtime/id-factory.js";
 import { ArtifactIdSchema, RunIdSchema } from "../runtime/ids.js";
+import {
+  NoopRuntimeMetrics,
+  RuntimeMetricsRecorder,
+  type RuntimeMetricsSink,
+} from "../runtime/performance-instrumentation.js";
+import type { Sha256Digest } from "../runtime/scalars.js";
 import { summarizeRun, type RunManifest } from "../run/index.js";
 import {
   extractPdfText,
   fetchOpenApiDocument,
+  orderedConcurrentMap,
   type RemoteOpenApiSource,
 } from "../source-ingestion/source-loader.js";
-import { inventoryOpenApiOperations } from "../source-ingestion/openapi-inventory.js";
+import {
+  inventoryOpenApiOperations,
+  openApiClassificationSummary,
+} from "../source-ingestion/openapi-inventory.js";
 import type { RunStageName, StageState } from "../run/stages.js";
 import type { RunStore } from "../store/run-store.js";
 import { RevisionConflictError } from "../store/errors.js";
@@ -60,8 +73,15 @@ import {
   WorkflowSourcePathSchema,
   WorkflowSourceUrlSchema,
   WorkflowActionSchema,
+  WorkflowActionStatusSchema,
+  WorkflowCheckpointStatusSchema,
+  WorkflowDetailStatusSchema,
+  WorkflowResumeContextSchema,
+  WorkflowStatusInputSchema,
+  CompactFailedVisualTargetsSchema,
+  VisualLineageOutcomeV2Schema,
+  VisualRepairEvidenceV2Schema,
   WorkflowScopeSchema,
-  WorkflowStatusSchema,
   WorkflowSubmissionSchema,
   WorkloadEstimateSchema,
   OpenApiOperationContractSchema,
@@ -79,12 +99,17 @@ import {
   type WorkloadEstimate,
   type WorkloadSignals,
   type WorkflowStatus,
+  type WorkflowActionStatus,
+  type WorkflowCheckpointStatus,
+  type WorkflowDetailStatus,
+  type WorkflowResumeContext,
   type WorkflowSubmission,
   DraftEvidenceManifestSchema,
 } from "../workflow/index.js";
 import {
   reopenImplementationForReviewChanges,
   reopenImplementationForVisualRepair,
+  terminalizeVisualThresholdFailure,
 } from "../state/stage-machine.js";
 import type { IntakeRequestService } from "./intake-request-service.js";
 import type { OpenSpecArchiveService } from "./openspec-archive-service.js";
@@ -93,19 +118,44 @@ import type { RunService } from "./run-service.js";
 import type { StageService } from "./stage-service.js";
 import {
   MAX_VISUAL_REPAIR_ATTEMPTS,
+  normalizeVisualTargetManifest,
+  VisualTargetManifestCompatibilitySchema,
   VisualTargetManifestSchema,
-  compareVisualPngs,
+  VisualRendererLineageBindingSchema,
   type VisualTargetManifest,
 } from "../visual/visual-comparator.js";
+import { defaultVisualComparisonPool } from "../visual/visual-comparison-pool.js";
 import { decodeBoundedPng } from "../visual/png-decoder.js";
 import { normalizeVisualPng } from "../visual/visual-normalizer.js";
-import { VisualCaptureReceiptSchema, assertCaptureReceipt } from "../visual/capture-receipt.js";
+import {
+  VisualCaptureReceiptSchema,
+  VisualCaptureReceiptV2Schema,
+  assertCaptureReceipt,
+  canonicalCaptureAssetDigests,
+  canonicalCaptureFontDigests,
+  captureRendererLineageId,
+} from "../visual/capture-receipt.js";
+import {
+  BaselineIsolationEvidenceSchema,
+  assertBaselineIsolation,
+} from "../visual/baseline-isolation.js";
+import {
+  PlaywrightCliResultSchema,
+  UiAssertionObservationSchema,
+  UiAssertionReportSchema,
+  assertUiAssertionReport,
+} from "../visual/ui-assertion-contract.js";
 import {
   CapturedFigmaComponentSchema,
   FigmaDesignMappingSchema,
+  FigmaStateContractSchema,
   assertCompleteDesignMapping,
+  assertExactFigmaImplementationBindings,
   assertFigmaCaptureGeometry,
+  assertFigmaPublicApiCatalogEvidence,
+  assertFigmaStateContracts,
   type FigmaDesignMapping,
+  type FigmaStateContract,
 } from "../figma/figma-capture-contract.js";
 import {
   WorkspaceStartInputSchema,
@@ -113,7 +163,29 @@ import {
   assertWorkspaceFresh,
   resolveWorkspaceBinding,
 } from "../workspace/workspace-binding.js";
-import { createVisualLineage } from "../workflow/visual-repair-lineage.js";
+import {
+  createVisualLineage,
+  latestVisualLineageOutcome,
+  type VisualLineageOutcome,
+} from "../workflow/visual-repair-lineage.js";
+import {
+  nextCommittedVisualAttempt,
+  reduceVisualReservations,
+  type VisualAttemptReservation,
+  type VisualAttemptReservationEvent,
+} from "../workflow/visual-attempt-reservation.js";
+import {
+  ImplementationSnapshotSchema,
+  implementationRepositoryKey,
+  reusableImplementationSnapshot,
+  type ImplementationSnapshot,
+} from "../workflow/implementation-snapshot.js";
+import {
+  PacketEvidenceEntrySchema,
+  PacketEvidenceIndexSchema,
+  reusablePacketEvidence,
+  type PacketEvidenceEntry,
+} from "../workflow/packet-evidence-index.js";
 
 const WORKER_ID = "workflow-orchestrator" as const;
 const execFileAsync = promisify(execFile);
@@ -162,9 +234,10 @@ const FigmaManifestSchema = z
     capturedAt: z.string().datetime({ offset: true }),
     fileUrl: FigmaFileUrlSchema,
     fileUrls: z.array(FigmaFileUrlSchema).min(1).max(MAX_COMPOSABLE_SOURCE_PATHS),
-    nodeIds: z.array(z.string().trim().min(1)).min(1),
+    nodeIds: z.array(z.string().trim().min(1)).max(50),
     capturedComponents: z.array(CapturedFigmaComponentSchema).max(1_000),
     designMapping: FigmaDesignMappingSchema,
+    stateContracts: z.array(FigmaStateContractSchema).min(1).max(50),
     visualPaths: z
       .array(
         z
@@ -173,7 +246,7 @@ const FigmaManifestSchema = z
           .regex(/\.png$/i),
       )
       .min(1),
-    visualTargets: z.array(VisualTargetManifestSchema).min(1).max(50),
+    visualTargets: z.array(VisualTargetManifestCompatibilitySchema).min(1).max(50),
   })
   .strict();
 
@@ -371,7 +444,7 @@ export const WorkflowSubmitInputSchema = z
   })
   .strict();
 
-export const WorkflowStatusInputSchema = z.object({ runId: RunIdSchema }).strict();
+export { WorkflowStatusInputSchema };
 
 export const WorkflowPublishInputSchema = z
   .object({
@@ -455,21 +528,48 @@ export type WorkflowServiceDependencies = {
   fetchOpenApiSource?: (input: { url: string }) => Promise<RemoteOpenApiSource>;
   publisherService?: PublisherService;
   archiveService?: OpenSpecArchiveService;
+  metrics?: RuntimeMetricsSink;
   now?: () => string;
+  monotonicNow?: () => number;
   externalLeaseTtlMs?: number;
   externalHeartbeatMs?: number;
 };
 
+type VisualAttemptReservationResult =
+  | { kind: "reserved"; reservation: VisualAttemptReservation }
+  | { kind: "committed-replay"; reservation: VisualAttemptReservation }
+  | { kind: "busy"; reservation: VisualAttemptReservation };
+
+type PreparedVisualEvidence = {
+  artifact: ArtifactRef;
+  content: Buffer;
+  label: string;
+};
+
+type MutatingStatusView = "action" | "detail";
+type MutatingWorkflowStatus = WorkflowActionStatus | WorkflowDetailStatus;
+type ReviewerStageName = "functional-review" | "design-review";
+type ReviewerTiming = {
+  startedAt: number;
+  visualStableAtStart: boolean;
+  completedWallMs?: number;
+};
+
 export class WorkflowService {
   private readonly now: () => string;
+  private readonly monotonicNow: () => number;
   private readonly externalLeaseTtlMs: number;
   private readonly externalHeartbeatMs: number;
+  private readonly metrics: RuntimeMetricsSink;
   private readonly diagnosticPublishFlights = new Map<string, Promise<unknown>>();
+  private readonly reviewerTimings = new Map<string, Map<ReviewerStageName, ReviewerTiming>>();
 
   public constructor(private readonly dependencies: WorkflowServiceDependencies) {
     this.now = dependencies.now ?? (() => new Date().toISOString());
+    this.monotonicNow = dependencies.monotonicNow ?? performance.now.bind(performance);
     this.externalLeaseTtlMs = dependencies.externalLeaseTtlMs ?? DEFAULT_EXTERNAL_LEASE_TTL_MS;
     this.externalHeartbeatMs = dependencies.externalHeartbeatMs ?? DEFAULT_EXTERNAL_HEARTBEAT_MS;
+    this.metrics = dependencies.metrics ?? new NoopRuntimeMetrics();
 
     if (
       this.externalHeartbeatMs <= 0 ||
@@ -480,7 +580,46 @@ export class WorkflowService {
     }
   }
 
-  public async start(rawInput: unknown): Promise<WorkflowStatus> {
+  private async measureWorkflowAction<T>(
+    rawInput: unknown,
+    action: "start" | "advance" | "submit" | "status" | "publish" | "archive",
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const measured = () => this.metrics.time("external_action.wall_ms", { action }, operation);
+    const scopedRun = z.object({ runId: RunIdSchema }).passthrough().safeParse(rawInput);
+    if (this.metrics instanceof RuntimeMetricsRecorder && scopedRun.success) {
+      return this.metrics.withRun(scopedRun.data.runId, measured);
+    }
+    return measured();
+  }
+
+  public async start(rawInput: unknown): Promise<WorkflowDetailStatus>;
+  public async start(rawInput: unknown, view: "action"): Promise<WorkflowActionStatus>;
+  public async start(rawInput: unknown, view: "detail"): Promise<WorkflowDetailStatus>;
+  public async start(
+    rawInput: unknown,
+    view: MutatingStatusView = "detail",
+  ): Promise<MutatingWorkflowStatus> {
+    if (this.metrics instanceof RuntimeMetricsRecorder) {
+      const recorder = this.metrics;
+      const pending = recorder.beginRun();
+      return recorder.withPendingRun(pending, async () => {
+        const status = await this.measureWorkflowAction(rawInput, "start", () =>
+          this.startUninstrumented(rawInput, view),
+        );
+        recorder.bindPendingRun(pending, status.runId);
+        return status;
+      });
+    }
+    return this.measureWorkflowAction(rawInput, "start", () =>
+      this.startUninstrumented(rawInput, view),
+    );
+  }
+
+  private async startUninstrumented(
+    rawInput: unknown,
+    view: MutatingStatusView,
+  ): Promise<MutatingWorkflowStatus> {
     const input = WorkflowStartInputSchema.parse(rawInput);
     const workspaceBinding =
       input.workspace === undefined
@@ -523,7 +662,8 @@ export class WorkflowService {
     });
     const sourceOpenApiOperations = inventoryOpenApiOperations(sources.openApi);
     const publication = input.publication ?? "draft";
-    const initialHead = workspaceBinding?.baseSha ?? (await currentGitHead(projectRoot));
+    const initialHead =
+      workspaceBinding?.baseSha ?? (await currentGitHead(projectRoot, this.metrics));
     const created = await this.dependencies.runService.createRun({
       projectRoot,
       ...(initialHead === null ? {} : { baseCommit: initialHead }),
@@ -540,6 +680,7 @@ export class WorkflowService {
       requestText: input.requestText,
     });
     const intakeArtifactIds = [parsed.artifact.id];
+    const sourceIntakeRequests: Array<{ requestText: string; label: string }> = [];
     for (const [kind, files] of [
       ["brief", sources.brief === undefined ? [] : [sources.brief]],
       ["docs", sources.docs],
@@ -547,14 +688,15 @@ export class WorkflowService {
       ["guidance", [...sources.guidance, ...sources.discoveredGuidance]],
     ] as const) {
       for (const file of files) {
-        const artifactIds = await ingestProjectTextSource({
-          service: this.dependencies.intakeRequestService,
-          runId: created.id,
-          kind,
-          file,
-        });
-        intakeArtifactIds.push(...artifactIds);
+        sourceIntakeRequests.push(...projectTextSourceIntakeRequests({ kind, file }));
       }
+    }
+    for (let start = 0; start < sourceIntakeRequests.length; start += 200) {
+      const results = await this.dependencies.intakeRequestService.parseIntakeRequests({
+        runId: created.id,
+        requests: sourceIntakeRequests.slice(start, start + 200),
+      });
+      intakeArtifactIds.push(...results.map((result) => result.artifact.id));
     }
     const legacyInventoryResult =
       canonicalLegacyProjectRoot === undefined
@@ -591,8 +733,14 @@ export class WorkflowService {
       input.requestText,
       ...(sources.brief === undefined ? [] : [sources.brief.text]),
       ...sources.docs.map((file) => file.text),
-      ...sources.openApi.map((file) => file.text),
+      openApiClassificationSummary(sourceOpenApiOperations),
     ].join("\n\n");
+    const workloadRequirementCount = countIntakeRequirementsFromTexts([
+      input.requestText,
+      ...(sources.brief === undefined ? [] : [sources.brief.text]),
+      ...sources.docs.map((file) => file.text),
+      ...sources.openApi.map((file) => file.text),
+    ]);
     const classifiedScope = classifyWorkflowScope({
       requestText: classificationText,
       explicitScope,
@@ -656,7 +804,7 @@ export class WorkflowService {
       mode: deliveryProfile.mode,
       scope,
       signals: {
-        requirements: countIntakeRequirements(classificationText),
+        requirements: workloadRequirementCount,
         apiOperations: sources.openApi.length > 0 ? openApiOperations.length : scope.api ? 1 : 0,
         uiSurfaces: scope.ui ? 1 : 0,
         figmaNodes: figmaUrls.length,
@@ -729,7 +877,7 @@ export class WorkflowService {
           },
         },
       });
-      return this.status({ runId: created.id });
+      return this.mutatingStatus(created.id, view);
     }
 
     await this.dependencies.stageService.complete({
@@ -753,7 +901,7 @@ export class WorkflowService {
       },
     });
 
-    return this.status({ runId: created.id });
+    return this.mutatingStatus(created.id, view);
   }
 
   private async recordLegacyInventory(
@@ -762,6 +910,9 @@ export class WorkflowService {
     legacyNetworkEvidence?: ProjectTextSource,
   ): Promise<{ artifact: ArtifactRef; inventory: LegacyInventory }> {
     const sourceInventory = await buildLegacyInventory(legacyProjectRoot);
+    this.metrics.increment("legacy.rebuild_count");
+    this.metrics.increment("legacy.file_read_count", sourceInventory.scannedFiles);
+    this.metrics.increment("legacy.parse_count", sourceInventory.entries.length);
     const inventory =
       legacyNetworkEvidence === undefined
         ? sourceInventory
@@ -813,7 +964,22 @@ export class WorkflowService {
     return { artifact, inventory };
   }
 
-  public async advance(rawInput: unknown): Promise<WorkflowStatus> {
+  public async advance(rawInput: unknown): Promise<WorkflowDetailStatus>;
+  public async advance(rawInput: unknown, view: "action"): Promise<WorkflowActionStatus>;
+  public async advance(rawInput: unknown, view: "detail"): Promise<WorkflowDetailStatus>;
+  public async advance(
+    rawInput: unknown,
+    view: MutatingStatusView = "detail",
+  ): Promise<MutatingWorkflowStatus> {
+    return this.measureWorkflowAction(rawInput, "advance", () =>
+      this.advanceUninstrumented(rawInput, view),
+    );
+  }
+
+  private async advanceUninstrumented(
+    rawInput: unknown,
+    view: MutatingStatusView,
+  ): Promise<MutatingWorkflowStatus> {
     const input = WorkflowAdvanceInputSchema.parse(rawInput);
 
     for (let step = 0; step < 8; step += 1) {
@@ -836,7 +1002,7 @@ export class WorkflowService {
       ) {
         await this.generateReport(run.id);
         if (input.until === "report") {
-          return this.status({ runId: run.id });
+          return this.mutatingStatus(run.id, view);
         }
         continue;
       }
@@ -851,18 +1017,33 @@ export class WorkflowService {
         continue;
       }
 
-      return this.status({ runId: input.runId });
+      return this.mutatingStatus(input.runId, view);
     }
 
     throw new Error(`Workflow ${input.runId} exceeded the deterministic advance limit`);
   }
 
-  public async submit(rawInput: unknown): Promise<WorkflowStatus> {
+  public async submit(rawInput: unknown): Promise<WorkflowDetailStatus>;
+  public async submit(rawInput: unknown, view: "action"): Promise<WorkflowActionStatus>;
+  public async submit(rawInput: unknown, view: "detail"): Promise<WorkflowDetailStatus>;
+  public async submit(
+    rawInput: unknown,
+    view: MutatingStatusView = "detail",
+  ): Promise<MutatingWorkflowStatus> {
+    return this.measureWorkflowAction(rawInput, "submit", () =>
+      this.submitUninstrumented(rawInput, view),
+    );
+  }
+
+  private async submitUninstrumented(
+    rawInput: unknown,
+    view: MutatingStatusView,
+  ): Promise<MutatingWorkflowStatus> {
     const input = WorkflowSubmitInputSchema.parse(rawInput);
     const run = await this.dependencies.runStore.get(input.runId);
     const submission = input.submission;
     if (submission.kind === "legacy-network-evidence") {
-      return this.submitLegacyNetworkEvidence(run, submission.evidencePath);
+      return this.submitLegacyNetworkEvidence(run, submission.evidencePath, view);
     }
     if (
       submission.kind === "visual-comparison" ||
@@ -871,30 +1052,61 @@ export class WorkflowService {
     ) {
       await this.assertLegacyReferenceFresh(run);
     }
-    assertSubmissionPrerequisites(run, submission);
+    if (submission.kind === "visual-comparison") {
+      await this.recordVisualComparison(run, submission);
+      return this.mutatingStatus(run.id, view);
+    }
+    assertSubmissionPrerequisites(run, submission, this.now());
     await assertDraftBundleIntegrity(run, submission);
+    const reviewStage =
+      submission.kind === "functional-review" || submission.kind === "design-review"
+        ? submission.kind
+        : undefined;
+    const reviewFence = reviewStage === undefined ? undefined : reviewSubmissionFence(run);
     if (
       (submission.kind === "functional-review" || submission.kind === "design-review") &&
       submission.verdict !== "changes-requested"
     ) {
-      await assertReviewPacketFresh(run);
+      await assertReviewPacketFresh(run, this.dependencies.artifactStore, this.metrics);
     }
     const evidenceArtifacts = await this.ingestSubmissionEvidence(run, submission);
     const implementationSnapshot =
       submission.kind === "implementation" && submission.status === "passed"
-        ? await captureGitSnapshot(run)
+        ? await captureGitSnapshot(run, this.metrics, this.now())
         : undefined;
     if (submission.kind === "implementation" && implementationSnapshot !== undefined) {
       assertChangedFilesMatch(submission.changedFiles, implementationSnapshot.changedFiles);
     }
+    const implementationSnapshotArtifact =
+      submission.kind === "implementation" &&
+      implementationSnapshot?.implementationSnapshot !== undefined
+        ? await this.writeImplementationSnapshotArtifact(
+            implementationSnapshot.implementationSnapshot,
+          )
+        : undefined;
+    const evidenceIndex =
+      submission.kind === "implementation" && implementationSnapshot !== undefined
+        ? buildImplementationEvidenceIndex(submission, evidenceArtifacts, implementationSnapshot)
+        : [];
     const reviewPacket =
       submission.kind === "implementation" && implementationSnapshot !== undefined
-        ? createImplementationReviewPacket(run, implementationSnapshot, evidenceArtifacts)
+        ? await createImplementationReviewPacket(
+            run,
+            implementationSnapshot,
+            evidenceArtifacts,
+            this.dependencies.artifactStore,
+            implementationSnapshotArtifact,
+            evidenceIndex,
+          )
         : undefined;
+    const acceptedEvidenceArtifacts =
+      implementationSnapshotArtifact === undefined
+        ? evidenceArtifacts
+        : [...evidenceArtifacts, implementationSnapshotArtifact];
 
     if (submission.kind === "figma-bundle") {
       await this.recordSubmissionArtifact(run, submission, evidenceArtifacts);
-      return this.status({ runId: run.id });
+      return this.mutatingStatus(run.id, view);
     }
 
     if (submission.kind === "api-ready") {
@@ -905,20 +1117,18 @@ export class WorkflowService {
         submission.implementationContextId,
         submission.operations,
       );
-      return this.status({ runId: run.id });
-    }
-
-    if (submission.kind === "visual-comparison") {
-      await this.recordVisualComparison(run, submission, evidenceArtifacts);
-      return this.status({ runId: run.id });
+      return this.mutatingStatus(run.id, view);
     }
 
     const stageName = stageForSubmission(submission);
-    const started = await this.dependencies.stageService.start({
-      runId: run.id,
-      stageName,
-      workerId: WORKER_ID,
-    });
+    const started =
+      reviewFence === undefined
+        ? await this.dependencies.stageService.start({
+            runId: run.id,
+            stageName,
+            workerId: WORKER_ID,
+          })
+        : await this.startFencedReviewStage(run.id, reviewStage!, reviewFence);
     const activeRun = await this.dependencies.runStore.get(run.id);
     const runWithEvidence = {
       ...activeRun,
@@ -932,10 +1142,10 @@ export class WorkflowService {
     const artifact = await this.recordSubmissionArtifact(
       activeRun,
       submission,
-      evidenceArtifacts,
+      acceptedEvidenceArtifacts,
       reviewPacket,
     );
-    const artifactIds = [...evidenceArtifacts.map((item) => item.id), artifact.id];
+    const artifactIds = [...acceptedEvidenceArtifacts.map((item) => item.id), artifact.id];
     const outcome = submissionOutcome(submission);
 
     if (
@@ -959,7 +1169,8 @@ export class WorkflowService {
         },
         current.revision,
       );
-      return this.status({ runId: run.id });
+      this.completeReviewerTiming(submission.reviewPacketId, submission.kind);
+      return this.mutatingStatus(run.id, view);
     }
 
     if (outcome === "passed") {
@@ -1007,13 +1218,41 @@ export class WorkflowService {
       });
     }
 
-    return this.status({ runId: run.id });
+    if (submission.kind === "functional-review" || submission.kind === "design-review") {
+      this.completeReviewerTiming(submission.reviewPacketId, submission.kind);
+      await this.cleanupReviewerTimingIfTerminal(run.id, submission.reviewPacketId);
+    }
+
+    return this.mutatingStatus(run.id, view);
+  }
+
+  private async startFencedReviewStage(
+    runId: string,
+    stageName: "functional-review" | "design-review",
+    fence: ReviewSubmissionFence,
+  ) {
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const current = await this.dependencies.runStore.get(runId);
+      assertCurrentReviewFence(current, fence, stageName);
+      try {
+        return await this.dependencies.stageService.start({
+          runId,
+          stageName,
+          workerId: WORKER_ID,
+          expectedRevision: current.revision,
+        });
+      } catch (error: unknown) {
+        if (!(error instanceof RevisionConflictError)) throw error;
+      }
+    }
+    throw new Error("REVIEW_PACKET_STALE: refresh the Run before submitting the reviewer result");
   }
 
   private async submitLegacyNetworkEvidence(
     run: RunManifest,
     evidencePath: string,
-  ): Promise<WorkflowStatus> {
+    view: MutatingStatusView,
+  ): Promise<MutatingWorkflowStatus> {
     const intake = stage(run, "intake");
     const profile = deliveryProfileFromRun(run);
     if (
@@ -1037,6 +1276,7 @@ export class WorkflowService {
     const source: ProjectTextSource = {
       ...file,
       origin: "file",
+      rawContent,
       text,
       chunks: buildParserSafeChunks(text),
       mediaType: mediaTypeForPath(file.path),
@@ -1075,7 +1315,7 @@ export class WorkflowService {
               },
             }),
       });
-      return this.status({ runId: run.id });
+      return this.mutatingStatus(run.id, view);
     }
     const scope = scopeFromRun(run);
     const updatedProfile = DeliveryProfileSchema.parse({
@@ -1130,16 +1370,46 @@ export class WorkflowService {
         },
       },
     });
-    return this.status({ runId: run.id });
+    return this.mutatingStatus(run.id, view);
   }
 
+  private async mutatingStatus(
+    runId: string,
+    view: MutatingStatusView,
+  ): Promise<MutatingWorkflowStatus> {
+    return view === "action"
+      ? this.status({ runId, view: "action" })
+      : this.status({ runId, view: "detail" });
+  }
+
+  public async status(input: { runId: string; view: "action" }): Promise<WorkflowActionStatus>;
+  public async status(input: {
+    runId: string;
+    view: "checkpoint";
+  }): Promise<WorkflowCheckpointStatus>;
+  public async status(input: { runId: string; view: "detail" }): Promise<WorkflowDetailStatus>;
+  public async status(input: { runId: string }): Promise<WorkflowActionStatus>;
+  public async status(rawInput: unknown): Promise<WorkflowStatus>;
   public async status(rawInput: unknown): Promise<WorkflowStatus> {
+    return this.measureWorkflowAction(rawInput, "status", () =>
+      this.statusUninstrumented(rawInput),
+    );
+  }
+
+  private async statusUninstrumented(rawInput: unknown): Promise<WorkflowStatus> {
     const input = WorkflowStatusInputSchema.parse(rawInput);
     const run = await this.dependencies.runStore.get(input.runId);
     const scope = scopeFromRun(run);
     const deliveryProfile = deliveryProfileFromRun(run);
     const workload = workloadFromRun(run, scope, deliveryProfile);
-    const nextActions = actionsForRun(run, scope, deliveryProfile);
+    const nextActions = await actionsForRun(
+      run,
+      scope,
+      deliveryProfile,
+      this.now(),
+      this.dependencies.artifactStore,
+    );
+    this.startExposedReviewerTimings(run, deliveryProfile, nextActions);
     const requiredValidations = requiredValidationsForRun(scope, deliveryProfile);
     const currentStage = run.stages.find(
       (item) => !["passed", "skipped", "waived"].includes(item.status),
@@ -1167,33 +1437,106 @@ export class WorkflowService {
       status === "blocked" && currentBlocker !== undefined
         ? await this.diagnosticPublicationForRun(run, currentBlocker)
         : undefined;
-    const legacyInventory = await this.legacyInventorySummaryForRun(run);
-
-    return WorkflowStatusSchema.parse({
+    const common = buildCommonStatusProjection({
       runId: run.id,
       revision: run.revision,
       status,
       ...(currentStage === undefined ? {} : { currentStage: currentStage.name }),
-      scope,
-      deliveryProfile,
+      deliveryProfile: {
+        publication: deliveryProfile.publication,
+        recommendedSkills: deliveryProfile.recommendedSkills,
+      },
       ...(run.workspaceBinding === undefined ? {} : { workspaceBinding: run.workspaceBinding }),
       workload,
       delegationPolicy: buildDelegationPolicy(workload.size),
       requiredValidations,
-      stages: run.stages.map((item) => ({
-        name: item.name,
-        status: item.status,
-        ...(item.name === "implementation" && item.checkpoint !== undefined
-          ? { checkpoint: item.checkpoint.name }
-          : {}),
-      })),
       nextActions,
       blockers,
       blockerDetails,
       ...(diagnosticPublication === undefined ? {} : { diagnosticPublication }),
-      ...(legacyInventory === undefined ? {} : { legacyInventory }),
-      resumeContext: resumeContextForRun(run),
     });
+    if (input.view === "action") {
+      return buildActionStatusProjection(common, run);
+    }
+    if (input.view === "checkpoint") {
+      return buildCheckpointStatusProjection(common, run);
+    }
+    const legacyInventory = await this.legacyInventorySummaryForRun(run);
+    return buildDetailStatusProjection(common, run, scope, deliveryProfile, legacyInventory);
+  }
+
+  private startExposedReviewerTimings(
+    run: RunManifest,
+    profile: DeliveryProfile,
+    actions: WorkflowStatus["nextActions"],
+  ): void {
+    const packet = reviewPacketFromRun(run);
+    if (packet === undefined) return;
+    const visualStable =
+      !profile.requirements.visualComparison ||
+      currentVisualReport(run, packet.id)?.metadata["visualStatus"] === "passed";
+    for (const action of actions) {
+      if (action.kind !== "review-functional" && action.kind !== "review-design") continue;
+      if (action.reviewPacketId !== packet.id) continue;
+      const stageName = action.kind === "review-functional" ? "functional-review" : "design-review";
+      let timings = this.reviewerTimings.get(packet.id);
+      if (timings === undefined) {
+        timings = new Map();
+        this.reviewerTimings.set(packet.id, timings);
+      }
+      if (!timings.has(stageName)) {
+        timings.set(stageName, {
+          startedAt: this.monotonicNow(),
+          visualStableAtStart: visualStable,
+        });
+      }
+    }
+  }
+
+  private completeReviewerTiming(packetId: string, stageName: ReviewerStageName): void {
+    let timings = this.reviewerTimings.get(packetId);
+    if (timings === undefined) {
+      timings = new Map();
+      this.reviewerTimings.set(packetId, timings);
+    }
+    let timing = timings.get(stageName);
+    if (timing === undefined) {
+      timing = { startedAt: this.monotonicNow(), visualStableAtStart: true };
+      timings.set(stageName, timing);
+    }
+    if (timing.completedWallMs !== undefined) return;
+    const wallMs = Math.max(0, this.monotonicNow() - timing.startedAt);
+    timing.completedWallMs = wallMs;
+    this.metrics.increment("review.wall_ms", wallMs, { stage: stageName });
+  }
+
+  private invalidateReviewerTimings(packetId: string): void {
+    const timings = this.reviewerTimings.get(packetId);
+    if (timings === undefined) return;
+    const invalidatedAt = this.monotonicNow();
+    for (const [stageName, timing] of timings) {
+      const wallMs = timing.completedWallMs ?? Math.max(0, invalidatedAt - timing.startedAt);
+      if (timing.completedWallMs === undefined) {
+        this.metrics.increment("review.wall_ms", wallMs, { stage: stageName });
+      }
+      this.metrics.increment("review.invalidated_wall_ms", wallMs, { stage: stageName });
+    }
+    this.reviewerTimings.delete(packetId);
+  }
+
+  private async cleanupReviewerTimingIfTerminal(runId: string, packetId: string): Promise<void> {
+    const run = await this.dependencies.runStore.get(runId);
+    const profile = deliveryProfileFromRun(run);
+    const visualStable =
+      !profile.requirements.visualComparison ||
+      currentVisualReport(run, packetId)?.metadata["visualStatus"] === "passed";
+    if (
+      visualStable &&
+      stage(run, "functional-review").status === "passed" &&
+      ["passed", "skipped", "waived"].includes(stage(run, "design-review").status)
+    ) {
+      this.reviewerTimings.delete(packetId);
+    }
   }
 
   private async legacyInventorySummaryForRun(run: RunManifest) {
@@ -1337,62 +1680,21 @@ export class WorkflowService {
     const timestamp = this.now();
     const sourceRunRevision = run.revision;
     const report = await this.materializeBlockedReport(run, blocker, timestamp);
-    const jsonBlob = await this.dependencies.artifactStore.writeBlob({
-      content: Buffer.from(`${JSON.stringify(report, null, 2)}\n`, "utf8"),
-      mediaType: "application/json",
-      storedAt: timestamp,
-      label: "pr-report-v2.1.json",
-    });
-    const jsonArtifact = ArtifactRefSchema.parse({
-      id: createArtifactId(),
-      kind: "pr-report",
-      uri: jsonBlob.uri,
-      mediaType: "application/json",
-      digest: jsonBlob.digest,
-      producedBy: "orchestrator",
-      evidenceIds: [],
-      createdAt: timestamp,
+    const {
+      jsonArtifact,
+      markdownArtifact: artifact,
+      runtimeArtifact,
+    } = await this.writePrReportArtifacts({
+      run,
+      report,
+      reportIntent: "blocked-diagnostic",
+      timestamp,
       metadata: {
-        adapter: "pr-report-v2",
-        reportKind: "pr-report-v2-json",
-        reportSchemaVersion: "pr-report-v2.1",
-        decision: "blocked",
-        blockedStage: blocker.stage,
-        errorCode: blocker.code,
-        idempotencyKey,
-      },
-    });
-    const markdown = renderPrReportV2Markdown(report);
-    const blob = await this.dependencies.artifactStore.writeBlob({
-      content: Buffer.from(markdown, "utf8"),
-      mediaType: "text/markdown",
-      storedAt: timestamp,
-      label: "pr-report.md",
-    });
-    const artifact = ArtifactRefSchema.parse({
-      id: createArtifactId(),
-      kind: "pr-report",
-      uri: blob.uri,
-      mediaType: "text/markdown",
-      digest: blob.digest,
-      producedBy: "orchestrator",
-      evidenceIds: [],
-      createdAt: timestamp,
-      metadata: {
-        adapter: "pr-report-v2",
-        ...WorkflowReportMetadataSchema.parse({
-          reportKind: "pr-body-markdown",
-          reportIntent: "blocked-diagnostic",
-          decision: "blocked",
-        }),
-        locale: "en",
         blockedStage: blocker.stage,
         errorCode: blocker.code,
         blockedStageAttempt,
         sourceRunRevision,
         idempotencyKey,
-        reportSchemaVersion: "pr-report-v2.1",
-        reportJsonArtifactId: jsonArtifact.id,
       },
     });
 
@@ -1402,7 +1704,12 @@ export class WorkflowService {
           ...run,
           revision: run.revision + 1,
           updatedAt: timestamp,
-          artifacts: [...run.artifacts, jsonArtifact, artifact],
+          artifacts: [
+            ...run.artifacts,
+            jsonArtifact,
+            artifact,
+            ...(runtimeArtifact === undefined ? [] : [runtimeArtifact]),
+          ],
         },
         run.revision,
       );
@@ -1421,6 +1728,12 @@ export class WorkflowService {
   }
 
   public async publish(rawInput: unknown): Promise<unknown> {
+    return this.measureWorkflowAction(rawInput, "publish", () =>
+      this.publishUninstrumented(rawInput),
+    );
+  }
+
+  private async publishUninstrumented(rawInput: unknown): Promise<unknown> {
     const input = WorkflowPublishInputSchema.parse(rawInput);
     const publisher = this.dependencies.publisherService;
 
@@ -1453,7 +1766,7 @@ export class WorkflowService {
     if (reviewPacketFromRun(run) === undefined) {
       throw new Error("Ready publication requires the current implementation review packet");
     }
-    await assertReviewPacketFresh(run);
+    await assertReviewPacketFresh(run, this.dependencies.artifactStore, this.metrics);
     const packet = reviewPacketFromRun(run)!;
     const reportArtifact = readyReportArtifactForPacket(run, packet.id);
     if (reportArtifact === undefined) {
@@ -1562,7 +1875,7 @@ export class WorkflowService {
       });
     }
 
-    return { result, status: await this.status({ runId: run.id }) };
+    return { result, status: await this.status({ runId: run.id, view: "detail" }) };
   }
 
   private async publishBlockedDiagnostic(
@@ -1570,7 +1883,7 @@ export class WorkflowService {
     run: RunManifest,
     publisher: PublisherService,
   ): Promise<unknown> {
-    const workflowStatus = await this.status({ runId: run.id });
+    const workflowStatus = await this.status({ runId: run.id, view: "detail" });
     const blocker = workflowStatus.blockerDetails.find((item) => !item.retryable);
     if (workflowStatus.status !== "blocked" || blocker === undefined) {
       throw new Error("Blocked diagnostic publication requires a currently blocked Run");
@@ -1636,9 +1949,33 @@ export class WorkflowService {
         expectedReportKey: executionIdentity.reportKey,
         actualReportKey: typeof actualReportKey === "string" ? actualReportKey : null,
         diagnosticReport: { artifactId: reportArtifact.id, path: reportArtifact.uri },
-        status: await this.status({ runId: run.id }),
+        status: await this.status({ runId: run.id, view: "detail" }),
       };
       return stopped;
+    }
+    const runWithReport = await this.dependencies.runStore.get(run.id);
+    const reportJsonArtifactId = reportArtifact.metadata["reportJsonArtifactId"];
+    const reportJsonArtifact =
+      typeof reportJsonArtifactId === "string"
+        ? runWithReport.artifacts.find((artifact) => artifact.id === reportJsonArtifactId)
+        : undefined;
+    if (reportJsonArtifact === undefined) {
+      throw new Error("Blocked diagnostic publication requires its canonical report JSON");
+    }
+    const canonicalReport = PrReportV2Schema.parse(
+      JSON.parse(
+        (await this.dependencies.artifactStore.readContent(reportJsonArtifact.digest)).toString(
+          "utf8",
+        ),
+      ),
+    );
+    assertCurrentPrReportV2(canonicalReport);
+    if (
+      canonicalReport.schemaVersion !== "pr-report-v2.1" ||
+      canonicalReport.runId !== run.id ||
+      canonicalReport.decision !== "blocked"
+    ) {
+      throw new Error("Blocked diagnostic publication requires a current Run-bound report");
     }
     if (blocker.kind === "publish-precondition") {
       return {
@@ -1648,17 +1985,19 @@ export class WorkflowService {
         localReportPath: reportArtifact.uri,
         diagnosticReport: { artifactId: reportArtifact.id, path: reportArtifact.uri },
         exactUnblockAction: blocker.exactUnblockAction,
-        status: await this.status({ runId: run.id }),
+        status: await this.status({ runId: run.id, view: "detail" }),
       };
     }
-    const runWithReport = await this.dependencies.runStore.get(run.id);
     const synchronized = await this.synchronizedDiagnosticPublishResultForRun(
       runWithReport,
       reportArtifact.id,
       executionIdentity,
     );
     if (synchronized !== undefined) {
-      return { result: synchronized, status: await this.status({ runId: run.id }) };
+      return {
+        result: synchronized,
+        status: await this.status({ runId: run.id, view: "detail" }),
+      };
     }
     const claim = await this.acquireDiagnosticPublishClaim(
       run.id,
@@ -1667,7 +2006,10 @@ export class WorkflowService {
       input.recoverUncertain,
     );
     if (claim.state === "synchronized") {
-      return { result: claim.result, status: await this.status({ runId: run.id }) };
+      return {
+        result: claim.result,
+        status: await this.status({ runId: run.id, view: "detail" }),
+      };
     }
     if (claim.state === "in-progress") {
       return {
@@ -1677,13 +2019,13 @@ export class WorkflowService {
         retryable: true,
         retryAfter: claim.expiresAt,
         diagnosticReport: { artifactId: reportArtifact.id, path: reportArtifact.uri },
-        status: await this.status({ runId: run.id }),
+        status: await this.status({ runId: run.id, view: "detail" }),
       };
     }
     if (claim.state === "uncertain") {
       return diagnosticPublicationUncertainResult(
         reportArtifact,
-        await this.status({ runId: run.id }),
+        await this.status({ runId: run.id, view: "detail" }),
       );
     }
     const baseInput = {
@@ -1698,6 +2040,12 @@ export class WorkflowService {
       labels: ["spec-to-pr"],
       reviewers: [],
       assignees: [],
+      ...(canonicalReport.binding === undefined
+        ? {}
+        : {
+            reviewPacketId: canonicalReport.binding.reviewPacketId,
+            headSha: canonicalReport.binding.headSha,
+          }),
     };
     try {
       const result = await this.withDiagnosticPublishClaimHeartbeat(
@@ -1707,7 +2055,7 @@ export class WorkflowService {
         (signal) => publisher.publish({ ...baseInput, confirm: true }, { signal }),
       );
       await this.releaseDiagnosticPublishClaim(run.id, claim.executionKey, claim.ownerClaimId);
-      return { result, status: await this.status({ runId: run.id }) };
+      return { result, status: await this.status({ runId: run.id, view: "detail" }) };
     } catch (error: unknown) {
       if (error instanceof DiagnosticPublishClaimUncertainError) {
         await this.markDiagnosticPublishClaimUncertainBestEffort(
@@ -1717,7 +2065,7 @@ export class WorkflowService {
         );
         return diagnosticPublicationUncertainResult(
           reportArtifact,
-          await this.status({ runId: run.id }),
+          await this.status({ runId: run.id, view: "detail" }),
         );
       }
       await this.releaseDiagnosticPublishClaim(run.id, claim.executionKey, claim.ownerClaimId);
@@ -1726,6 +2074,12 @@ export class WorkflowService {
   }
 
   public async archive(rawInput: unknown): Promise<unknown> {
+    return this.measureWorkflowAction(rawInput, "archive", () =>
+      this.archiveUninstrumented(rawInput),
+    );
+  }
+
+  private async archiveUninstrumented(rawInput: unknown): Promise<unknown> {
     const input = WorkflowArchiveInputSchema.parse(rawInput);
     const archiveService = this.dependencies.archiveService;
 
@@ -1802,7 +2156,7 @@ export class WorkflowService {
       });
     }
 
-    return { result, status: await this.status({ runId }) };
+    return { result, status: await this.status({ runId, view: "detail" }) };
   }
 
   private async recordSubmissionArtifact(
@@ -1863,6 +2217,7 @@ export class WorkflowService {
               figmaFileUrls: submission.fileUrls ?? [submission.fileUrl],
               capturedComponents: submission.capturedComponents,
               designMapping: submission.designMapping,
+              stateContracts: submission.stateContracts,
               visualTargets: submission.visualTargets,
             }
           : { summary: persistedSummary }),
@@ -1934,6 +2289,35 @@ export class WorkflowService {
     );
 
     return artifact;
+  }
+
+  private async writeImplementationSnapshotArtifact(
+    snapshot: ImplementationSnapshot,
+  ): Promise<ArtifactRef> {
+    const parsed = ImplementationSnapshotSchema.parse(snapshot);
+    const content = Buffer.from(`${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+    const blob = await this.dependencies.artifactStore.writeBlob({
+      content,
+      mediaType: "application/json",
+      storedAt: parsed.capturedAt,
+      label: "implementation-snapshot-v1.json",
+    });
+    return ArtifactRefSchema.parse({
+      id: createArtifactId(),
+      kind: "agent-result-report",
+      uri: blob.uri,
+      mediaType: "application/json",
+      digest: blob.digest,
+      producedBy: "orchestrator",
+      evidenceIds: [],
+      createdAt: parsed.capturedAt,
+      metadata: {
+        adapter: "implementation-snapshot-v1",
+        schemaVersion: parsed.schemaVersion,
+        headSha: parsed.headSha,
+        diffDigest: parsed.diffDigest,
+      },
+    });
   }
 
   private async withLeaseHeartbeat<T>(
@@ -2088,7 +2472,16 @@ export class WorkflowService {
       projectRelativePath: string;
     }> = [];
 
-    for (const evidencePath of submission.artifactPaths) {
+    const submissionEvidencePaths =
+      submission.kind === "figma-bundle"
+        ? [
+            ...submission.artifactPaths,
+            submission.designMapping.publicApiCatalog.packageManifest.path,
+            ...submission.designMapping.publicApiCatalog.publicBarrels.map((barrel) => barrel.path),
+            submission.designMapping.publicApiCatalog.codeConnectManifest.path,
+          ]
+        : submission.artifactPaths;
+    for (const evidencePath of [...new Set(submissionEvidencePaths)]) {
       if (path.isAbsolute(evidencePath)) {
         throw new Error(
           "Evidence path must be a project-relative durable evidence path within the project root",
@@ -2116,9 +2509,33 @@ export class WorkflowService {
 
     if (submission.kind === "figma-bundle") {
       await assertFigmaDesignAssets(root, submission.designMapping);
+      const catalogPaths = new Set([
+        submission.designMapping.publicApiCatalog.packageManifest.path,
+        ...submission.designMapping.publicApiCatalog.publicBarrels.map((barrel) => barrel.path),
+        submission.designMapping.publicApiCatalog.codeConnectManifest.path,
+      ]);
+      assertFigmaPublicApiCatalogEvidence({
+        mapping: submission.designMapping,
+        evidence: await Promise.all(
+          preparedEvidencePaths
+            .filter((item) => catalogPaths.has(item.evidencePath))
+            .map(async (item) => ({
+              path: item.evidencePath,
+              content: await readFile(item.resolvedPath),
+            })),
+        ),
+      });
     }
 
-    const mockFixtureDigests = new Map<string, { id: string; digest: string; named: boolean }>();
+    const mockFixtureDigests = new Map<
+      string,
+      {
+        id: string;
+        digest: string;
+        named: boolean;
+        stateContractDigest?: string | undefined;
+      }
+    >();
     if (submission.kind === "implementation" && submission.mockDataEvidence !== undefined) {
       const physicalFixtures = new Set<string>();
       for (const fixture of normalizedMockFixtures(submission.mockDataEvidence)) {
@@ -2137,6 +2554,9 @@ export class WorkflowService {
           id: fixture.id,
           digest: `sha256:${createHash("sha256").update(content).digest("hex")}`,
           named: fixture.named,
+          ...(fixture.stateContractDigest === undefined
+            ? {}
+            : { stateContractDigest: fixture.stateContractDigest }),
         });
       }
     }
@@ -2227,20 +2647,47 @@ export class WorkflowService {
         if (evidencePath === submission.manifestPath) {
           assertFigmaManifest(content, evidencePath, submission);
         } else {
-          const target = submission.visualTargets.find(
-            (candidate) => candidate.baselinePath === evidencePath,
-          );
-          if (target === undefined || target.figmaCapture === undefined) {
-            throw new Error(
-              `FIGMA_CAPTURE_GEOMETRY_INVALID: ${evidencePath} is not bound to a Figma target`,
+          const catalogEvidence = [
+            submission.designMapping.publicApiCatalog.packageManifest,
+            ...submission.designMapping.publicApiCatalog.publicBarrels,
+            submission.designMapping.publicApiCatalog.codeConnectManifest,
+          ].find((candidate) => candidate.path === evidencePath);
+          if (catalogEvidence !== undefined) {
+            const digest = `sha256:${createHash("sha256").update(content).digest("hex")}`;
+            if (digest !== catalogEvidence.digest) {
+              throw new Error(
+                `FIGMA_DESIGN_MAPPING_INCOMPLETE: public API/Code Connect evidence digest does not match: ${evidencePath}`,
+              );
+            }
+          } else {
+            const target = submission.visualTargets.find(
+              (candidate) => candidate.baselinePath === evidencePath,
             );
+            if (target === undefined || target.figmaCapture === undefined) {
+              throw new Error(
+                `FIGMA_CAPTURE_GEOMETRY_INVALID: ${evidencePath} is not bound to a Figma target`,
+              );
+            }
+            const decoded = await decodeBoundedPng(content, evidencePath);
+            this.metrics.increment("visual.decode_pixels", decoded.width * decoded.height);
+            const stateContract = submission.stateContracts.find(
+              (contract) => contract.targetId === target.targetId,
+            );
+            if (stateContract === undefined) {
+              throw new Error(
+                `FIGMA_STATE_CONTRACT_INVALID: missing expected node/state binding for ${target.targetId}`,
+              );
+            }
+            assertFigmaCaptureGeometry({
+              geometry: target.figmaCapture,
+              target: {
+                nodeId: stateContract.nodeId,
+                state: stateContract.state,
+              },
+              viewport: target.viewport,
+              decodedSize: { width: decoded.width, height: decoded.height },
+            });
           }
-          const decoded = await decodeBoundedPng(content, evidencePath);
-          assertFigmaCaptureGeometry({
-            geometry: target.figmaCapture,
-            viewport: target.viewport,
-            decodedSize: { width: decoded.width, height: decoded.height },
-          });
         }
       }
       const visualCapture =
@@ -2251,8 +2698,26 @@ export class WorkflowService {
         submission.kind === "visual-comparison"
           ? submission.captures.find((capture) => capture.receiptPath === evidencePath)
           : undefined;
+      const baselineIsolationEvidence =
+        submission.kind === "visual-comparison" &&
+        submission.baselineIsolationPath === evidencePath;
       if (submission.kind === "visual-comparison") {
-        if (visualReceipt !== undefined) {
+        if (baselineIsolationEvidence) {
+          let rawEvidence: unknown;
+          try {
+            rawEvidence = JSON.parse(content.toString("utf8"));
+          } catch {
+            throw new Error(
+              `VISUAL_BASELINE_ISOLATION_INVALID: evidence must be strict JSON: ${evidencePath}`,
+            );
+          }
+          const parsedIsolation = BaselineIsolationEvidenceSchema.safeParse(rawEvidence);
+          if (!parsedIsolation.success) {
+            throw new Error(
+              `VISUAL_BASELINE_ISOLATION_INVALID: evidence schema is invalid: ${evidencePath}: ${parsedIsolation.error.issues.map((issue) => issue.message).join("; ")}`,
+            );
+          }
+        } else if (visualReceipt !== undefined) {
           let rawReceipt: unknown;
           try {
             rawReceipt = JSON.parse(content.toString("utf8"));
@@ -2311,11 +2776,21 @@ export class WorkflowService {
                   reviewPacketId: submission.reviewPacketId,
                   headSha: reviewPacketFromRun(run)?.headSha,
                   diffDigest: reviewPacketFromRun(run)?.diffDigest,
-                  visualRole: visualCapture === undefined ? "capture-receipt" : "actual",
+                  visualRole: baselineIsolationEvidence
+                    ? "baseline-isolation"
+                    : visualCapture === undefined
+                      ? "capture-receipt"
+                      : "actual",
                   ...(visualCapture === undefined ? {} : { targetId: visualCapture.targetId }),
                   ...(visualReceipt === undefined ? {} : { targetId: visualReceipt.targetId }),
                 }),
             ...(featureEvidenceRole === undefined ? {} : { featureEvidenceRole }),
+            ...(featureEvidenceRole !== "result" || submission.kind !== "implementation"
+              ? {}
+              : {
+                  evidenceCommand: submission.featureEvidence?.testCommand,
+                  evidenceSelector: submission.featureEvidence?.testSelector,
+                }),
             ...(apiEvidenceRole === undefined ? {} : { apiEvidenceRole }),
             ...(mockFixture === undefined
               ? {}
@@ -2323,6 +2798,9 @@ export class WorkflowService {
                   mockFixtureId: mockFixture.id,
                   mockFixtureDigest: mockFixture.digest,
                   mockFixtureNamed: mockFixture.named,
+                  ...(mockFixture.stateContractDigest === undefined
+                    ? {}
+                    : { stateContractDigest: mockFixture.stateContractDigest }),
                 }),
             ...(openSpecChangeName === undefined ? {} : { changeName: openSpecChangeName }),
             ...(submission.kind !== "figma-bundle"
@@ -2336,24 +2814,230 @@ export class WorkflowService {
     return artifacts;
   }
 
+  private async prepareVisualSubmissionEvidence(
+    run: RunManifest,
+    submission: Extract<WorkflowSubmission, { kind: "visual-comparison" }>,
+  ): Promise<PreparedVisualEvidence[]> {
+    const root = await realpath(run.projectRoot);
+    const timestamp = this.now();
+    const prepared: PreparedVisualEvidence[] = [];
+
+    for (const evidencePath of submission.artifactPaths) {
+      if (path.isAbsolute(evidencePath)) {
+        throw new Error(
+          "Evidence path must be a project-relative durable evidence path within the project root",
+        );
+      }
+      if (!isSafeDurableEvidencePath(evidencePath)) {
+        throw new Error("Evidence path must be a safe durable evidence path");
+      }
+      const requestedPath = path.resolve(root, evidencePath);
+      assertWithinProjectRoot(root, requestedPath, evidencePath);
+
+      let resolvedPath: string;
+      try {
+        resolvedPath = await realpath(requestedPath);
+      } catch {
+        throw new Error(`Evidence file does not exist: ${evidencePath}`);
+      }
+      assertWithinProjectRoot(root, resolvedPath, evidencePath);
+      const projectRelativePath = path.relative(root, resolvedPath).split(path.sep).join("/");
+      if (!isSafeDurableEvidencePath(projectRelativePath)) {
+        throw new Error("Evidence path must be a safe durable evidence path");
+      }
+
+      const details = await stat(resolvedPath);
+      if (!details.isFile()) {
+        throw new Error(`Evidence path must reference a file: ${evidencePath}`);
+      }
+      if (details.size > 50 * 1024 * 1024) {
+        throw new Error(`Evidence file exceeds the 50 MB limit: ${evidencePath}`);
+      }
+      if (details.size === 0) {
+        throw new Error(`Evidence file is empty: ${evidencePath}`);
+      }
+
+      const content = await readFile(resolvedPath);
+      const visualCapture = submission.captures.find(
+        (capture) => capture.actualPath === evidencePath,
+      );
+      const visualReceipt = submission.captures.find(
+        (capture) => capture.receiptPath === evidencePath,
+      );
+      const visualAssertion = submission.captures.find(
+        (capture) => capture.assertionReportPath === evidencePath,
+      );
+      const visualAssertionResult = submission.captures.find(
+        (capture) => capture.assertionResultPath === evidencePath,
+      );
+      const visualAssertionObservation = submission.captures.find(
+        (capture) => capture.assertionObservationPath === evidencePath,
+      );
+      const baselineIsolationEvidence = submission.baselineIsolationPath === evidencePath;
+      if (baselineIsolationEvidence) {
+        let rawEvidence: unknown;
+        try {
+          rawEvidence = JSON.parse(content.toString("utf8"));
+        } catch {
+          throw new Error(
+            `VISUAL_BASELINE_ISOLATION_INVALID: evidence must be strict JSON: ${evidencePath}`,
+          );
+        }
+        const parsedIsolation = BaselineIsolationEvidenceSchema.safeParse(rawEvidence);
+        if (!parsedIsolation.success) {
+          throw new Error(
+            `VISUAL_BASELINE_ISOLATION_INVALID: evidence schema is invalid: ${evidencePath}: ${parsedIsolation.error.issues.map((issue) => issue.message).join("; ")}`,
+          );
+        }
+      } else if (visualReceipt !== undefined) {
+        let rawReceipt: unknown;
+        try {
+          rawReceipt = JSON.parse(content.toString("utf8"));
+        } catch {
+          throw new Error(
+            `VISUAL_CAPTURE_PROVENANCE_INVALID: receipt must be strict JSON: ${evidencePath}`,
+          );
+        }
+        if (!VisualCaptureReceiptSchema.safeParse(rawReceipt).success) {
+          throw new Error(
+            `VISUAL_CAPTURE_PROVENANCE_INVALID: receipt schema is invalid: ${evidencePath}`,
+          );
+        }
+      } else if (visualAssertion !== undefined) {
+        let rawAssertionReport: unknown;
+        try {
+          rawAssertionReport = JSON.parse(content.toString("utf8"));
+        } catch {
+          throw new Error(
+            `UI_ASSERTION_REPORT_INVALID: report must be strict JSON: ${evidencePath}`,
+          );
+        }
+        const parsedAssertionReport = UiAssertionReportSchema.safeParse(rawAssertionReport);
+        if (!parsedAssertionReport.success) {
+          throw new Error(
+            `UI_ASSERTION_REPORT_INVALID: report schema is invalid: ${evidencePath}: ${parsedAssertionReport.error.issues.map((issue) => issue.message).join("; ")}`,
+          );
+        }
+      } else if (visualAssertionResult !== undefined) {
+        let rawResult: unknown;
+        try {
+          rawResult = JSON.parse(content.toString("utf8"));
+        } catch {
+          throw new Error(
+            `UI_ASSERTION_REPORT_INVALID: Playwright CLI result must be strict JSON: ${evidencePath}`,
+          );
+        }
+        const parsedResult = PlaywrightCliResultSchema.safeParse(rawResult);
+        if (!parsedResult.success) {
+          throw new Error(
+            `UI_ASSERTION_REPORT_INVALID: Playwright CLI result schema is invalid: ${evidencePath}: ${parsedResult.error.issues.map((issue) => issue.message).join("; ")}`,
+          );
+        }
+      } else if (visualAssertionObservation !== undefined) {
+        let rawObservation: unknown;
+        try {
+          rawObservation = JSON.parse(content.toString("utf8"));
+        } catch {
+          throw new Error(
+            `UI_ASSERTION_REPORT_INVALID: observation must be strict JSON: ${evidencePath}`,
+          );
+        }
+        const parsedObservation = UiAssertionObservationSchema.safeParse(rawObservation);
+        if (!parsedObservation.success) {
+          throw new Error(
+            `UI_ASSERTION_REPORT_INVALID: observation schema is invalid: ${evidencePath}: ${parsedObservation.error.issues.map((issue) => issue.message).join("; ")}`,
+          );
+        }
+      } else if (visualCapture !== undefined) {
+        await assertPng(content, evidencePath);
+      } else {
+        throw new Error(
+          `VISUAL_CAPTURE_PROVENANCE_INVALID: unbound visual artifact: ${evidencePath}`,
+        );
+      }
+
+      const mediaType = mediaTypeForPath(resolvedPath);
+      const digest = `sha256:${createHash("sha256").update(content).digest("hex")}` as const;
+      prepared.push({
+        content,
+        label: path.posix.basename(projectRelativePath),
+        artifact: ArtifactRefSchema.parse({
+          id: createArtifactId(),
+          kind: visualCapture === undefined ? "other" : "screenshot",
+          uri: `artifact://sha256/${digest.slice("sha256:".length)}`,
+          mediaType,
+          digest,
+          producedBy: producerForSubmission(submission),
+          evidenceIds: [],
+          createdAt: timestamp,
+          metadata: {
+            adapter: "workflow-v2-evidence",
+            projectRelativePath,
+            byteLength: details.size,
+            workflowSubmissionKind: submission.kind,
+            reviewPacketId: submission.reviewPacketId,
+            headSha: reviewPacketFromRun(run)?.headSha,
+            diffDigest: reviewPacketFromRun(run)?.diffDigest,
+            visualRole: baselineIsolationEvidence
+              ? "baseline-isolation"
+              : visualReceipt !== undefined
+                ? "capture-receipt"
+                : visualAssertion !== undefined
+                  ? "ui-assertions"
+                  : visualAssertionResult !== undefined
+                    ? "ui-assertion-result"
+                    : visualAssertionObservation !== undefined
+                      ? "ui-assertion-observation"
+                      : "actual",
+            ...(visualCapture === undefined ? {} : { targetId: visualCapture.targetId }),
+            ...(visualReceipt === undefined ? {} : { targetId: visualReceipt.targetId }),
+            ...(visualAssertion === undefined ? {} : { targetId: visualAssertion.targetId }),
+            ...(visualAssertionResult === undefined
+              ? {}
+              : { targetId: visualAssertionResult.targetId }),
+            ...(visualAssertionObservation === undefined
+              ? {}
+              : { targetId: visualAssertionObservation.targetId }),
+          },
+        }),
+      });
+    }
+
+    return prepared;
+  }
+
+  private async persistPreparedVisualEvidence(prepared: PreparedVisualEvidence[]): Promise<void> {
+    for (const item of prepared) {
+      const blob = await this.dependencies.artifactStore.writeBlob({
+        content: item.content,
+        mediaType: item.artifact.mediaType,
+        storedAt: item.artifact.createdAt,
+        label: item.label,
+      });
+      if (blob.digest !== item.artifact.digest || blob.uri !== item.artifact.uri) {
+        throw new Error("Prepared visual evidence changed while being persisted");
+      }
+    }
+  }
+
   private async assertVisualCaptureAcquisition(
     run: RunManifest,
     packet: ImplementationReviewPacket,
     submission: Extract<WorkflowSubmission, { kind: "visual-comparison" }>,
     targets: VisualTargetManifest[],
     evidenceArtifacts: ArtifactRef[],
-  ): Promise<void> {
+    preparedContent: ReadonlyMap<string, Buffer>,
+  ): Promise<`sha256:${string}` | undefined> {
     const mapping = figmaDesignMappingFromRun(run);
-    const expectedFonts =
-      mapping?.fonts.flatMap((font) =>
-        font.digest === undefined ? [] : [{ family: font.family, digest: font.digest }],
-      ) ?? [];
-    const expectedAssets =
+    const expectedFonts = canonicalCaptureFontDigests(mapping?.fonts ?? []);
+    let rendererLineageId: `sha256:${string}` | undefined;
+    const expectedAssets = canonicalCaptureAssetDigests(
       mapping?.components.flatMap((component) =>
         component.resolution.kind === "asset"
           ? [{ path: component.resolution.path, digest: component.resolution.digest }]
           : [],
-      ) ?? [];
+      ) ?? [],
+    );
 
     for (const target of targets) {
       const capture = submission.captures.find(
@@ -2388,6 +3072,15 @@ export class WorkflowService {
       }
 
       if (target.figmaCapture === undefined) {
+        if (
+          capture.assertionReportPath !== undefined ||
+          capture.assertionResultPath !== undefined ||
+          capture.assertionObservationPath !== undefined
+        ) {
+          throw new Error(
+            `UI_ASSERTION_REPORT_INVALID: compatibility target ${target.targetId} forbids unbound UI assertion artifacts`,
+          );
+        }
         if (actualArtifact.digest === baselineArtifact.digest) {
           throw new Error(
             "VISUAL_CAPTURE_REPLAY: identical compatibility captures require a strict packet receipt",
@@ -2398,6 +3091,18 @@ export class WorkflowService {
       if (capture.receiptPath === undefined || capture.receiptDigest === undefined) {
         throw new Error(
           `VISUAL_CAPTURE_PROVENANCE_INVALID: strict target ${target.targetId} requires a capture receipt`,
+        );
+      }
+      if (
+        capture.assertionReportPath === undefined ||
+        capture.assertionReportDigest === undefined ||
+        capture.assertionResultPath === undefined ||
+        capture.assertionResultDigest === undefined ||
+        capture.assertionObservationPath === undefined ||
+        capture.assertionObservationDigest === undefined
+      ) {
+        throw new Error(
+          `UI_ASSERTION_REPORT_INVALID: strict target ${target.targetId} requires a report and Playwright CLI result`,
         );
       }
       const receiptArtifact = evidenceArtifacts.find(
@@ -2420,13 +3125,14 @@ export class WorkflowService {
           `MOCK_FIXTURE_NOT_CONSUMED: no immutable fixture digest exists for ${target.fixture}`,
         );
       }
-      const actualContent = await this.dependencies.artifactStore.readContent(
-        actualArtifact.digest,
-      );
+      const actualContent =
+        preparedContent.get(actualArtifact.digest) ??
+        (await this.dependencies.artifactStore.readContent(actualArtifact.digest));
       const decodedActual = await decodeBoundedPng(
         actualContent,
         `${target.targetId} browser capture`,
       );
+      this.metrics.increment("visual.decode_pixels", decodedActual.width * decodedActual.height);
       const expectedWidth = Math.round(target.viewport.width * target.deviceScaleFactor);
       const expectedHeight = Math.round(target.viewport.height * target.deviceScaleFactor);
       if (decodedActual.width !== expectedWidth || decodedActual.height !== expectedHeight) {
@@ -2436,14 +3142,21 @@ export class WorkflowService {
       }
       let receipt: unknown;
       try {
-        receipt = JSON.parse(
-          (await this.dependencies.artifactStore.readContent(receiptArtifact.digest)).toString(
-            "utf8",
-          ),
-        );
+        const receiptContent =
+          preparedContent.get(receiptArtifact.digest) ??
+          (await this.dependencies.artifactStore.readContent(receiptArtifact.digest));
+        receipt = JSON.parse(receiptContent.toString("utf8"));
       } catch {
         throw new Error(
           `VISUAL_CAPTURE_PROVENANCE_INVALID: receipt must be strict JSON for ${target.targetId}`,
+        );
+      }
+      const stateContract = figmaStateContractsFromRun(run).find(
+        (contract) => contract.targetId === target.targetId,
+      );
+      if (stateContract === undefined) {
+        throw new Error(
+          `UI_ASSERTION_REPORT_INVALID: missing state contract for ${target.targetId}`,
         );
       }
       const validated = assertCaptureReceipt({
@@ -2455,20 +3168,157 @@ export class WorkflowService {
         actualPath: capture.actualPath,
         expectedFonts,
         expectedAssets,
+        stateContractDigest: stateContract.digest,
       });
       if (validated.capturedAt !== capture.capturedAt) {
         throw new Error(
           `VISUAL_CAPTURE_PROVENANCE_INVALID: receipt timestamp does not match ${target.targetId}`,
         );
       }
+      const assertionArtifact = evidenceArtifacts.find(
+        (artifact) =>
+          artifact.metadata["projectRelativePath"] === capture.assertionReportPath &&
+          artifact.metadata["visualRole"] === "ui-assertions",
+      );
+      if (assertionArtifact === undefined) {
+        throw new Error(`UI_ASSERTION_REPORT_INVALID: missing report for ${target.targetId}`);
+      }
+      const assertionResultArtifact = evidenceArtifacts.find(
+        (artifact) =>
+          artifact.metadata["projectRelativePath"] === capture.assertionResultPath &&
+          artifact.metadata["visualRole"] === "ui-assertion-result",
+      );
+      if (assertionResultArtifact === undefined) {
+        throw new Error(
+          `UI_ASSERTION_REPORT_INVALID: missing Playwright CLI result for ${target.targetId}`,
+        );
+      }
+      const assertionObservationArtifact = evidenceArtifacts.find(
+        (artifact) =>
+          artifact.metadata["projectRelativePath"] === capture.assertionObservationPath &&
+          artifact.metadata["visualRole"] === "ui-assertion-observation",
+      );
+      if (assertionObservationArtifact === undefined) {
+        throw new Error(`UI_ASSERTION_REPORT_INVALID: missing observation for ${target.targetId}`);
+      }
+      let assertionReport: unknown;
+      try {
+        const assertionContent =
+          preparedContent.get(assertionArtifact.digest) ??
+          (await this.dependencies.artifactStore.readContent(assertionArtifact.digest));
+        assertionReport = JSON.parse(assertionContent.toString("utf8"));
+      } catch {
+        throw new Error(
+          `UI_ASSERTION_REPORT_INVALID: report must be strict JSON for ${target.targetId}`,
+        );
+      }
+      let assertionResult: unknown;
+      try {
+        const assertionResultContent =
+          preparedContent.get(assertionResultArtifact.digest) ??
+          (await this.dependencies.artifactStore.readContent(assertionResultArtifact.digest));
+        assertionResult = JSON.parse(assertionResultContent.toString("utf8"));
+      } catch {
+        throw new Error(
+          `UI_ASSERTION_REPORT_INVALID: Playwright CLI result must be strict JSON for ${target.targetId}`,
+        );
+      }
+      let assertionObservation: unknown;
+      try {
+        const assertionObservationContent =
+          preparedContent.get(assertionObservationArtifact.digest) ??
+          (await this.dependencies.artifactStore.readContent(assertionObservationArtifact.digest));
+        assertionObservation = JSON.parse(assertionObservationContent.toString("utf8"));
+      } catch {
+        throw new Error(
+          `UI_ASSERTION_REPORT_INVALID: observation must be strict JSON for ${target.targetId}`,
+        );
+      }
+      assertUiAssertionReport({
+        report: assertionReport,
+        packet,
+        target,
+        stateContract,
+        captureReceiptDigest: capture.receiptDigest,
+        producerResultPath: capture.assertionResultPath,
+        producerResultDigest: capture.assertionResultDigest,
+        producerResult: assertionResult,
+        producerObservationPath: capture.assertionObservationPath,
+        producerObservationDigest: capture.assertionObservationDigest,
+        producerObservation: assertionObservation,
+        screenshotPath: capture.actualPath,
+        screenshotDigest: capture.actualDigest,
+      });
+      const captureLineageId = captureRendererLineageId(validated.environment);
+      if (rendererLineageId !== undefined && captureLineageId !== rendererLineageId) {
+        throw rendererDriftError(
+          `target ${target.targetId} uses ${captureLineageId}, expected ${rendererLineageId}`,
+        );
+      }
+      rendererLineageId = captureLineageId;
     }
+    if (rendererLineageId !== undefined) {
+      assertRendererLineageMatchesCommittedAttempts(run, packet, rendererLineageId);
+    }
+    return rendererLineageId;
+  }
+
+  private async assertVisualBaselineIsolation(
+    run: RunManifest,
+    packet: ImplementationReviewPacket,
+    submission: Extract<WorkflowSubmission, { kind: "visual-comparison" }>,
+    targets: VisualTargetManifest[],
+    evidenceArtifacts: ArtifactRef[],
+    preparedContent: ReadonlyMap<string, Buffer>,
+  ): Promise<void> {
+    const isolationArtifact = evidenceArtifacts.find(
+      (artifact) =>
+        artifact.metadata["projectRelativePath"] === submission.baselineIsolationPath &&
+        artifact.metadata["visualRole"] === "baseline-isolation",
+    );
+    if (isolationArtifact === undefined) {
+      throw new Error(
+        `VISUAL_BASELINE_ISOLATION_INVALID: missing evidence ${submission.baselineIsolationPath}`,
+      );
+    }
+    const content =
+      preparedContent.get(isolationArtifact.digest) ??
+      (await this.dependencies.artifactStore.readContent(isolationArtifact.digest));
+    let evidence: unknown;
+    try {
+      evidence = JSON.parse(content.toString("utf8"));
+    } catch {
+      throw new Error("VISUAL_BASELINE_ISOLATION_INVALID: evidence must be strict JSON");
+    }
+    const baselineArtifacts = visualBaselineArtifacts(run, targets);
+    const sourceInputs = baselineIsolationSourceInputsFromRun(run, packet);
+    await assertBaselineIsolation({
+      projectRoot: run.projectRoot,
+      packet,
+      baselineArtifacts,
+      evidence,
+      implementationSourceFiles: sourceInputs.implementationSourceFiles,
+      designSystemSourceFiles: sourceInputs.designSystemSourceFiles,
+      browserBundlePaths: sourceInputs.browserBundlePaths,
+      excludedPaths: [
+        ...sourceInputs.registeredExcludedPaths,
+        ...submission.artifactPaths,
+        ...targets.map((target) => target.baselinePath),
+      ],
+    });
   }
 
   private async recordVisualComparison(
     run: RunManifest,
     submission: Extract<WorkflowSubmission, { kind: "visual-comparison" }>,
-    actualArtifacts: ArtifactRef[],
   ): Promise<void> {
+    if (stage(run, "intake").status !== "passed") {
+      throw new Error("The intake stage must pass before downstream evidence can be submitted");
+    }
+    const profile = deliveryProfileFromRun(run);
+    if (!profile.requirements.visualComparison) {
+      throw new Error("Visual comparison is not applicable to this delivery profile");
+    }
     const packet = reviewPacketFromRun(run);
     if (packet === undefined || packet.id !== submission.reviewPacketId) {
       throw new Error("Visual comparison must reference the current implementation review packet");
@@ -2476,6 +3326,16 @@ export class WorkflowService {
     const targets = visualTargetsFromRun(run);
     if (targets.length === 0) {
       throw new Error("Visual comparison requires a declared Figma or legacy target manifest");
+    }
+    const historicalFigmaTarget = targets.find(
+      (target) =>
+        target.baselineKind === "figma" &&
+        (target.figmaCapture === undefined || !("schemaVersion" in target.figmaCapture)),
+    );
+    if (historicalFigmaTarget !== undefined) {
+      throw new Error(
+        `FIGMA_CAPTURE_GEOMETRY_REACQUISITION_REQUIRED: persisted target ${historicalFigmaTarget.targetId} lacks present v2 geometry`,
+      );
     }
     const captures = new Map(submission.captures.map((capture) => [capture.targetId, capture]));
     const targetIds = new Set(targets.map((target) => target.targetId));
@@ -2514,6 +3374,13 @@ export class WorkflowService {
         `VISUAL_CAPTURE_REPLAY: ${replayedBaseline.actualPath} is a declared baseline path`,
       );
     }
+    const submissionIdentity = visualSubmissionIdentity(packet.id, submission.captures);
+    const committedReplay = this.isCommittedVisualReplay(run, submission);
+    if (stage(run, "implementation").status !== "passed" && !committedReplay) {
+      throw new Error("Implementation must pass before visual comparison");
+    }
+    const preparedEvidence = await this.prepareVisualSubmissionEvidence(run, submission);
+    const actualArtifacts = preparedEvidence.map((item) => item.artifact);
     const boundEvidenceArtifacts = actualArtifacts.map((artifact) => {
       const capture = submission.captures.find(
         (capture) => capture.actualPath === artifact.metadata["projectRelativePath"],
@@ -2521,6 +3388,17 @@ export class WorkflowService {
       const receiptCapture = submission.captures.find(
         (capture) => capture.receiptPath === artifact.metadata["projectRelativePath"],
       );
+      const assertionCapture = submission.captures.find(
+        (capture) => capture.assertionReportPath === artifact.metadata["projectRelativePath"],
+      );
+      const assertionResultCapture = submission.captures.find(
+        (capture) => capture.assertionResultPath === artifact.metadata["projectRelativePath"],
+      );
+      const assertionObservationCapture = submission.captures.find(
+        (capture) => capture.assertionObservationPath === artifact.metadata["projectRelativePath"],
+      );
+      const baselineIsolationArtifact =
+        submission.baselineIsolationPath === artifact.metadata["projectRelativePath"];
       if (capture !== undefined && capture.actualDigest !== artifact.digest) {
         throw new Error(
           `VISUAL_CAPTURE_DIGEST_MISMATCH: ${capture.actualPath} does not match its declared digest`,
@@ -2531,61 +3409,170 @@ export class WorkflowService {
           `VISUAL_CAPTURE_PROVENANCE_INVALID: ${receiptCapture.receiptPath} does not match its declared digest`,
         );
       }
+      if (
+        assertionCapture !== undefined &&
+        assertionCapture.assertionReportDigest !== artifact.digest
+      ) {
+        throw new Error(
+          `UI_ASSERTION_REPORT_INVALID: ${assertionCapture.assertionReportPath} does not match its declared digest`,
+        );
+      }
+      if (
+        assertionResultCapture !== undefined &&
+        assertionResultCapture.assertionResultDigest !== artifact.digest
+      ) {
+        throw new Error(
+          `UI_ASSERTION_REPORT_INVALID: ${assertionResultCapture.assertionResultPath} does not match its declared digest`,
+        );
+      }
+      if (
+        assertionObservationCapture !== undefined &&
+        assertionObservationCapture.assertionObservationDigest !== artifact.digest
+      ) {
+        throw new Error(
+          `UI_ASSERTION_REPORT_INVALID: ${assertionObservationCapture.assertionObservationPath} does not match its declared digest`,
+        );
+      }
+      if (baselineIsolationArtifact && submission.baselineIsolationDigest !== artifact.digest) {
+        throw new Error(
+          `VISUAL_BASELINE_ISOLATION_INVALID: ${submission.baselineIsolationPath} does not match its declared digest`,
+        );
+      }
       return ArtifactRefSchema.parse({
         ...artifact,
         metadata: {
           ...artifact.metadata,
-          ...(capture === undefined && receiptCapture === undefined
+          ...(capture === undefined &&
+          receiptCapture === undefined &&
+          assertionCapture === undefined &&
+          assertionResultCapture === undefined &&
+          assertionObservationCapture === undefined
             ? {}
             : {
-                targetId: (capture ?? receiptCapture)!.targetId,
-                captureProvider: (capture ?? receiptCapture)!.provider,
-                visualCapturedAt: (capture ?? receiptCapture)!.capturedAt,
-                ...(capture === undefined
-                  ? { declaredReceiptDigest: receiptCapture!.receiptDigest }
-                  : { declaredCaptureDigest: capture.actualDigest }),
+                targetId: (capture ??
+                  receiptCapture ??
+                  assertionCapture ??
+                  assertionResultCapture ??
+                  assertionObservationCapture)!.targetId,
+                captureProvider: (capture ??
+                  receiptCapture ??
+                  assertionCapture ??
+                  assertionResultCapture ??
+                  assertionObservationCapture)!.provider,
+                visualCapturedAt: (capture ??
+                  receiptCapture ??
+                  assertionCapture ??
+                  assertionResultCapture ??
+                  assertionObservationCapture)!.capturedAt,
+                ...(capture !== undefined
+                  ? { declaredCaptureDigest: capture.actualDigest }
+                  : receiptCapture !== undefined
+                    ? { declaredReceiptDigest: receiptCapture!.receiptDigest }
+                    : assertionCapture !== undefined
+                      ? {
+                          declaredAssertionReportDigest: assertionCapture!.assertionReportDigest,
+                        }
+                      : assertionResultCapture !== undefined
+                        ? {
+                            declaredAssertionResultDigest:
+                              assertionResultCapture!.assertionResultDigest,
+                          }
+                        : {
+                            declaredAssertionObservationDigest:
+                              assertionObservationCapture!.assertionObservationDigest,
+                          }),
               }),
         },
       });
     });
-    const boundActualArtifacts = boundEvidenceArtifacts.filter(
-      (artifact) => artifact.metadata["visualRole"] === "actual",
+    const preparedContent = new Map(
+      preparedEvidence.map((item) => [item.artifact.digest, item.content] as const),
     );
-    await this.assertVisualCaptureAcquisition(
+    await this.assertVisualBaselineIsolation(
       run,
       packet,
       submission,
       targets,
       boundEvidenceArtifacts,
+      preparedContent,
     );
-    const submissionIdentity = visualSubmissionIdentity(
-      packet.id,
-      boundActualArtifacts.map((artifact) => ({
-        targetId: String(artifact.metadata["targetId"]),
-        digest: artifact.digest,
-      })),
+    const rendererLineageId = await this.assertVisualCaptureAcquisition(
+      run,
+      packet,
+      submission,
+      targets,
+      boundEvidenceArtifacts,
+      preparedContent,
     );
-    const reservation = await this.reserveVisualAttempt(run.id, packet, submissionIdentity);
-    if (reservation.duplicate) return;
+    const reservationResult = await this.reserveVisualAttempt(
+      run.id,
+      packet,
+      submissionIdentity,
+      rendererLineageId,
+      async (current) =>
+        this.assertVisualBaselineIsolation(
+          current,
+          packet,
+          submission,
+          targets,
+          boundEvidenceArtifacts,
+          preparedContent,
+        ),
+    );
+    if (reservationResult.kind === "busy") {
+      throw new Error(
+        "VISUAL_ATTEMPT_IN_PROGRESS: a visual comparison lease is active; refresh workflow_status and retry",
+      );
+    }
+    const reservation = reservationResult.reservation;
     const attempt = reservation.attempt;
     const lineageId = visualLineageId(packet);
-    const attemptEvidenceArtifacts = boundEvidenceArtifacts.map((artifact) =>
-      ArtifactRefSchema.parse({
-        ...artifact,
-        metadata: { ...artifact.metadata, visualComparisonAttempt: attempt, submissionIdentity },
-      }),
-    );
-    const attemptActualArtifacts = attemptEvidenceArtifacts.filter(
-      (artifact) => artifact.metadata["visualRole"] === "actual",
-    );
 
     try {
+      if (reservationResult.kind === "committed-replay") return;
+      await this.persistPreparedVisualEvidence(preparedEvidence);
+      const attemptEvidenceArtifacts = boundEvidenceArtifacts.map((artifact) =>
+        ArtifactRefSchema.parse({
+          ...artifact,
+          metadata: { ...artifact.metadata, visualComparisonAttempt: attempt, submissionIdentity },
+        }),
+      );
+      const attemptActualArtifacts = attemptEvidenceArtifacts.filter(
+        (artifact) => artifact.metadata["visualRole"] === "actual",
+      );
       const timestamp = this.now();
       const generatedArtifacts: ArtifactRef[] = [];
       const results: Array<Record<string, unknown>> = [];
-
+      type NormalizedVisual = Awaited<ReturnType<typeof normalizeVisualPng>>;
+      const preparedTargets: Array<{
+        target: VisualTargetManifest;
+        capture: (typeof submission.captures)[number];
+        receipt: z.infer<typeof VisualCaptureReceiptV2Schema> | undefined;
+        actualArtifact: ArtifactRef;
+        baselineArtifact: ArtifactRef;
+        comparisonBaseline: Buffer;
+        comparisonActual: Buffer;
+        normalizedBaseline?: NormalizedVisual;
+        normalizedActual?: NormalizedVisual;
+      }> = [];
       for (const target of targets) {
         const capture = captures.get(target.targetId)!;
+        const receiptArtifact = attemptEvidenceArtifacts.find(
+          (artifact) =>
+            artifact.metadata["visualRole"] === "capture-receipt" &&
+            artifact.metadata["targetId"] === target.targetId,
+        );
+        const receipt =
+          receiptArtifact === undefined
+            ? undefined
+            : VisualCaptureReceiptV2Schema.parse(
+                JSON.parse(
+                  (
+                    preparedContent.get(receiptArtifact.digest) ??
+                    (await this.dependencies.artifactStore.readContent(receiptArtifact.digest))
+                  ).toString("utf8"),
+                ),
+              );
         const actualArtifact = attemptActualArtifacts.find(
           (artifact) => artifact.metadata["projectRelativePath"] === capture.actualPath,
         );
@@ -2609,7 +3596,6 @@ export class WorkflowService {
           );
         }
 
-        const artifactBase = `visual/${target.targetId}`;
         const baselineContent = await this.dependencies.artifactStore.readContent(
           baselineArtifact.digest,
         );
@@ -2618,19 +3604,21 @@ export class WorkflowService {
         );
         let comparisonBaseline = baselineContent;
         let comparisonActual = actualContent;
-        let comparedActualArtifact = actualArtifact;
-        let baselineRef: ArtifactRef;
+        let normalizedBaseline: NormalizedVisual | undefined;
+        let normalizedActual: NormalizedVisual | undefined;
 
         if (target.figmaCapture !== undefined) {
-          const normalizedBaseline = await normalizeVisualPng({
+          normalizedBaseline = await normalizeVisualPng({
             content: baselineContent,
+            sourceDigest: baselineArtifact.digest as `sha256:${string}`,
             sourceSize: target.figmaCapture.bitmapSize,
             logicalSize: target.figmaCapture.logicalSize,
             colorSpace: target.figmaCapture.colorSpace,
             role: `${target.targetId} Figma baseline`,
           });
-          const normalizedActual = await normalizeVisualPng({
+          normalizedActual = await normalizeVisualPng({
             content: actualContent,
+            sourceDigest: actualArtifact.digest as `sha256:${string}`,
             sourceSize: {
               width: Math.round(target.viewport.width * target.deviceScaleFactor),
               height: Math.round(target.viewport.height * target.deviceScaleFactor),
@@ -2638,11 +3626,83 @@ export class WorkflowService {
             logicalSize: target.figmaCapture.logicalSize,
             colorSpace: target.figmaCapture.colorSpace,
             role: `${target.targetId} browser capture`,
+            cacheRead: false,
           });
+          this.metrics.increment(
+            normalizedBaseline.cacheStatus === "miss"
+              ? "visual.normalization_cache_miss"
+              : "visual.normalization_cache_hit",
+          );
+          this.metrics.increment("visual.normalization_cache_miss");
+          this.metrics.increment(
+            "visual.decode_pixels",
+            (normalizedBaseline.cacheStatus === "miss"
+              ? target.figmaCapture.bitmapSize.width * target.figmaCapture.bitmapSize.height
+              : 0) +
+              Math.round(target.viewport.width * target.deviceScaleFactor) *
+                Math.round(target.viewport.height * target.deviceScaleFactor),
+          );
+          this.metrics.increment(
+            "visual.encode_pixels",
+            (normalizedBaseline.cacheStatus === "miss"
+              ? normalizedBaseline.width * normalizedBaseline.height
+              : 0) +
+              normalizedActual.width * normalizedActual.height,
+          );
           comparisonBaseline = normalizedBaseline.content;
           comparisonActual = normalizedActual.content;
+        }
+        preparedTargets.push({
+          target,
+          capture,
+          receipt,
+          actualArtifact,
+          baselineArtifact,
+          comparisonBaseline,
+          comparisonActual,
+          ...(normalizedBaseline === undefined ? {} : { normalizedBaseline }),
+          ...(normalizedActual === undefined ? {} : { normalizedActual }),
+        });
+      }
+
+      const comparisonResults = await defaultVisualComparisonPool.compare(
+        preparedTargets.map((prepared) => ({
+          targetId: prepared.target.targetId,
+          baseline: prepared.comparisonBaseline,
+          actual: prepared.comparisonActual,
+          ...(prepared.normalizedBaseline === undefined || prepared.normalizedActual === undefined
+            ? {}
+            : {
+                baselineRgba: {
+                  data: prepared.normalizedBaseline.rgba,
+                  width: prepared.normalizedBaseline.width,
+                  height: prepared.normalizedBaseline.height,
+                },
+                actualRgba: {
+                  data: prepared.normalizedActual.rgba,
+                  width: prepared.normalizedActual.width,
+                  height: prepared.normalizedActual.height,
+                },
+              }),
+          masks: prepared.target.masks,
+        })),
+      );
+      const poolAfter = defaultVisualComparisonPool.snapshotStats();
+      this.metrics.gauge("visual.active_workers", poolAfter.activeWorkers, {
+        stage: "implementation",
+      });
+      this.metrics.gauge("visual.peak_workers", poolAfter.peakActiveWorkers, {
+        stage: "implementation",
+      });
+
+      for (const [index, prepared] of preparedTargets.entries()) {
+        const { target, capture, receipt, actualArtifact, baselineArtifact } = prepared;
+        const artifactBase = `visual/${target.targetId}`;
+        let comparedActualArtifact = actualArtifact;
+        let baselineRef: ArtifactRef;
+        if (prepared.normalizedBaseline !== undefined && prepared.normalizedActual !== undefined) {
           baselineRef = await this.writeVisualArtifact({
-            content: normalizedBaseline.content,
+            content: prepared.normalizedBaseline.content,
             kind: "screenshot",
             projectRelativePath: `${artifactBase}.baseline.normalized.png`,
             targetId: target.targetId,
@@ -2651,10 +3711,10 @@ export class WorkflowService {
             attempt,
             timestamp,
             sourceArtifactId: baselineArtifact.id,
-            normalizerVersion: normalizedBaseline.version,
+            normalizerVersion: prepared.normalizedBaseline.version,
           });
           comparedActualArtifact = await this.writeVisualArtifact({
-            content: normalizedActual.content,
+            content: prepared.normalizedActual.content,
             kind: "screenshot",
             projectRelativePath: `${artifactBase}.actual.normalized.png`,
             targetId: target.targetId,
@@ -2663,7 +3723,7 @@ export class WorkflowService {
             attempt,
             timestamp,
             sourceArtifactId: actualArtifact.id,
-            normalizerVersion: normalizedActual.version,
+            normalizerVersion: prepared.normalizedActual.version,
           });
           generatedArtifacts.push(baselineRef, comparedActualArtifact);
         } else {
@@ -2687,13 +3747,10 @@ export class WorkflowService {
           });
           generatedArtifacts.push(baselineRef);
         }
-
-        const comparison = await compareVisualPngs({
-          baseline: comparisonBaseline,
-          actual: comparisonActual,
-          masks: target.masks,
-          reviewThreshold: target.reviewThreshold,
-        });
+        const comparison = comparisonResults[index]?.comparison;
+        if (comparison === undefined) {
+          throw new Error(`VISUAL_COMPARISON_INCOMPLETE: missing result for ${target.targetId}`);
+        }
         const diffArtifact = await this.writeVisualArtifact({
           content: comparison.diff,
           kind: "visual-diff",
@@ -2725,6 +3782,16 @@ export class WorkflowService {
           deviceScaleFactor: target.deviceScaleFactor,
           fixture: target.fixture,
           captureProvider: capture.provider,
+          ...(receipt === undefined
+            ? {}
+            : {
+                captureSummary: {
+                  provider: capture.provider,
+                  browser: `${receipt.environment.browser.family} ${receipt.environment.browser.version}`,
+                  fontsReady: receipt.environment.readiness.fontsReady,
+                  assetsReady: receipt.environment.readiness.assetsReady,
+                },
+              }),
           capturedAt: capture.capturedAt,
           actualDigest: capture.actualDigest,
           masks: target.masks,
@@ -2735,7 +3802,7 @@ export class WorkflowService {
           actualArtifactId: comparedActualArtifact.id,
           sourceBaselineArtifactId: baselineArtifact.id,
           sourceActualArtifactId: actualArtifact.id,
-          ...(target.figmaCapture === undefined
+          ...(prepared.normalizedBaseline === undefined
             ? {}
             : {
                 normalizerVersion: "visual-normalizer-v1",
@@ -2750,6 +3817,13 @@ export class WorkflowService {
       const visualStatus = results.every((result) => result["status"] === "passed")
         ? "passed"
         : "failed";
+      const rendererLineageBinding =
+        rendererLineageId === undefined
+          ? undefined
+          : VisualRendererLineageBindingSchema.parse({
+              visualLineageId: lineageId,
+              rendererLineageId,
+            });
       const reportContent = Buffer.from(
         `${JSON.stringify(
           {
@@ -2757,6 +3831,7 @@ export class WorkflowService {
             runId: run.id,
             reviewPacketId: packet.id,
             visualLineageId: lineageId,
+            ...(rendererLineageBinding === undefined ? {} : rendererLineageBinding),
             headSha: packet.headSha,
             diffDigest: packet.diffDigest,
             attempt,
@@ -2791,6 +3866,7 @@ export class WorkflowService {
           workflowSubmissionKind: "visual-comparison",
           reviewPacketId: packet.id,
           visualLineageId: lineageId,
+          ...(rendererLineageBinding === undefined ? {} : rendererLineageBinding),
           headSha: packet.headSha,
           diffDigest: packet.diffDigest,
           visualComparisonAttempt: attempt,
@@ -2803,38 +3879,37 @@ export class WorkflowService {
           submissionIdentity,
         },
       });
-      const completionArtifact = await this.visualAttemptStatusArtifact({
-        runId: run.id,
-        packet,
-        submissionIdentity,
-        attempt,
-        status: "completed",
-        timestamp,
-      });
-      await this.appendVisualAttemptArtifacts(
-        run.id,
-        submissionIdentity,
-        [...attemptEvidenceArtifacts, ...generatedArtifacts, reportArtifact, completionArtifact],
-        timestamp,
-      );
-      await this.recordVisualRepairOutcome({
+      const lineageArtifact = await this.createVisualRepairOutcomeArtifact({
         runId: run.id,
         packet,
         lineageId,
+        rendererLineageId,
         attempt,
         visualStatus,
         results,
         timestamp,
       });
+      await this.commitVisualAttemptOutcome({
+        runId: run.id,
+        packet,
+        reservation,
+        generatedArtifacts: [...attemptEvidenceArtifacts, ...generatedArtifacts],
+        visualReport: reportArtifact,
+        lineageArtifact,
+        status: visualStatus,
+      });
     } catch (error: unknown) {
+      if (reservationResult.kind === "committed-replay") throw error;
+      this.metrics.increment("visual.reservation_aborted");
       const timestamp = this.now();
       const failureArtifact = await this.visualAttemptStatusArtifact({
         runId: run.id,
         packet,
-        submissionIdentity,
-        attempt,
-        status: "failed",
-        timestamp,
+        reservation: {
+          ...reservation,
+          status: "aborted",
+          updatedAt: timestamp,
+        },
       });
       await this.appendVisualAttemptArtifacts(
         run.id,
@@ -2846,16 +3921,17 @@ export class WorkflowService {
     }
   }
 
-  private async recordVisualRepairOutcome(input: {
+  private async createVisualRepairOutcomeArtifact(input: {
     runId: string;
     packet: ImplementationReviewPacket;
     lineageId: string;
+    rendererLineageId: `sha256:${string}` | undefined;
     attempt: 1 | 2 | 3;
     visualStatus: "passed" | "failed";
     results: Array<Record<string, unknown>>;
     timestamp: string;
-  }): Promise<void> {
-    const failedTargets = input.results.flatMap((result) => {
+  }): Promise<ArtifactRef> {
+    const compactFailedTargets = input.results.flatMap((result) => {
       if (result["status"] !== "failed" || typeof result["targetId"] !== "string") return [];
       const metrics =
         typeof result["metrics"] === "object" && result["metrics"] !== null
@@ -2866,42 +3942,109 @@ export class WorkflowService {
             {
               targetId: result["targetId"],
               reviewMatchRatio: metrics["reviewMatchRatio"],
-              diffArtifactId:
-                typeof result["diffArtifactId"] === "string" ? result["diffArtifactId"] : undefined,
-              overlayArtifactId:
-                typeof result["overlayArtifactId"] === "string"
-                  ? result["overlayArtifactId"]
-                  : undefined,
             },
           ]
         : [];
     });
+    const failedTargets = input.results
+      .filter((result) => result["status"] === "failed")
+      .map((result) => {
+        const captureSummary = result["captureSummary"];
+        if (typeof captureSummary !== "object" || captureSummary === null) {
+          throw new Error(
+            `VISUAL_REPAIR_EVIDENCE_INCOMPLETE: failed target ${String(result["targetId"])} has no strict capture receipt`,
+          );
+        }
+        const metrics =
+          typeof result["metrics"] === "object" && result["metrics"] !== null
+            ? (result["metrics"] as Record<string, unknown>)
+            : {};
+        const causeHints: Array<
+          "implementation" | "acquisition" | "fixture" | "design-mapping" | "baseline-isolation"
+        > = [];
+        if (
+          typeof metrics["reviewMatchRatio"] === "number" &&
+          typeof metrics["threshold"] === "number" &&
+          metrics["reviewMatchRatio"] < metrics["threshold"]
+        ) {
+          causeHints.push("implementation");
+        }
+        const captureFacts = captureSummary as Record<string, unknown>;
+        if (captureFacts["fontsReady"] !== true || captureFacts["assetsReady"] !== true) {
+          causeHints.push("acquisition");
+        }
+        if (causeHints.length === 0) {
+          throw new Error(
+            `VISUAL_REPAIR_EVIDENCE_INCOMPLETE: failed target ${String(result["targetId"])} has no validated cause category`,
+          );
+        }
+        return {
+          targetId: result["targetId"],
+          name: result["name"],
+          route: result["route"],
+          state: result["state"],
+          fixture: result["fixture"],
+          viewport: result["viewport"],
+          deviceScaleFactor: result["deviceScaleFactor"],
+          metrics: result["metrics"],
+          diffArtifactId: result["diffArtifactId"],
+          overlayArtifactId: result["overlayArtifactId"],
+          captureSummary,
+          causeHints,
+        };
+      });
     const repairRequired =
       input.visualStatus === "failed" && input.attempt < MAX_VISUAL_REPAIR_ATTEMPTS;
+    const status =
+      input.visualStatus === "passed" ? "closed" : repairRequired ? "repair-required" : "exhausted";
+    const artifactId = createArtifactId();
+    const evidence =
+      input.visualStatus === "failed"
+        ? VisualRepairEvidenceV2Schema.parse({
+            schemaVersion: "visual-repair-evidence-v2",
+            runId: input.runId,
+            lineageId: input.lineageId,
+            reviewPacketId: input.packet.id,
+            headSha: input.packet.headSha,
+            ...(input.rendererLineageId === undefined
+              ? {}
+              : { rendererLineageId: input.rendererLineageId }),
+            attempt: input.attempt,
+            generatedAt: input.timestamp,
+            failedTargets,
+          })
+        : undefined;
     const content = Buffer.from(
-      `${JSON.stringify({
-        visualLineageId: input.lineageId,
-        sourcePacketId: input.packet.id,
-        attempt: input.attempt,
-        status:
-          input.visualStatus === "passed"
-            ? "closed"
-            : repairRequired
-              ? "repair-required"
-              : "exhausted",
-        repairRequired,
-        failedTargets,
-      })}\n`,
+      `${JSON.stringify(
+        evidence ?? {
+          schemaVersion: "visual-repair-lineage-v2",
+          runId: input.runId,
+          lineageId: input.lineageId,
+          reviewPacketId: input.packet.id,
+          headSha: input.packet.headSha,
+          ...(input.rendererLineageId === undefined
+            ? {}
+            : { rendererLineageId: input.rendererLineageId }),
+          attempt: input.attempt,
+          generatedAt: input.timestamp,
+          status,
+        },
+        null,
+        2,
+      )}\n`,
       "utf8",
     );
     const blob = await this.dependencies.artifactStore.writeBlob({
       content,
       mediaType: "application/json",
       storedAt: input.timestamp,
-      label: `visual-lineage-attempt-${String(input.attempt)}.json`,
+      label:
+        evidence === undefined
+          ? `visual-lineage-attempt-${String(input.attempt)}.json`
+          : `visual-repair-evidence-attempt-${String(input.attempt)}.json`,
     });
     const artifact = ArtifactRefSchema.parse({
-      id: createArtifactId(),
+      id: artifactId,
       kind: "other",
       uri: blob.uri,
       mediaType: "application/json",
@@ -2910,67 +4053,167 @@ export class WorkflowService {
       evidenceIds: [],
       createdAt: input.timestamp,
       metadata: {
-        adapter: "visual-repair-lineage-v1",
+        adapter: evidence === undefined ? "visual-repair-lineage-v2" : "visual-repair-evidence-v2",
+        schemaVersion:
+          evidence === undefined ? "visual-repair-lineage-v2" : "visual-repair-evidence-v2",
         visualLineageId: input.lineageId,
+        ...(input.rendererLineageId === undefined
+          ? {}
+          : { rendererLineageId: input.rendererLineageId }),
         visualLineageAttempt: input.attempt,
+        visualLineageStatus: status,
         sourcePacketId: input.packet.id,
+        headSha: input.packet.headSha,
         repairRequired,
         visualStatus: input.visualStatus,
-        failedTargets: failedTargets.map(({ targetId, reviewMatchRatio }) => ({
-          targetId,
-          reviewMatchRatio,
-        })),
-        diffArtifactIds: failedTargets.flatMap((target) =>
-          target.diffArtifactId === undefined ? [] : [target.diffArtifactId],
-        ),
-        overlayArtifactIds: failedTargets.flatMap((target) =>
-          target.overlayArtifactId === undefined ? [] : [target.overlayArtifactId],
-        ),
+        failedTargets: compactFailedTargets,
+        ...(evidence === undefined ? {} : { repairEvidenceArtifactId: artifactId }),
       },
     });
 
+    return artifact;
+  }
+
+  private async commitVisualAttemptOutcome(input: {
+    runId: string;
+    packet: ImplementationReviewPacket;
+    reservation: VisualAttemptReservation;
+    generatedArtifacts: ArtifactRef[];
+    visualReport: ArtifactRef;
+    lineageArtifact: ArtifactRef;
+    repairEvidenceArtifact?: ArtifactRef;
+    status: "passed" | "failed";
+  }): Promise<void> {
+    const timestamp = input.visualReport.createdAt;
+    const committedAttempt = await this.visualAttemptStatusArtifact({
+      runId: input.runId,
+      packet: input.packet,
+      reservation: {
+        ...input.reservation,
+        status: "committed",
+        updatedAt: timestamp,
+        reportArtifactId: input.visualReport.id,
+        reportDigest: input.visualReport.digest,
+      },
+    });
+    const artifacts = [
+      ...input.generatedArtifacts,
+      input.visualReport,
+      committedAttempt,
+      input.lineageArtifact,
+      ...(input.repairEvidenceArtifact === undefined ? [] : [input.repairEvidenceArtifact]),
+    ];
+    const repairRequired =
+      input.status === "failed" && input.reservation.attempt < MAX_VISUAL_REPAIR_ATTEMPTS;
+    const terminalIdentity =
+      input.status === "failed" && input.reservation.attempt === MAX_VISUAL_REPAIR_ATTEMPTS
+        ? `sha256:${createHash("sha256")
+            .update(
+              JSON.stringify({
+                runId: input.runId,
+                lineageId: visualLineageId(input.packet),
+                reviewPacketId: input.packet.id,
+                attempt: 3,
+                visualReportDigest: input.visualReport.digest,
+              }),
+            )
+            .digest("hex")}`
+        : undefined;
+
     for (let retry = 0; retry < 12; retry += 1) {
       const current = await this.dependencies.runStore.get(input.runId);
+      const currentTerminalIdentity = stage(current, "implementation").checkpoint?.data[
+        "visualTerminalIdentity"
+      ];
+      if (terminalIdentity !== undefined && currentTerminalIdentity === terminalIdentity) {
+        return;
+      }
       if (
+        terminalIdentity === undefined &&
         current.artifacts.some(
-          (candidate) =>
-            candidate.metadata["adapter"] === "visual-repair-lineage-v1" &&
-            candidate.metadata["sourcePacketId"] === input.packet.id &&
-            candidate.metadata["visualLineageAttempt"] === input.attempt,
+          (artifact) =>
+            artifact.kind === "visual-report" &&
+            artifact.metadata["submissionIdentity"] === input.reservation.submissionIdentity,
         )
       ) {
         return;
       }
-      const withArtifact = {
-        ...current,
-        artifacts: [...current.artifacts, artifact],
-      };
-      const next = repairRequired
-        ? reopenImplementationForVisualRepair(
-            withArtifact,
-            `Visual comparison attempt ${String(input.attempt)} failed; repair the implementation before recapturing.`,
-            this.now,
-          )
-        : {
-            ...withArtifact,
-            revision: current.revision + 1,
-            updatedAt: input.timestamp,
-          };
+      const currentPacket = reviewPacketFromRun(current);
+      if (
+        stage(current, "implementation").status !== "passed" ||
+        currentPacket?.id !== input.packet.id ||
+        currentPacket.headSha !== input.packet.headSha ||
+        currentPacket.diffDigest !== input.packet.diffDigest
+      ) {
+        throw new Error(
+          "VISUAL_ATTEMPT_STALE: the implementation review packet, head, or diff is no longer current",
+        );
+      }
+
+      const next =
+        terminalIdentity === undefined
+          ? repairRequired
+            ? reopenImplementationForVisualRepair(
+                {
+                  ...current,
+                  artifacts: [...current.artifacts, ...artifacts],
+                },
+                `Visual comparison attempt ${String(input.reservation.attempt)} failed; repair the implementation before recapturing.`,
+                () => timestamp,
+              )
+            : {
+                ...current,
+                revision: current.revision + 1,
+                updatedAt: timestamp,
+                artifacts: [...current.artifacts, ...artifacts],
+              }
+          : terminalizeVisualThresholdFailure(current, {
+              artifacts,
+              reviewPacket: input.packet,
+              visualLineageId: visualLineageId(input.packet),
+              visualReportArtifactId: input.visualReport.id,
+              visualReportDigest: input.visualReport.digest,
+              terminalIdentity,
+              timestamp,
+            });
       try {
         await this.dependencies.runStore.save(next, current.revision);
+        this.metrics.increment("visual.reservation_committed", 1, { outcome: "committed" });
+        this.metrics.gauge("visual.active_workers", 0, { stage: "implementation" });
+        if (input.status === "failed") {
+          this.invalidateReviewerTimings(input.packet.id);
+        }
         return;
       } catch (error: unknown) {
         if (!(error instanceof RevisionConflictError)) throw error;
       }
     }
-    throw new Error("VISUAL_REPAIR_REFRESH_REQUIRED: refresh workflow_status and retry");
+    throw new Error("VISUAL_ATTEMPT_REFRESH_REQUIRED: refresh workflow_status and retry");
+  }
+
+  private isCommittedVisualReplay(
+    run: RunManifest,
+    submission: Extract<WorkflowSubmission, { kind: "visual-comparison" }>,
+  ): boolean {
+    const packet = reviewPacketFromRun(run);
+    if (packet === undefined || packet.id !== submission.reviewPacketId) return false;
+    const submissionIdentity = visualSubmissionIdentity(
+      submission.reviewPacketId,
+      submission.captures,
+    );
+    return reduceVisualReservations(
+      visualAttemptReservations(run, visualLineageId(packet), "v3"),
+      this.now(),
+    ).committed.some((reservation) => reservation.submissionIdentity === submissionIdentity);
   }
 
   private async reserveVisualAttempt(
     runId: string,
     packet: ImplementationReviewPacket,
     submissionIdentity: string,
-  ): Promise<{ attempt: 1 | 2 | 3; duplicate: boolean }> {
+    rendererLineageId: `sha256:${string}` | undefined,
+    validateBeforeReservation?: (current: RunManifest) => Promise<void>,
+  ): Promise<VisualAttemptReservationResult> {
     for (let retry = 0; retry < 12; retry += 1) {
       const current = await this.dependencies.runStore.get(runId);
       const currentPacket = reviewPacketFromRun(current);
@@ -2979,28 +4222,80 @@ export class WorkflowService {
           "Visual comparison must reference the current implementation review packet",
         );
       }
+      if (rendererLineageId !== undefined) {
+        assertRendererLineageMatchesCommittedAttempts(current, packet, rendererLineageId);
+      }
+      await validateBeforeReservation?.(current);
+      const events = visualAttemptReservations(current, visualLineageId(packet));
+      const summary = reduceVisualReservations(events, this.now());
+      const committedReplay = summary.committed.find(
+        (candidate) => candidate.submissionIdentity === submissionIdentity,
+      );
+      if (committedReplay !== undefined) {
+        this.metrics.increment("visual.reservation_committed", 1, { outcome: "replay" });
+        return { kind: "committed-replay", reservation: committedReplay };
+      }
       if (currentVisualReport(current, packet.id)?.metadata["visualStatus"] === "passed") {
         throw new Error("The current review packet already has a passing visual comparison");
       }
-      const reservations = visualAttemptReservations(current, visualLineageId(packet));
-      const duplicate = reservations.find(
-        (candidate) => candidate.submissionIdentity === submissionIdentity,
-      );
-      if (duplicate !== undefined) return { attempt: duplicate.attempt, duplicate: true };
-      if (reservations.length >= MAX_VISUAL_REPAIR_ATTEMPTS) {
+      if (summary.active !== undefined) {
+        this.metrics.gauge("visual.active_workers", 1, { stage: "implementation" });
+        this.metrics.gauge("visual.peak_workers", 1, { stage: "implementation" });
+        return { kind: "busy", reservation: summary.active };
+      }
+      if (summary.recoverable !== undefined) {
+        const latestRecoverableEvent = [...events]
+          .reverse()
+          .find((candidate) => candidate.ownerToken === summary.recoverable?.ownerToken);
+        if (latestRecoverableEvent?.status === "in-progress") {
+          const timestamp = this.now();
+          const staleReservation: VisualAttemptReservation = {
+            ...summary.recoverable,
+            status: "stale",
+            updatedAt: timestamp,
+          };
+          const staleArtifact = await this.visualAttemptStatusArtifact({
+            runId,
+            packet,
+            reservation: staleReservation,
+          });
+          try {
+            await this.dependencies.runStore.save(
+              {
+                ...current,
+                revision: current.revision + 1,
+                updatedAt: timestamp,
+                artifacts: [...current.artifacts, staleArtifact],
+              },
+              current.revision,
+            );
+            this.metrics.increment("visual.reservation_stale");
+            continue;
+          } catch (error: unknown) {
+            if (!(error instanceof RevisionConflictError)) throw error;
+            continue;
+          }
+        }
+      }
+      const attempt = nextCommittedVisualAttempt(summary);
+      if (attempt === undefined) {
         throw new Error(
           `VISUAL_ATTEMPT_LIMIT_REACHED: the active visual lineage already used ${MAX_VISUAL_REPAIR_ATTEMPTS} attempts`,
         );
       }
-      const attempt = (reservations.length + 1) as 1 | 2 | 3;
       const timestamp = this.now();
-      const artifact = await this.visualAttemptStatusArtifact({
-        runId,
-        packet,
+      const reservation: VisualAttemptReservation = {
         submissionIdentity,
         attempt,
         status: "in-progress",
-        timestamp,
+        ownerToken: randomUUID(),
+        reservedAt: timestamp,
+        updatedAt: timestamp,
+      };
+      const artifact = await this.visualAttemptStatusArtifact({
+        runId,
+        packet,
+        reservation,
       });
       try {
         await this.dependencies.runStore.save(
@@ -3012,7 +4307,9 @@ export class WorkflowService {
           },
           current.revision,
         );
-        return { attempt, duplicate: false };
+        this.metrics.gauge("visual.active_workers", 1, { stage: "implementation" });
+        this.metrics.gauge("visual.peak_workers", 1, { stage: "implementation" });
+        return { kind: "reserved", reservation };
       } catch (error: unknown) {
         if (!(error instanceof RevisionConflictError)) throw error;
       }
@@ -3023,26 +4320,22 @@ export class WorkflowService {
   private async visualAttemptStatusArtifact(input: {
     runId: string;
     packet: ImplementationReviewPacket;
-    submissionIdentity: string;
-    attempt: 1 | 2 | 3;
-    status: "in-progress" | "completed" | "failed";
-    timestamp: string;
+    reservation: VisualAttemptReservation;
   }): Promise<ArtifactRef> {
+    const { reservation } = input;
     const content = Buffer.from(
       `${JSON.stringify({
         reviewPacketId: input.packet.id,
         visualLineageId: visualLineageId(input.packet),
-        submissionIdentity: input.submissionIdentity,
-        attempt: input.attempt,
-        status: input.status,
+        ...reservation,
       })}\n`,
       "utf8",
     );
     const blob = await this.dependencies.artifactStore.writeBlob({
       content,
       mediaType: "application/json",
-      storedAt: input.timestamp,
-      label: `visual-attempt-${String(input.attempt)}-${input.status}.json`,
+      storedAt: reservation.updatedAt,
+      label: `visual-attempt-${String(reservation.attempt)}-${reservation.status}.json`,
     });
     return ArtifactRefSchema.parse({
       id: createArtifactId(),
@@ -3052,16 +4345,25 @@ export class WorkflowService {
       digest: blob.digest,
       producedBy: "orchestrator",
       evidenceIds: [],
-      createdAt: input.timestamp,
+      createdAt: reservation.updatedAt,
       metadata: {
-        adapter: "visual-attempt-reservation-v2",
+        adapter: "visual-attempt-reservation-v3",
         reviewPacketId: input.packet.id,
         visualLineageId: visualLineageId(input.packet),
         headSha: input.packet.headSha,
         diffDigest: input.packet.diffDigest,
-        submissionIdentity: input.submissionIdentity,
-        visualComparisonAttempt: input.attempt,
-        reservationStatus: input.status,
+        submissionIdentity: reservation.submissionIdentity,
+        visualComparisonAttempt: reservation.attempt,
+        reservationStatus: reservation.status,
+        ownerToken: reservation.ownerToken,
+        reservedAt: reservation.reservedAt,
+        updatedAt: reservation.updatedAt,
+        ...(reservation.reportArtifactId === undefined
+          ? {}
+          : { reportArtifactId: reservation.reportArtifactId }),
+        ...(reservation.reportDigest === undefined
+          ? {}
+          : { reportDigest: reservation.reportDigest }),
       },
     });
   }
@@ -3153,7 +4455,7 @@ export class WorkflowService {
     const timestamp = this.now();
     const packet = reviewPacketFromRun(run);
     if (packet === undefined) throw new Error("A current implementation review packet is required");
-    await assertReviewPacketFresh(run);
+    await assertReviewPacketFresh(run, this.dependencies.artifactStore, this.metrics);
     const submissions = await this.latestWorkflowSubmissions(run);
     const contracts = submissions.get("contracts");
     const implementation = submissions.get("implementation");
@@ -3326,10 +4628,69 @@ export class WorkflowService {
       ],
     });
     assertCurrentPrReportV2(report);
+    const { jsonArtifact, markdownArtifact, runtimeArtifact } = await this.writePrReportArtifacts({
+      run,
+      report,
+      reportIntent: "ready",
+      timestamp,
+      metadata: {},
+    });
+
+    await this.dependencies.runStore.save(
+      {
+        ...run,
+        revision: run.revision + 1,
+        updatedAt: timestamp,
+        artifacts: [
+          ...run.artifacts,
+          jsonArtifact,
+          markdownArtifact,
+          ...(runtimeArtifact === undefined ? [] : [runtimeArtifact]),
+        ],
+      },
+      run.revision,
+    );
+    await this.completeStage(run.id, "report", [jsonArtifact.id, markdownArtifact.id]);
+  }
+
+  private async writePrReportArtifacts(input: {
+    run: RunManifest;
+    report: PrReportV2;
+    reportIntent: WorkflowReportIntent;
+    timestamp: string;
+    metadata: Record<string, unknown>;
+  }): Promise<{
+    jsonArtifact: ArtifactRef;
+    markdownArtifact: ArtifactRef;
+    runtimeArtifact?: ArtifactRef;
+  }> {
+    const report = PrReportV2Schema.parse(input.report);
+    assertCurrentPrReportV2(report);
+    if (report.schemaVersion !== "pr-report-v2.1" || report.runId !== input.run.id) {
+      throw new Error("Current PR report persistence requires a Run-bound pr-report-v2.1");
+    }
+    if (
+      (input.reportIntent === "ready" && report.decision !== "ready") ||
+      (input.reportIntent === "blocked-diagnostic" && report.decision !== "blocked")
+    ) {
+      throw new Error("PR report intent and decision must agree before persistence");
+    }
+
+    const bindingMetadata =
+      report.binding === undefined
+        ? {}
+        : {
+            reviewPacketId: report.binding.reviewPacketId,
+            headSha: report.binding.headSha,
+            diffDigest: report.binding.diffDigest,
+            ...(report.visual.reportArtifactId === undefined
+              ? {}
+              : { visualReportArtifactId: report.visual.reportArtifactId }),
+          };
     const jsonBlob = await this.dependencies.artifactStore.writeBlob({
       content: Buffer.from(`${JSON.stringify(report, null, 2)}\n`, "utf8"),
       mediaType: "application/json",
-      storedAt: timestamp,
+      storedAt: input.timestamp,
       label: "pr-report-v2.1.json",
     });
     const jsonArtifact = ArtifactRefSchema.parse({
@@ -3340,23 +4701,20 @@ export class WorkflowService {
       digest: jsonBlob.digest,
       producedBy: "orchestrator",
       evidenceIds: [],
-      createdAt: timestamp,
+      createdAt: input.timestamp,
       metadata: {
+        ...input.metadata,
         adapter: "pr-report-v2",
         reportKind: "pr-report-v2-json",
         reportSchemaVersion: "pr-report-v2.1",
-        reportIntent: "ready",
-        decision: "ready",
-        reviewPacketId: packet.id,
-        headSha: packet.headSha,
-        diffDigest: packet.diffDigest,
+        decision: report.decision,
+        ...bindingMetadata,
       },
     });
-    const markdown = renderPrReportV2Markdown(report);
     const markdownBlob = await this.dependencies.artifactStore.writeBlob({
-      content: Buffer.from(markdown, "utf8"),
+      content: Buffer.from(renderPrReportV2Markdown(report), "utf8"),
       mediaType: "text/markdown",
-      storedAt: timestamp,
+      storedAt: input.timestamp,
       label: "pr-report.md",
     });
     const markdownArtifact = ArtifactRefSchema.parse({
@@ -3367,33 +4725,59 @@ export class WorkflowService {
       digest: markdownBlob.digest,
       producedBy: "orchestrator",
       evidenceIds: [],
-      createdAt: timestamp,
+      createdAt: input.timestamp,
       metadata: {
+        ...input.metadata,
         adapter: "pr-report-v2",
         ...WorkflowReportMetadataSchema.parse({
           reportKind: "pr-body-markdown",
-          reportIntent: "ready",
-          decision: "ready",
+          reportIntent: input.reportIntent,
+          decision: report.decision,
         }),
         locale: "ko",
-        reviewPacketId: packet.id,
-        headSha: packet.headSha,
-        diffDigest: packet.diffDigest,
         reportSchemaVersion: "pr-report-v2.1",
         reportJsonArtifactId: jsonArtifact.id,
+        ...bindingMetadata,
       },
     });
-
-    await this.dependencies.runStore.save(
-      {
-        ...run,
-        revision: run.revision + 1,
-        updatedAt: timestamp,
-        artifacts: [...run.artifacts, jsonArtifact, markdownArtifact],
-      },
-      run.revision,
+    const runtimeArtifact = await this.writeRuntimePerformanceArtifact(
+      input.run.id,
+      jsonBlob.digest,
+      input.timestamp,
     );
-    await this.completeStage(run.id, "report", [jsonArtifact.id, markdownArtifact.id]);
+    return {
+      jsonArtifact,
+      markdownArtifact,
+      ...(runtimeArtifact === undefined ? {} : { runtimeArtifact }),
+    };
+  }
+
+  private async writeRuntimePerformanceArtifact(
+    runId: string,
+    fixtureDigest: Sha256Digest,
+    timestamp: string,
+  ): Promise<ArtifactRef | undefined> {
+    if (!(this.metrics instanceof RuntimeMetricsRecorder)) return undefined;
+    const blob = await this.dependencies.artifactStore.writeBlob({
+      content: Buffer.from(
+        `${JSON.stringify(this.metrics.snapshot({ runId, fixtureDigest, collectedAt: timestamp }), null, 2)}\n`,
+        "utf8",
+      ),
+      mediaType: "application/json",
+      storedAt: timestamp,
+      label: "runtime-performance-v1.json",
+    });
+    return ArtifactRefSchema.parse({
+      id: createArtifactId(),
+      kind: "agent-result-report",
+      uri: blob.uri,
+      mediaType: "application/json",
+      digest: blob.digest,
+      producedBy: "orchestrator",
+      evidenceIds: [],
+      createdAt: timestamp,
+      metadata: { adapter: "runtime-performance-v1", reportKind: "runtime-performance-v1" },
+    });
   }
 
   private async featureTestCountForRun(
@@ -3449,9 +4833,42 @@ export class WorkflowService {
     const implementation = submissions.get("implementation");
     const rawPacket = reviewPacketFromRun(run);
     let packet = rawPacket;
-    if (packet !== undefined) {
+    let terminalVisualArtifact: ArtifactRef | undefined;
+    if (blocker.code === "VISUAL_REVIEW_THRESHOLD_NOT_MET") {
+      const checkpoint = stage(run, "implementation").checkpoint;
+      const terminalPacket = ImplementationReviewPacketSchema.safeParse(
+        checkpoint?.data["reviewPacket"],
+      );
+      const reportArtifactId = checkpoint?.data["visualReportArtifactId"];
+      const reportDigest = checkpoint?.data["visualReportDigest"];
+      if (
+        checkpoint?.name !== "visual-threshold-not-met" ||
+        !terminalPacket.success ||
+        typeof reportArtifactId !== "string" ||
+        typeof reportDigest !== "string"
+      ) {
+        throw new Error(
+          "VISUAL_TERMINAL_REPORT_BINDING_INVALID: terminal packet and visual report identity are required",
+        );
+      }
+      terminalVisualArtifact = run.artifacts.find(
+        (artifact) => artifact.id === reportArtifactId && artifact.kind === "visual-report",
+      );
+      if (
+        terminalVisualArtifact === undefined ||
+        terminalVisualArtifact.digest !== reportDigest ||
+        terminalVisualArtifact.metadata["reviewPacketId"] !== terminalPacket.data.id ||
+        terminalVisualArtifact.metadata["headSha"] !== terminalPacket.data.headSha ||
+        terminalVisualArtifact.metadata["diffDigest"] !== terminalPacket.data.diffDigest
+      ) {
+        throw new Error(
+          "VISUAL_TERMINAL_REPORT_BINDING_INVALID: the exact terminal visual report is unavailable or stale",
+        );
+      }
+      packet = terminalPacket.data;
+    } else if (packet !== undefined) {
       try {
-        await assertReviewPacketFresh(run);
+        await assertReviewPacketFresh(run, this.dependencies.artifactStore, this.metrics);
       } catch {
         packet = undefined;
       }
@@ -3462,7 +4879,9 @@ export class WorkflowService {
         packet !== undefined &&
         submission.reviewPacketId === packet.id,
     );
-    const visualArtifact = packet === undefined ? undefined : currentVisualReport(run, packet.id);
+    const visualArtifact =
+      terminalVisualArtifact ??
+      (packet === undefined ? undefined : currentVisualReport(run, packet.id));
     let visualReport: Record<string, unknown> | undefined;
     if (visualArtifact !== undefined) {
       try {
@@ -4164,6 +5583,15 @@ function diagnosticPublicationUncertainResult(reportArtifact: ArtifactRef, statu
 }
 
 function blockedDiagnosticReportKey(run: RunManifest, blocker: WorkflowBlocker): string {
+  if (blocker.code === "VISUAL_REVIEW_THRESHOLD_NOT_MET") {
+    const terminalIdentity = stage(run, blocker.stage).checkpoint?.data["visualTerminalIdentity"];
+    if (typeof terminalIdentity !== "string") {
+      throw new Error(
+        "VISUAL_TERMINAL_IDENTITY_MISSING: terminal visual blockers require a persisted identity",
+      );
+    }
+    return `${blocker.stage}:${blocker.code}:${terminalIdentity}`;
+  }
   return `${blocker.stage}:${stage(run, blocker.stage).attempt}:${blocker.code}`;
 }
 
@@ -4544,6 +5972,7 @@ const KNOWN_DURABLE_BLOCKER_CODES = new Set([
   "ARCHIVE_FAILED",
   "ARCHIVE_UNEXPECTED_ERROR",
   "LEGACY_API_METHOD_UNKNOWN",
+  "VISUAL_REVIEW_THRESHOLD_NOT_MET",
 ]);
 
 function canonicalDurableBlockerCode(kind: WorkflowBlocker["kind"], rawCode: string): string {
@@ -4552,6 +5981,7 @@ function canonicalDurableBlockerCode(kind: WorkflowBlocker["kind"], rawCode: str
 
 function blockerKindForStageError(stageName: RunStageName, code: string): WorkflowBlocker["kind"] {
   if (code === "LEGACY_API_METHOD_UNKNOWN") return "missing-input";
+  if (code === "VISUAL_REVIEW_THRESHOLD_NOT_MET") return "verification";
   if (/UNEXPECTED/.test(code)) return "unexpected";
   if (code === "WORKFLOW_BLOCKED") return "unexpected";
   if (code === "REVIEW_CHANGES_REQUESTED") return "unexpected";
@@ -4593,6 +6023,9 @@ function genericUnblockAction(
   kind: WorkflowBlocker["kind"],
   code?: string,
 ): string {
+  if (code === "VISUAL_REVIEW_THRESHOLD_NOT_MET") {
+    return "Inspect the failed 92% visual comparison in the draft, correct the implementation or evidence source, and start a new approved Run for further work.";
+  }
   if (code === "LEGACY_API_METHOD_UNKNOWN") {
     return "Capture scoped runtime network evidence for the unresolved calls and submit it to this same Run to resume intake.";
   }
@@ -4682,17 +6115,31 @@ function deliveryPolicyForRun(
 }
 
 function countIntakeRequirements(text: string): number {
-  const explicitLines = text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => /^(?:[-*+] |\d+[.)] )/.test(line)).length;
-  if (explicitLines > 0) return Math.min(explicitLines, 50);
+  return countIntakeRequirementsFromTexts([text]);
+}
 
-  const sentences = text
-    .split(/[.!?\n]+/)
-    .map((sentence) => sentence.trim())
-    .filter((sentence) => sentence.length >= 3).length;
-  return Math.max(1, Math.min(sentences, 50));
+function countIntakeRequirementsFromTexts(texts: readonly string[]): number {
+  let explicitLines = 0;
+  for (const text of texts) {
+    for (const line of text.split(/\r?\n/)) {
+      if (/^(?:[-*+] |\d+[.)] )/.test(line.trim())) {
+        explicitLines += 1;
+        if (explicitLines === 50) return 50;
+      }
+    }
+  }
+  if (explicitLines > 0) return explicitLines;
+
+  let sentences = 0;
+  for (const text of texts) {
+    for (const sentence of text.split(/[.!?\n]+/)) {
+      if (sentence.trim().length >= 3) {
+        sentences += 1;
+        if (sentences === 50) return 50;
+      }
+    }
+  }
+  return Math.max(1, sentences);
 }
 
 function requiredValidationsForRun(scope: WorkflowScope, profile: DeliveryProfile): string[] {
@@ -4715,7 +6162,110 @@ function requiredValidationsForRun(scope: WorkflowScope, profile: DeliveryProfil
   return [...validations];
 }
 
-function resumeContextForRun(run: RunManifest): WorkflowStatus["resumeContext"] {
+type WorkflowActionStatusCommon = Omit<WorkflowActionStatus, "view" | "stages">;
+
+function buildCommonStatusProjection(
+  common: WorkflowActionStatusCommon,
+): WorkflowActionStatusCommon {
+  return common;
+}
+
+function buildActionStatusProjection(
+  common: WorkflowActionStatusCommon,
+  run: RunManifest,
+): WorkflowActionStatus {
+  return WorkflowActionStatusSchema.parse({
+    view: "action",
+    ...common,
+    stages: run.stages.map((item) => ({ name: item.name, status: item.status })),
+  });
+}
+
+function buildCheckpointStatusProjection(
+  common: WorkflowActionStatusCommon,
+  run: RunManifest,
+): WorkflowCheckpointStatus {
+  return WorkflowCheckpointStatusSchema.parse({
+    view: "checkpoint",
+    ...common,
+    stages: run.stages.map((item) => ({
+      name: item.name,
+      status: item.status,
+      ...(item.checkpoint === undefined ? {} : { checkpoint: item.checkpoint.name }),
+    })),
+    resumeContext: boundedResumeContextForRun(run),
+  });
+}
+
+function buildDetailStatusProjection(
+  common: WorkflowActionStatusCommon,
+  run: RunManifest,
+  scope: WorkflowScope,
+  deliveryProfile: DeliveryProfile,
+  legacyInventory: WorkflowDetailStatus["legacyInventory"],
+): WorkflowDetailStatus {
+  const { deliveryProfile: _deliverySummary, ...shared } = common;
+  return WorkflowDetailStatusSchema.parse({
+    view: "detail",
+    ...shared,
+    scope,
+    deliveryProfile,
+    stages: run.stages.map((item) => ({
+      name: item.name,
+      status: item.status,
+      ...(item.name === "implementation" && item.checkpoint !== undefined
+        ? { checkpoint: item.checkpoint.name }
+        : {}),
+    })),
+    ...(legacyInventory === undefined ? {} : { legacyInventory }),
+    resumeContext: resumeContextForRun(run),
+  });
+}
+
+function boundedResumeContextForRun(run: RunManifest): WorkflowResumeContext {
+  const goal = run.evidence
+    .slice(0, 32)
+    .filter((item) => item.metadata["itemType"] === "instruction")
+    .flatMap((item) => (item.excerpt === undefined ? [] : [item.excerpt]))
+    .join("\n\n")
+    .slice(0, 4_000)
+    .trim();
+  const artifactWindow =
+    run.artifacts.length <= 200
+      ? run.artifacts
+      : [...run.artifacts.slice(0, 50), ...run.artifacts.slice(-150)];
+  const evidencePaths = [
+    ...new Set(
+      artifactWindow.flatMap((artifact) => {
+        const projectPath = artifact.metadata["projectRelativePath"];
+        return typeof projectPath === "string" &&
+          projectPath.length <= 1_000 &&
+          isSafeDurableEvidencePath(projectPath)
+          ? [projectPath]
+          : [];
+      }),
+    ),
+  ].slice(-200);
+  const submissions: WorkflowResumeContext["submissions"] = [];
+  for (let index = run.artifacts.length - 1; index >= 0 && submissions.length < 16; index -= 1) {
+    const artifact = run.artifacts[index];
+    const kind = artifact?.metadata["workflowSubmissionKind"];
+    const summary = artifact?.metadata["summary"];
+    const outcome = artifact?.metadata["status"] ?? artifact?.metadata["verdict"];
+    if (typeof kind === "string" && typeof summary === "string" && typeof outcome === "string") {
+      submissions.push({ kind, summary: summary.slice(0, 500), outcome });
+    }
+  }
+  submissions.reverse();
+
+  return WorkflowResumeContextSchema.parse({
+    goal: goal === "" ? "Continue the recorded spec-to-pr Run." : goal,
+    evidencePaths,
+    submissions,
+  });
+}
+
+function resumeContextForRun(run: RunManifest): WorkflowResumeContext {
   const goal = run.evidence
     .filter((item) => item.metadata["itemType"] === "instruction")
     .map((item) => item.excerpt)
@@ -4737,10 +6287,7 @@ function resumeContextForRun(run: RunManifest): WorkflowStatus["resumeContext"] 
     allEvidencePaths.length <= 200
       ? allEvidencePaths
       : [...allEvidencePaths.slice(0, 50), ...allEvidencePaths.slice(-150)];
-  const submissionsByKind = new Map<
-    string,
-    WorkflowStatus["resumeContext"]["submissions"][number]
-  >();
+  const submissionsByKind = new Map<string, WorkflowResumeContext["submissions"][number]>();
   run.artifacts.forEach((artifact) => {
     const kind = artifact.metadata["workflowSubmissionKind"];
     const summary = artifact.metadata["summary"];
@@ -4768,7 +6315,13 @@ function stage(run: RunManifest, name: RunStageName): StageState {
   return value;
 }
 
-function actionsForRun(run: RunManifest, scope: WorkflowScope, profile: DeliveryProfile) {
+async function actionsForRun(
+  run: RunManifest,
+  scope: WorkflowScope,
+  profile: DeliveryProfile,
+  nowIso: string,
+  artifactStore: ArtifactBlobStore,
+) {
   const intake = stage(run, "intake");
   if (intake.status !== "passed") {
     return intake.status === "blocked" && intake.error?.code === "LEGACY_API_METHOD_UNKNOWN"
@@ -4790,16 +6343,20 @@ function actionsForRun(run: RunManifest, scope: WorkflowScope, profile: Delivery
     return [WorkflowActionSchema.parse({ kind: "prepare-contracts", runId: run.id })];
   }
   if (stage(run, "contracts").status === "passed" && isActionable(stage(run, "implementation"))) {
-    const visualRepair = activeVisualRepairAction(run);
+    const visualRepair = await activeVisualRepairAction(run, artifactStore);
     if (visualRepair !== undefined) {
       return [
         WorkflowActionSchema.parse({
           kind: "implementation-repair",
+          repairEvidenceVersion: visualRepair.repairEvidenceVersion,
           runId: run.id,
           reviewPacketId: visualRepair.sourcePacketId,
           lineageId: visualRepair.lineageId,
           nextAttempt: visualRepair.nextAttempt,
           failedTargets: visualRepair.failedTargets,
+          ...(visualRepair.repairEvidenceVersion === "v2"
+            ? { repairEvidenceArtifactId: visualRepair.repairEvidenceArtifactId }
+            : {}),
         }),
       ];
     }
@@ -4819,21 +6376,22 @@ function actionsForRun(run: RunManifest, scope: WorkflowScope, profile: Delivery
   if (packet === undefined) {
     throw new Error(`Run ${run.id} has no implementation review packet`);
   }
+  const evidenceIndex = currentReusablePacketEvidence(run, packet);
 
   const actions = [];
   const currentVisual = currentVisualReport(run, packet.id);
   if (
     profile.requirements.visualComparison &&
     currentVisual?.metadata["visualStatus"] !== "passed" &&
-    !hasInProgressVisualAttempt(run, packet) &&
-    visualComparisonAttemptCount(run, packet) < MAX_VISUAL_REPAIR_ATTEMPTS
+    !hasInProgressVisualAttempt(run, packet, nowIso) &&
+    committedVisualComparisonAttemptCount(run, packet, nowIso) < MAX_VISUAL_REPAIR_ATTEMPTS
   ) {
     actions.push(
       WorkflowActionSchema.parse({
         kind: "compare-visuals",
         runId: run.id,
         reviewPacketId: packet.id,
-        attempt: visualComparisonAttemptCount(run, packet) + 1,
+        attempt: committedVisualComparisonAttemptCount(run, packet, nowIso) + 1,
       }),
     );
   }
@@ -4843,6 +6401,7 @@ function actionsForRun(run: RunManifest, scope: WorkflowScope, profile: Delivery
         kind: "review-functional",
         runId: run.id,
         reviewPacketId: packet.id,
+        ...(evidenceIndex.length === 0 ? {} : { evidenceIndex }),
       }),
     );
   }
@@ -4850,15 +6409,14 @@ function actionsForRun(run: RunManifest, scope: WorkflowScope, profile: Delivery
     scope.ui &&
     isActionable(stage(run, "design-review")) &&
     (parallelReviewers || stage(run, "functional-review").status === "passed") &&
-    (!profile.requirements.visualComparison ||
-      currentVisual?.metadata["visualStatus"] === "passed" ||
-      visualComparisonAttemptCount(run, packet) >= MAX_VISUAL_REPAIR_ATTEMPTS)
+    (!profile.requirements.visualComparison || currentVisual?.metadata["visualStatus"] === "passed")
   ) {
     actions.push(
       WorkflowActionSchema.parse({
         kind: "review-design",
         runId: run.id,
         reviewPacketId: packet.id,
+        ...(evidenceIndex.length === 0 ? {} : { evidenceIndex }),
       }),
     );
   }
@@ -4893,9 +6451,58 @@ function stageForSubmission(
   return submission.kind;
 }
 
+type ReviewSubmissionFence = {
+  reviewPacketId: string;
+  headSha: string;
+  diffDigest: string;
+};
+
+function reviewSubmissionFence(run: RunManifest): ReviewSubmissionFence {
+  const packet = reviewPacketFromRun(run);
+  if (packet === undefined) {
+    throw new Error("REVIEW_PACKET_STALE: the implementation review packet is missing");
+  }
+  return {
+    reviewPacketId: packet.id,
+    headSha: packet.headSha,
+    diffDigest: packet.diffDigest,
+  };
+}
+
+function assertCurrentReviewFence(
+  run: RunManifest,
+  fence: ReviewSubmissionFence,
+  reviewStage: "functional-review" | "design-review",
+): void {
+  const implementation = stage(run, "implementation");
+  if (implementation.checkpoint?.name === "visual-threshold-not-met") {
+    throw new Error(
+      "REVIEW_PACKET_STALE: visual threshold terminalization invalidated the reviewer result",
+    );
+  }
+  const packet = reviewPacketFromRun(run);
+  if (
+    packet === undefined ||
+    packet.id !== fence.reviewPacketId ||
+    packet.headSha !== fence.headSha ||
+    packet.diffDigest !== fence.diffDigest
+  ) {
+    throw new Error(
+      "REVIEW_PACKET_STALE: the current implementation packet, head, or diff no longer matches the reviewer result",
+    );
+  }
+  if (implementation.status !== "passed") {
+    throw new Error("REVIEW_PACKET_STALE: implementation is no longer passed for this review");
+  }
+  if (!isActionable(stage(run, reviewStage))) {
+    throw new Error(`REVIEW_PACKET_STALE: ${reviewStage} is no longer actionable`);
+  }
+}
+
 function assertSubmissionPrerequisites(
   run: RunManifest,
   submission: StandardWorkflowSubmission,
+  nowIso: string,
 ): void {
   if (stage(run, "intake").status !== "passed") {
     throw new Error("The intake stage must pass before downstream evidence can be submitted");
@@ -4903,7 +6510,7 @@ function assertSubmissionPrerequisites(
   const profile = deliveryProfileFromRun(run);
   if (submission.kind === "design-review") {
     if (submission.verdict === "approved" && profile.requirements.visualComparison) {
-      assertCurrentVisualComparisonPassed(run, submission.reviewPacketId);
+      assertCurrentVisualComparisonPassed(run, submission.reviewPacketId, nowIso);
     }
     const scope = scopeFromRun(run);
     const parallelReviewers =
@@ -5325,10 +6932,69 @@ function contractRequirementIds(run: RunManifest): Set<string> {
 }
 
 function reviewPacketFromRun(run: RunManifest): ImplementationReviewPacket | undefined {
-  const parsed = ImplementationReviewPacketSchema.safeParse(
+  return parseImplementationReviewPacket(
     stage(run, "implementation").checkpoint?.data["reviewPacket"],
   );
-  return parsed.success ? parsed.data : undefined;
+}
+
+function reviewPacketByIdFromRun(
+  run: RunManifest,
+  reviewPacketId: string,
+): ImplementationReviewPacket | undefined {
+  const current = reviewPacketFromRun(run);
+  if (current?.id === reviewPacketId) return current;
+  for (const artifact of run.artifacts) {
+    const parsed = parseImplementationReviewPacket(artifact.metadata["reviewPacket"]);
+    if (parsed?.id === reviewPacketId) return parsed;
+  }
+  return undefined;
+}
+
+function parseImplementationReviewPacket(raw: unknown): ImplementationReviewPacket | undefined {
+  const parsed = ImplementationReviewPacketSchema.safeParse(raw);
+  if (parsed.success) return parsed.data;
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
+  const withoutEvidenceIndex = { ...(raw as Record<string, unknown>) };
+  delete withoutEvidenceIndex["evidenceIndex"];
+  const sanitized = ImplementationReviewPacketSchema.safeParse(withoutEvidenceIndex);
+  return sanitized.success ? sanitized.data : undefined;
+}
+
+function currentReusablePacketEvidence(
+  run: RunManifest,
+  packet: ImplementationReviewPacket,
+): PacketEvidenceEntry[] {
+  return (packet.evidenceIndex ?? []).filter((entry) => {
+    const artifact = run.artifacts.find((candidate) => candidate.id === entry.artifactId);
+    if (
+      artifact === undefined ||
+      artifact.metadata["reviewPacketId"] !== packet.id ||
+      artifact.metadata["headSha"] !== packet.headSha ||
+      artifact.metadata["diffDigest"] !== packet.diffDigest
+    ) {
+      return false;
+    }
+    const command = artifact.metadata["evidenceCommand"];
+    const selector = artifact.metadata["evidenceSelector"];
+    const adapterVersion = artifact.metadata["adapter"];
+    if (
+      typeof command !== "string" ||
+      (selector !== undefined && typeof selector !== "string") ||
+      typeof adapterVersion !== "string"
+    ) {
+      return false;
+    }
+    const expected = PacketEvidenceEntrySchema.safeParse({
+      command,
+      ...(selector === undefined ? {} : { selector }),
+      resultDigest: artifact.digest,
+      artifactId: artifact.id,
+      headSha: packet.headSha,
+      diffDigest: packet.diffDigest,
+      adapterVersion,
+    });
+    return expected.success && reusablePacketEvidence([entry], expected.data) !== undefined;
+  });
 }
 
 function legacyFeatureKeysFromRun(run: RunManifest): Set<string> {
@@ -5385,11 +7051,118 @@ function visualTargetsFromRun(run: RunManifest): VisualTargetManifest[] {
   for (const artifact of [...run.artifacts].reverse()) {
     if (artifact.metadata["workflowSubmissionKind"] !== expectedSubmissionKind) continue;
     const parsed = z
-      .array(VisualTargetManifestSchema)
+      .array(VisualTargetManifestCompatibilitySchema)
       .safeParse(artifact.metadata["visualTargets"]);
-    if (parsed.success && parsed.data.length > 0) return parsed.data;
+    if (parsed.success && parsed.data.length > 0) {
+      return parsed.data.map(normalizeVisualTargetManifest);
+    }
   }
   return [];
+}
+
+function visualBaselineArtifacts(run: RunManifest, targets: VisualTargetManifest[]): ArtifactRef[] {
+  const byPath = new Map<string, ArtifactRef>();
+  for (const target of targets) {
+    const expectedSubmissionKind = target.baselineKind === "figma" ? "figma-bundle" : "contracts";
+    const artifact = [...run.artifacts]
+      .reverse()
+      .find(
+        (candidate) =>
+          candidate.metadata["projectRelativePath"] === target.baselinePath &&
+          candidate.metadata["workflowSubmissionKind"] === expectedSubmissionKind,
+      );
+    if (artifact === undefined) {
+      throw new Error(
+        `VISUAL_BASELINE_ISOLATION_INVALID: missing immutable baseline ${target.baselinePath}`,
+      );
+    }
+    byPath.set(target.baselinePath, artifact);
+  }
+  return [...byPath.values()];
+}
+
+function baselineIsolationSourceInputsFromRun(
+  run: RunManifest,
+  packet: ImplementationReviewPacket,
+): {
+  implementationSourceFiles: string[];
+  designSystemSourceFiles: string[];
+  browserBundlePaths: string[];
+  registeredExcludedPaths: string[];
+} {
+  const implementationReport = [...run.artifacts].reverse().find((artifact) => {
+    if (
+      artifact.kind !== "agent-result-report" ||
+      artifact.metadata["workflowSubmissionKind"] !== "implementation"
+    ) {
+      return false;
+    }
+    const parsed = ImplementationReviewPacketSchema.safeParse(artifact.metadata["reviewPacket"]);
+    return parsed.success && parsed.data.id === packet.id;
+  });
+  if (implementationReport === undefined) {
+    throw new Error(
+      "VISUAL_BASELINE_ISOLATION_INVALID: current implementation declaration is missing",
+    );
+  }
+  const implementationSourceFiles = z
+    .array(z.string())
+    .safeParse(implementationReport.metadata["changedFiles"]);
+  if (!implementationSourceFiles.success) {
+    throw new Error(
+      "VISUAL_BASELINE_ISOLATION_INVALID: implementation source declaration is invalid",
+    );
+  }
+  const designSystemEvidence = z
+    .object({
+      usages: z.array(z.object({ sourceFile: z.string() }).passthrough()),
+    })
+    .passthrough()
+    .safeParse(implementationReport.metadata["designSystemEvidence"]);
+  const designSystemSourceFiles = designSystemEvidence.success
+    ? designSystemEvidence.data.usages.map((usage) => usage.sourceFile)
+    : [];
+  const evidenceArtifactIds = new Set(
+    z.array(z.string()).catch([]).parse(implementationReport.metadata["evidenceArtifactIds"]),
+  );
+  const browserBundlePaths = run.artifacts.flatMap((artifact) => {
+    const projectRelativePath = artifact.metadata["projectRelativePath"];
+    return evidenceArtifactIds.has(artifact.id) &&
+      typeof projectRelativePath === "string" &&
+      /\.(?:js|mjs|cjs|css)$/i.test(projectRelativePath)
+      ? [projectRelativePath]
+      : [];
+  });
+  const browserBundlePathSet = new Set(browserBundlePaths);
+  const registeredEvidencePaths = run.artifacts.flatMap((artifact) => {
+    const projectRelativePath = artifact.metadata["projectRelativePath"];
+    return evidenceArtifactIds.has(artifact.id) &&
+      typeof projectRelativePath === "string" &&
+      !browserBundlePathSet.has(projectRelativePath)
+      ? [projectRelativePath]
+      : [];
+  });
+  const mockDataEvidence = z
+    .object({
+      manifestPath: z.string(),
+      fixturePaths: z.array(z.string()).optional(),
+      fixtures: z.array(z.object({ path: z.string() }).passthrough()).optional(),
+    })
+    .passthrough()
+    .safeParse(implementationReport.metadata["mockDataEvidence"]);
+  const registeredMockPaths = mockDataEvidence.success
+    ? [
+        mockDataEvidence.data.manifestPath,
+        ...(mockDataEvidence.data.fixturePaths ?? []),
+        ...(mockDataEvidence.data.fixtures?.map((fixture) => fixture.path) ?? []),
+      ]
+    : [];
+  return {
+    implementationSourceFiles: implementationSourceFiles.data,
+    designSystemSourceFiles,
+    browserBundlePaths,
+    registeredExcludedPaths: [...new Set([...registeredEvidencePaths, ...registeredMockPaths])],
+  };
 }
 
 function figmaDesignMappingFromRun(run: RunManifest): FigmaDesignMapping | undefined {
@@ -5399,6 +7172,19 @@ function figmaDesignMappingFromRun(run: RunManifest): FigmaDesignMapping | undef
     if (parsed.success) return parsed.data;
   }
   return undefined;
+}
+
+function figmaStateContractsFromRun(run: RunManifest): FigmaStateContract[] {
+  for (const artifact of [...run.artifacts].reverse()) {
+    if (artifact.metadata["workflowSubmissionKind"] !== "figma-bundle") continue;
+    const parsed = z
+      .array(FigmaStateContractSchema)
+      .min(1)
+      .max(50)
+      .safeParse(artifact.metadata["stateContracts"]);
+    if (parsed.success) return parsed.data;
+  }
+  return [];
 }
 
 function figmaNodeIdFromUrl(fileUrl: string): string | undefined {
@@ -5423,107 +7209,327 @@ function assertFigmaImplementationBindings(
       `MOCK_FIXTURE_ID_MISMATCH: missing fixture IDs: ${missingFixtures.join(", ") || "none"}; unused fixture IDs: ${unusedFixtures.join(", ") || "none"}`,
     );
   }
+  const stateContracts = figmaStateContractsFromRun(run);
+  const stateContractsByTarget = new Map(
+    stateContracts.map((contract) => [contract.targetId, contract]),
+  );
+  const invalidStateBindings = visualTargetsFromRun(run).filter((target) => {
+    const contract = stateContractsByTarget.get(target.targetId);
+    const fixture = namedFixtures.find((candidate) => candidate.id === target.fixture);
+    return (
+      contract === undefined ||
+      target.figmaCapture === undefined ||
+      contract.nodeId !== target.figmaCapture.nodeId ||
+      contract.state !== target.state ||
+      contract.fixtureId !== target.fixture ||
+      fixture?.stateContractDigest !== contract.digest
+    );
+  });
+  if (stateContracts.length !== targetFixtureIds.size || invalidStateBindings.length > 0) {
+    throw new Error(
+      `FIGMA_STATE_CONTRACT_INVALID: implementation fixtures must bind each target's fixture ID and state-contract digest; invalid targets: ${invalidStateBindings.map((target) => target.targetId).join(", ") || "none"}`,
+    );
+  }
 
   const mapping = figmaDesignMappingFromRun(run);
   if (mapping === undefined) {
     throw new Error("FIGMA_DESIGN_SYSTEM_EVIDENCE_INVALID: Figma design mapping is missing");
   }
-  const requiredMappings = new Map(
-    mapping.components
-      .filter((component) => component.resolution.kind !== "exception")
-      .map((component) => [component.figmaComponent, component]),
-  );
   const usages = submission.designSystemEvidence?.usages ?? [];
-  const usagesByComponent = new Map(usages.map((usage) => [usage.figmaComponent, usage]));
-  const missingUsages = [...requiredMappings].filter(
-    ([figmaComponent]) => !usagesByComponent.has(figmaComponent),
-  );
-  const unknownUsages = [...usagesByComponent].filter(
-    ([figmaComponent]) =>
-      !mapping.components.some((component) => component.figmaComponent === figmaComponent),
-  );
-  const mismatchedUsages = [...requiredMappings].filter(([figmaComponent, component]) => {
-    const usage = usagesByComponent.get(figmaComponent);
-    if (usage === undefined || usage.resolutionKind !== component.resolution.kind) return true;
-    if (component.resolution.kind === "component") {
-      return usage.importedExport !== component.resolution.exportName;
-    }
-    return component.resolution.kind !== "asset" || usage.assetPath !== component.resolution.path;
-  });
-  if (missingUsages.length > 0 || unknownUsages.length > 0 || mismatchedUsages.length > 0) {
-    throw new Error(
-      `FIGMA_DESIGN_SYSTEM_EVIDENCE_INVALID: missing: ${missingUsages.map(([name]) => name).join(", ") || "none"}; unknown: ${unknownUsages.map(([name]) => name).join(", ") || "none"}; mismatched: ${mismatchedUsages.map(([name]) => name).join(", ") || "none"}`,
-    );
-  }
+  assertExactFigmaImplementationBindings({ mapping, usages });
 }
 
 function visualLineageId(packet: ImplementationReviewPacket): string {
   return packet.visualLineageId ?? packet.id;
 }
 
-function activeVisualRepairAction(run: RunManifest):
+function assertRendererLineageMatchesCommittedAttempts(
+  run: RunManifest,
+  packet: ImplementationReviewPacket,
+  rendererLineageId: string,
+): void {
+  const lineageId = visualLineageId(packet);
+  for (const artifact of run.artifacts) {
+    if (artifact.kind !== "visual-report" || artifact.metadata["visualLineageId"] !== lineageId) {
+      continue;
+    }
+    const committedRendererLineageId = artifact.metadata["rendererLineageId"];
+    if (typeof committedRendererLineageId !== "string") {
+      throw rendererDriftError(
+        `committed attempt ${String(artifact.metadata["visualComparisonAttempt"])} is missing renderer lineage`,
+      );
+    }
+    if (committedRendererLineageId !== rendererLineageId) {
+      throw rendererDriftError(
+        `capture uses ${rendererLineageId}, committed attempts use ${committedRendererLineageId}`,
+      );
+    }
+  }
+}
+
+function rendererDriftError(reason: string): Error {
+  return new Error(`VISUAL_CAPTURE_RENDERER_DRIFT: ${reason}`);
+}
+
+async function activeVisualRepairAction(
+  run: RunManifest,
+  artifactStore: ArtifactBlobStore,
+): Promise<
   | {
+      repairEvidenceVersion: "v2";
+      sourcePacketId: string;
+      lineageId: string;
+      nextAttempt: 2 | 3;
+      failedTargets: Array<{ targetId: string; reviewMatchRatio: number }>;
+      repairEvidenceArtifactId: string;
+    }
+  | {
+      repairEvidenceVersion: "legacy-v1";
       sourcePacketId: string;
       lineageId: string;
       nextAttempt: 2 | 3;
       failedTargets: Array<{ targetId: string; reviewMatchRatio: number }>;
     }
-  | undefined {
+  | undefined
+> {
   if (stage(run, "implementation").error?.code !== "VISUAL_IMPLEMENTATION_REPAIR_REQUIRED") {
     return undefined;
   }
-  for (const artifact of [...run.artifacts].reverse()) {
+  const packet = reviewPacketFromRun(run);
+  if (packet === undefined) return undefined;
+  const lineageId = visualLineageId(packet);
+  const latest = await latestVisualLineageRecord(run, lineageId, artifactStore);
+  if (
+    latest === undefined ||
+    latest.outcome.status !== "repair-required" ||
+    latest.outcome.sourcePacketId !== packet.id ||
+    (latest.outcome.attempt !== 1 && latest.outcome.attempt !== 2)
+  ) {
+    return undefined;
+  }
+  const common = {
+    sourcePacketId: latest.outcome.sourcePacketId,
+    lineageId,
+    nextAttempt: (latest.outcome.attempt + 1) as 2 | 3,
+    failedTargets: latest.failedTargets,
+  };
+  if (latest.repairEvidenceVersion === "legacy-v1") {
+    return { ...common, repairEvidenceVersion: "legacy-v1" };
+  }
+  if (latest.repairEvidenceArtifactId === undefined) {
+    throw invalidVisualRepairEvidence("current v2 repair outcome has no bound evidence artifact");
+  }
+  return {
+    ...common,
+    repairEvidenceVersion: "v2",
+    repairEvidenceArtifactId: latest.repairEvidenceArtifactId,
+  };
+}
+
+type VisualLineageRecord = {
+  outcome: VisualLineageOutcome;
+  repairEvidenceVersion: "v2" | "legacy-v1";
+  repairEvidenceArtifactId?: string;
+  failedTargets: Array<{ targetId: string; reviewMatchRatio: number }>;
+};
+
+async function latestVisualLineageRecord(
+  run: RunManifest,
+  lineageId: string,
+  artifactStore: ArtifactBlobStore,
+): Promise<VisualLineageRecord | undefined> {
+  const records = await visualLineageRecords(run, lineageId, artifactStore);
+  let latest: VisualLineageOutcome | undefined;
+  try {
+    latest = latestVisualLineageOutcome(
+      records.map((record) => record.outcome),
+      lineageId,
+    );
+  } catch (error: unknown) {
+    throw invalidVisualRepairEvidence(
+      error instanceof Error ? error.message : "duplicate lineage outcome",
+    );
+  }
+  return records.find((record) => record.outcome === latest);
+}
+
+async function visualLineageRecords(
+  run: RunManifest,
+  lineageId: string,
+  artifactStore: ArtifactBlobStore,
+): Promise<VisualLineageRecord[]> {
+  const records: VisualLineageRecord[] = [];
+  for (const artifact of run.artifacts) {
+    const adapter = artifact.metadata["adapter"];
     if (
-      artifact.metadata["adapter"] !== "visual-repair-lineage-v1" ||
-      artifact.metadata["repairRequired"] !== true
+      adapter !== "visual-repair-lineage-v1" &&
+      adapter !== "visual-repair-lineage-v2" &&
+      adapter !== "visual-repair-evidence-v2"
     ) {
       continue;
     }
-    const sourcePacketId = artifact.metadata["sourcePacketId"];
-    const lineageId = artifact.metadata["visualLineageId"];
-    const attempt = artifact.metadata["visualLineageAttempt"];
-    const failedTargets = z
-      .array(
-        z
-          .object({
-            targetId: VisualTargetManifestSchema.shape.targetId,
-            reviewMatchRatio: z.number().min(0).max(1),
-          })
-          .strict(),
-      )
-      .min(1)
-      .max(50)
-      .safeParse(artifact.metadata["failedTargets"]);
-    if (
-      typeof sourcePacketId === "string" &&
-      typeof lineageId === "string" &&
-      (attempt === 1 || attempt === 2) &&
-      failedTargets.success
-    ) {
-      return {
-        sourcePacketId,
-        lineageId,
-        nextAttempt: (attempt + 1) as 2 | 3,
-        failedTargets: failedTargets.data,
-      };
+    if (artifact.metadata["visualLineageId"] !== lineageId) {
+      continue;
     }
+    const sourcePacketId = artifact.metadata["sourcePacketId"];
+    const attempt = artifact.metadata["visualLineageAttempt"];
+    if (typeof sourcePacketId !== "string" || (attempt !== 1 && attempt !== 2 && attempt !== 3)) {
+      throw invalidVisualRepairEvidence("current lineage metadata is malformed");
+    }
+    const failedTargets = CompactFailedVisualTargetsSchema.safeParse(
+      artifact.metadata["failedTargets"],
+    );
+    if (adapter === "visual-repair-lineage-v1") {
+      if (artifact.metadata["repairRequired"] === true && !failedTargets.success) {
+        throw invalidVisualRepairEvidence("legacy repair targets are malformed");
+      }
+      const status =
+        artifact.metadata["repairRequired"] === true
+          ? "repair-required"
+          : artifact.metadata["visualStatus"] === "passed"
+            ? "closed"
+            : "exhausted";
+      if (
+        (status === "repair-required" && attempt === 3) ||
+        (status === "exhausted" && attempt !== 3)
+      ) {
+        throw invalidVisualRepairEvidence("legacy outcome status does not match its attempt");
+      }
+      records.push({
+        outcome: { lineageId, sourcePacketId, attempt, status },
+        repairEvidenceVersion: "legacy-v1",
+        failedTargets: failedTargets.success ? failedTargets.data : [],
+      });
+      continue;
+    }
+
+    const status = artifact.metadata["visualLineageStatus"];
+    if (status !== "repair-required" && status !== "closed" && status !== "exhausted") {
+      throw invalidVisualRepairEvidence("current lineage status is malformed");
+    }
+    const sourcePacket = reviewPacketByIdFromRun(run, sourcePacketId);
+    if (sourcePacket === undefined || visualLineageId(sourcePacket) !== lineageId) {
+      throw invalidVisualRepairEvidence("source review packet is missing or outside the lineage");
+    }
+    const payload = await readVisualLineagePayload(artifactStore, artifact);
+    if (adapter === "visual-repair-evidence-v2") {
+      const parsed = VisualRepairEvidenceV2Schema.safeParse(payload);
+      const repairEvidenceArtifactId = artifact.metadata["repairEvidenceArtifactId"];
+      if (
+        !parsed.success ||
+        (status !== "repair-required" && status !== "exhausted") ||
+        (status === "repair-required" && attempt === 3) ||
+        (status === "exhausted" && attempt !== 3) ||
+        repairEvidenceArtifactId !== artifact.id ||
+        !failedTargets.success ||
+        parsed.data.runId !== run.id ||
+        parsed.data.lineageId !== lineageId ||
+        parsed.data.reviewPacketId !== sourcePacketId ||
+        parsed.data.headSha !== sourcePacket.headSha ||
+        artifact.metadata["headSha"] !== sourcePacket.headSha ||
+        parsed.data.rendererLineageId !== artifact.metadata["rendererLineageId"] ||
+        parsed.data.attempt !== attempt
+      ) {
+        throw invalidVisualRepairEvidence("rich evidence does not match its lineage metadata");
+      }
+      const payloadCompactTargets = CompactFailedVisualTargetsSchema.parse(
+        parsed.data.failedTargets.map((target) => ({
+          targetId: target.targetId,
+          reviewMatchRatio: target.metrics.reviewMatchRatio,
+        })),
+      );
+      if (JSON.stringify(payloadCompactTargets) !== JSON.stringify(failedTargets.data)) {
+        throw invalidVisualRepairEvidence("compact targets do not match rich evidence");
+      }
+      const artifactIds = new Set(run.artifacts.map((candidate) => candidate.id));
+      if (
+        parsed.data.failedTargets.some(
+          (target) =>
+            !artifactIds.has(target.diffArtifactId) || !artifactIds.has(target.overlayArtifactId),
+        )
+      ) {
+        throw invalidVisualRepairEvidence("rich evidence references missing visual artifacts");
+      }
+      records.push({
+        outcome: {
+          lineageId,
+          sourcePacketId,
+          attempt,
+          status,
+          repairEvidenceArtifactId,
+        },
+        repairEvidenceVersion: "v2",
+        repairEvidenceArtifactId,
+        failedTargets: failedTargets.data,
+      });
+      continue;
+    }
+
+    const parsed = VisualLineageOutcomeV2Schema.safeParse(payload);
+    if (
+      !parsed.success ||
+      status !== "closed" ||
+      parsed.data.runId !== run.id ||
+      parsed.data.lineageId !== lineageId ||
+      parsed.data.reviewPacketId !== sourcePacketId ||
+      parsed.data.headSha !== sourcePacket.headSha ||
+      artifact.metadata["headSha"] !== sourcePacket.headSha ||
+      parsed.data.rendererLineageId !== artifact.metadata["rendererLineageId"] ||
+      parsed.data.attempt !== attempt
+    ) {
+      throw invalidVisualRepairEvidence("closed outcome does not match its lineage metadata");
+    }
+    records.push({
+      outcome: { lineageId, sourcePacketId, attempt, status: "closed" },
+      repairEvidenceVersion: "v2",
+      failedTargets: [],
+    });
   }
-  return undefined;
+  return records;
 }
 
-function visualComparisonAttemptCount(
+async function readVisualLineagePayload(
+  artifactStore: ArtifactBlobStore,
+  artifact: ArtifactRef,
+): Promise<unknown> {
+  try {
+    return JSON.parse((await artifactStore.readContent(artifact.digest)).toString("utf8"));
+  } catch {
+    throw invalidVisualRepairEvidence("lineage artifact payload is unreadable");
+  }
+}
+
+function invalidVisualRepairEvidence(reason: string): Error {
+  return new Error(`VISUAL_REPAIR_EVIDENCE_INVALID: ${reason}`);
+}
+
+function committedVisualComparisonAttemptCount(
   run: RunManifest,
   packet: ImplementationReviewPacket,
+  nowIso: string,
 ): number {
   const reservations = visualAttemptReservations(run, visualLineageId(packet));
-  if (reservations.length > 0) return reservations.length;
-  return run.artifacts.filter(
-    (artifact) =>
-      artifact.kind === "visual-report" &&
-      (artifact.metadata["visualLineageId"] === visualLineageId(packet) ||
-        (artifact.metadata["visualLineageId"] === undefined &&
-          artifact.metadata["reviewPacketId"] === packet.id)),
-  ).length;
+  if (reservations.length > 0) {
+    return reduceVisualReservations(reservations, nowIso).committed.length;
+  }
+  const completedAttempts = new Set(
+    run.artifacts.flatMap((artifact) => {
+      const attempt = artifact.metadata["visualComparisonAttempt"];
+      return artifact.kind === "visual-report" &&
+        (artifact.metadata["visualLineageId"] === visualLineageId(packet) ||
+          (artifact.metadata["visualLineageId"] === undefined &&
+            artifact.metadata["reviewPacketId"] === packet.id)) &&
+        (attempt === 1 || attempt === 2 || attempt === 3)
+        ? [attempt]
+        : [];
+    }),
+  );
+  let count = 0;
+  for (const attempt of [1, 2, 3] as const) {
+    if (!completedAttempts.has(attempt)) break;
+    count += 1;
+  }
+  return count;
 }
 
 function currentVisualReport(run: RunManifest, reviewPacketId: string): ArtifactRef | undefined {
@@ -5541,62 +7547,169 @@ function currentVisualReport(run: RunManifest, reviewPacketId: string): Artifact
   );
 }
 
-type VisualAttemptReservationState = {
-  submissionIdentity: string;
-  attempt: 1 | 2 | 3;
-  status: "in-progress" | "completed" | "failed";
-};
-
 function visualAttemptReservations(
   run: RunManifest,
   lineageId: string,
-): VisualAttemptReservationState[] {
-  const byIdentity = new Map<string, VisualAttemptReservationState>();
+  adapter: "all" | "v3" = "all",
+): VisualAttemptReservationEvent[] {
+  const reservations: VisualAttemptReservationEvent[] = [];
+  const reportsByIdentity = new Map(
+    run.artifacts.flatMap((artifact) => {
+      const submissionIdentity = artifact.metadata["submissionIdentity"];
+      return artifact.kind === "visual-report" && typeof submissionIdentity === "string"
+        ? [[submissionIdentity, artifact] as const]
+        : [];
+    }),
+  );
   for (const artifact of run.artifacts) {
-    if (
-      artifact.metadata["adapter"] !== "visual-attempt-reservation-v2" ||
-      (artifact.metadata["visualLineageId"] ?? artifact.metadata["reviewPacketId"]) !== lineageId
-    ) {
-      continue;
+    const artifactAdapter = artifact.metadata["adapter"];
+    if (artifactAdapter !== "visual-attempt-reservation-v3") {
+      if (adapter === "v3" || artifactAdapter !== "visual-attempt-reservation-v2") continue;
     }
+    if ((artifact.metadata["visualLineageId"] ?? artifact.metadata["reviewPacketId"]) !== lineageId)
+      continue;
     const submissionIdentity = artifact.metadata["submissionIdentity"];
     const attempt = artifact.metadata["visualComparisonAttempt"];
     const status = artifact.metadata["reservationStatus"];
     if (
       typeof submissionIdentity !== "string" ||
       (attempt !== 1 && attempt !== 2 && attempt !== 3) ||
-      (status !== "in-progress" && status !== "completed" && status !== "failed")
+      (status !== "in-progress" &&
+        status !== "committed" &&
+        status !== "aborted" &&
+        status !== "stale" &&
+        status !== "completed" &&
+        status !== "failed")
     ) {
       continue;
     }
-    byIdentity.set(submissionIdentity, { submissionIdentity, attempt, status });
+    if (artifactAdapter === "visual-attempt-reservation-v3") {
+      const ownerToken = artifact.metadata["ownerToken"];
+      const reservedAt = artifact.metadata["reservedAt"];
+      const updatedAt = artifact.metadata["updatedAt"];
+      if (
+        typeof ownerToken !== "string" ||
+        typeof reservedAt !== "string" ||
+        typeof updatedAt !== "string"
+      ) {
+        continue;
+      }
+      const reportArtifactId = artifact.metadata["reportArtifactId"];
+      const reportDigest = artifact.metadata["reportDigest"];
+      reservations.push({
+        submissionIdentity,
+        attempt,
+        status,
+        ownerToken,
+        reservedAt,
+        updatedAt,
+        ...(typeof reportArtifactId === "string" ? { reportArtifactId } : {}),
+        ...(typeof reportDigest === "string" ? { reportDigest } : {}),
+      });
+      continue;
+    }
+    const report = reportsByIdentity.get(submissionIdentity);
+    reservations.push({
+      submissionIdentity,
+      attempt,
+      status,
+      ownerToken: `legacy-v2:${submissionIdentity}:${String(attempt)}`,
+      reservedAt: artifact.createdAt,
+      updatedAt: artifact.createdAt,
+      ...(status === "completed" && report !== undefined
+        ? { reportArtifactId: report.id, reportDigest: report.digest }
+        : {}),
+    });
   }
-  return [...byIdentity.values()].sort((left, right) => left.attempt - right.attempt);
+  return reservations;
 }
 
-function hasInProgressVisualAttempt(run: RunManifest, packet: ImplementationReviewPacket): boolean {
-  return visualAttemptReservations(run, visualLineageId(packet)).some(
-    (reservation) => reservation.status === "in-progress",
+function hasInProgressVisualAttempt(
+  run: RunManifest,
+  packet: ImplementationReviewPacket,
+  nowIso: string,
+): boolean {
+  return (
+    reduceVisualReservations(visualAttemptReservations(run, visualLineageId(packet)), nowIso)
+      .active !== undefined
   );
 }
 
 function visualSubmissionIdentity(
   reviewPacketId: string,
-  captures: Array<{ targetId: string; digest: string }>,
+  captures: Array<{
+    targetId: string;
+    route: string;
+    state: string;
+    viewport: { width: number; height: number };
+    deviceScaleFactor: number;
+    fixture: string;
+    provider: string;
+    capturedAt: string;
+    actualPath: string;
+    actualDigest: string;
+    assertionReportPath?: string | undefined;
+    assertionReportDigest?: string | undefined;
+    assertionResultPath?: string | undefined;
+    assertionResultDigest?: string | undefined;
+    assertionObservationPath?: string | undefined;
+    assertionObservationDigest?: string | undefined;
+    receiptPath?: string | undefined;
+    receiptDigest?: string | undefined;
+  }>,
 ): string {
-  const canonical = [...captures].sort((left, right) =>
-    left.targetId.localeCompare(right.targetId),
-  );
+  const canonical = captures
+    .map((capture) => ({
+      targetId: capture.targetId,
+      route: capture.route,
+      state: capture.state,
+      viewport: {
+        width: capture.viewport.width,
+        height: capture.viewport.height,
+      },
+      deviceScaleFactor: capture.deviceScaleFactor,
+      fixture: capture.fixture,
+      provider: capture.provider,
+      capturedAt: capture.capturedAt,
+      actualPath: capture.actualPath,
+      actualDigest: capture.actualDigest,
+      ...(capture.assertionReportPath === undefined
+        ? {}
+        : { assertionReportPath: capture.assertionReportPath }),
+      ...(capture.assertionReportDigest === undefined
+        ? {}
+        : { assertionReportDigest: capture.assertionReportDigest }),
+      ...(capture.assertionResultPath === undefined
+        ? {}
+        : { assertionResultPath: capture.assertionResultPath }),
+      ...(capture.assertionResultDigest === undefined
+        ? {}
+        : { assertionResultDigest: capture.assertionResultDigest }),
+      ...(capture.assertionObservationPath === undefined
+        ? {}
+        : { assertionObservationPath: capture.assertionObservationPath }),
+      ...(capture.assertionObservationDigest === undefined
+        ? {}
+        : { assertionObservationDigest: capture.assertionObservationDigest }),
+      ...(capture.receiptPath === undefined ? {} : { receiptPath: capture.receiptPath }),
+      ...(capture.receiptDigest === undefined ? {} : { receiptDigest: capture.receiptDigest }),
+    }))
+    .sort((left, right) => left.targetId.localeCompare(right.targetId));
   return `sha256:${createHash("sha256")
     .update(JSON.stringify({ reviewPacketId, captures: canonical }))
     .digest("hex")}`;
 }
 
-function assertCurrentVisualComparisonPassed(run: RunManifest, reviewPacketId: string): void {
+function assertCurrentVisualComparisonPassed(
+  run: RunManifest,
+  reviewPacketId: string,
+  nowIso: string,
+): void {
   const report = currentVisualReport(run, reviewPacketId);
   if (report?.metadata["visualStatus"] === "passed") return;
   const packet = reviewPacketFromRun(run);
-  const attempts = packet?.id === reviewPacketId ? visualComparisonAttemptCount(run, packet) : 0;
+  const attempts =
+    packet?.id === reviewPacketId ? committedVisualComparisonAttemptCount(run, packet, nowIso) : 0;
   if (attempts >= MAX_VISUAL_REPAIR_ATTEMPTS) {
     throw new Error(
       `VISUAL_ATTEMPT_LIMIT_REACHED: design approval is blocked after ${MAX_VISUAL_REPAIR_ATTEMPTS} failed comparisons`,
@@ -5704,6 +7817,7 @@ function assertDeterministicMockManifest(
     id: string;
     digest: string;
     named: boolean;
+    stateContractDigest?: string | undefined;
   }>,
 ): void {
   let parsed: unknown;
@@ -5728,6 +7842,10 @@ function assertDeterministicMockManifest(
                 .optional(),
               path: z.string().trim().min(1),
               sha256: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+              stateContractDigest: z
+                .string()
+                .regex(/^sha256:[a-f0-9]{64}$/)
+                .optional(),
             })
             .strict(),
         )
@@ -5749,6 +7867,7 @@ function assertDeterministicMockManifest(
       return (
         received === undefined ||
         received.sha256 !== expected.digest ||
+        received.stateContractDigest !== expected.stateContractDigest ||
         (expected.named
           ? received.id !== expected.id
           : received.id !== undefined && received.id !== expected.id)
@@ -5756,15 +7875,21 @@ function assertDeterministicMockManifest(
     })
   ) {
     throw new Error(
-      `Mock data manifest must bind deterministic=true to the exact fixture IDs, paths, and SHA-256 digests: ${evidencePath}`,
+      `Mock data manifest must bind deterministic=true to the exact fixture IDs, paths, and SHA-256 digests plus state-contract digests: ${evidencePath}`,
     );
   }
 }
 
 function normalizedMockFixtures(evidence: {
   fixturePaths?: string[] | undefined;
-  fixtures?: Array<{ id: string; path: string }> | undefined;
-}): Array<{ id: string; path: string; named: boolean }> {
+  fixtures?:
+    Array<{ id: string; path: string; stateContractDigest?: string | undefined }> | undefined;
+}): Array<{
+  id: string;
+  path: string;
+  named: boolean;
+  stateContractDigest?: string | undefined;
+}> {
   if (evidence.fixtures !== undefined) {
     return evidence.fixtures.map((fixture) => ({ ...fixture, named: true }));
   }
@@ -5880,24 +8005,30 @@ async function assertFigmaDesignAssets(
   mapping: FigmaDesignMapping,
 ): Promise<void> {
   for (const component of mapping.components) {
-    if (component.resolution.kind !== "asset") continue;
-    const requestedPath = path.resolve(projectRoot, component.resolution.path);
-    assertWithinProjectRoot(projectRoot, requestedPath, component.resolution.path);
+    const asset =
+      component.resolution.kind === "asset"
+        ? component.resolution
+        : component.resolution.kind === "exception"
+          ? component.resolution.substitute
+          : undefined;
+    if (asset === undefined) continue;
+    const requestedPath = path.resolve(projectRoot, asset.path);
+    assertWithinProjectRoot(projectRoot, requestedPath, asset.path);
     let resolvedPath: string;
     try {
       resolvedPath = await realpath(requestedPath);
     } catch {
       throw new Error(
-        `FIGMA_DESIGN_MAPPING_INCOMPLETE: canonical asset does not exist: ${component.resolution.path}`,
+        `FIGMA_DESIGN_MAPPING_INCOMPLETE: canonical asset does not exist: ${asset.path}`,
       );
     }
-    assertWithinProjectRoot(projectRoot, resolvedPath, component.resolution.path);
+    assertWithinProjectRoot(projectRoot, resolvedPath, asset.path);
     const digest = `sha256:${createHash("sha256")
       .update(await readFile(resolvedPath))
       .digest("hex")}`;
-    if (digest !== component.resolution.digest) {
+    if (digest !== asset.digest) {
       throw new Error(
-        `FIGMA_DESIGN_MAPPING_INCOMPLETE: canonical asset digest does not match: ${component.resolution.path}`,
+        `FIGMA_DESIGN_MAPPING_INCOMPLETE: canonical asset digest does not match: ${asset.path}`,
       );
     }
   }
@@ -5915,22 +8046,38 @@ function assertFigmaManifest(
     throw new Error(`Figma manifest must be valid JSON: ${evidencePath}`);
   }
   const parsed = FigmaManifestSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new Error(`Figma manifest provenance does not match its submission: ${evidencePath}`);
+  }
+  assertFigmaStateContracts({
+    nodeIds: parsed.data.nodeIds,
+    targets: parsed.data.visualTargets,
+    stateContracts: parsed.data.stateContracts,
+    mapping: parsed.data.designMapping,
+  });
   const submittedFileUrls = submission.fileUrls ?? [submission.fileUrl];
+  const catalogEvidencePaths = [
+    submission.designMapping.publicApiCatalog.packageManifest.path,
+    ...submission.designMapping.publicApiCatalog.publicBarrels.map((barrel) => barrel.path),
+    submission.designMapping.publicApiCatalog.codeConnectManifest.path,
+  ];
   const expectedVisualPaths = submission.artifactPaths.filter(
-    (artifactPath) => artifactPath !== submission.manifestPath,
+    (artifactPath) =>
+      artifactPath !== submission.manifestPath && !catalogEvidencePaths.includes(artifactPath),
   );
   if (
-    !parsed.success ||
     parsed.data.provider !== submission.provider ||
     parsed.data.capturedAt !== submission.capturedAt ||
     parsed.data.fileUrl !== submission.fileUrl ||
     JSON.stringify(parsed.data.fileUrls) !== JSON.stringify(submittedFileUrls) ||
-    JSON.stringify(parsed.data.nodeIds) !== JSON.stringify(submission.nodeIds) ||
+    !sameStringMembers(parsed.data.nodeIds, submission.nodeIds) ||
     JSON.stringify(parsed.data.capturedComponents) !==
       JSON.stringify(submission.capturedComponents) ||
     JSON.stringify(parsed.data.designMapping) !== JSON.stringify(submission.designMapping) ||
+    JSON.stringify(parsed.data.stateContracts) !== JSON.stringify(submission.stateContracts) ||
     JSON.stringify(parsed.data.visualPaths) !== JSON.stringify(expectedVisualPaths) ||
-    JSON.stringify(parsed.data.visualTargets) !== JSON.stringify(submission.visualTargets)
+    JSON.stringify(parsed.data.visualTargets.map(normalizeVisualTargetManifest)) !==
+      JSON.stringify(submission.visualTargets)
   ) {
     throw new Error(`Figma manifest provenance does not match its submission: ${evidencePath}`);
   }
@@ -6052,6 +8199,7 @@ type ProjectTextFile = {
 
 type ProjectTextSource = ProjectTextFile & {
   origin: "file" | "url";
+  rawContent: Buffer;
   text: string;
   chunks: string[];
   mediaType: string;
@@ -6585,55 +8733,69 @@ async function prepareComposableSources(
     }
   }
 
-  const loaded = new Map<string, ProjectTextSource>();
-  const load = async (file: ProjectTextFile): Promise<ProjectTextSource> => {
-    const existing = loaded.get(file.resolvedPath);
-    if (existing !== undefined) return existing;
-    const rawContent = await readFile(file.resolvedPath);
+  const localFiles = [
+    ...(brief === undefined ? [] : [brief]),
+    ...(legacyNetwork === undefined ? [] : [legacyNetwork]),
+    ...docs,
+    ...openApiFiles,
+    ...guidance,
+    ...discoveredGuidance,
+  ];
+  const loadTasks = [
+    ...localFiles.map((file) => ({ kind: "file" as const, file })),
+    ...openApiUrlInput.map((url) => ({ kind: "url" as const, url })),
+  ];
+  const loadedSources = await orderedConcurrentMap(loadTasks, 4, async (task) => {
+    if (task.kind === "url") {
+      const remote = await fetchOpenApiSource({ url: task.url });
+      const rawContent = Buffer.from(remote.text, "utf8");
+      return {
+        origin: "url",
+        path: remote.originalUrl,
+        resolvedPath: remote.resolvedUrl,
+        rawContent,
+        text: remote.text,
+        chunks: buildParserSafeChunks(remote.text),
+        mediaType: remote.mediaType,
+        rawDigest: remote.sha256,
+      } satisfies ProjectTextSource;
+    }
+    const rawContent = await readFile(task.file.resolvedPath);
     const pdf =
-      path.extname(file.path).toLowerCase() === ".pdf"
+      path.extname(task.file.path).toLowerCase() === ".pdf"
         ? await extractPdfText(rawContent)
         : undefined;
     const text = pdf?.text ?? rawContent.toString("utf8");
-    const source: ProjectTextSource = {
-      ...file,
+    return {
+      ...task.file,
       origin: "file",
+      rawContent,
       text,
       chunks: buildParserSafeChunks(text),
-      mediaType: pdf?.mediaType ?? mediaTypeForPath(file.path),
+      mediaType: pdf?.mediaType ?? mediaTypeForPath(task.file.path),
       rawDigest:
         pdf?.sha256 ?? (`sha256:${createHash("sha256").update(rawContent).digest("hex")}` as const),
-    };
-    loaded.set(file.resolvedPath, source);
+    } satisfies ProjectTextSource;
+  });
+  const localByResolvedPath = new Map(
+    loadedSources
+      .filter((source) => source.origin === "file")
+      .map((source) => [source.resolvedPath, source]),
+  );
+  const loadedLocal = (file: ProjectTextFile): ProjectTextSource => {
+    const source = localByResolvedPath.get(file.resolvedPath);
+    if (source === undefined) throw new Error(`Prepared source was not loaded: ${file.path}`);
     return source;
   };
-  const loadAll = async (files: ProjectTextFile[]): Promise<ProjectTextSource[]> => {
-    const sources: ProjectTextSource[] = [];
-    for (const file of files) sources.push(await load(file));
-    return sources;
-  };
-
-  const remoteOpenApi: ProjectTextSource[] = [];
-  for (const sourceUrl of openApiUrlInput) {
-    const remote = await fetchOpenApiSource({ url: sourceUrl });
-    remoteOpenApi.push({
-      origin: "url",
-      path: remote.originalUrl,
-      resolvedPath: remote.resolvedUrl,
-      text: remote.text,
-      chunks: buildParserSafeChunks(remote.text),
-      mediaType: remote.mediaType,
-      rawDigest: remote.sha256,
-    });
-  }
+  const remoteOpenApi = loadedSources.filter((source) => source.origin === "url");
 
   return {
-    ...(brief === undefined ? {} : { brief: await load(brief) }),
-    ...(legacyNetwork === undefined ? {} : { legacyNetwork: await load(legacyNetwork) }),
-    docs: await loadAll(docs),
-    openApi: [...(await loadAll(openApiFiles)), ...remoteOpenApi],
-    guidance: await loadAll(guidance),
-    discoveredGuidance: await loadAll(discoveredGuidance),
+    ...(brief === undefined ? {} : { brief: loadedLocal(brief) }),
+    ...(legacyNetwork === undefined ? {} : { legacyNetwork: loadedLocal(legacyNetwork) }),
+    docs: docs.map(loadedLocal),
+    openApi: [...openApiFiles.map(loadedLocal), ...remoteOpenApi],
+    guidance: guidance.map(loadedLocal),
+    discoveredGuidance: discoveredGuidance.map(loadedLocal),
     skillHints,
   };
 }
@@ -6655,22 +8817,18 @@ async function readDistinctProjectTextFiles(
   return files;
 }
 
-async function ingestProjectTextSource(input: {
-  service: IntakeRequestService;
-  runId: string;
+function projectTextSourceIntakeRequests(input: {
   kind: "brief" | "docs" | "openapi" | "guidance";
   file: ProjectTextSource;
-}): Promise<string[]> {
-  const artifactIds: string[] = [];
+}): Array<{ requestText: string; label: string }> {
+  const requests: Array<{ requestText: string; label: string }> = [];
   for (let index = 0; index < input.file.chunks.length; index += 1) {
-    const result = await input.service.parseIntakeRequest({
-      runId: input.runId,
-      requestText: input.file.chunks[index],
+    requests.push({
+      requestText: input.file.chunks[index]!,
       label: intakeSourceLabel(input.kind, input.file.path, index, input.file.chunks.length),
     });
-    artifactIds.push(result.artifact.id);
   }
-  return artifactIds;
+  return requests;
 }
 
 export function buildParserSafeChunks(text: string): string[] {
@@ -6905,11 +9063,14 @@ async function countDeclaredWorkspacePackages(projectRoot: string): Promise<numb
   return packageRoots.size;
 }
 
-function createImplementationReviewPacket(
+async function createImplementationReviewPacket(
   run: RunManifest,
   snapshot: GitSnapshot,
   evidenceArtifacts: ArtifactRef[],
-): ImplementationReviewPacket {
+  artifactStore: ArtifactBlobStore,
+  snapshotArtifact: ArtifactRef | undefined,
+  evidenceIndex: PacketEvidenceEntry[],
+): Promise<ImplementationReviewPacket> {
   const previous = reviewPacketFromRun(run);
   const evidenceHex = createHash("sha256")
     .update(
@@ -6930,11 +9091,20 @@ function createImplementationReviewPacket(
     evidenceDigest: `sha256:${evidenceHex}`,
     diffDigest: snapshot.diffDigest,
     changedFiles: snapshot.changedFiles,
+    ...(snapshotArtifact === undefined
+      ? {}
+      : {
+          snapshotArtifactId: snapshotArtifact.id,
+          snapshotDigest: snapshotArtifact.digest,
+        }),
+    evidenceIndex,
   };
   const id = createHash("sha256").update(JSON.stringify(identity)).digest("hex");
   const packetId = `packet_${id}`;
   const lineage = createVisualLineage(
-    previous === undefined ? undefined : activeVisualRepairCheckpoint(run, previous),
+    previous === undefined
+      ? undefined
+      : await activeVisualRepairCheckpoint(run, previous, artifactStore),
     { id: packetId },
   );
   return ImplementationReviewPacketSchema.parse({
@@ -6944,57 +9114,84 @@ function createImplementationReviewPacket(
   });
 }
 
-function activeVisualRepairCheckpoint(
+async function activeVisualRepairCheckpoint(
   run: RunManifest,
   previousPacket: ImplementationReviewPacket,
+  artifactStore: ArtifactBlobStore,
 ) {
-  for (const artifact of [...run.artifacts].reverse()) {
-    if (
-      artifact.metadata["adapter"] !== "visual-repair-lineage-v1" ||
-      artifact.metadata["repairRequired"] !== true ||
-      artifact.metadata["sourcePacketId"] !== previousPacket.id
-    ) {
-      continue;
-    }
-    const lineageId = artifact.metadata["visualLineageId"];
-    const attempts = artifact.metadata["visualLineageAttempt"];
-    if (typeof lineageId === "string" && (attempts === 1 || attempts === 2 || attempts === 3)) {
-      return {
-        lineageId,
-        attempts,
-        repairRequired: true as const,
-        sourcePacketId: previousPacket.id,
-      };
-    }
+  const lineageId = visualLineageId(previousPacket);
+  const latest = await latestVisualLineageRecord(run, lineageId, artifactStore);
+  if (
+    latest === undefined ||
+    latest.outcome.status !== "repair-required" ||
+    latest.outcome.sourcePacketId !== previousPacket.id
+  ) {
+    return undefined;
   }
-  return undefined;
+  return {
+    lineageId,
+    attempts: latest.outcome.attempt,
+    repairRequired: true as const,
+    sourcePacketId: previousPacket.id,
+  };
+}
+
+function buildImplementationEvidenceIndex(
+  submission: Extract<WorkflowSubmission, { kind: "implementation" }>,
+  evidenceArtifacts: ArtifactRef[],
+  snapshot: GitSnapshot,
+): PacketEvidenceEntry[] {
+  const featureEvidence = submission.featureEvidence;
+  if (featureEvidence === undefined) return [];
+  const resultArtifact = evidenceArtifacts.find(
+    (artifact) => artifact.metadata["projectRelativePath"] === featureEvidence.resultPath,
+  );
+  if (resultArtifact === undefined) return [];
+  const adapter = resultArtifact.metadata["adapter"];
+  return PacketEvidenceIndexSchema.parse([
+    {
+      command: featureEvidence.testCommand,
+      selector: featureEvidence.testSelector,
+      resultDigest: resultArtifact.digest,
+      artifactId: resultArtifact.id,
+      headSha: snapshot.headSha,
+      diffDigest: snapshot.diffDigest,
+      adapterVersion: typeof adapter === "string" ? adapter : "workflow-v2-evidence",
+    },
+  ]);
 }
 
 type GitSnapshot = {
   headSha: string;
   diffDigest: `sha256:${string}`;
   changedFiles: string[];
+  implementationSnapshot?: ImplementationSnapshot;
 };
 
-async function captureGitSnapshot(run: RunManifest): Promise<GitSnapshot> {
+export async function captureGitSnapshot(
+  run: RunManifest,
+  metrics: RuntimeMetricsSink = new NoopRuntimeMetrics(),
+  capturedAt = new Date().toISOString(),
+): Promise<GitSnapshot> {
   const baseCommit = run.workspaceBinding?.baseSha ?? run.baseCommit;
   const projectRoot = run.workspaceBinding?.repositoryRoot ?? run.projectRoot;
   if (baseCommit === undefined) {
     throw new Error("Implementation review packets require a Git base commit");
   }
-  const headSha = await currentGitHead(projectRoot);
+  const headSha = await currentGitHead(projectRoot, metrics);
   if (headSha === null)
     throw new Error("Implementation review packets require a readable Git HEAD");
   try {
     const strictBinding = run.workspaceBinding;
     if (strictBinding !== undefined) {
+      metrics.increment("git.command_count", 2);
       const [{ stdout: checkedOutBranch }, { stdout: trackedStatus }] = await Promise.all([
         execFileAsync("git", ["symbolic-ref", "--quiet", "--short", "HEAD"], {
           cwd: projectRoot,
           encoding: "utf8",
           maxBuffer: 1024 * 1024,
         }),
-        execFileAsync("git", ["status", "--porcelain=v1", "--untracked-files=no"], {
+        execFileAsync("git", ["status", "--porcelain=v1", "--untracked-files=all"], {
           cwd: projectRoot,
           encoding: "utf8",
           maxBuffer: 5 * 1024 * 1024,
@@ -7012,6 +9209,7 @@ async function captureGitSnapshot(run: RunManifest): Promise<GitSnapshot> {
       }
     }
     const diffRange = strictBinding === undefined ? [baseCommit] : [baseCommit, headSha];
+    metrics.increment("git.command_count", strictBinding === undefined ? 3 : 2);
     const [{ stdout: diff }, { stdout: trackedNames }, untrackedResult] = await Promise.all([
       execFileAsync("git", ["diff", "--binary", ...diffRange, "--"], {
         cwd: projectRoot,
@@ -7032,6 +9230,8 @@ async function captureGitSnapshot(run: RunManifest): Promise<GitSnapshot> {
         : Promise.resolve({ stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }),
     ]);
     const untrackedNames = untrackedResult.stdout;
+    const binaryDiffBytes = Buffer.isBuffer(diff) ? diff.byteLength : Buffer.byteLength(diff);
+    metrics.increment("git.binary_diff_bytes", binaryDiffBytes);
     const tracked = splitNullPaths(trackedNames);
     const untracked = splitNullPaths(untrackedNames);
     const changedFiles = [...new Set([...tracked, ...untracked])].sort();
@@ -7049,21 +9249,76 @@ async function captureGitSnapshot(run: RunManifest): Promise<GitSnapshot> {
       }
       digest.update(`\0untracked:${relativePath}\0`).update(await readFile(resolvedPath));
     }
-    return {
+    const result: GitSnapshot = {
       headSha,
       diffDigest: `sha256:${digest.digest("hex")}`,
       changedFiles,
     };
+    if (strictBinding !== undefined) {
+      result.implementationSnapshot = ImplementationSnapshotSchema.parse({
+        schemaVersion: "implementation-snapshot-v1",
+        repositoryKey: implementationRepositoryKey(root),
+        baseSha: baseCommit,
+        headSha,
+        sourceBranch: strictBinding.sourceBranch,
+        clean: true,
+        changedFiles,
+        diffDigest: result.diffDigest,
+        binaryDiffBytes,
+        capturedAt,
+      });
+    }
+    return result;
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Unable to capture the implementation Git diff: ${message}`);
   }
 }
 
-async function assertReviewPacketFresh(run: RunManifest): Promise<void> {
+async function assertReviewPacketFresh(
+  run: RunManifest,
+  artifactStore: ArtifactBlobStore,
+  metrics: RuntimeMetricsSink = new NoopRuntimeMetrics(),
+): Promise<void> {
   const packet = reviewPacketFromRun(run);
   if (packet === undefined) throw new Error("The implementation review packet is missing");
-  const snapshot = await captureGitSnapshot(run);
+  if (packet.snapshotArtifactId !== undefined && packet.snapshotDigest !== undefined) {
+    const artifact = run.artifacts.find(
+      (candidate) =>
+        candidate.id === packet.snapshotArtifactId &&
+        candidate.digest === packet.snapshotDigest &&
+        candidate.metadata["adapter"] === "implementation-snapshot-v1" &&
+        candidate.metadata["reviewPacketId"] === packet.id,
+    );
+    if (artifact !== undefined) {
+      try {
+        const snapshot = ImplementationSnapshotSchema.parse(
+          JSON.parse((await artifactStore.readContent(artifact.digest)).toString("utf8")),
+        );
+        if (
+          snapshot.baseSha === packet.baseSha &&
+          snapshot.headSha === packet.headSha &&
+          snapshot.diffDigest === packet.diffDigest &&
+          sameStrings(snapshot.changedFiles, packet.changedFiles)
+        ) {
+          const current = await captureImplementationSnapshotFence(
+            run.workspaceBinding?.repositoryRoot ?? run.projectRoot,
+            metrics,
+          );
+          if (reusableImplementationSnapshot(snapshot, current)) return;
+        }
+      } catch {
+        // A malformed or unreadable bound artifact must take the full stale path.
+      }
+    }
+    try {
+      await captureGitSnapshot(run, metrics);
+    } catch {
+      // The stale-packet error below is authoritative for all fence mismatches.
+    }
+    throw new Error("The implementation review packet is stale; current Git diff does not match");
+  }
+  const snapshot = await captureGitSnapshot(run, metrics);
   if (
     snapshot.headSha !== packet.headSha ||
     snapshot.diffDigest !== packet.diffDigest ||
@@ -7071,6 +9326,35 @@ async function assertReviewPacketFresh(run: RunManifest): Promise<void> {
   ) {
     throw new Error("The implementation review packet is stale; current Git diff does not match");
   }
+}
+
+async function captureImplementationSnapshotFence(
+  projectRoot: string,
+  metrics: RuntimeMetricsSink,
+): Promise<{ headSha: string; sourceBranch: string; clean: boolean }> {
+  metrics.increment("git.command_count", 3);
+  const [{ stdout: head }, { stdout: sourceBranch }, { stdout: status }] = await Promise.all([
+    execFileAsync("git", ["rev-parse", "--verify", "HEAD"], {
+      cwd: projectRoot,
+      encoding: "utf8",
+      maxBuffer: 1024 * 1024,
+    }),
+    execFileAsync("git", ["symbolic-ref", "--quiet", "--short", "HEAD"], {
+      cwd: projectRoot,
+      encoding: "utf8",
+      maxBuffer: 1024 * 1024,
+    }),
+    execFileAsync("git", ["status", "--porcelain=v1", "--untracked-files=all"], {
+      cwd: projectRoot,
+      encoding: "utf8",
+      maxBuffer: 5 * 1024 * 1024,
+    }),
+  ]);
+  return {
+    headSha: head.trim(),
+    sourceBranch: sourceBranch.trim(),
+    clean: status.trim() === "",
+  };
 }
 
 function assertChangedFilesMatch(declared: string[], actual: string[]): void {
@@ -7110,8 +9394,12 @@ async function hasPackageManifest(packageRoot: string): Promise<boolean> {
   }
 }
 
-async function currentGitHead(projectRoot: string): Promise<string | null> {
+async function currentGitHead(
+  projectRoot: string,
+  metrics: RuntimeMetricsSink = new NoopRuntimeMetrics(),
+): Promise<string | null> {
   try {
+    metrics.increment("git.command_count");
     const { stdout } = await execFileAsync("git", ["rev-parse", "--verify", "HEAD"], {
       cwd: projectRoot,
       encoding: "utf8",

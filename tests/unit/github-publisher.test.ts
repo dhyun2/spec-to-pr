@@ -223,6 +223,7 @@ describe("GitHubPublisherAdapter", () => {
       .mockResolvedValueOnce(
         jsonResponse({
           content: {
+            sha: "f".repeat(40),
             html_url:
               "https://github.com/acme/spec-to-pr/blob/spec-to-pr/run-1/.spec-to-pr/visual-assets/x/figma.png",
           },
@@ -235,6 +236,7 @@ describe("GitHubPublisherAdapter", () => {
       target: githubTarget(),
       payload: payload(),
       token: "ghp_example",
+      maxConcurrency: 3,
       assets: [asset()],
     });
 
@@ -252,12 +254,16 @@ describe("GitHubPublisherAdapter", () => {
     );
     expect(result).toEqual([
       {
-        artifactId: "art_22222222222222222222222222222222",
-        targetId: "home",
-        role: "figma",
-        label: "Figma",
-        url: `https://raw.githubusercontent.com/acme/spec-to-pr/${EVIDENCE_COMMIT}/.spec-to-pr/visual-assets/run_11111111111111111111111111111111/${PACKET_ID}/home/art_22222222222222222222222222222222/figma.png`,
-        embeddable: true,
+        status: "published",
+        asset: {
+          artifactId: "art_22222222222222222222222222222222",
+          artifactDigest: `sha256:${"d".repeat(64)}`,
+          targetId: "home",
+          role: "figma",
+          label: "Figma",
+          url: `https://raw.githubusercontent.com/acme/spec-to-pr/${EVIDENCE_COMMIT}/.spec-to-pr/visual-assets/run_11111111111111111111111111111111/${PACKET_ID}/home/art_22222222222222222222222222222222/figma.png`,
+          embeddable: true,
+        },
       },
     ]);
   });
@@ -270,13 +276,16 @@ describe("GitHubPublisherAdapter", () => {
       .mockResolvedValueOnce(new Response("missing ref", { status: 404 }))
       .mockResolvedValueOnce(jsonResponse(evidenceRef(reviewedHead), 201))
       .mockResolvedValueOnce(new Response("missing asset", { status: 404 }))
-      .mockResolvedValueOnce(jsonResponse({ content: {}, commit: { sha: EVIDENCE_COMMIT } }));
+      .mockResolvedValueOnce(
+        jsonResponse({ content: uploadedContent(), commit: { sha: EVIDENCE_COMMIT } }),
+      );
     const adapter = new GitHubPublisherAdapter(fetchMock);
 
     await adapter.publishAssets({
       target: githubTarget(),
       payload: { ...payload(), headSha: reviewedHead },
       token: "ghp_example",
+      maxConcurrency: 3,
       assets: [asset()],
     });
 
@@ -301,6 +310,7 @@ describe("GitHubPublisherAdapter", () => {
       .mockResolvedValueOnce(
         jsonResponse({
           content: {
+            sha: "f".repeat(40),
             html_url:
               "https://github.com/acme/spec-to-pr/blob/spec-to-pr/run-1/.spec-to-pr/visual-assets/x/figma.png",
           },
@@ -313,13 +323,54 @@ describe("GitHubPublisherAdapter", () => {
       target: githubTarget(),
       payload: payload(),
       token: "ghp_example",
+      maxConcurrency: 3,
       assets: [asset()],
     });
 
     expect(result[0]).toMatchObject({
-      embeddable: false,
-      url: `https://github.com/acme/spec-to-pr/blob/${EVIDENCE_COMMIT}/.spec-to-pr/visual-assets/run_11111111111111111111111111111111/${PACKET_ID}/home/art_22222222222222222222222222222222/figma.png`,
+      status: "published",
+      asset: {
+        embeddable: false,
+        url: `https://github.com/acme/spec-to-pr/blob/${EVIDENCE_COMMIT}/.spec-to-pr/visual-assets/run_11111111111111111111111111111111/${PACKET_ID}/home/art_22222222222222222222222222222222/figma.png`,
+      },
     });
+  });
+
+  it("keeps public GitHub Enterprise evidence on the exact configured host", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ private: false }))
+      .mockResolvedValueOnce(jsonResponse(evidenceRef()))
+      .mockResolvedValueOnce(new Response("not found", { status: 404 }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          content: { sha: "f".repeat(40) },
+          commit: { sha: EVIDENCE_COMMIT },
+        }),
+      );
+    const adapter = new GitHubPublisherAdapter(fetchMock);
+    const enterpriseTarget: PublishTarget = {
+      ...githubTarget(),
+      webBaseUrl: "https://github.corp.example",
+      apiBaseUrl: "https://github.corp.example/api/v3",
+    };
+
+    const result = await adapter.publishAssets({
+      target: enterpriseTarget,
+      payload: payload(),
+      token: "ghp_example",
+      maxConcurrency: 3,
+      assets: [asset()],
+    });
+
+    expect(result[0]).toMatchObject({
+      status: "published",
+      asset: {
+        embeddable: false,
+        url: `https://github.corp.example/acme/spec-to-pr/blob/${EVIDENCE_COMMIT}/.spec-to-pr/visual-assets/run_11111111111111111111111111111111/${PACKET_ID}/home/art_22222222222222222222222222222222/figma.png`,
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain("raw.githubusercontent.com");
   });
 
   it("reuses the same managed branch across runs", async () => {
@@ -329,7 +380,9 @@ describe("GitHubPublisherAdapter", () => {
         .mockResolvedValueOnce(jsonResponse({ private: false }))
         .mockResolvedValueOnce(jsonResponse(evidenceRef()))
         .mockResolvedValueOnce(new Response("not found", { status: 404 }))
-        .mockResolvedValueOnce(jsonResponse({ content: {}, commit: { sha: EVIDENCE_COMMIT } }));
+        .mockResolvedValueOnce(
+          jsonResponse({ content: uploadedContent(), commit: { sha: EVIDENCE_COMMIT } }),
+        );
     }
     const adapter = new GitHubPublisherAdapter(fetchMock);
 
@@ -337,12 +390,14 @@ describe("GitHubPublisherAdapter", () => {
       target: githubTarget(),
       payload: payload(),
       token: "ghp_example",
+      maxConcurrency: 3,
       assets: [asset()],
     });
     await adapter.publishAssets({
       target: githubTarget(),
       payload: { ...payload(), runId: `run_${"3".repeat(32)}`, sourceBranch: "codex/another" },
       token: "ghp_example",
+      maxConcurrency: 3,
       assets: [asset()],
     });
 
@@ -361,7 +416,7 @@ describe("GitHubPublisherAdapter", () => {
     { ref: "refs/tags/spec-to-pr/evidence", object: { type: "commit", sha: REVIEWED_HEAD } },
     { ref: "refs/heads/spec-to-pr/evidence", object: { type: "tag", sha: REVIEWED_HEAD } },
     { ref: "refs/heads/spec-to-pr/evidence", object: { type: "commit", sha: "invalid" } },
-  ])("rejects malformed or non-commit managed refs", async (invalidRef) => {
+  ])("settles malformed or non-commit managed refs for every input", async (invalidRef) => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse({ private: false }))
@@ -373,9 +428,16 @@ describe("GitHubPublisherAdapter", () => {
         target: githubTarget(),
         payload: payload(),
         token: "ghp_example",
+        maxConcurrency: 3,
         assets: [asset()],
       }),
-    ).rejects.toThrow(/EVIDENCE_REF_CONFLICT/);
+    ).resolves.toMatchObject([
+      {
+        status: "failed",
+        artifactId: "art_22222222222222222222222222222222",
+        failure: "uncertain",
+      },
+    ]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -387,7 +449,9 @@ describe("GitHubPublisherAdapter", () => {
       .mockResolvedValueOnce(new Response("already exists", { status: 422 }))
       .mockResolvedValueOnce(jsonResponse(evidenceRef()))
       .mockResolvedValueOnce(new Response("missing asset", { status: 404 }))
-      .mockResolvedValueOnce(jsonResponse({ content: {}, commit: { sha: EVIDENCE_COMMIT } }));
+      .mockResolvedValueOnce(
+        jsonResponse({ content: uploadedContent(), commit: { sha: EVIDENCE_COMMIT } }),
+      );
     const adapter = new GitHubPublisherAdapter(fetchMock);
 
     await expect(
@@ -395,6 +459,7 @@ describe("GitHubPublisherAdapter", () => {
         target: githubTarget(),
         payload: payload(),
         token: "ghp_example",
+        maxConcurrency: 3,
         assets: [asset()],
       }),
     ).resolves.toHaveLength(1);
@@ -405,7 +470,7 @@ describe("GitHubPublisherAdapter", () => {
     );
   });
 
-  it("fails closed when a create race does not produce a valid managed ref", async () => {
+  it("settles every input when a create race does not produce a valid managed ref", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse({ private: false }))
@@ -419,9 +484,16 @@ describe("GitHubPublisherAdapter", () => {
         target: githubTarget(),
         payload: payload(),
         token: "ghp_example",
+        maxConcurrency: 3,
         assets: [asset()],
       }),
-    ).rejects.toThrow(/EVIDENCE_REF_CONFLICT/);
+    ).resolves.toMatchObject([
+      {
+        status: "failed",
+        artifactId: "art_22222222222222222222222222222222",
+        failure: "uncertain",
+      },
+    ]);
   });
 
   it("retries shared-ref upload conflicts with a refreshed content SHA", async () => {
@@ -432,7 +504,9 @@ describe("GitHubPublisherAdapter", () => {
       .mockResolvedValueOnce(new Response("missing asset", { status: 404 }))
       .mockResolvedValueOnce(new Response("ref moved", { status: 409 }))
       .mockResolvedValueOnce(jsonResponse({ sha: "blobsha2" }))
-      .mockResolvedValueOnce(jsonResponse({ content: {}, commit: { sha: EVIDENCE_COMMIT } }));
+      .mockResolvedValueOnce(
+        jsonResponse({ content: uploadedContent(), commit: { sha: EVIDENCE_COMMIT } }),
+      );
     const adapter = new GitHubPublisherAdapter(fetchMock);
 
     await expect(
@@ -440,6 +514,7 @@ describe("GitHubPublisherAdapter", () => {
         target: githubTarget(),
         payload: payload(),
         token: "ghp_example",
+        maxConcurrency: 3,
         assets: [asset()],
       }),
     ).resolves.toHaveLength(1);
@@ -450,11 +525,276 @@ describe("GitHubPublisherAdapter", () => {
       sha: "blobsha2",
     });
   });
+
+  it.each([
+    [400, "permanent"],
+    [408, "transient"],
+    [429, "transient"],
+    [503, "transient"],
+  ] as const)("settles an upload HTTP %i failure as %s", async (status, failure) => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ private: false }))
+      .mockResolvedValueOnce(jsonResponse(evidenceRef()))
+      .mockResolvedValueOnce(new Response("missing asset", { status: 404 }))
+      .mockResolvedValueOnce(new Response("do-not-leak-response", { status }));
+    const adapter = new GitHubPublisherAdapter(fetchMock);
+
+    await expect(
+      adapter.publishAssets({
+        target: githubTarget(),
+        payload: payload(),
+        token: "ghp_example",
+        maxConcurrency: 3,
+        assets: [asset()],
+      }),
+    ).resolves.toEqual([
+      {
+        status: "failed",
+        artifactId: "art_22222222222222222222222222222222",
+        failure,
+        message: `GitHub upload review asset failed with HTTP ${status}`,
+      },
+    ]);
+  });
+
+  it("settles a successful response without a valid commit SHA as uncertain", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ private: false }))
+      .mockResolvedValueOnce(jsonResponse(evidenceRef()))
+      .mockResolvedValueOnce(new Response("missing asset", { status: 404 }))
+      .mockResolvedValueOnce(jsonResponse({ content: {} }));
+    const adapter = new GitHubPublisherAdapter(fetchMock);
+
+    await expect(
+      adapter.publishAssets({
+        target: githubTarget(),
+        payload: payload(),
+        token: "ghp_example",
+        maxConcurrency: 3,
+        assets: [asset()],
+      }),
+    ).resolves.toMatchObject([{ status: "failed", failure: "uncertain" }]);
+  });
+
+  it.each([undefined, null, 42, [], "content", {}, { sha: "invalid" }])(
+    "settles a successful response with malformed content %j as uncertain",
+    async (content) => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse({ private: false }))
+        .mockResolvedValueOnce(jsonResponse(evidenceRef()))
+        .mockResolvedValueOnce(new Response("missing asset", { status: 404 }))
+        .mockResolvedValueOnce(jsonResponse({ content, commit: { sha: EVIDENCE_COMMIT } }));
+      const adapter = new GitHubPublisherAdapter(fetchMock);
+
+      await expect(
+        adapter.publishAssets({
+          target: githubTarget(),
+          payload: payload(),
+          token: "ghp_example",
+          maxConcurrency: 3,
+          assets: [asset()],
+        }),
+      ).resolves.toMatchObject([
+        {
+          status: "failed",
+          artifactId: "art_22222222222222222222222222222222",
+          failure: "uncertain",
+        },
+      ]);
+    },
+  );
+
+  it.each([
+    {
+      contentSha: "f".repeat(7),
+      commitSha: EVIDENCE_COMMIT,
+      malformedField: "content.sha",
+    },
+    {
+      contentSha: "f".repeat(40),
+      commitSha: "c".repeat(7),
+      malformedField: "commit.sha",
+    },
+  ])("settles abbreviated $malformedField as uncertain", async ({ contentSha, commitSha }) => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ private: false }))
+      .mockResolvedValueOnce(jsonResponse(evidenceRef()))
+      .mockResolvedValueOnce(new Response("missing asset", { status: 404 }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          content: { sha: contentSha },
+          commit: { sha: commitSha },
+        }),
+      );
+    const adapter = new GitHubPublisherAdapter(fetchMock);
+
+    await expect(
+      adapter.publishAssets({
+        target: githubTarget(),
+        payload: payload(),
+        token: "ghp_example",
+        maxConcurrency: 3,
+        assets: [asset()],
+      }),
+    ).resolves.toEqual([
+      {
+        status: "failed",
+        artifactId: "art_22222222222222222222222222222222",
+        failure: "uncertain",
+        message: "GitHub upload review asset returned a malformed response",
+      },
+    ]);
+  });
+
+  it("accepts full 64-character GitHub content and commit object IDs", async () => {
+    const fullObjectId = "e".repeat(64);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ private: false }))
+      .mockResolvedValueOnce(jsonResponse(evidenceRef()))
+      .mockResolvedValueOnce(new Response("missing asset", { status: 404 }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          content: { sha: fullObjectId },
+          commit: { sha: fullObjectId },
+        }),
+      );
+    const adapter = new GitHubPublisherAdapter(fetchMock);
+
+    await expect(
+      adapter.publishAssets({
+        target: githubTarget(),
+        payload: payload(),
+        token: "ghp_example",
+        maxConcurrency: 3,
+        assets: [asset()],
+      }),
+    ).resolves.toMatchObject([
+      {
+        status: "published",
+        asset: {
+          url: expect.stringContaining(fullObjectId),
+        },
+      },
+    ]);
+  });
+
+  it.each([
+    { headSha: undefined },
+    { reviewPacketId: undefined },
+    { headSha: undefined, reviewPacketId: undefined },
+  ])("settles every input when packet/head binding is missing", async (missing) => {
+    const fetchMock = vi.fn();
+    const adapter = new GitHubPublisherAdapter(fetchMock);
+    const second = {
+      ...asset(),
+      artifactId: "art_33333333333333333333333333333333",
+      artifactDigest: `sha256:${"e".repeat(64)}` as const,
+      role: "browser" as const,
+      filename: "browser.png",
+    };
+
+    await expect(
+      adapter.publishAssets({
+        target: githubTarget(),
+        payload: { ...payload(), ...missing },
+        token: "ghp_example",
+        maxConcurrency: 3,
+        assets: [asset(), second],
+      }),
+    ).resolves.toEqual([
+      {
+        status: "failed",
+        artifactId: "art_22222222222222222222222222222222",
+        failure: "uncertain",
+        message: "GitHub prepare review asset upload failed",
+      },
+      {
+        status: "failed",
+        artifactId: "art_33333333333333333333333333333333",
+        failure: "uncertain",
+        message: "GitHub prepare review asset upload failed",
+      },
+    ]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("reads the current pull request body", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ body: "# synced" }));
+    const adapter = new GitHubPublisherAdapter(fetchMock);
+
+    await expect(
+      adapter.readBody({
+        target: githubTarget(),
+        requestNumber: "123",
+        token: "ghp_example",
+      }),
+    ).resolves.toBe("# synced");
+  });
+
+  it("serializes shared-branch mutations so six conflicting assets all publish", async () => {
+    let nextMutationId = 0;
+    const activeMutations = new Set<number>();
+    const contendedMutations = new Set<number>();
+    let maxActiveMutations = 0;
+    const attemptsByUrl = new Map<string, number>();
+    const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+      if (url === "https://api.github.com/repos/acme/spec-to-pr") {
+        return jsonResponse({ private: false });
+      }
+      if (url.includes("/git/ref/heads/spec-to-pr/evidence")) {
+        return jsonResponse(evidenceRef());
+      }
+      if (init.method === "GET") return new Response("missing asset", { status: 404 });
+
+      const attempt = (attemptsByUrl.get(url) ?? 0) + 1;
+      attemptsByUrl.set(url, attempt);
+      const mutationId = nextMutationId++;
+      activeMutations.add(mutationId);
+      if (activeMutations.size > 1) {
+        for (const activeMutationId of activeMutations) {
+          contendedMutations.add(activeMutationId);
+        }
+      }
+      maxActiveMutations = Math.max(maxActiveMutations, activeMutations.size);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      activeMutations.delete(mutationId);
+      if (attempt === 1 || contendedMutations.has(mutationId)) {
+        return new Response("ref moved", { status: 409 });
+      }
+      return jsonResponse({ content: uploadedContent(), commit: { sha: EVIDENCE_COMMIT } });
+    });
+    const adapter = new GitHubPublisherAdapter(fetchMock);
+    const assets = ["2", "3", "4", "5", "6", "7"].map((digit, index) => ({
+      ...asset(),
+      artifactId: `art_${digit.repeat(32)}`,
+      artifactDigest: `sha256:${digit.repeat(64)}` as const,
+      targetId: `target-${index}`,
+    }));
+
+    const outcomes = await adapter.publishAssets({
+      target: githubTarget(),
+      payload: payload(),
+      token: "ghp_example",
+      maxConcurrency: 99,
+      assets,
+    });
+
+    expect(outcomes).toHaveLength(6);
+    expect(outcomes.every((outcome) => outcome.status === "published")).toBe(true);
+    expect(maxActiveMutations).toBe(1);
+    expect([...attemptsByUrl.values()]).toEqual([2, 2, 2, 2, 2, 2]);
+  });
 });
 
 function asset() {
   return {
     artifactId: "art_22222222222222222222222222222222",
+    artifactDigest: `sha256:${"d".repeat(64)}` as const,
     targetId: "home",
     role: "figma" as const,
     label: "Figma",
@@ -499,6 +839,12 @@ function evidenceRef(sha = EVIDENCE_COMMIT) {
   return {
     ref: "refs/heads/spec-to-pr/evidence",
     object: { type: "commit", sha },
+  };
+}
+
+function uploadedContent() {
+  return {
+    sha: "f".repeat(40),
   };
 }
 

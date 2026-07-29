@@ -1,5 +1,15 @@
 export const MAX_VISUAL_LINEAGE_ATTEMPTS = 3;
 
+export type VisualLineageOutcomeStatus = "repair-required" | "closed" | "exhausted";
+
+export type VisualLineageOutcome = {
+  lineageId: string;
+  sourcePacketId: string;
+  attempt: 1 | 2 | 3;
+  status: VisualLineageOutcomeStatus;
+  repairEvidenceArtifactId?: string;
+};
+
 export type VisualLineageCheckpoint = {
   lineageId: string;
   attempts: number;
@@ -41,6 +51,27 @@ export function nextVisualAttempt(input: {
       .map((attempt) => attempt.attempt)
       .filter((attempt): attempt is 1 | 2 | 3 => attempt === 1 || attempt === 2 || attempt === 3),
   );
-  if (completedAttempts.size >= MAX_VISUAL_LINEAGE_ATTEMPTS) return undefined;
-  return (completedAttempts.size + 1) as 1 | 2 | 3;
+  for (const attempt of [1, 2, 3] as const) {
+    if (!completedAttempts.has(attempt)) return attempt;
+  }
+  return undefined;
+}
+
+export function latestVisualLineageOutcome(
+  outcomes: VisualLineageOutcome[],
+  lineageId: string,
+): VisualLineageOutcome | undefined {
+  const committed = outcomes
+    .filter((outcome) => outcome.lineageId === lineageId)
+    .sort((left, right) => left.attempt - right.attempt);
+  const attempts = new Set<number>();
+  for (const outcome of committed) {
+    if (attempts.has(outcome.attempt)) {
+      throw new Error(
+        `Duplicate committed visual lineage outcome for ${lineageId} attempt ${String(outcome.attempt)}`,
+      );
+    }
+    attempts.add(outcome.attempt);
+  }
+  return committed.at(-1);
 }

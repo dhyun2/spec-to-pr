@@ -3,6 +3,7 @@ import { defineConfig } from "tsup";
 export default defineConfig({
   entry: {
     "mcp/server": "src/mcp/server.ts",
+    "mcp/visual-comparison-worker": "src/visual/visual-comparison-worker.ts",
   },
   format: ["esm"],
   platform: "node",

@@ -8,6 +8,7 @@ import {
   LEGACY_SOURCE_DIGEST_ALGORITHM_V2,
   discoverLegacySourceGraph,
 } from "../../src/legacy/legacy-source-graph.js";
+import { LegacySourceCache } from "../../src/legacy/legacy-source-cache.js";
 
 const temporaryRoots: string[] = [];
 
@@ -18,6 +19,52 @@ afterEach(async () => {
 });
 
 describe("legacy source graph", () => {
+  it("starts a fresh source snapshot for every public graph discovery", async () => {
+    const project = await vueFixture({
+      "src/route.ts": 'export const route = { path: "/before" };',
+    });
+    const sourcePath = path.join(project, "src", "route.ts");
+    const cache = new LegacySourceCache();
+    const before = await discoverLegacySourceGraph(
+      path.join(project, "src"),
+      {},
+      { sourceCache: cache },
+    );
+
+    await writeFile(sourcePath, 'export const route = { path: "/after" };\n', "utf8");
+    const after = await discoverLegacySourceGraph(
+      path.join(project, "src"),
+      {},
+      { sourceCache: cache },
+    );
+
+    expect(after.sourceDigest).not.toBe(before.sourceDigest);
+    expect(after.files.find((file) => file.sourcePath === "route.ts")?.content).toContain("/after");
+  });
+
+  it("reads and parses each of 250 included code files at most once", async () => {
+    const files = Object.fromEntries(
+      Array.from({ length: 250 }, (_, index) => [
+        `src/file-${String(index).padStart(3, "0")}.ts`,
+        `export const value${index} = ${index};`,
+      ]),
+    );
+    const project = await vueFixture(files);
+    const cache = new LegacySourceCache();
+
+    const graph = await discoverLegacySourceGraph(
+      path.join(project, "src"),
+      {},
+      { sourceCache: cache },
+    );
+
+    expect(graph.files).toHaveLength(250);
+    expect(cache.snapshotStats()).toMatchObject({
+      fileReads: 251,
+      astParses: 250,
+    });
+  });
+
   it("follows only the requested symbol through a supporting barrel", async () => {
     const project = await vueFixture({
       "src/modules/shop/profile.ts":
@@ -38,7 +85,16 @@ describe("legacy source graph", () => {
       "src/api/index.ts",
       "src/api/profileApi.ts",
     ]);
-    expect(JSON.stringify(graph)).not.toContain("ordersApi.ts");
+    expect(JSON.stringify(graph.files)).not.toContain("ordersApi.ts");
+    expect(JSON.stringify(graph.edges)).not.toContain("ordersApi.ts");
+    expect(graph.resolutionDecisions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          specifier: "./ordersApi",
+          resolvedPath: "src/api/ordersApi.ts",
+        }),
+      ]),
+    );
 
     await writeFile(
       path.join(project, "src/api/ordersApi.ts"),

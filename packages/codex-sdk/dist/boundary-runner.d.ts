@@ -1,6 +1,7 @@
 import type { RunResult } from "@openai/codex-sdk";
 import { type AggregatedUsage, type WorkloadSize } from "./workload-budget.js";
 export type BoundaryWorkflowStatus = {
+    view: "action" | "checkpoint" | "detail";
     runId: string;
     revision: number;
     status: "running" | "needs-external-action" | "blocked" | "publish-ready" | "completed";
@@ -27,15 +28,7 @@ export type BoundaryWorkflowStatus = {
         updated: boolean;
         publishResultArtifactId: string;
     };
-    resumeContext: {
-        goal: string;
-        evidencePaths: string[];
-        submissions: Array<{
-            kind: string;
-            summary: string;
-            outcome: string;
-        }>;
-    };
+    resumeContext?: BoundaryResumeContext;
     requiredValidations: string[];
     workload: {
         size: WorkloadSize;
@@ -51,6 +44,15 @@ export type BoundaryWorkflowStatus = {
             hardLimitTokens: number;
         };
     };
+};
+export type BoundaryResumeContext = {
+    goal: string;
+    evidencePaths: string[];
+    submissions: Array<{
+        kind: string;
+        summary: string;
+        outcome: string;
+    }>;
 };
 export type BoundaryWorkflowBlocker = {
     stage: string;
@@ -95,6 +97,7 @@ export declare function executeBudgetedBoundaryTurns(input: {
     workloadHardLimits?: Partial<Record<WorkloadSize, number>>;
     requiredValidations: readonly string[];
     maxTurns: number;
+    blockedDiagnosticTokenReserve?: number;
     inspectBlockedDiagnosticPreflight?: () => BlockedDiagnosticPreflight | Promise<BlockedDiagnosticPreflight>;
 }): Promise<{
     threadId: string | null;

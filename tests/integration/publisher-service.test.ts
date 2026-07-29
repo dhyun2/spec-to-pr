@@ -7,11 +7,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ArtifactBlobStore } from "../../src/artifact-registry/artifact-blob-store.js";
 import { PublisherService } from "../../src/application/publisher-service.js";
 import { RunService } from "../../src/application/run-service.js";
+import { PrReportV2Schema } from "../../src/pr-report/pr-report-model.js";
 import { ArtifactRefSchema } from "../../src/runtime/artifact.js";
 import { createArtifactId } from "../../src/runtime/id-factory.js";
 import type {
   PublishedReviewRequest,
   PublishTarget,
+  ReviewAssetPublishOutcome,
+  ReviewRequestAsset,
   ReviewRequestPayload,
   ReviewRequestPublisher,
   ReviewRequestUpdate,
@@ -37,6 +40,8 @@ let gitlabPublisher: FakePublisher;
 let gitCalls: string[][];
 let gitCurrentBranch: string;
 const gitHead = "a".repeat(40);
+const canonicalReviewPacketId = `packet_${"c".repeat(64)}`;
+const canonicalDiffDigest = `sha256:${"d".repeat(64)}`;
 
 beforeEach(async () => {
   directory = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-publisher-"));
@@ -160,6 +165,336 @@ describe("PublisherService", () => {
     await expect(publisherService.plan(baseInput)).rejects.toThrow(/WORKSPACE_BRANCH_MISMATCH/);
     expect(githubPublisher.createdPayloads).toHaveLength(0);
   });
+
+  it("revalidates bound Git and remote state before an authoritative publish mutation", async () => {
+    gitCurrentBranch = "codex/pinned";
+    const run = await runService.createRun({
+      projectRoot,
+      workspaceBinding: {
+        repositoryRoot: projectRoot,
+        targetPaths: ["src/page/shop"],
+        supportingPaths: [],
+        sourceBranch: "codex/pinned",
+        targetBranch: "release-qa",
+        baseSha: gitHead,
+        initialHeadSha: gitHead,
+        remoteName: "origin",
+        remoteUrl: "https://github.com/acme/spec-to-pr.git",
+        remoteProvider: "github",
+        remoteHost: "github.com",
+        publicationTarget: {
+          host: "github",
+          webBaseUrl: "https://github.com",
+          apiBaseUrl: "https://api.github.com",
+          owner: "acme",
+          repo: "spec-to-pr",
+        },
+      },
+    });
+    await markRunReadyForPublish(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    gitCalls = [];
+
+    await publisherService.publish({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "codex/pinned",
+      targetBranch: "release-qa",
+      remoteName: "origin",
+      pushBranch: false,
+      confirm: true,
+    });
+
+    expect(gitCalls.filter((args) => args[0] === "status").length).toBeGreaterThanOrEqual(4);
+    expect(gitCalls.filter((args) => args[0] === "symbolic-ref").length).toBeGreaterThanOrEqual(4);
+    expect(
+      gitCalls.filter((args) => args[0] === "rev-parse" && args.at(-1) === "HEAD").length,
+    ).toBeGreaterThanOrEqual(4);
+    expect(
+      gitCalls.filter((args) => args[0] === "rev-parse" && args.at(-1) === "codex/pinned").length,
+    ).toBeGreaterThanOrEqual(4);
+    expect(gitCalls.filter((args) => args[0] === "remote").length).toBeGreaterThanOrEqual(4);
+    expect(gitCalls.filter((args) => args[0] === "rev-list").length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("invalidates the private publication fence when semantic Run state changes", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    let reads = 0;
+    const changingStore: RunStore = {
+      create: (manifest) => store.create(manifest),
+      get: async (runId) => {
+        const current = await store.get(runId);
+        reads += 1;
+        return reads < 3
+          ? current
+          : { ...current, status: "cancelled" as const, revision: current.revision + 1 };
+      },
+      list: (filter) => store.list(filter),
+      save: (manifest, expectedRevision) => store.save(manifest, expectedRevision),
+      close: async () => {},
+    };
+    const fencedService = new PublisherService(
+      changingStore,
+      artifactStore,
+      () => "2026-06-23T00:00:02.000Z",
+      { github: githubPublisher, gitlab: gitlabPublisher },
+      async (_cwd, args) => {
+        if (args[0] === "status") return { stdout: "", stderr: "" };
+        if (args[0] === "rev-list") return { stdout: "1\n", stderr: "" };
+        if (args[0] === "symbolic-ref") {
+          return { stdout: "spec-to-pr/run-1\n", stderr: "" };
+        }
+        if (args[0] === "rev-parse") return { stdout: `${gitHead}\n`, stderr: "" };
+        return { stdout: "https://github.com/acme/spec-to-pr.git\n", stderr: "" };
+      },
+    );
+
+    await expect(
+      fencedService.publish({
+        runId: run.id,
+        reportArtifactId: report.markdownArtifactId,
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        pushBranch: false,
+        confirm: true,
+      }),
+    ).rejects.toThrow(/PUBLISH_EXECUTION_FENCE_STALE/);
+    expect(githubPublisher.createdPayloads).toHaveLength(0);
+  });
+
+  it("revalidates semantic bindings after a provider callback before draft mutation", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    githubPublisher.beforeFindExisting = async () => {
+      const current = await store.get(run.id);
+      await store.save(
+        {
+          ...current,
+          status: "blocked",
+          revision: current.revision + 1,
+          updatedAt: "2026-06-23T00:00:01.750Z",
+        },
+        current.revision,
+      );
+    };
+
+    await expect(
+      publisherService.publish({
+        runId: run.id,
+        reportArtifactId: report.markdownArtifactId,
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        pushBranch: false,
+        confirm: true,
+      }),
+    ).rejects.toThrow(/PUBLISH_EXECUTION_FENCE_STALE.*Run semantic binding/i);
+
+    expect(githubPublisher.createdPayloads).toHaveLength(0);
+    expect(githubPublisher.updatedMetadata).toHaveLength(0);
+    expect(
+      (await store.get(run.id)).artifacts.filter(
+        (artifact) => artifact.metadata["reportKind"] === "publish-result",
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("allows publisher-owned lease and diagnostic-claim heartbeats across publication", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    const initial = await store.get(run.id);
+    const initialClaim = await writeArtifact({
+      id: "art_12121212121212121212121212121212",
+      kind: "other",
+      label: "diagnostic-publish-claim.json",
+      reportKind: "diagnostic-publish-claim",
+      content: Buffer.from('{"event":"claim","expiresAt":"2026-06-23T00:01:00.000Z"}\n'),
+      mediaType: "application/json",
+      timestamp: "2026-06-23T00:00:01.000Z",
+      metadata: {
+        diagnosticExecutionKey: "diagnostic:test",
+        claimState: "active",
+        ownerClaimId: "art_12121212121212121212121212121212",
+        expiresAt: "2026-06-23T00:01:00.000Z",
+      },
+    });
+    await store.save(
+      {
+        ...initial,
+        revision: initial.revision + 1,
+        updatedAt: "2026-06-23T00:00:01.000Z",
+        artifacts: [...initial.artifacts, initialClaim],
+        stages: initial.stages.map((stage) =>
+          stage.name === "publish"
+            ? {
+                ...stage,
+                status: "running" as const,
+                attempt: 1,
+                startedAt: "2026-06-23T00:00:01.000Z",
+                lease: {
+                  id: "lease_12121212121212121212121212121212",
+                  workerId: "orchestrator",
+                  acquiredAt: "2026-06-23T00:00:01.000Z",
+                  heartbeatAt: "2026-06-23T00:00:01.000Z",
+                  expiresAt: "2026-06-23T00:01:01.000Z",
+                },
+              }
+            : stage,
+        ),
+      },
+      initial.revision,
+    );
+    githubPublisher.beforeFindExisting = async () => {
+      const current = await store.get(run.id);
+      const renewal = await writeArtifact({
+        id: "art_13131313131313131313131313131313",
+        kind: "other",
+        label: "diagnostic-publish-claim.json",
+        reportKind: "diagnostic-publish-claim",
+        content: Buffer.from('{"event":"claim","expiresAt":"2026-06-23T00:02:00.000Z"}\n'),
+        mediaType: "application/json",
+        timestamp: "2026-06-23T00:00:01.500Z",
+        metadata: {
+          diagnosticExecutionKey: "diagnostic:test",
+          claimState: "active",
+          ownerClaimId: "art_12121212121212121212121212121212",
+          expiresAt: "2026-06-23T00:02:00.000Z",
+        },
+      });
+      await store.save(
+        {
+          ...current,
+          revision: current.revision + 1,
+          updatedAt: "2026-06-23T00:00:01.500Z",
+          artifacts: [...current.artifacts, renewal],
+          stages: current.stages.map((stage) =>
+            stage.name === "publish" && stage.lease !== undefined
+              ? {
+                  ...stage,
+                  lease: {
+                    ...stage.lease,
+                    heartbeatAt: "2026-06-23T00:00:01.500Z",
+                    expiresAt: "2026-06-23T00:01:01.500Z",
+                  },
+                }
+              : stage,
+          ),
+        },
+        current.revision,
+      );
+    };
+
+    const published = await publisherService.publish({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      pushBranch: false,
+      confirm: true,
+    });
+
+    expect(published.result.status).toBe("passed");
+    expect(githubPublisher.createdPayloads).toHaveLength(1);
+  });
+
+  it("rejects Git drift after provider lookup before draft mutation and result recording", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    githubPublisher.beforeFindExisting = async () => {
+      gitCurrentBranch = "codex/drifted";
+    };
+
+    await expect(
+      publisherService.publish({
+        runId: run.id,
+        reportArtifactId: report.markdownArtifactId,
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        pushBranch: false,
+        confirm: true,
+      }),
+    ).rejects.toThrow(/PUBLISH_EXECUTION_FENCE_STALE|WORKSPACE_BRANCH_MISMATCH|checked-out branch/);
+
+    expect(githubPublisher.createdPayloads).toHaveLength(0);
+    expect(githubPublisher.updatedMetadata).toHaveLength(0);
+    expect(
+      (await store.get(run.id)).artifacts.filter(
+        (artifact) => artifact.metadata["reportKind"] === "publish-result",
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("rechecks Git immediately after asset upload before draft mutation", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    await addVisualEvidence(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    githubPublisher.afterPublishAssets = async () => {
+      gitCurrentBranch = "codex/drifted-after-upload";
+    };
+
+    await expect(
+      publisherService.publish({
+        runId: run.id,
+        reportArtifactId: report.markdownArtifactId,
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        pushBranch: false,
+        confirm: true,
+      }),
+    ).rejects.toThrow(/checked-out branch/);
+
+    expect(githubPublisher.uploadedAssets).toHaveLength(1);
+    expect(githubPublisher.createdPayloads).toHaveLength(0);
+    expect(githubPublisher.updatedMetadata).toHaveLength(0);
+    expect(
+      (await store.get(run.id)).artifacts.filter(
+        (artifact) => artifact.metadata["reportKind"] === "publish-result",
+      ),
+    ).toHaveLength(0);
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["null", null],
+    ["malformed", { id: canonicalReviewPacketId, headSha: gitHead }],
+    [
+      "mismatched",
+      {
+        id: `packet_${"e".repeat(64)}`,
+        headSha: gitHead,
+      },
+    ],
+  ] as const)(
+    "rejects a %s current implementation packet before push or provider mutation",
+    async (_name, reviewPacket) => {
+      const run = await runService.createRun({ projectRoot });
+      await markRunReadyForPublish(run.id);
+      const report = await prReportService.generatePrReport({ runId: run.id });
+      await replaceImplementationReviewPacket(run.id, reviewPacket);
+      const gitCallsBeforePublish = gitCalls.length;
+
+      await expect(
+        publisherService.publish({
+          runId: run.id,
+          reportArtifactId: report.markdownArtifactId,
+          sourceBranch: "spec-to-pr/run-1",
+          targetBranch: "main",
+          pushBranch: true,
+          confirm: true,
+        }),
+      ).rejects.toThrow(/PUBLISH_EXECUTION_FENCE_STALE.*review packet/i);
+
+      expect(gitCalls.slice(gitCallsBeforePublish).some((args) => args[0] === "push")).toBe(false);
+      expect(githubPublisher.createdPayloads).toHaveLength(0);
+      expect(githubPublisher.updatedMetadata).toHaveLength(0);
+      expect(githubPublisher.uploadedAssets).toHaveLength(0);
+    },
+  );
 
   it("rejects a lookalike remote before any provider request", async () => {
     const previousHostOverride = process.env["SPEC_TO_PR_GIT_HOST"];
@@ -425,7 +760,7 @@ describe("PublisherService", () => {
       "push",
       "--set-upstream",
       "upstream",
-      "spec-to-pr/run-upstream",
+      `${gitHead}:refs/heads/spec-to-pr/run-upstream`,
     ]);
   });
 
@@ -595,7 +930,7 @@ describe("PublisherService", () => {
     expect(published.result.errorMessage).toMatch(/draft/i);
   });
 
-  it("refuses to publish a blocked report", async () => {
+  it("rejects a blocked canonical report requested with ready intent", async () => {
     const run = await runService.createRun({
       projectRoot,
     });
@@ -605,23 +940,16 @@ describe("PublisherService", () => {
 
     expect(report.decision).toBe("blocked");
 
-    const blocked = await publisherService.publish({
-      runId: run.id,
-      reportArtifactId: report.markdownArtifactId,
-      sourceBranch: "spec-to-pr/run-1",
-      targetBranch: "main",
-      pushBranch: false,
-      confirm: true,
-    });
-
-    expect(blocked.result).toMatchObject({
-      status: "blocked",
-      errorCode: "PUBLISH_BLOCKED",
-      requestSynced: false,
-      visualPreviewExpected: false,
-      visualPreviewSynced: false,
-    });
-    expect(blocked.agentResultId).toBeUndefined();
+    await expect(
+      publisherService.publish({
+        runId: run.id,
+        reportArtifactId: report.markdownArtifactId,
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        pushBranch: false,
+        confirm: true,
+      }),
+    ).rejects.toThrow(/PUBLISH_REPORT_BINDING_INVALID.*intent/i);
 
     const loadedRun = await store.get(run.id);
 
@@ -630,6 +958,7 @@ describe("PublisherService", () => {
 
   it("creates a synchronized blocked diagnostic draft without requiring a reviewed head SHA", async () => {
     const run = await runService.createRun({ projectRoot });
+    await addFeatureVideoEvidence(run.id);
     const report = await prReportService.generatePrReport({
       runId: run.id,
       metadata: {
@@ -658,6 +987,8 @@ describe("PublisherService", () => {
         labels: ["spec-to-pr", "spec-to-pr:blocked"],
       },
     });
+    expect(plan.payload).not.toHaveProperty("reviewPacketId");
+    expect(plan.payload).not.toHaveProperty("headSha");
 
     const published = await publisherService.publish({
       runId: run.id,
@@ -673,6 +1004,8 @@ describe("PublisherService", () => {
     expect(published.result).toMatchObject({
       status: "blocked",
       requestSynced: true,
+      featureVideoExpected: false,
+      featureVideoSynced: false,
       request: { number: "123", draft: true, created: true },
     });
     expect(published.result.errorCode).toBeUndefined();
@@ -681,6 +1014,7 @@ describe("PublisherService", () => {
       title: `[Blocked] SpecToPR Run ${run.id}`,
       labels: ["spec-to-pr", "spec-to-pr:blocked"],
     });
+    expect(githubPublisher.uploadedAssets).toHaveLength(0);
     expect(gitCalls).toContainEqual(["rev-list", "--count", "main..spec-to-pr/run-1"]);
 
     const publishedRun = await store.get(run.id);
@@ -695,6 +1029,218 @@ describe("PublisherService", () => {
       remoteName: "origin",
       pushBranch: false,
     });
+  });
+
+  it("binds a blocked visual publication to the exact canonical packet and report", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await addVisualEvidence(run.id);
+    const report = await generatePrReport({
+      runId: run.id,
+      binding: {
+        reviewPacketId: canonicalReviewPacketId,
+        headSha: gitHead,
+        diffDigest: canonicalDiffDigest,
+      },
+      visualReportArtifactId: "art_55555555555555555555555555555555",
+    });
+
+    const plan = await publisherService.plan({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      intent: "blocked-diagnostic",
+      pushBranch: false,
+    });
+
+    expect(plan.payload).toMatchObject({
+      reviewPacketId: canonicalReviewPacketId,
+      headSha: gitHead,
+    });
+
+    const mismatchedHeadService = new PublisherService(
+      store,
+      artifactStore,
+      () => "2026-06-23T00:00:02.000Z",
+      { github: githubPublisher, gitlab: gitlabPublisher },
+      async (_cwd, args) => ({
+        stdout:
+          args[0] === "status"
+            ? ""
+            : args[0] === "symbolic-ref"
+              ? "spec-to-pr/run-1\n"
+              : args[0] === "rev-parse"
+                ? `${"b".repeat(40)}\n`
+                : args[0] === "rev-list"
+                  ? "1\n"
+                  : "https://github.com/acme/spec-to-pr.git\n",
+        stderr: "",
+      }),
+    );
+    await expect(
+      mismatchedHeadService.publish({
+        runId: run.id,
+        reportArtifactId: report.markdownArtifactId,
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        intent: "blocked-diagnostic",
+        pushBranch: false,
+        confirm: true,
+      }),
+    ).rejects.toThrow(/reviewed source SHA/);
+  });
+
+  it("renders the bound failed report as an equal-size two-column blocked visual preview", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await addVisualEvidence(run.id, {
+      status: "failed",
+      includeOverlay: true,
+      context: {
+        targetId: "store-cinema4k",
+        name: "매장 상세",
+        route: "/shop/stores/123",
+        state: "available",
+        viewport: { width: 360, height: 1831 },
+        deviceScaleFactor: 1,
+      },
+      metrics: {
+        exactMatchRatio: 0.84,
+        reviewMatchRatio: 0.912,
+        maskedAreaRatio: 0,
+        threshold: 0.92,
+      },
+    });
+    await addNewerUnboundVisualReport(run.id);
+    await addParsedIntakePolicy(run.id, { includeDiff: false });
+    const report = await generatePrReport({
+      runId: run.id,
+      binding: {
+        reviewPacketId: canonicalReviewPacketId,
+        headSha: gitHead,
+        diffDigest: canonicalDiffDigest,
+      },
+      visualReportArtifactId: "art_55555555555555555555555555555555",
+    });
+
+    await publisherService.publish({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      intent: "blocked-diagnostic",
+      pushBranch: false,
+      confirm: true,
+    });
+
+    expect(githubPublisher.uploadedAssetIds[0]).toEqual([
+      "art_22222222222222222222222222222222",
+      "art_33333333333333333333333333333333",
+      "art_44444444444444444444444444444444",
+      "art_88888888888888888888888888888888",
+    ]);
+    const body = githubPublisher.createdPayloads[0]?.body ?? "";
+    expect(body).toContain('width="320"');
+    expect(body.match(/width="320"/g)).toHaveLength(2);
+    expect(body).toContain("검토 일치율");
+    expect(body).toContain("불일치율");
+    expect(body).toContain("Diff");
+    expect(body).toContain("Overlay");
+    expect(body).toContain("91.20%");
+    expect(body).toContain("8.80%");
+    expect(body).toContain("92.00%");
+    expect(body).not.toContain("unbound-newer-report.png");
+  });
+
+  it.each([
+    ["diff", { includeDiff: false }],
+    ["overlay", { includeOverlay: false }],
+  ] as const)(
+    "fails closed before host mutation when blocked visual publication lacks its required %s",
+    async (role, fixture) => {
+      const run = await runService.createRun({ projectRoot });
+      await addVisualEvidence(run.id, { status: "failed", ...fixture });
+      const report = await generatePrReport({
+        runId: run.id,
+        binding: {
+          reviewPacketId: canonicalReviewPacketId,
+          headSha: gitHead,
+          diffDigest: canonicalDiffDigest,
+        },
+        visualReportArtifactId: "art_55555555555555555555555555555555",
+      });
+
+      const published = await publisherService.publish({
+        runId: run.id,
+        reportArtifactId: report.markdownArtifactId,
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        intent: "blocked-diagnostic",
+        pushBranch: false,
+        confirm: true,
+      });
+
+      expect(published.result).toMatchObject({
+        status: "failed",
+        errorCode: "PUBLISH_FAILED",
+        requestSynced: false,
+        visualPreviewExpected: false,
+        visualPreviewSynced: false,
+      });
+      expect(published.result.errorMessage).toMatch(
+        new RegExp(`missing an? ${role} artifact`, "i"),
+      );
+      expect(githubPublisher.uploadedAssetIds).toHaveLength(0);
+      expect(githubPublisher.createdPayloads).toHaveLength(0);
+      expect(githubPublisher.updatedMetadata).toHaveLength(0);
+    },
+  );
+
+  it("starts a separate compact preview block for each visual target", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    await addVisualEvidence(run.id);
+    await appendSecondVisualTarget(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+
+    await publisherService.publish({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      pushBranch: false,
+      confirm: true,
+    });
+
+    const body = githubPublisher.createdPayloads[0]?.body ?? "";
+    expect(body).toContain("#### 화면 1 · 고정된 검토 데이터");
+    expect(body).toContain("#### 화면 2 · 두 번째 검토 데이터");
+    expect(body.match(/\| 경로 \| 상태 \| Fixture \| 화면/g)).toHaveLength(2);
+    expect(body.match(/\| Figma \| 브라우저 \|/g)).toHaveLength(2);
+  });
+
+  it("rejects a crossed blocked report and visual artifact binding", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await addVisualEvidence(run.id);
+    const report = await generatePrReport({
+      runId: run.id,
+      binding: {
+        reviewPacketId: `packet_${"e".repeat(64)}`,
+        headSha: gitHead,
+        diffDigest: canonicalDiffDigest,
+      },
+      visualReportArtifactId: "art_55555555555555555555555555555555",
+    });
+
+    await expect(
+      publisherService.plan({
+        runId: run.id,
+        reportArtifactId: report.markdownArtifactId,
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        intent: "blocked-diagnostic",
+        pushBranch: false,
+      }),
+    ).rejects.toThrow(/PUBLISH_REPORT_BINDING_INVALID/);
   });
 
   it("updates the same source-target diagnostic draft instead of creating another", async () => {
@@ -729,6 +1275,264 @@ describe("PublisherService", () => {
       body: expect.stringContaining("blocked"),
       labels: ["spec-to-pr", "spec-to-pr:blocked"],
     });
+  });
+
+  it("persists digest-bound upload receipts and retries only the missing asset on the same draft", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    await addVisualEvidence(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    const input = {
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      pushBranch: false,
+      confirm: true as const,
+    };
+    const transientId = "art_33333333333333333333333333333333";
+    githubPublisher.assetOutcomePlan = ({ invocation, assets }) =>
+      assets.map((asset) =>
+        asset.artifactId === transientId && invocation <= 3
+          ? {
+              status: "failed" as const,
+              artifactId: asset.artifactId,
+              failure: "transient" as const,
+              message: "GitHub upload review asset failed with HTTP 503",
+            }
+          : githubPublisher.publishedOutcome(asset),
+      );
+
+    const partial = await publisherService.publish(input);
+    expect(partial.result).toMatchObject({
+      status: "blocked",
+      errorCode: "PUBLISH_PARTIAL_SYNC",
+      requestSynced: false,
+      visualPreviewSynced: false,
+      retryable: true,
+      request: { created: true, updated: false },
+    });
+    expect(partial.result.uploadReceiptArtifactIds).toHaveLength(2);
+    expect(githubPublisher.uploadedAssetIds).toEqual([
+      [
+        "art_22222222222222222222222222222222",
+        "art_33333333333333333333333333333333",
+        "art_44444444444444444444444444444444",
+      ],
+      [transientId],
+      [transientId],
+    ]);
+    githubPublisher.existingRequest = {
+      ...partial.result.request!,
+      created: false,
+      updated: false,
+    };
+
+    const recovered = await publisherService.publish(input);
+
+    expect(githubPublisher.uploadedAssetIds.at(-1)).toEqual([transientId]);
+    expect(githubPublisher.createdPayloads).toHaveLength(1);
+    expect(githubPublisher.updatedMetadata).toHaveLength(1);
+    expect(recovered.result).toMatchObject({
+      status: "passed",
+      requestSynced: true,
+      visualPreviewSynced: true,
+    });
+    expect(recovered.result.uploadReceiptArtifactIds).toHaveLength(3);
+    expect(
+      (await store.get(run.id)).artifacts.filter(
+        (artifact) => artifact.metadata["reportKind"] === "review-asset-upload-receipt",
+      ),
+    ).toHaveLength(3);
+  });
+
+  it("uploads a changed digest again instead of reusing the old receipt URL", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    await addVisualEvidence(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    const input = {
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      pushBranch: false,
+      confirm: true as const,
+    };
+    const changedArtifactId = "art_33333333333333333333333333333333";
+    const first = await publisherService.publish(input);
+    githubPublisher.existingRequest = {
+      ...first.result.request!,
+      created: false,
+      updated: false,
+    };
+    const current = await store.get(run.id);
+    const changedBlob = await artifactStore.writeBlob({
+      content: Buffer.from("changed-browser-png"),
+      mediaType: "image/png",
+      storedAt: "2026-06-23T00:00:03.000Z",
+      label: "browser-home.png",
+    });
+    await store.save(
+      {
+        ...current,
+        revision: current.revision + 1,
+        updatedAt: "2026-06-23T00:00:03.000Z",
+        artifacts: current.artifacts.map((artifact) =>
+          artifact.id === changedArtifactId
+            ? ArtifactRefSchema.parse({
+                ...artifact,
+                uri: changedBlob.uri,
+                digest: changedBlob.digest,
+              })
+            : artifact,
+        ),
+      },
+      current.revision,
+    );
+    githubPublisher.assetOutcomePlan = ({ assets }) =>
+      assets.map((asset) => {
+        const outcome = githubPublisher.publishedOutcome(asset);
+        if (outcome.status !== "published" || asset.artifactId !== changedArtifactId) {
+          return outcome;
+        }
+        return {
+          ...outcome,
+          asset: {
+            ...outcome.asset,
+            url: `https://github.example/assets/browser-${asset.artifactDigest.slice(-12)}.png`,
+          },
+        };
+      });
+
+    const second = await publisherService.publish(input);
+
+    expect(githubPublisher.uploadedAssetIds).toEqual([
+      [
+        "art_22222222222222222222222222222222",
+        changedArtifactId,
+        "art_44444444444444444444444444444444",
+      ],
+      [changedArtifactId],
+    ]);
+    const firstUrl = first.result.publishedAssets.find(
+      (asset) => asset.artifactId === changedArtifactId,
+    )?.url;
+    const secondUrl = second.result.publishedAssets.find(
+      (asset) => asset.artifactId === changedArtifactId,
+    )?.url;
+    expect(secondUrl).toBeDefined();
+    expect(secondUrl).not.toBe(firstUrl);
+    expect(second.result.uploadReceiptArtifactIds).toHaveLength(3);
+    expect(
+      (await store.get(run.id)).artifacts.filter(
+        (artifact) => artifact.metadata["reportKind"] === "review-asset-upload-receipt",
+      ),
+    ).toHaveLength(4);
+  });
+
+  it.each([
+    ["permanent", "GitHub upload review asset failed with HTTP 400"],
+    ["uncertain", "GitHub upload review asset returned a malformed response"],
+  ] as const)("does not retry %s upload failures", async (failure, message) => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    await addVisualEvidence(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    const failedId = "art_33333333333333333333333333333333";
+    githubPublisher.assetOutcomePlan = ({ assets }) =>
+      assets.map((asset) =>
+        asset.artifactId === failedId
+          ? {
+              status: "failed",
+              artifactId: asset.artifactId,
+              failure,
+              message,
+            }
+          : githubPublisher.publishedOutcome(asset),
+      );
+
+    const partial = await publisherService.publish({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      pushBranch: false,
+      confirm: true,
+    });
+
+    expect(githubPublisher.uploadedAssetIds).toHaveLength(1);
+    expect(partial.result).toMatchObject({
+      status: "blocked",
+      errorCode: "PUBLISH_PARTIAL_SYNC",
+      retryable: false,
+      requestSynced: false,
+    });
+    expect(partial.result.uploadReceiptArtifactIds).toHaveLength(2);
+  });
+
+  it("keeps body sync blocked when the remote draft omits a confirmed asset URL", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    await addVisualEvidence(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    githubPublisher.remoteBodyOverride = "# host truncated the visual evidence";
+
+    const result = await publisherService.publish({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      pushBranch: false,
+      confirm: true,
+    });
+
+    expect(result.result).toMatchObject({
+      status: "blocked",
+      errorCode: "PUBLISH_PARTIAL_SYNC",
+      requestSynced: false,
+      visualPreviewSynced: false,
+      retryable: true,
+    });
+    expect(result.result.partialReasons.join("\n")).toContain("PUBLISH_ASSET_BODY_SYNC_INCOMPLETE");
+  });
+
+  it("keeps local body sync blocked before host mutation when a confirmed URL is absent", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    await addVisualEvidence(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    githubPublisher.assetOutcomePlan = ({ assets }) =>
+      assets.map((asset) => {
+        const outcome = githubPublisher.publishedOutcome(asset);
+        if (outcome.status !== "published") return outcome;
+        return {
+          ...outcome,
+          asset: {
+            ...outcome.asset,
+            url: `${outcome.asset.url}?first=1&second=2`,
+          },
+        };
+      });
+
+    const result = await publisherService.publish({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      pushBranch: false,
+      confirm: true,
+    });
+
+    expect(result.result).toMatchObject({
+      status: "blocked",
+      errorCode: "PUBLISH_PARTIAL_SYNC",
+      requestSynced: false,
+      visualPreviewSynced: false,
+    });
+    expect(result.result.partialReasons).toContain("PUBLISH_ASSET_BODY_SYNC_INCOMPLETE");
+    expect(githubPublisher.createdPayloads).toHaveLength(0);
+    expect(githubPublisher.updatedMetadata).toHaveLength(0);
   });
 
   it("records partial GitHub create and update mutations and completes labels on retry", async () => {
@@ -976,29 +1780,24 @@ describe("PublisherService", () => {
     expect(githubPublisher.updatedMetadata).toHaveLength(0);
   });
 
-  it("does not let compatibility flags mutate a ready report as a blocked diagnostic", async () => {
+  it("rejects a ready canonical report requested with blocked intent", async () => {
     const run = await runService.createRun({ projectRoot });
     await markRunReadyForPublish(run.id);
     const report = await prReportService.generatePrReport({ runId: run.id });
     githubPublisher.existingRequest = existingDraftRequest("473");
 
-    const updated = await publisherService.updateBody({
-      runId: run.id,
-      reportArtifactId: report.markdownArtifactId,
-      sourceBranch: "spec-to-pr/run-1",
-      targetBranch: "main",
-      requestNumber: "473",
-      allowBlockedBody: true,
-      pushBranch: false,
-      confirm: true,
-    });
-
-    expect(updated.result).toMatchObject({
-      status: "blocked",
-      errorCode: "PUBLISH_INTENT_MISMATCH",
-      requestSynced: false,
-    });
-    expect(updated.agentResultId).toBeUndefined();
+    await expect(
+      publisherService.updateBody({
+        runId: run.id,
+        reportArtifactId: report.markdownArtifactId,
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        requestNumber: "473",
+        allowBlockedBody: true,
+        pushBranch: false,
+        confirm: true,
+      }),
+    ).rejects.toThrow(/PUBLISH_REPORT_BINDING_INVALID.*intent/i);
     expect(githubPublisher.updatedMetadata).toHaveLength(0);
   });
 
@@ -1015,50 +1814,25 @@ describe("PublisherService", () => {
         decision: "blocked",
       },
     },
-  ])(
-    "does not publish $name report metadata through compatibility update",
-    async ({ metadata }) => {
-      const run = await runService.createRun({ projectRoot });
-      const report = await generatePrReport({ runId: run.id, metadata });
-      githubPublisher.existingRequest = existingDraftRequest("472");
+  ])("rejects $name Markdown report metadata before canonical comparison", async ({ metadata }) => {
+    const run = await runService.createRun({ projectRoot });
+    const report = await generatePrReport({ runId: run.id, metadata });
+    githubPublisher.existingRequest = existingDraftRequest("472");
 
-      const plan = await publisherService.plan({
+    await expect(
+      publisherService.plan({
         runId: run.id,
         reportArtifactId: report.markdownArtifactId,
         sourceBranch: "spec-to-pr/run-1",
         targetBranch: "main",
         intent: "blocked-diagnostic",
         pushBranch: false,
-      });
-      expect(plan).toMatchObject({
-        reportMetadataValid: false,
-        reportDecision: "blocked",
-        willCreateOrUpdate: false,
-      });
-      expect(plan.reportIntent).toBeUndefined();
-      expect(plan.warnings.join("\n")).toMatch(/report metadata.*invalid.*decision blocked/i);
+      }),
+    ).rejects.toThrow(/PUBLISH_REPORT_BINDING_INVALID.*metadata/i);
+    expect(githubPublisher.updatedMetadata).toHaveLength(0);
+  });
 
-      const updated = await publisherService.updateBody({
-        runId: run.id,
-        reportArtifactId: report.markdownArtifactId,
-        sourceBranch: "spec-to-pr/run-1",
-        targetBranch: "main",
-        requestNumber: "472",
-        allowBlockedBody: true,
-        pushBranch: false,
-        confirm: true,
-      });
-      expect(updated.result).toMatchObject({
-        status: "blocked",
-        errorCode: "PUBLISH_REPORT_METADATA_INVALID",
-        requestSynced: false,
-      });
-      expect(updated.result.errorMessage).toMatch(/intent unknown.*decision blocked/i);
-      expect(githubPublisher.updatedMetadata).toHaveLength(0);
-    },
-  );
-
-  it("rejects crossed report metadata and reports both known values", async () => {
+  it("rejects crossed Markdown metadata before canonical comparison", async () => {
     const run = await runService.createRun({ projectRoot });
     const report = await generatePrReport({
       runId: run.id,
@@ -1069,37 +1843,16 @@ describe("PublisherService", () => {
       },
     });
 
-    const plan = await publisherService.plan({
-      runId: run.id,
-      reportArtifactId: report.markdownArtifactId,
-      sourceBranch: "spec-to-pr/run-1",
-      targetBranch: "main",
-      intent: "blocked-diagnostic",
-      pushBranch: false,
-    });
-    expect(plan).toMatchObject({
-      reportMetadataValid: false,
-      reportIntent: "ready",
-      reportDecision: "blocked",
-      willCreateOrUpdate: false,
-    });
-    expect(plan.warnings.join("\n")).toMatch(/intent ready.*decision blocked/i);
-
-    const published = await publisherService.publish({
-      runId: run.id,
-      reportArtifactId: report.markdownArtifactId,
-      sourceBranch: "spec-to-pr/run-1",
-      targetBranch: "main",
-      intent: "blocked-diagnostic",
-      pushBranch: false,
-      confirm: true,
-    });
-    expect(published.result).toMatchObject({
-      status: "blocked",
-      errorCode: "PUBLISH_REPORT_METADATA_INVALID",
-      requestSynced: false,
-    });
-    expect(published.result.errorMessage).toMatch(/intent ready.*decision blocked/i);
+    await expect(
+      publisherService.plan({
+        runId: run.id,
+        reportArtifactId: report.markdownArtifactId,
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        intent: "blocked-diagnostic",
+        pushBranch: false,
+      }),
+    ).rejects.toThrow(/PUBLISH_REPORT_BINDING_INVALID.*metadata/i);
     expect(githubPublisher.createdPayloads).toHaveLength(0);
     expect(githubPublisher.updatedMetadata).toHaveLength(0);
   });
@@ -1137,6 +1890,44 @@ describe("PublisherService", () => {
     expect(updated.agentResultId).toBeUndefined();
     expect(githubPublisher.updatedBodies[0]).toContain("# 요약");
     expect(githubPublisher.updatedBodies[0]).toContain("## 결정");
+  });
+
+  it("fences updateBody against Run changes during provider lookup", async () => {
+    const run = await runService.createRun({ projectRoot });
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    githubPublisher.existingRequest = existingDraftRequest("476");
+    githubPublisher.beforeFindExisting = async () => {
+      const current = await store.get(run.id);
+      await store.save(
+        {
+          ...current,
+          status: "cancelled",
+          revision: current.revision + 1,
+          updatedAt: "2026-06-23T00:00:01.750Z",
+        },
+        current.revision,
+      );
+    };
+
+    await expect(
+      publisherService.updateBody({
+        runId: run.id,
+        reportArtifactId: report.markdownArtifactId,
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        pushBranch: false,
+        requestNumber: "476",
+        allowBlockedBody: true,
+        confirm: true,
+      }),
+    ).rejects.toThrow(/PUBLISH_EXECUTION_FENCE_STALE/);
+
+    expect(githubPublisher.updatedMetadata).toHaveLength(0);
+    expect(
+      (await store.get(run.id)).artifacts.filter(
+        (artifact) => artifact.metadata["reportKind"] === "publish-result",
+      ),
+    ).toHaveLength(0);
   });
 
   it("can sync a blocked report using the blocked draft update publish mode", async () => {
@@ -1237,7 +2028,7 @@ describe("PublisherService", () => {
     });
 
     expect(githubPublisher.createdPayloads[0]?.body).toContain(
-      "| 화면 | 레거시 | 이관 결과 | 차이 | 검토 일치율 | 픽셀 일치율 | 결과 |",
+      "| 경로 | 상태 | Fixture | 화면 | DPR | 시도 | 검토 일치율 | 불일치율 | 픽셀 일치율 | 마스킹 | 기준 | 결과 |",
     );
     expect(githubPublisher.createdPayloads[0]?.body).toContain(
       "레거시 화면과 이관 결과를 같은 조건으로 비교했습니다.",
@@ -1248,6 +2039,7 @@ describe("PublisherService", () => {
     expect(githubPublisher.createdPayloads[0]?.body).toContain(
       "https://github.example/assets/diff.png",
     );
+    expect(githubPublisher.createdPayloads[0]?.body).toContain("진단: [Diff]");
     expect(githubPublisher.createdPayloads[0]?.body).toContain("95.00%");
     expect(githubPublisher.createdPayloads[0]?.body).toContain("98.00%");
     expect(githubPublisher.createdPayloads[0]?.body).not.toContain("overlay");
@@ -1285,9 +2077,9 @@ describe("PublisherService", () => {
 
     const body = githubPublisher.createdPayloads[0]?.body ?? "";
     expect(body).toContain("매장 상세");
-    expect(body).toContain(
-      "/shop/42?tab=notice&amp;token=[REDACTED] · 공지 탭 &lt;펼침&gt; · 390×844 @2x",
-    );
+    expect(body).toContain("/shop/42?tab=notice&amp;token=[REDACTED]");
+    expect(body).toContain("공지 탭 &lt;펼침&gt;");
+    expect(body).toContain("390×844 | 2");
     expect(body).not.toContain("do-not-publish");
     expect(body).not.toContain("<펼침>");
     expect(body).not.toContain("legacy_01e68a8c011c37b4b997f938");
@@ -1328,7 +2120,7 @@ describe("PublisherService", () => {
     expect(loadedRun.agentResults.some((result) => result.kind === "publishing")).toBe(false);
   });
 
-  it("records failed publish when required visual evidence upload cannot be synchronized", async () => {
+  it("records blocked partial publish when required visual evidence upload cannot be synchronized", async () => {
     const run = await runService.createRun({
       projectRoot,
     });
@@ -1351,20 +2143,23 @@ describe("PublisherService", () => {
     });
 
     expect(published.result).toMatchObject({
-      status: "failed",
+      status: "blocked",
+      errorCode: "PUBLISH_PARTIAL_SYNC",
       requestSynced: false,
       visualPreviewExpected: true,
       visualPreviewSynced: false,
     });
-    expect(published.result.partialReasons.join("\n")).toContain("visual evidence upload failed");
-    expect(githubPublisher.createdPayloads).toHaveLength(0);
+    expect(published.result.partialReasons.join("\n")).toContain(
+      "visual evidence upload incomplete",
+    );
+    expect(githubPublisher.createdPayloads).toHaveLength(1);
 
     const loadedRun = await store.get(run.id);
 
     expect(loadedRun.agentResults.some((result) => result.kind === "publishing")).toBe(false);
   });
 
-  it("publishes a Korean legacy side-by-side preview from immutable GitLab raw evidence when uploads fail", async () => {
+  it("keeps a ready GitLab publication partial when required generated diff upload fails", async () => {
     const originalGitLabToken = process.env["GITLAB_TOKEN"];
     process.env["GITLAB_TOKEN"] = "glpat_test_token";
 
@@ -1392,23 +2187,20 @@ describe("PublisherService", () => {
       });
 
       expect(published.result).toMatchObject({
-        status: "passed",
-        requestSynced: true,
+        status: "blocked",
+        errorCode: "PUBLISH_PARTIAL_SYNC",
+        requestSynced: false,
         visualPreviewExpected: true,
-        visualPreviewSynced: true,
-        fallbackMode: "gitlab-raw-evidence",
-        partialReasons: [],
+        visualPreviewSynced: false,
+        fallbackMode: "none",
       });
-      expect(published.result.fallbackReason).toContain("GitLab review-asset upload failed");
-      expect(published.agentResultId).toMatch(/^ar_/);
-      expect(gitlabPublisher.createdPayloads[0]?.body).toContain("### 레거시와 이관 결과");
-      expect(gitlabPublisher.createdPayloads[0]?.body).toContain(
-        `https://gitlab.com/acme/spec-to-pr/-/raw/${gitHead}/.spec-to-pr/shop/visual/legacy.png`,
+      expect(published.result.partialReasons.join("\n")).toContain(
+        "visual evidence upload incomplete",
       );
-      expect(gitlabPublisher.createdPayloads[0]?.body).toContain(
-        `https://gitlab.com/acme/spec-to-pr/-/raw/${gitHead}/.spec-to-pr/shop/visual/current.png`,
-      );
-      expect(gitlabPublisher.createdPayloads[0]?.body).not.toContain("diff.png");
+      expect(gitlabPublisher.createdPayloads).toHaveLength(1);
+      expect(gitlabPublisher.createdPayloads[0]?.body).not.toContain("/-/raw/");
+      const loadedRun = await store.get(run.id);
+      expect(loadedRun.agentResults.some((result) => result.kind === "publishing")).toBe(false);
     } finally {
       if (originalGitLabToken === undefined) delete process.env["GITLAB_TOKEN"];
       else process.env["GITLAB_TOKEN"] = originalGitLabToken;
@@ -1423,6 +2215,7 @@ describe("PublisherService", () => {
       const run = await runService.createRun({ projectRoot });
       await markRunReadyForPublish(run.id);
       await addVisualEvidence(run.id, { visualBaseline: "legacy-screenshot" });
+      await addParsedIntakePolicy(run.id, { includeDiff: false });
       await bindVisualEvidenceToCommittedFiles(run.id);
       const report = await prReportService.generatePrReport({ runId: run.id });
       gitlabPublisher.assetUploadError = new GitLabAssetUploadError(
@@ -1446,7 +2239,8 @@ describe("PublisherService", () => {
       });
 
       expect(published.result).toMatchObject({
-        status: "failed",
+        status: "blocked",
+        errorCode: "PUBLISH_PARTIAL_SYNC",
         requestSynced: false,
         visualPreviewExpected: true,
         visualPreviewSynced: false,
@@ -1457,7 +2251,60 @@ describe("PublisherService", () => {
         "blob",
         `${gitHead}:.spec-to-pr/shop/visual/current.png`,
       ]);
-      expect(gitlabPublisher.createdPayloads).toHaveLength(0);
+      expect(gitlabPublisher.createdPayloads).toHaveLength(1);
+    } finally {
+      if (originalGitLabToken === undefined) delete process.env["GITLAB_TOKEN"];
+      else process.env["GITLAB_TOKEN"] = originalGitLabToken;
+    }
+  });
+
+  it("refuses GitLab raw fallback for a failed blocked diagnostic that requires all four visual roles", async () => {
+    const originalGitLabToken = process.env["GITLAB_TOKEN"];
+    process.env["GITLAB_TOKEN"] = "glpat_test_token";
+
+    try {
+      const run = await runService.createRun({ projectRoot });
+      await addVisualEvidence(run.id, {
+        visualBaseline: "legacy-screenshot",
+        status: "failed",
+        includeOverlay: true,
+      });
+      await bindVisualEvidenceToCommittedFiles(run.id);
+      const report = await generatePrReport({
+        runId: run.id,
+        binding: {
+          reviewPacketId: canonicalReviewPacketId,
+          headSha: gitHead,
+          diffDigest: canonicalDiffDigest,
+        },
+        visualReportArtifactId: "art_55555555555555555555555555555555",
+      });
+      gitlabPublisher.assetUploadError = new GitLabAssetUploadError(
+        "GitLab upload review asset failed: 503 uploads unavailable",
+        503,
+      );
+
+      const published = await createGitLabRawFallbackService().publish({
+        runId: run.id,
+        reportArtifactId: report.markdownArtifactId,
+        sourceBranch: "spec-to-pr/run-1",
+        targetBranch: "main",
+        remoteUrl: "https://gitlab.com/acme/spec-to-pr.git",
+        intent: "blocked-diagnostic",
+        pushBranch: false,
+        confirm: true,
+      });
+
+      expect(published.result).toMatchObject({
+        status: "blocked",
+        errorCode: "PUBLISH_PARTIAL_SYNC",
+        requestSynced: false,
+        visualPreviewExpected: true,
+        visualPreviewSynced: false,
+        fallbackMode: "none",
+      });
+      expect(gitlabPublisher.createdPayloads).toHaveLength(1);
+      expect(gitlabPublisher.createdPayloads[0]?.body).not.toContain("/-/raw/");
     } finally {
       if (originalGitLabToken === undefined) delete process.env["GITLAB_TOKEN"];
       else process.env["GITLAB_TOKEN"] = originalGitLabToken;
@@ -1483,7 +2330,7 @@ describe("PublisherService", () => {
     const body = githubPublisher.createdPayloads[0]?.body ?? "";
     expect(body).toContain("[레거시 · 화면 1 ↗]");
     expect(body).toContain("[이관 결과 · 화면 1 ↗]");
-    expect(body).toContain("[차이 · 화면 1 ↗]");
+    expect(body).toContain("[Diff · 화면 1 ↗]");
   });
 
   it("refuses the GitLab raw-evidence fallback when a committed screenshot no longer matches its captured digest", async () => {
@@ -1494,6 +2341,7 @@ describe("PublisherService", () => {
       const run = await runService.createRun({ projectRoot });
       await markRunReadyForPublish(run.id);
       await addVisualEvidence(run.id, { visualBaseline: "legacy-screenshot" });
+      await addParsedIntakePolicy(run.id, { includeDiff: false });
       await bindVisualEvidenceToCommittedFiles(run.id);
       await writeFile(
         path.join(projectRoot, ".spec-to-pr", "shop", "visual", "current.png"),
@@ -1517,13 +2365,14 @@ describe("PublisherService", () => {
       });
 
       expect(published.result).toMatchObject({
-        status: "failed",
+        status: "blocked",
+        errorCode: "PUBLISH_PARTIAL_SYNC",
         requestSynced: false,
         visualPreviewExpected: true,
         visualPreviewSynced: false,
         fallbackMode: "none",
       });
-      expect(gitlabPublisher.createdPayloads).toHaveLength(0);
+      expect(gitlabPublisher.createdPayloads).toHaveLength(1);
     } finally {
       if (originalGitLabToken === undefined) delete process.env["GITLAB_TOKEN"];
       else process.env["GITLAB_TOKEN"] = originalGitLabToken;
@@ -1538,6 +2387,7 @@ describe("PublisherService", () => {
       const run = await runService.createRun({ projectRoot });
       await markRunReadyForPublish(run.id);
       await addVisualEvidence(run.id, { visualBaseline: "legacy-screenshot" });
+      await addParsedIntakePolicy(run.id, { includeDiff: false });
       await bindVisualEvidenceToCommittedFiles(run.id);
       const report = await prReportService.generatePrReport({ runId: run.id });
       gitlabPublisher.assetUploadError = new GitLabAssetUploadError(
@@ -1557,11 +2407,12 @@ describe("PublisherService", () => {
       });
 
       expect(published.result).toMatchObject({
-        status: "failed",
+        status: "blocked",
+        errorCode: "PUBLISH_PARTIAL_SYNC",
         requestSynced: false,
         fallbackMode: "none",
       });
-      expect(gitlabPublisher.createdPayloads).toHaveLength(0);
+      expect(gitlabPublisher.createdPayloads).toHaveLength(1);
     } finally {
       if (originalGitLabToken === undefined) delete process.env["GITLAB_TOKEN"];
       else process.env["GITLAB_TOKEN"] = originalGitLabToken;
@@ -1623,6 +2474,7 @@ async function addFeatureVideoEvidence(runId: string): Promise<void> {
       workflowSubmissionKind: "implementation",
       featureEvidenceRole: "video",
       projectRelativePath: "test-results/checkout.webm",
+      reviewPacketId: canonicalReviewPacketId,
     },
   });
 
@@ -1781,6 +2633,20 @@ async function markRunReadyForPublish(runId: string): Promise<void> {
         observabilityArtifact,
         scorecardArtifact,
       ],
+      stages: run.stages.map((stage) =>
+        stage.name === "implementation"
+          ? {
+              ...stage,
+              checkpoint: {
+                name: "implementation-complete",
+                data: {
+                  reviewPacket: canonicalImplementationReviewPacket(run.id),
+                },
+                updatedAt: timestamp,
+              },
+            }
+          : stage,
+      ),
       agentResults: [
         ...run.agentResults,
         {
@@ -1806,10 +2672,56 @@ async function markRunReadyForPublish(runId: string): Promise<void> {
   );
 }
 
+function canonicalImplementationReviewPacket(runId: string) {
+  return {
+    id: canonicalReviewPacketId,
+    runId,
+    revision: 1,
+    baseSha: "b".repeat(40),
+    headSha: gitHead,
+    evidenceDigest: `sha256:${"e".repeat(64)}`,
+    diffDigest: canonicalDiffDigest,
+    changedFiles: [],
+  };
+}
+
+async function replaceImplementationReviewPacket(
+  runId: string,
+  reviewPacket: unknown,
+): Promise<void> {
+  const run = await store.get(runId);
+  await store.save(
+    {
+      ...run,
+      revision: run.revision + 1,
+      updatedAt: "2026-06-23T00:00:01.500Z",
+      stages: run.stages.map((stage) =>
+        stage.name === "implementation"
+          ? {
+              ...stage,
+              checkpoint: {
+                name: "implementation-complete",
+                data: reviewPacket === undefined ? {} : { reviewPacket },
+                updatedAt: "2026-06-23T00:00:01.500Z",
+              },
+            }
+          : stage,
+      ),
+    },
+    run.revision,
+  );
+}
+
 async function generatePrReport(input: {
   runId: string;
   metadata?: Record<string, unknown>;
   body?: string;
+  binding?: {
+    reviewPacketId: string;
+    headSha: string;
+    diffDigest: string;
+  };
+  visualReportArtifactId?: string;
 }) {
   const run = await store.get(input.runId);
   const timestamp = "2026-06-23T00:00:01.000Z";
@@ -1818,6 +2730,138 @@ async function generatePrReport(input: {
   )
     ? "ready"
     : "blocked";
+  const canonicalDecision =
+    input.metadata?.["decision"] === "ready" || input.metadata?.["decision"] === "blocked"
+      ? input.metadata["decision"]
+      : decision;
+  const reportIntent =
+    input.metadata?.["reportIntent"] === "ready" ||
+    input.metadata?.["reportIntent"] === "blocked-diagnostic"
+      ? input.metadata["reportIntent"]
+      : canonicalDecision === "ready"
+        ? "ready"
+        : "blocked-diagnostic";
+  const binding =
+    input.binding ??
+    (canonicalDecision === "ready"
+      ? {
+          reviewPacketId: canonicalReviewPacketId,
+          headSha: gitHead,
+          diffDigest: canonicalDiffDigest,
+        }
+      : undefined);
+  const visualReportArtifactId =
+    input.visualReportArtifactId ??
+    (canonicalDecision === "ready"
+      ? [...run.artifacts].reverse().find((artifact) => artifact.kind === "visual-report")?.id
+      : undefined);
+  const canonicalReport = PrReportV2Schema.parse({
+    schemaVersion: "pr-report-v2.1",
+    runId: run.id,
+    generatedAt: timestamp,
+    decision: canonicalDecision,
+    mode: "auto",
+    sectionStatuses: {
+      api: "not-applicable",
+      legacy: "not-applicable",
+      visual: visualReportArtifactId === undefined ? "not-applicable" : "complete",
+      "functional-review": canonicalDecision === "ready" ? "complete" : "not-run",
+      "design-review": canonicalDecision === "ready" ? "complete" : "not-run",
+      performance: "not-applicable",
+      "feature-evidence": "not-applicable",
+    },
+    ...(binding === undefined
+      ? {}
+      : {
+          binding: {
+            reviewPacketId: binding.reviewPacketId,
+            revision: 1,
+            baseSha: "b".repeat(40),
+            headSha: binding.headSha,
+            evidenceDigest: `sha256:${"e".repeat(64)}`,
+            diffDigest: binding.diffDigest,
+          },
+        }),
+    summary: {
+      title: canonicalDecision === "ready" ? "Ready fixture" : "Blocked fixture",
+      bullets: [],
+      exclusions: [],
+    },
+    sources: [],
+    skills: { hints: [], applied: [] },
+    requirements:
+      canonicalDecision === "ready"
+        ? [
+            {
+              id: "REQ-PUBLISH",
+              title: "Publish reviewed evidence",
+              acceptanceCriteria: ["The exact report binding is published."],
+              implementationFiles: [],
+              reviewVerdicts: ["approved"],
+            },
+          ]
+        : [],
+    changedFiles: [],
+    implementationNotes: [],
+    api: { applicable: false, operations: [], gaps: [] },
+    legacy: { applicable: false, coverage: [] },
+    visual: {
+      applicable: visualReportArtifactId !== undefined,
+      ...(visualReportArtifactId === undefined ? {} : { reportArtifactId: visualReportArtifactId }),
+      attempt: visualReportArtifactId === undefined ? 0 : 1,
+      status:
+        visualReportArtifactId === undefined
+          ? "not-applicable"
+          : canonicalDecision === "ready"
+            ? "passed"
+            : "failed",
+      results: [],
+    },
+    reviews: [],
+    performance: { applicable: false },
+    gaps: [],
+    blockers: canonicalDecision === "blocked" ? ["Fixture blocker"] : [],
+    unrunValidations: canonicalDecision === "blocked" ? ["functional-review"] : [],
+    risks: [],
+    rollback: {
+      trigger: "Fixture regression.",
+      strategy: "Revert the fixture.",
+      steps: ["Revert the fixture."],
+      dataImpact: "None.",
+      postChecks: ["Rerun the fixture."],
+    },
+    evidencePaths: [],
+    artifactIds: visualReportArtifactId === undefined ? [] : [visualReportArtifactId],
+  });
+  const jsonBlob = await artifactStore.writeBlob({
+    content: Buffer.from(`${JSON.stringify(canonicalReport, null, 2)}\n`),
+    mediaType: "application/json",
+    storedAt: timestamp,
+    label: "pr-report-v2.1.json",
+  });
+  const jsonArtifact = ArtifactRefSchema.parse({
+    id: createArtifactId(),
+    kind: "pr-report",
+    uri: jsonBlob.uri,
+    mediaType: "application/json",
+    digest: jsonBlob.digest,
+    producedBy: "orchestrator",
+    evidenceIds: [],
+    createdAt: timestamp,
+    metadata: {
+      reportKind: "pr-report-v2-json",
+      reportSchemaVersion: "pr-report-v2.1",
+      decision: canonicalDecision,
+      ...(binding === undefined
+        ? {}
+        : {
+            reviewPacketId: binding.reviewPacketId,
+            headSha: binding.headSha,
+            diffDigest: binding.diffDigest,
+          }),
+      ...(visualReportArtifactId === undefined ? {} : { visualReportArtifactId }),
+    },
+  });
   const generatedMarkdown = [
     "# 요약",
     "",
@@ -1844,10 +2888,21 @@ async function generatePrReport(input: {
     producedBy: "orchestrator",
     evidenceIds: [],
     createdAt: timestamp,
-    metadata: input.metadata ?? {
-      reportKind: "pr-body-markdown",
-      reportIntent: decision === "ready" ? "ready" : "blocked-diagnostic",
-      decision,
+    metadata: {
+      ...(input.metadata ?? {
+        reportKind: "pr-body-markdown",
+        reportIntent,
+        decision: canonicalDecision,
+      }),
+      reportJsonArtifactId: jsonArtifact.id,
+      ...(binding === undefined
+        ? {}
+        : {
+            reviewPacketId: binding.reviewPacketId,
+            headSha: binding.headSha,
+            diffDigest: binding.diffDigest,
+          }),
+      ...(visualReportArtifactId === undefined ? {} : { visualReportArtifactId }),
     },
   });
   await store.save(
@@ -1855,7 +2910,7 @@ async function generatePrReport(input: {
       ...run,
       revision: run.revision + 1,
       updatedAt: timestamp,
-      artifacts: [...run.artifacts, artifact],
+      artifacts: [...run.artifacts, jsonArtifact, artifact],
     },
     run.revision,
   );
@@ -1875,6 +2930,15 @@ async function addVisualEvidence(
   runId: string,
   options: {
     visualBaseline?: "figma" | "legacy-screenshot";
+    status?: "passed" | "failed";
+    includeDiff?: boolean;
+    includeOverlay?: boolean;
+    metrics?: {
+      exactMatchRatio: number;
+      reviewMatchRatio: number;
+      maskedAreaRatio: number;
+      threshold: number;
+    };
     context?: {
       targetId: string;
       name: string;
@@ -1933,15 +2997,32 @@ async function addVisualEvidence(
       mediaType: "image/png",
       timestamp,
     }),
-    await writeArtifact({
-      id: "art_44444444444444444444444444444444",
-      kind: "visual-diff",
-      label: "diff-home.png",
-      reportKind: "visual-diff",
-      content: Buffer.from("diff-png"),
-      mediaType: "image/png",
-      timestamp,
-    }),
+    ...(options.includeDiff === false
+      ? []
+      : [
+          await writeArtifact({
+            id: "art_44444444444444444444444444444444",
+            kind: "visual-diff",
+            label: "diff-home.png",
+            reportKind: "visual-diff",
+            content: Buffer.from("diff-png"),
+            mediaType: "image/png",
+            timestamp,
+          }),
+        ]),
+    ...(options.includeOverlay
+      ? [
+          await writeArtifact({
+            id: "art_88888888888888888888888888888888",
+            kind: "visual-diff",
+            label: "overlay-home.png",
+            reportKind: "visual-overlay",
+            content: Buffer.from("overlay-png"),
+            mediaType: "image/png",
+            timestamp,
+          }),
+        ]
+      : []),
   ];
   const commonMetrics = {
     width: 100,
@@ -1953,66 +3034,60 @@ async function addVisualEvidence(
     meanDistance: 0.1,
     maxDistance: 1,
   };
-  const visualReport =
-    options.context === undefined
-      ? {
-          runId,
-          changeName: "home",
-          ...(options.visualBaseline === undefined
-            ? {}
-            : { visualBaseline: options.visualBaseline }),
-          generatedAt: timestamp,
-          targetCount: 1,
-          passedCount: 1,
-          failedCount: 0,
-          reviewNeededCount: 0,
-          results: [
-            {
-              targetId: "home-desktop",
-              status: "passed",
-              figmaScreenshotArtifactId: "art_22222222222222222222222222222222",
-              browserScreenshotArtifactId: "art_33333333333333333333333333333333",
-              diffArtifactId: "art_44444444444444444444444444444444",
-              metrics: commonMetrics,
-              gapIds: [],
-              notes: [],
-            },
-          ],
-        }
-      : {
-          version: 2,
-          runId,
-          generatedAt: timestamp,
-          results: [
-            {
-              ...options.context,
-              baselineKind: options.visualBaseline ?? "figma",
-              fixture: "고정된 검토 데이터",
-              masks: [],
-              status: "passed",
-              metrics: {
-                ...commonMetrics,
-                maskedAreaRatio: 0,
-                pixelTolerance: 0.02,
-                threshold: 0.98,
-              },
-              baselineArtifactId: "art_22222222222222222222222222222222",
-              actualArtifactId: "art_33333333333333333333333333333333",
-              diffArtifactId: "art_44444444444444444444444444444444",
-            },
-          ],
-        };
+  const visualReport = {
+    version: 2,
+    runId,
+    reviewPacketId: canonicalReviewPacketId,
+    headSha: gitHead,
+    diffDigest: canonicalDiffDigest,
+    attempt: 1,
+    status: options.status ?? "passed",
+    generatedAt: timestamp,
+    results: [
+      {
+        ...(options.context ?? {
+          targetId: "home-desktop",
+          name: "화면 1",
+          route: "/",
+          state: "default",
+          viewport: { width: 1440, height: 900 },
+          deviceScaleFactor: 1,
+        }),
+        baselineKind: options.visualBaseline ?? "figma",
+        fixture: "고정된 검토 데이터",
+        masks: [],
+        status: options.status ?? "passed",
+        metrics: {
+          ...commonMetrics,
+          ...(options.metrics ?? {}),
+          pixelTolerance: 0.02,
+          threshold: options.metrics?.threshold ?? 0.98,
+        },
+        baselineArtifactId: "art_22222222222222222222222222222222",
+        actualArtifactId: "art_33333333333333333333333333333333",
+        ...(options.includeDiff === false
+          ? {}
+          : { diffArtifactId: "art_44444444444444444444444444444444" }),
+        ...(options.includeOverlay
+          ? { overlayArtifactId: "art_88888888888888888888888888888888" }
+          : {}),
+      },
+    ],
+  };
   const visualReportArtifact = await writeArtifact({
     id: "art_55555555555555555555555555555555",
     kind: "visual-report",
     label: "visual-report.json",
-    reportKind: "visual-report-json",
+    reportKind: "visual-report-v2-json",
     content: Buffer.from(`${JSON.stringify(visualReport, null, 2)}\n`),
     mediaType: "application/json",
     timestamp,
     metadata: {
       changeName: "home",
       decision: "passed",
+      reviewPacketId: canonicalReviewPacketId,
+      headSha: gitHead,
+      diffDigest: canonicalDiffDigest,
     },
   });
 
@@ -2022,6 +3097,158 @@ async function addVisualEvidence(
       revision: run.revision + 1,
       updatedAt: timestamp,
       artifacts: [...run.artifacts, ...artifacts, visualReportArtifact],
+      stages: run.stages.map((stage) =>
+        stage.name === "implementation"
+          ? {
+              ...stage,
+              checkpoint: {
+                name: "implementation-complete",
+                data: {
+                  ...stage.checkpoint?.data,
+                  reviewPacket: canonicalImplementationReviewPacket(run.id),
+                },
+                updatedAt: timestamp,
+              },
+            }
+          : stage,
+      ),
+    },
+    run.revision,
+  );
+}
+
+async function addNewerUnboundVisualReport(runId: string): Promise<void> {
+  const run = await store.get(runId);
+  const timestamp = "2026-06-23T00:00:01.000Z";
+  const artifact = await writeArtifact({
+    id: "art_99999999999999999999999999999999",
+    kind: "visual-report",
+    label: "unbound-newer-report.png",
+    reportKind: "visual-report-v2-json",
+    content: Buffer.from(
+      `${JSON.stringify({
+        version: 2,
+        runId,
+        reviewPacketId: `packet_${"e".repeat(64)}`,
+        headSha: gitHead,
+        diffDigest: canonicalDiffDigest,
+        attempt: 2,
+        status: "passed",
+        generatedAt: timestamp,
+        results: [],
+      })}\n`,
+    ),
+    mediaType: "application/json",
+    timestamp,
+    metadata: {
+      reviewPacketId: `packet_${"e".repeat(64)}`,
+      headSha: gitHead,
+      diffDigest: canonicalDiffDigest,
+    },
+  });
+
+  await store.save(
+    {
+      ...run,
+      revision: run.revision + 1,
+      updatedAt: timestamp,
+      artifacts: [...run.artifacts, artifact],
+    },
+    run.revision,
+  );
+}
+
+async function appendSecondVisualTarget(runId: string): Promise<void> {
+  const run = await store.get(runId);
+  const timestamp = "2026-06-23T00:00:00.800Z";
+  const baseline = await writeArtifact({
+    id: createArtifactId(),
+    kind: "figma-screenshot",
+    label: "figma-second.png",
+    reportKind: "figma-screenshot",
+    content: Buffer.from("figma-second-png"),
+    mediaType: "image/png",
+    timestamp,
+  });
+  const current = await writeArtifact({
+    id: createArtifactId(),
+    kind: "screenshot",
+    label: "browser-second.png",
+    reportKind: "browser-screenshot",
+    content: Buffer.from("browser-second-png"),
+    mediaType: "image/png",
+    timestamp,
+  });
+  const diff = await writeArtifact({
+    id: createArtifactId(),
+    kind: "visual-diff",
+    label: "diff-second.png",
+    reportKind: "visual-diff",
+    content: Buffer.from("diff-second-png"),
+    mediaType: "image/png",
+    timestamp,
+  });
+  const visualReportArtifact = run.artifacts.find(
+    (artifact) => artifact.id === "art_55555555555555555555555555555555",
+  );
+  if (visualReportArtifact === undefined) throw new Error("Visual report fixture is incomplete");
+  const visualReport = JSON.parse(
+    (await artifactStore.readContent(visualReportArtifact.digest)).toString("utf8"),
+  ) as { results: unknown[] };
+  visualReport.results.push({
+    targetId: "second-screen",
+    name: "화면 2",
+    route: "/second",
+    state: "default",
+    viewport: { width: 1280, height: 720 },
+    deviceScaleFactor: 1,
+    baselineKind: "figma",
+    fixture: "두 번째 검토 데이터",
+    masks: [],
+    status: "passed",
+    metrics: {
+      width: 100,
+      height: 100,
+      comparedPixelCount: 10_000,
+      maskedPixelCount: 0,
+      maskedAreaRatio: 0,
+      exactMatchRatio: 0.99,
+      reviewMatchRatio: 0.99,
+      meanDistance: 0.1,
+      maxDistance: 1,
+      pixelTolerance: 0.02,
+      threshold: 0.98,
+    },
+    baselineArtifactId: baseline.id,
+    actualArtifactId: current.id,
+    diffArtifactId: diff.id,
+  });
+  const blob = await artifactStore.writeBlob({
+    content: Buffer.from(`${JSON.stringify(visualReport, null, 2)}\n`),
+    mediaType: "application/json",
+    storedAt: timestamp,
+    label: visualReportArtifact.metadata["label"] as string,
+  });
+  const updatedReport = ArtifactRefSchema.parse({
+    ...visualReportArtifact,
+    uri: blob.uri,
+    digest: blob.digest,
+    createdAt: timestamp,
+  });
+
+  await store.save(
+    {
+      ...run,
+      revision: run.revision + 1,
+      updatedAt: timestamp,
+      artifacts: [
+        ...run.artifacts.map((artifact) =>
+          artifact.id === updatedReport.id ? updatedReport : artifact,
+        ),
+        baseline,
+        current,
+        diff,
+      ],
     },
     run.revision,
   );
@@ -2231,6 +3458,7 @@ class FakePublisher implements ReviewRequestPublisher {
   public readonly updatedBodies: string[] = [];
   public readonly updatedMetadata: ReviewRequestUpdate[] = [];
   public readonly uploadedAssets: Array<Array<{ role: string }>> = [];
+  public readonly uploadedAssetIds: string[][] = [];
   public readonly receivedSignals: Array<AbortSignal | undefined> = [];
   public failCreate = false;
   public failAssetUpload = false;
@@ -2238,6 +3466,12 @@ class FakePublisher implements ReviewRequestPublisher {
   public visualAssetsEmbeddable = true;
   public existingRequest: PublishedReviewRequest | undefined;
   public forceNonDraftResult = false;
+  public remoteBodyOverride: string | undefined;
+  public beforeFindExisting: (() => Promise<void>) | undefined;
+  public afterPublishAssets: (() => Promise<void>) | undefined;
+  public assetOutcomePlan:
+    | ((input: { invocation: number; assets: ReviewRequestAsset[] }) => ReviewAssetPublishOutcome[])
+    | undefined;
 
   public constructor(private readonly host: "github" | "gitlab") {}
 
@@ -2245,29 +3479,60 @@ class FakePublisher implements ReviewRequestPublisher {
     signal?: AbortSignal;
   }): Promise<PublishedReviewRequest | undefined> {
     this.receivedSignals.push(input.signal);
+    await this.beforeFindExisting?.();
     return this.existingRequest;
   }
 
   public async publishAssets(input: {
-    assets: Array<{ role: string; artifactId: string; label: string; targetId: string }>;
-  }) {
+    assets: ReviewRequestAsset[];
+  }): Promise<ReviewAssetPublishOutcome[]> {
     if (this.assetUploadError !== undefined) {
       throw this.assetUploadError;
     }
     if (this.failAssetUpload) {
-      throw new Error("forced visual evidence upload failure");
+      return input.assets.map((asset) => ({
+        status: "failed",
+        artifactId: asset.artifactId,
+        failure: "uncertain",
+        message: "forced visual evidence upload failure",
+      }));
     }
 
     this.uploadedAssets.push(input.assets.map((asset) => ({ role: asset.role })));
+    this.uploadedAssetIds.push(input.assets.map((asset) => asset.artifactId));
+    await this.afterPublishAssets?.();
 
-    return input.assets.map((asset) => ({
-      artifactId: asset.artifactId,
-      role: asset.role as "figma" | "browser" | "diff" | "overlay" | "e2e-video",
-      targetId: asset.targetId,
-      label: asset.label,
-      url: `https://github.example/assets/${asset.role}${asset.role === "e2e-video" ? ".webm" : ".png"}`,
-      embeddable: asset.role !== "e2e-video" && this.visualAssetsEmbeddable,
-    }));
+    const invocation = this.uploadedAssetIds.length;
+    return (
+      this.assetOutcomePlan?.({ invocation, assets: input.assets }) ??
+      input.assets.map((asset) => this.publishedOutcome(asset))
+    );
+  }
+
+  public publishedOutcome(asset: ReviewRequestAsset): ReviewAssetPublishOutcome {
+    return {
+      status: "published",
+      asset: {
+        artifactId: asset.artifactId,
+        artifactDigest: asset.artifactDigest,
+        role: asset.role,
+        targetId: asset.targetId,
+        label: asset.label,
+        url: `https://github.example/assets/${asset.role}${
+          asset.role === "e2e-video" ? ".webm" : ".png"
+        }`,
+        embeddable: asset.role !== "e2e-video" && this.visualAssetsEmbeddable,
+      },
+    };
+  }
+
+  public async readBody(): Promise<string> {
+    return (
+      this.remoteBodyOverride ??
+      this.updatedBodies.at(-1) ??
+      this.createdPayloads.at(-1)?.body ??
+      ""
+    );
   }
 
   public async create(input: {

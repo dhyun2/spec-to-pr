@@ -2,17 +2,27 @@ import { z } from "zod";
 
 import { RunStageNameSchema } from "../run/stages.js";
 import { ArtifactIdSchema, RunIdSchema } from "../runtime/ids.js";
-import { GitObjectIdSchema, Sha256DigestSchema } from "../runtime/scalars.js";
+import { GitObjectIdSchema, IsoDateTimeSchema, Sha256DigestSchema } from "../runtime/scalars.js";
 import { OpenSpecChangeNameSchema } from "../openspec/openspec-paths.js";
 import { WorkloadEstimateSchema, WorkloadSignalsSchema } from "./workload-policy.js";
-import { VisualCaptureSchema, VisualTargetManifestSchema } from "../visual/visual-comparator.js";
+import {
+  VisualCaptureSchema,
+  VisualComparisonMetricsV2Schema,
+  VisualRendererLineageBindingSchema,
+  VisualTargetManifestSchema,
+} from "../visual/visual-comparator.js";
 import { WorkspaceBindingSchema } from "../workspace/workspace-binding.js";
 import { DraftEvidenceBundleSchema } from "./draft-evidence-bundle.js";
+import { PacketEvidenceIndexSchema } from "./packet-evidence-index.js";
 import {
   CapturedFigmaComponentSchema,
   FigmaDesignMappingSchema,
+  FigmaImplementationBindingSchema,
+  FigmaStateContractSchema,
   assertCompleteDesignMapping,
+  assertFigmaStateContracts,
 } from "../figma/figma-capture-contract.js";
+export { BaselineIsolationEvidenceSchema } from "../visual/baseline-isolation.js";
 
 export const WorkflowScopeSchema = z
   .object({
@@ -416,9 +426,21 @@ export const ImplementationReviewPacketSchema = z
     evidenceDigest: Sha256DigestSchema,
     diffDigest: Sha256DigestSchema,
     changedFiles: z.array(z.string().trim().min(1)).max(10_000),
+    snapshotArtifactId: ArtifactIdSchema.optional(),
+    snapshotDigest: Sha256DigestSchema.optional(),
+    evidenceIndex: PacketEvidenceIndexSchema.optional(),
     visualLineageId: ReviewPacketIdSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((packet, context) => {
+    if ((packet.snapshotArtifactId === undefined) !== (packet.snapshotDigest === undefined)) {
+      context.addIssue({
+        code: "custom",
+        path: ["snapshotArtifactId"],
+        message: "Implementation snapshot artifact ID and digest must be bound together",
+      });
+    }
+  });
 
 const RequirementContractSchema = z
   .object({
@@ -1110,6 +1132,7 @@ const MockDataEvidenceSchema = z
               .min(1)
               .max(1_000)
               .regex(/\.json$/i, "Mock fixtures must be JSON"),
+            stateContractDigest: Sha256DigestSchema.optional(),
           })
           .strict(),
       )
@@ -1164,31 +1187,7 @@ const MockDataEvidenceSchema = z
     }
   });
 
-const DesignSystemUsageSchema = z
-  .object({
-    figmaComponent: z.string().trim().min(1).max(500),
-    sourceFile: WorkflowSourcePathSchema,
-    resolutionKind: z.enum(["component", "asset", "exception"]),
-    importedExport: z.string().trim().min(1).max(500).optional(),
-    assetPath: WorkflowSourcePathSchema.optional(),
-  })
-  .strict()
-  .superRefine((usage, context) => {
-    if (usage.resolutionKind === "component" && usage.importedExport === undefined) {
-      context.addIssue({
-        code: "custom",
-        path: ["importedExport"],
-        message: "Component usage requires the imported export",
-      });
-    }
-    if (usage.resolutionKind === "asset" && usage.assetPath === undefined) {
-      context.addIssue({
-        code: "custom",
-        path: ["assetPath"],
-        message: "Asset usage requires the canonical asset path",
-      });
-    }
-  });
+const DesignSystemUsageSchema = FigmaImplementationBindingSchema;
 
 const DesignSystemEvidenceSchema = z
   .object({
@@ -1196,16 +1195,16 @@ const DesignSystemEvidenceSchema = z
   })
   .strict()
   .superRefine((evidence, context) => {
-    const componentNames = new Set<string>();
+    const mappingIds = new Set<string>();
     evidence.usages.forEach((usage, index) => {
-      if (componentNames.has(usage.figmaComponent)) {
+      if (mappingIds.has(usage.mappingId)) {
         context.addIssue({
           code: "custom",
-          path: ["usages", index, "figmaComponent"],
-          message: `Duplicate design-system usage ${usage.figmaComponent}`,
+          path: ["usages", index, "mappingId"],
+          message: `Duplicate design-system usage ${usage.mappingId}`,
         });
       }
-      componentNames.add(usage.figmaComponent);
+      mappingIds.add(usage.mappingId);
     });
   });
 
@@ -1407,6 +1406,7 @@ export const FigmaBundleSubmissionSchema = z
       .string()
       .trim()
       .regex(/\.json$/i, "Figma manifest must be a JSON file"),
+    stateContracts: z.array(FigmaStateContractSchema).min(1).max(50),
     visualTargets: VisualTargetsSchema.min(1),
     artifactPaths: z.array(z.string().trim().min(1)).min(1),
   })
@@ -1432,6 +1432,20 @@ export const FigmaBundleSubmissionSchema = z
         message: error instanceof Error ? error.message : "Figma design mapping is incomplete",
       });
     }
+    try {
+      assertFigmaStateContracts({
+        nodeIds: submission.nodeIds,
+        targets: submission.visualTargets,
+        stateContracts: submission.stateContracts,
+        mapping: submission.designMapping,
+      });
+    } catch (error: unknown) {
+      context.addIssue({
+        code: "custom",
+        path: ["stateContracts"],
+        message: error instanceof Error ? error.message : "Figma state contracts are invalid",
+      });
+    }
     if (!submission.artifactPaths.includes(submission.manifestPath)) {
       context.addIssue({
         code: "custom",
@@ -1446,8 +1460,29 @@ export const FigmaBundleSubmissionSchema = z
         message: "Figma bundle artifact paths must be unique",
       });
     }
+    const catalogEvidencePaths = [
+      submission.designMapping.publicApiCatalog.packageManifest.path,
+      ...submission.designMapping.publicApiCatalog.publicBarrels.map((barrel) => barrel.path),
+      submission.designMapping.publicApiCatalog.codeConnectManifest.path,
+    ];
+    if (
+      new Set(catalogEvidencePaths).size !== catalogEvidencePaths.length ||
+      catalogEvidencePaths.some(
+        (evidencePath) =>
+          evidencePath === submission.manifestPath ||
+          submission.visualTargets.some((target) => target.baselinePath === evidencePath),
+      )
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["designMapping", "publicApiCatalog"],
+        message:
+          "Digest-bound public barrels and Code Connect manifest must use distinct non-baseline paths",
+      });
+    }
     const visualPaths = submission.artifactPaths.filter(
-      (artifactPath) => artifactPath !== submission.manifestPath,
+      (artifactPath) =>
+        artifactPath !== submission.manifestPath && !catalogEvidencePaths.includes(artifactPath),
     );
     if (
       visualPaths.length === 0 ||
@@ -1473,6 +1508,13 @@ export const FigmaBundleSubmissionSchema = z
           path: ["visualTargets", index, "figmaCapture"],
           message: "Figma bundle targets require native capture geometry",
         });
+      } else if (!("schemaVersion" in target.figmaCapture)) {
+        context.addIssue({
+          code: "custom",
+          path: ["visualTargets", index, "figmaCapture"],
+          message:
+            "FIGMA_CAPTURE_GEOMETRY_REACQUISITION_REQUIRED: historical v1 geometry cannot be used for a new Figma bundle",
+        });
       }
       if (!submission.artifactPaths.includes(target.baselinePath)) {
         context.addIssue({
@@ -1482,6 +1524,21 @@ export const FigmaBundleSubmissionSchema = z
         });
       }
     });
+    const expectedArtifactPaths = new Set([
+      submission.manifestPath,
+      ...submission.visualTargets.map((target) => target.baselinePath),
+    ]);
+    if (
+      submission.artifactPaths.length !== expectedArtifactPaths.size ||
+      submission.artifactPaths.some((artifactPath) => !expectedArtifactPaths.has(artifactPath))
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["artifactPaths"],
+        message:
+          "Figma bundle artifacts must exactly cover the manifest, public API/Code Connect evidence, and target baselines",
+      });
+    }
   });
 
 export const VisualComparisonSubmissionSchema = z
@@ -1489,13 +1546,31 @@ export const VisualComparisonSubmissionSchema = z
     kind: z.literal("visual-comparison"),
     reviewPacketId: ReviewPacketIdSchema,
     captures: z.array(VisualCaptureSchema).min(1).max(50),
+    baselineIsolationPath: z
+      .string()
+      .trim()
+      .regex(/\.json$/i, "Baseline-isolation evidence must be a JSON file"),
+    baselineIsolationDigest: Sha256DigestSchema,
     artifactPaths: z.array(z.string().trim().min(1)).min(1).max(100),
   })
   .strict()
   .superRefine((submission, context) => {
     const targetIds = new Set<string>();
     const actualPaths = new Set<string>();
-    const expectedArtifactPaths = new Set<string>();
+    const expectedArtifactPaths = new Set<string>([submission.baselineIsolationPath]);
+    const expectedDirectory = `visual/actual/${submission.reviewPacketId}/`;
+    const isolationFileName = submission.baselineIsolationPath.slice(expectedDirectory.length);
+    if (
+      !submission.baselineIsolationPath.startsWith(expectedDirectory) ||
+      isolationFileName.includes("/") ||
+      !/^[a-z0-9][a-z0-9._:-]*\.json$/i.test(isolationFileName)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["baselineIsolationPath"],
+        message: `Baseline-isolation evidence must use a distinct file in ${expectedDirectory}`,
+      });
+    }
     submission.captures.forEach((capture, index) => {
       if (targetIds.has(capture.targetId)) {
         context.addIssue({
@@ -1511,7 +1586,6 @@ export const VisualComparisonSubmissionSchema = z
           message: "Each visual target requires a distinct actual PNG",
         });
       }
-      const expectedDirectory = `visual/actual/${submission.reviewPacketId}/`;
       const fileName = capture.actualPath.slice(expectedDirectory.length);
       if (
         !capture.actualPath.startsWith(expectedDirectory) ||
@@ -1527,6 +1601,32 @@ export const VisualComparisonSubmissionSchema = z
       targetIds.add(capture.targetId);
       actualPaths.add(capture.actualPath);
       expectedArtifactPaths.add(capture.actualPath);
+      if (
+        capture.assertionReportPath !== undefined &&
+        capture.assertionResultPath !== undefined &&
+        capture.assertionObservationPath !== undefined
+      ) {
+        for (const [field, evidencePath] of [
+          ["assertionReportPath", capture.assertionReportPath],
+          ["assertionResultPath", capture.assertionResultPath],
+          ["assertionObservationPath", capture.assertionObservationPath],
+        ] as const) {
+          const evidenceFileName = evidencePath.slice(expectedDirectory.length);
+          if (
+            !evidencePath.startsWith(expectedDirectory) ||
+            evidenceFileName.includes("/") ||
+            !/^[a-z0-9][a-z0-9._:-]*\.json$/i.test(evidenceFileName) ||
+            expectedArtifactPaths.has(evidencePath)
+          ) {
+            context.addIssue({
+              code: "custom",
+              path: ["captures", index, field],
+              message: `UI assertion evidence must use a distinct file in ${expectedDirectory}`,
+            });
+          }
+          expectedArtifactPaths.add(evidencePath);
+        }
+      }
       if (capture.receiptPath !== undefined) {
         const receiptFileName = capture.receiptPath.slice(expectedDirectory.length);
         if (
@@ -1552,7 +1652,7 @@ export const VisualComparisonSubmissionSchema = z
         code: "custom",
         path: ["artifactPaths"],
         message:
-          "Visual comparison artifactPaths must exactly match submitted actual PNGs and receipts",
+          "Visual comparison artifactPaths must exactly match submitted actual PNGs, receipts, UI assertion reports/results, and baseline-isolation evidence",
       });
     }
   });
@@ -1572,7 +1672,112 @@ export const WorkflowSubmissionSchema = z.union([
   VisualComparisonSubmissionSchema,
 ]);
 
-export const WorkflowActionSchema = z.discriminatedUnion("kind", [
+export const CompactFailedVisualTargetsSchema = z
+  .array(
+    z
+      .object({
+        targetId: VisualTargetManifestSchema.shape.targetId,
+        reviewMatchRatio: z.number().min(0).max(1),
+      })
+      .strict(),
+  )
+  .min(1)
+  .max(50);
+
+export const VisualRepairEvidenceV2Schema = z
+  .object({
+    schemaVersion: z.literal("visual-repair-evidence-v2"),
+    runId: RunIdSchema,
+    lineageId: ReviewPacketIdSchema,
+    reviewPacketId: ReviewPacketIdSchema,
+    headSha: GitObjectIdSchema,
+    rendererLineageId: VisualRendererLineageBindingSchema.shape.rendererLineageId.optional(),
+    attempt: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+    generatedAt: IsoDateTimeSchema,
+    failedTargets: z
+      .array(
+        z
+          .object({
+            targetId: VisualTargetManifestSchema.shape.targetId,
+            name: z.string(),
+            route: z.string(),
+            state: z.string(),
+            fixture: z.string(),
+            viewport: VisualTargetManifestSchema.shape.viewport,
+            deviceScaleFactor: z.number(),
+            metrics: VisualComparisonMetricsV2Schema,
+            diffArtifactId: ArtifactIdSchema,
+            overlayArtifactId: ArtifactIdSchema,
+            captureSummary: z
+              .object({
+                provider: z.string(),
+                browser: z.string(),
+                fontsReady: z.boolean(),
+                assetsReady: z.boolean(),
+              })
+              .strict(),
+            causeHints: z.array(
+              z.enum([
+                "implementation",
+                "acquisition",
+                "fixture",
+                "design-mapping",
+                "baseline-isolation",
+              ]),
+            ),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(50),
+  })
+  .strict();
+
+export const VisualLineageOutcomeV2Schema = z
+  .object({
+    schemaVersion: z.literal("visual-repair-lineage-v2"),
+    runId: RunIdSchema,
+    lineageId: ReviewPacketIdSchema,
+    reviewPacketId: ReviewPacketIdSchema,
+    headSha: GitObjectIdSchema,
+    rendererLineageId: VisualRendererLineageBindingSchema.shape.rendererLineageId.optional(),
+    attempt: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+    generatedAt: IsoDateTimeSchema,
+    status: z.literal("closed"),
+  })
+  .strict();
+
+export const CurrentImplementationRepairActionSchema = z
+  .object({
+    kind: z.literal("implementation-repair"),
+    repairEvidenceVersion: z.literal("v2"),
+    runId: RunIdSchema,
+    reviewPacketId: ReviewPacketIdSchema,
+    lineageId: ReviewPacketIdSchema,
+    nextAttempt: z.union([z.literal(2), z.literal(3)]),
+    failedTargets: CompactFailedVisualTargetsSchema,
+    repairEvidenceArtifactId: ArtifactIdSchema,
+  })
+  .strict();
+
+export const LegacyImplementationRepairActionSchema = z
+  .object({
+    kind: z.literal("implementation-repair"),
+    repairEvidenceVersion: z.literal("legacy-v1"),
+    runId: RunIdSchema,
+    reviewPacketId: ReviewPacketIdSchema,
+    lineageId: ReviewPacketIdSchema,
+    nextAttempt: z.union([z.literal(2), z.literal(3)]),
+    failedTargets: CompactFailedVisualTargetsSchema,
+  })
+  .strict();
+
+const ImplementationRepairActionSchema = z.discriminatedUnion("repairEvidenceVersion", [
+  CurrentImplementationRepairActionSchema,
+  LegacyImplementationRepairActionSchema,
+]);
+
+export const WorkflowActionSchema = z.union([
   z
     .object({
       kind: z.literal("collect-legacy-network-evidence"),
@@ -1597,31 +1802,13 @@ export const WorkflowActionSchema = z.discriminatedUnion("kind", [
       attempt: z.number().int().min(1).max(3),
     })
     .strict(),
-  z
-    .object({
-      kind: z.literal("implementation-repair"),
-      runId: RunIdSchema,
-      reviewPacketId: ReviewPacketIdSchema,
-      lineageId: ReviewPacketIdSchema,
-      nextAttempt: z.union([z.literal(2), z.literal(3)]),
-      failedTargets: z
-        .array(
-          z
-            .object({
-              targetId: VisualTargetManifestSchema.shape.targetId,
-              reviewMatchRatio: z.number().min(0).max(1),
-            })
-            .strict(),
-        )
-        .min(1)
-        .max(50),
-    })
-    .strict(),
+  ImplementationRepairActionSchema,
   z
     .object({
       kind: z.literal("review-functional"),
       runId: RunIdSchema,
       reviewPacketId: ReviewPacketIdSchema,
+      evidenceIndex: PacketEvidenceIndexSchema.optional(),
     })
     .strict(),
   z
@@ -1629,6 +1816,7 @@ export const WorkflowActionSchema = z.discriminatedUnion("kind", [
       kind: z.literal("review-design"),
       runId: RunIdSchema,
       reviewPacketId: ReviewPacketIdSchema,
+      evidenceIndex: PacketEvidenceIndexSchema.optional(),
     })
     .strict(),
   z.object({ kind: z.literal("publish-draft"), runId: RunIdSchema }).strict(),
@@ -1642,6 +1830,10 @@ export const WorkflowStageSummarySchema = z
     checkpoint: z.string().trim().min(1).optional(),
   })
   .strict();
+
+export const WorkflowActionStageSummarySchema = WorkflowStageSummarySchema.omit({
+  checkpoint: true,
+});
 
 export const WorkflowResumeContextSchema = z
   .object({
@@ -1675,27 +1867,74 @@ export const DiagnosticPublicationSchema = z
     message: "Diagnostic publication evidence must record a created or updated request",
   });
 
-export const WorkflowStatusSchema = z
+export const WorkflowStatusViewSchema = z.enum(["action", "checkpoint", "detail"]);
+
+export const WorkflowStatusInputSchema = z
   .object({
     runId: RunIdSchema,
-    revision: z.number().int().nonnegative(),
-    status: z.enum(["running", "needs-external-action", "blocked", "publish-ready", "completed"]),
-    currentStage: z.string().trim().min(1).optional(),
+    view: WorkflowStatusViewSchema.default("action"),
+  })
+  .strict();
+
+const WorkflowStatusStateSchema = z.enum([
+  "running",
+  "needs-external-action",
+  "blocked",
+  "publish-ready",
+  "completed",
+]);
+
+const WorkflowActionDeliveryProfileSchema = z
+  .object({
+    publication: PublicationIntentSchema,
+    recommendedSkills: NormalizedSkillHintsSchema.default([]),
+  })
+  .strict();
+
+const WorkflowActionStatusFields = {
+  runId: RunIdSchema,
+  revision: z.number().int().nonnegative(),
+  status: WorkflowStatusStateSchema,
+  currentStage: z.string().trim().min(1).optional(),
+  deliveryProfile: WorkflowActionDeliveryProfileSchema,
+  workspaceBinding: WorkspaceBindingSchema.optional(),
+  workload: WorkloadEstimateSchema,
+  delegationPolicy: DelegationPolicySchema,
+  requiredValidations: z.array(z.string().trim().min(1)).superRefine((items, context) => {
+    if (new Set(items).size !== items.length) {
+      context.addIssue({ code: "custom", message: "Required validations must be unique" });
+    }
+  }),
+  nextActions: z.array(WorkflowActionSchema),
+  blockers: z.array(z.string().trim().min(1)),
+  blockerDetails: z.array(WorkflowBlockerSchema),
+  diagnosticPublication: DiagnosticPublicationSchema.optional(),
+} as const;
+
+export const WorkflowActionStatusSchema = z
+  .object({
+    view: z.literal("action"),
+    ...WorkflowActionStatusFields,
+    stages: z.array(WorkflowActionStageSummarySchema),
+  })
+  .strict();
+
+export const WorkflowCheckpointStatusSchema = z
+  .object({
+    view: z.literal("checkpoint"),
+    ...WorkflowActionStatusFields,
+    stages: z.array(WorkflowStageSummarySchema),
+    resumeContext: WorkflowResumeContextSchema,
+  })
+  .strict();
+
+export const WorkflowDetailStatusSchema = z
+  .object({
+    view: z.literal("detail"),
+    ...WorkflowActionStatusFields,
     scope: WorkflowScopeSchema,
     deliveryProfile: DeliveryProfileSchema,
-    workspaceBinding: WorkspaceBindingSchema.optional(),
-    workload: WorkloadEstimateSchema,
-    delegationPolicy: DelegationPolicySchema,
-    requiredValidations: z.array(z.string().trim().min(1)).superRefine((items, context) => {
-      if (new Set(items).size !== items.length) {
-        context.addIssue({ code: "custom", message: "Required validations must be unique" });
-      }
-    }),
     stages: z.array(WorkflowStageSummarySchema),
-    nextActions: z.array(WorkflowActionSchema),
-    blockers: z.array(z.string().trim().min(1)),
-    blockerDetails: z.array(WorkflowBlockerSchema),
-    diagnosticPublication: DiagnosticPublicationSchema.optional(),
     legacyInventory: z
       .object({
         artifactId: ArtifactIdSchema,
@@ -1738,6 +1977,12 @@ export const WorkflowStatusSchema = z
   })
   .strict();
 
+export const WorkflowStatusSchema = z.discriminatedUnion("view", [
+  WorkflowActionStatusSchema,
+  WorkflowCheckpointStatusSchema,
+  WorkflowDetailStatusSchema,
+]);
+
 export type WorkflowScope = z.infer<typeof WorkflowScopeSchema>;
 export type DeliveryMode = z.infer<typeof DeliveryModeSchema>;
 export type ChangeKind = z.infer<typeof ChangeKindSchema>;
@@ -1750,6 +1995,10 @@ export type ReviewVerdict = z.infer<typeof ReviewVerdictSchema>;
 export type ImplementationReviewPacket = z.infer<typeof ImplementationReviewPacketSchema>;
 export type WorkflowSubmission = z.infer<typeof WorkflowSubmissionSchema>;
 export type WorkflowAction = z.infer<typeof WorkflowActionSchema>;
+export type WorkflowResumeContext = z.infer<typeof WorkflowResumeContextSchema>;
+export type WorkflowActionStatus = z.infer<typeof WorkflowActionStatusSchema>;
+export type WorkflowCheckpointStatus = z.infer<typeof WorkflowCheckpointStatusSchema>;
+export type WorkflowDetailStatus = z.infer<typeof WorkflowDetailStatusSchema>;
 export type WorkflowStatus = z.infer<typeof WorkflowStatusSchema>;
 
 function isTargetedPlaywrightCommand(command: string, selector: string): boolean {

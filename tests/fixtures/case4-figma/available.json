@@ -4,6 +4,11 @@
   "status": "이용 가능",
   "distance": "도보 4분",
   "address": "서울특별시 강남구 테헤란로 152",
+  "stateFacts": {
+    "cinema4k": "available",
+    "gpassMoney": true,
+    "parking": "가능"
+  },
   "chargers": [
     { "label": "급속", "available": 3, "total": 4 },
     { "label": "완속", "available": 5, "total": 6 }

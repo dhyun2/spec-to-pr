@@ -7,9 +7,13 @@ import {
   WorkflowArchiveInputSchema,
   WorkflowPublishInputSchema,
   WorkflowStartInputSchema,
-  WorkflowStatusInputSchema,
-  WorkflowSubmitInputSchema,
 } from "../application/workflow-service.js";
+import type { WorkflowService } from "../application/workflow-service.js";
+import {
+  RuntimeMetricsRecorder,
+  type RuntimeMetricsSink,
+} from "../runtime/performance-instrumentation.js";
+import { WorkflowStatusInputSchema } from "../workflow/index.js";
 import type { ServicesProvider } from "./run-service-provider.js";
 
 const CONTRACT_VERSION = "2.0.0" as const;
@@ -39,6 +43,25 @@ const REVIEWER_ROLES = ["functional-reviewer", "design-reviewer"] as const;
 const DELIVERY_MODES = ["auto", "brief", "legacy", "feature", "figma"] as const;
 
 const EmptyInputSchema = z.object({}).strict();
+const WorkflowSubmitToolInputSchema = z
+  .object({
+    runId: z.string().trim().min(1),
+    submission: z
+      .object({
+        kind: z.enum([
+          "legacy-network-evidence",
+          "contracts",
+          "api-ready",
+          "implementation",
+          "functional-review",
+          "design-review",
+          "figma-bundle",
+          "visual-comparison",
+        ]),
+      })
+      .passthrough(),
+  })
+  .strict();
 type StructuredResult = Record<string, unknown>;
 
 export function createKernelServer(servicesProvider: ServicesProvider): McpServer {
@@ -92,7 +115,8 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
         "Create a Run, capture intake, estimate workload, classify scope, and stop at the next boundary.",
       inputSchema: WorkflowStartInputSchema.shape,
     },
-    async (input) => toolResult(await (await servicesProvider()).workflowService.start(input)),
+    async (input) =>
+      workflowToolResult(servicesProvider, (workflow) => workflow.start(input, "action")),
   );
 
   server.registerTool(
@@ -102,7 +126,8 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
       description: "Run deterministic steps until completion, a blocker, or an external action.",
       inputSchema: WorkflowAdvanceInputSchema.shape,
     },
-    async (input) => toolResult(await (await servicesProvider()).workflowService.advance(input)),
+    async (input) =>
+      workflowToolResult(servicesProvider, (workflow) => workflow.advance(input, "action")),
   );
 
   server.registerTool(
@@ -110,9 +135,12 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
     {
       title: "Submit workflow result",
       description: "Record contracts, API readiness, implementation, Figma, or review evidence.",
-      inputSchema: WorkflowSubmitInputSchema.shape,
+      // Keep discovery compact. WorkflowService re-parses the complete strict
+      // discriminated submission contract before any state can change.
+      inputSchema: WorkflowSubmitToolInputSchema,
     },
-    async (input) => toolResult(await (await servicesProvider()).workflowService.submit(input)),
+    async (input) =>
+      workflowToolResult(servicesProvider, (workflow) => workflow.submit(input, "action")),
   );
 
   server.registerTool(
@@ -120,11 +148,11 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
     {
       title: "Workflow status",
       description:
-        "Return compact stage, workload, scope, blocker, action, and submission-evidence status.",
-      inputSchema: WorkflowStatusInputSchema.shape,
+        "Return action (default), checkpoint, or detail workflow status. Use action after external actions, checkpoint for bounded submission-evidence status when resuming, and detail only for immutable reviewer or report evidence.",
+      inputSchema: WorkflowStatusInputSchema,
       annotations: { readOnlyHint: true },
     },
-    async (input) => toolResult(await (await servicesProvider()).workflowService.status(input)),
+    async (input) => workflowToolResult(servicesProvider, (workflow) => workflow.status(input)),
   );
 
   server.registerTool(
@@ -134,7 +162,7 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
       description: "Preview or execute safe draft PR/MR publication from the canonical report.",
       inputSchema: WorkflowPublishInputSchema.shape,
     },
-    async (input) => toolResult(await (await servicesProvider()).workflowService.publish(input)),
+    async (input) => workflowToolResult(servicesProvider, (workflow) => workflow.publish(input)),
   );
 
   server.registerTool(
@@ -144,17 +172,42 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
       description: "Preview or execute explicit post-merge OpenSpec archival.",
       inputSchema: WorkflowArchiveInputSchema.shape,
     },
-    async (input) => toolResult(await (await servicesProvider()).workflowService.archive(input)),
+    async (input) => workflowToolResult(servicesProvider, (workflow) => workflow.archive(input)),
   );
 
   return server;
 }
 
-function toolResult(value: unknown) {
+async function workflowToolResult(
+  servicesProvider: ServicesProvider,
+  operation: (workflow: WorkflowService) => Promise<unknown>,
+) {
+  const services = await servicesProvider();
+  return toolResult(await operation(services.workflowService), services.metrics);
+}
+
+function toolResult(value: unknown, metrics?: RuntimeMetricsSink) {
   const structuredContent = asStructuredContent(value);
+  const text = JSON.stringify(structuredContent);
+  const runId = structuredContent["run"];
+  if (
+    metrics instanceof RuntimeMetricsRecorder &&
+    typeof runId === "object" &&
+    runId !== null &&
+    typeof (runId as Record<string, unknown>)["id"] === "string"
+  ) {
+    metrics.incrementForRun(
+      (runId as { id: `run_${string}` }).id,
+      "status.serialized_bytes",
+      Buffer.byteLength(text),
+      { view: "tool-result" },
+    );
+  } else {
+    metrics?.increment("status.serialized_bytes", Buffer.byteLength(text), { view: "tool-result" });
+  }
 
   return {
-    content: [{ type: "text" as const, text: JSON.stringify(structuredContent) }],
+    content: [{ type: "text" as const, text }],
     structuredContent,
   };
 }

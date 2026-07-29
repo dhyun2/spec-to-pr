@@ -2,13 +2,17 @@ import { z } from "zod";
 
 import { ReportDecisionSchema } from "../pr-report/pr-report-model.js";
 import { ArtifactIdSchema, RunIdSchema } from "../runtime/ids.js";
-import { GitObjectIdSchema, IsoDateTimeSchema } from "../runtime/scalars.js";
+import { GitObjectIdSchema, IsoDateTimeSchema, Sha256DigestSchema } from "../runtime/scalars.js";
 
 export const ReviewHostSchema = z.enum(["github", "gitlab"]);
 
 export const PublishModeSchema = z.literal("draft");
 
 export const PublishIntentSchema = z.enum(["ready", "blocked-diagnostic"]);
+
+export const ReviewPacketIdSchema = z
+  .string()
+  .regex(/^packet_[a-f0-9]{64}$/, "Expected packet_<64 lowercase hex characters>");
 
 export const PublishTargetSchema = z
   .object({
@@ -51,10 +55,7 @@ export const ReviewRequestPayloadSchema = z
     sourceBranch: z.string().trim().min(1),
     targetBranch: z.string().trim().min(1),
     headSha: GitObjectIdSchema.optional(),
-    reviewPacketId: z
-      .string()
-      .regex(/^packet_[a-f0-9]{64}$/)
-      .optional(),
+    reviewPacketId: ReviewPacketIdSchema.optional(),
     mode: PublishModeSchema.default("draft"),
     labels: z.array(z.string().trim().min(1)).default([]),
     reviewers: z.array(z.string().trim().min(1)).default([]),
@@ -82,6 +83,7 @@ export const ReviewRequestAssetRoleSchema = z.enum([
 export const PublishedReviewAssetSchema = z
   .object({
     artifactId: ArtifactIdSchema,
+    artifactDigest: Sha256DigestSchema,
     targetId: z.string().trim().min(1),
     role: ReviewRequestAssetRoleSchema,
     label: z.string().trim().min(1),
@@ -133,6 +135,7 @@ export const PublishResultSchema = z
     request: PublishedReviewRequestSchema.optional(),
     reportArtifactId: ArtifactIdSchema.optional(),
     publishedAssets: z.array(PublishedReviewAssetSchema).default([]),
+    uploadReceiptArtifactIds: z.array(ArtifactIdSchema).default([]),
     requestSynced: z.boolean().default(false),
     visualPreviewExpected: z.boolean().default(false),
     visualPreviewSynced: z.boolean().default(false),

@@ -16,6 +16,10 @@ export type ParsedLegacySource = {
   root: LegacyAstNode;
 };
 
+export function isLegacyCodePath(filePath: string): boolean {
+  return /\.(?:[cm]?[jt]sx?|vue|svelte)$/iu.test(filePath);
+}
+
 export function parseLegacySource(content: string, filePath: string): ParsedLegacySource {
   const code = /\.(?:vue|svelte)$/iu.test(filePath)
     ? [...content.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/giu)]
