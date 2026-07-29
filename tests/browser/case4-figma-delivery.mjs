@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFile, execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -10,6 +10,8 @@ import { promisify } from "node:util";
 
 import { chromium } from "playwright";
 import { PNG } from "pngjs";
+
+import { runConcurrentOrdered } from "./case4-parallel.mjs";
 
 const runFile = promisify(execFile);
 const root = path.resolve(import.meta.dirname, "../..");
@@ -411,8 +413,7 @@ const origin = `http://127.0.0.1:${address.port}`;
 const browser = await chromium.launch({ headless: true });
 
 try {
-  const captures = [];
-  for (const state of ["available", "unavailable"]) {
+  async function captureState(state) {
     const fixtureBytes = await readFile(path.join(fixtureRoot, `${state}.json`));
     const fixture = JSON.parse(fixtureBytes.toString("utf8"));
     const fixtureDigest = digest(fixtureBytes);
@@ -671,7 +672,7 @@ try {
     );
     await writeFile(path.join(outputRoot, `${state}.ui-assertions.json`), uiAssertionReportBytes);
 
-    captures.push({
+    return {
       state,
       fixtureId: fixture.id,
       fixtureDigest,
@@ -708,8 +709,12 @@ try {
         violations: [],
         status: "passed",
       },
-    });
+    };
   }
+
+  const captures = await runConcurrentOrdered(
+    ["available", "unavailable"].map((state) => () => captureState(state)),
+  );
 
   assert.equal(validSourceBytes.includes(Buffer.from("/baseline.png")), false);
   assert.equal(maliciousSourceBytes.includes(Buffer.from("/baseline.png")), true);
@@ -781,34 +786,38 @@ try {
     await maliciousContext.close();
   }
 
-  execFileSync(
-    "pnpm",
-    [
-      "vitest",
-      "run",
-      "tests/unit/figma-capture-contract.test.ts",
-      "tests/unit/visual-normalizer.test.ts",
-      "tests/unit/capture-receipt.test.ts",
-      "tests/unit/baseline-isolation.test.ts",
-      "tests/unit/figma-design-mapping.test.ts",
-      "tests/unit/ui-assertion-contract.test.ts",
-      "tests/unit/remote-detector.test.ts",
-      "tests/unit/workspace-binding.test.ts",
-    ],
-    { cwd: root, env: process.env, stdio: "inherit" },
-  );
-  execFileSync(
-    "pnpm",
-    [
-      "vitest",
-      "run",
-      "tests/integration/publisher-service.test.ts",
-      "tests/integration/workflow-service.test.ts",
-      "-t",
-      "persisted Figma target|baseline isolation|pinned publication|workspace binding|UI assertion|design system",
-    ],
-    { cwd: root, env: process.env, stdio: "inherit" },
-  );
+  await runConcurrentOrdered([
+    () =>
+      runFile(
+        "pnpm",
+        [
+          "vitest",
+          "run",
+          "tests/unit/figma-capture-contract.test.ts",
+          "tests/unit/visual-normalizer.test.ts",
+          "tests/unit/capture-receipt.test.ts",
+          "tests/unit/baseline-isolation.test.ts",
+          "tests/unit/figma-design-mapping.test.ts",
+          "tests/unit/ui-assertion-contract.test.ts",
+          "tests/unit/remote-detector.test.ts",
+          "tests/unit/workspace-binding.test.ts",
+        ],
+        { cwd: root, env: process.env, maxBuffer: 10 * 1024 * 1024 },
+      ),
+    () =>
+      runFile(
+        "pnpm",
+        [
+          "vitest",
+          "run",
+          "tests/integration/publisher-service.test.ts",
+          "tests/integration/workflow-service.test.ts",
+          "-t",
+          "persisted Figma target|baseline isolation|pinned publication|workspace binding|UI assertion|design system",
+        ],
+        { cwd: root, env: process.env, maxBuffer: 10 * 1024 * 1024 },
+      ),
+  ]);
 
   process.stdout.write(
     `${JSON.stringify(
