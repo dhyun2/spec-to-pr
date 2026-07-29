@@ -284,7 +284,9 @@ async function executeBoundaryTurnWithTimeout(input) {
             ...(timeout === undefined ? {} : { signal: controller.signal }),
         };
         const invocation = input.thread.run(input.prompt, Object.keys(runOptions).length === 0 ? undefined : runOptions);
-        const turn = timeoutPromise === undefined ? await invocation : await Promise.race([invocation, timeoutPromise]);
+        const turn = timeoutPromise === undefined
+            ? await invocation
+            : await Promise.race([invocation, timeoutPromise]);
         return {
             kind: "completed",
             turn,

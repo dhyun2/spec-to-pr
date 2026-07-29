@@ -496,10 +496,7 @@ export function validateSpecToPrRunInput(input: SpecToPrCodexRunInput): void {
     ["turnTimeoutMs", input.turnTimeoutMs],
     ["runTimeoutMs", input.runTimeoutMs],
   ] as const) {
-    if (
-      timeoutMs !== undefined &&
-      (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0)
-    ) {
+    if (timeoutMs !== undefined && (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0)) {
       throw new Error(`${name} must be a positive integer`);
     }
   }

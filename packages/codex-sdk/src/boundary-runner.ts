@@ -80,7 +80,10 @@ export type BoundaryWorkflowBlocker = {
 
 export type BoundaryThread = {
   readonly id: string | null;
-  run(prompt: string, options?: { outputSchema?: unknown; signal?: AbortSignal }): Promise<RunResult>;
+  run(
+    prompt: string,
+    options?: { outputSchema?: unknown; signal?: AbortSignal },
+  ): Promise<RunResult>;
 };
 
 export type BoundaryClient = {
@@ -490,7 +493,9 @@ async function executeBoundaryTurnWithTimeout(input: {
       Object.keys(runOptions).length === 0 ? undefined : runOptions,
     );
     const turn =
-      timeoutPromise === undefined ? await invocation : await Promise.race([invocation, timeoutPromise]);
+      timeoutPromise === undefined
+        ? await invocation
+        : await Promise.race([invocation, timeoutPromise]);
     return {
       kind: "completed",
       turn,

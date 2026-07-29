@@ -52,31 +52,31 @@ node packages/codex-sdk/dist/cli.js \
   --publish
 ```
 
-| Option                   | Description                               |
-| ------------------------ | ----------------------------------------- |
-| `--cwd <path>`           | Target repository, required               |
-| `--prompt <text>`        | Change request and constraints            |
-| `--mode <mode>`          | Delivery mode                             |
-| `--change-kind <kind>`   | Change classification                     |
-| `--brief <path>`         | Brief/spec input                          |
-| `--legacy-project <p>`   | Separate legacy project root              |
-| `--legacy-network <p>`   | Project-local bounded HAR/request JSON    |
-| `--docs <path>`          | Repeatable supporting document            |
-| `--figma <url>`          | Figma file/node URL                       |
-| `--openapi <path>`       | Repeatable OpenAPI input                  |
-| `--openapi-url <url>`    | Repeatable HTTPS OpenAPI URL              |
-| `--guidance <path>`      | Repeatable explicit guidance              |
-| `--skill <name>`         | Repeatable optional skill hint            |
-| `--publish`              | Publish a draft when ready                |
-| `--no-publish`           | Stop after implementation/review evidence |
-| `--resume <task-id>`     | Resume an existing Codex task             |
-| `--model <model>`        | Model override                            |
-| `--max-turns <n>`        | Action-group turn limit, default 12       |
-| `--turn-timeout-seconds <n>` | Stop and return a resumable state when one turn exceeds this duration |
-| `--run-timeout-seconds <n>` | Stop and return a resumable state when the full Run exceeds this duration |
-| `--usage-history <p>`    | Numeric-only calibration JSONL path       |
-| `--no-usage-calibration` | Disable calibration reads/writes          |
-| `--no-review-agents`     | Keep required review evidence in the current task instead of delegating it |
+| Option                       | Description                                                                |
+| ---------------------------- | -------------------------------------------------------------------------- |
+| `--cwd <path>`               | Target repository, required                                                |
+| `--prompt <text>`            | Change request and constraints                                             |
+| `--mode <mode>`              | Delivery mode                                                              |
+| `--change-kind <kind>`       | Change classification                                                      |
+| `--brief <path>`             | Brief/spec input                                                           |
+| `--legacy-project <p>`       | Separate legacy project root                                               |
+| `--legacy-network <p>`       | Project-local bounded HAR/request JSON                                     |
+| `--docs <path>`              | Repeatable supporting document                                             |
+| `--figma <url>`              | Figma file/node URL                                                        |
+| `--openapi <path>`           | Repeatable OpenAPI input                                                   |
+| `--openapi-url <url>`        | Repeatable HTTPS OpenAPI URL                                               |
+| `--guidance <path>`          | Repeatable explicit guidance                                               |
+| `--skill <name>`             | Repeatable optional skill hint                                             |
+| `--publish`                  | Publish a draft when ready                                                 |
+| `--no-publish`               | Stop after implementation/review evidence                                  |
+| `--resume <task-id>`         | Resume an existing Codex task                                              |
+| `--model <model>`            | Model override                                                             |
+| `--max-turns <n>`            | Action-group turn limit, default 12                                        |
+| `--turn-timeout-seconds <n>` | Stop and return a resumable state when one turn exceeds this duration      |
+| `--run-timeout-seconds <n>`  | Stop and return a resumable state when the full Run exceeds this duration  |
+| `--usage-history <p>`        | Numeric-only calibration JSONL path                                        |
+| `--no-usage-calibration`     | Disable calibration reads/writes                                           |
+| `--no-review-agents`         | Keep required review evidence in the current task instead of delegating it |
 
 Without an explicit mode, a legacy root selects `legacy`, brief path selects `brief`, Figma URL selects `figma`, and all other requests use `auto`. Unless `--no-publish` is present, all four explicit modes request draft publication.
 

@@ -324,8 +324,7 @@ export function validateSpecToPrRunInput(input) {
         ["turnTimeoutMs", input.turnTimeoutMs],
         ["runTimeoutMs", input.runTimeoutMs],
     ]) {
-        if (timeoutMs !== undefined &&
-            (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0)) {
+        if (timeoutMs !== undefined && (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0)) {
             throw new Error(`${name} must be a positive integer`);
         }
     }

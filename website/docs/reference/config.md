@@ -71,31 +71,31 @@ node packages/codex-sdk/dist/cli.js \
   --publish
 ```
 
-| 옵션                     | 설명                                |
-| ------------------------ | ----------------------------------- |
-| `--cwd <path>`           | 대상 저장소, 필수                   |
-| `--prompt <text>`        | 변경 요청/제약                      |
-| `--mode <mode>`          | 제공 방식                           |
-| `--change-kind <kind>`   | 변경 분류                           |
-| `--brief <path>`         | 기획서 입력                         |
-| `--legacy-project <p>`   | 별도 레거시 프로젝트 루트           |
-| `--legacy-network <p>`   | 프로젝트 안의 제한된 HAR/JSON       |
-| `--docs <path>`          | 반복 가능한 보조 문서 입력          |
-| `--figma <url>`          | Figma 파일/노드 URL                 |
-| `--openapi <path>`       | 반복 가능한 OpenAPI 입력            |
-| `--openapi-url <url>`    | 반복 가능한 HTTPS OpenAPI URL       |
-| `--guidance <path>`      | 반복 가능한 프로젝트 지침           |
-| `--skill <name>`         | 반복 가능한 선택 스킬 이름          |
-| `--publish`              | 준비되면 초안 PR/MR 발행            |
-| `--no-publish`           | 구현·검토와 검증 자료까지만 생성    |
-| `--resume <task-id>`     | 기존 Codex 작업 재개                |
-| `--model <model>`        | 사용할 모델 지정                    |
-| `--max-turns <n>`        | 작업 묶음별 최대 실행 횟수, 기본 12 |
+| 옵션                         | 설명                                                             |
+| ---------------------------- | ---------------------------------------------------------------- |
+| `--cwd <path>`               | 대상 저장소, 필수                                                |
+| `--prompt <text>`            | 변경 요청/제약                                                   |
+| `--mode <mode>`              | 제공 방식                                                        |
+| `--change-kind <kind>`       | 변경 분류                                                        |
+| `--brief <path>`             | 기획서 입력                                                      |
+| `--legacy-project <p>`       | 별도 레거시 프로젝트 루트                                        |
+| `--legacy-network <p>`       | 프로젝트 안의 제한된 HAR/JSON                                    |
+| `--docs <path>`              | 반복 가능한 보조 문서 입력                                       |
+| `--figma <url>`              | Figma 파일/노드 URL                                              |
+| `--openapi <path>`           | 반복 가능한 OpenAPI 입력                                         |
+| `--openapi-url <url>`        | 반복 가능한 HTTPS OpenAPI URL                                    |
+| `--guidance <path>`          | 반복 가능한 프로젝트 지침                                        |
+| `--skill <name>`             | 반복 가능한 선택 스킬 이름                                       |
+| `--publish`                  | 준비되면 초안 PR/MR 발행                                         |
+| `--no-publish`               | 구현·검토와 검증 자료까지만 생성                                 |
+| `--resume <task-id>`         | 기존 Codex 작업 재개                                             |
+| `--model <model>`            | 사용할 모델 지정                                                 |
+| `--max-turns <n>`            | 작업 묶음별 최대 실행 횟수, 기본 12                              |
 | `--turn-timeout-seconds <n>` | 한 작업 차례가 이 시간을 넘으면 취소하고 재개 가능한 상태로 반환 |
-| `--run-timeout-seconds <n>` | 전체 실행이 이 시간을 넘으면 취소하고 재개 가능한 상태로 반환 |
-| `--usage-history <p>`    | 숫자 전용 사용량 보정 JSONL 경로    |
-| `--no-usage-calibration` | 사용량 보정 읽기/쓰기 비활성화      |
-| `--no-review-agents`     | 검토를 위임하지 않고 현재 작업 맥락에서 필수 검토 자료를 제출 |
+| `--run-timeout-seconds <n>`  | 전체 실행이 이 시간을 넘으면 취소하고 재개 가능한 상태로 반환    |
+| `--usage-history <p>`        | 숫자 전용 사용량 보정 JSONL 경로                                 |
+| `--no-usage-calibration`     | 사용량 보정 읽기/쓰기 비활성화                                   |
+| `--no-review-agents`         | 검토를 위임하지 않고 현재 작업 맥락에서 필수 검토 자료를 제출    |
 
 `mode`를 생략하면 레거시 루트는 `legacy`, 기획서 경로는 `brief`, Figma URL은 `figma`, 나머지는 `auto`로 분류됩니다. 네 가지 명시적 제공 방식은 `--no-publish`가 없으면 초안 발행을 요청합니다.
 

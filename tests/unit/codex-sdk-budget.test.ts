@@ -80,7 +80,10 @@ describe("Codex SDK workload budget", () => {
     const client = {
       startThread: () => ({
         id: "thread-format-timeout",
-        run: async (_prompt: string, options?: { outputSchema?: unknown; signal?: AbortSignal }) => {
+        run: async (
+          _prompt: string,
+          options?: { outputSchema?: unknown; signal?: AbortSignal },
+        ) => {
           calls += 1;
           if (options?.outputSchema !== undefined) {
             return new Promise<never>(() => undefined);
@@ -116,7 +119,10 @@ describe("Codex SDK workload budget", () => {
 
   it("rejects unsafe direct boundary timeout values before starting a turn", async () => {
     const client = {
-      startThread: () => ({ id: "thread-1", run: async () => turnResult(1_000, workflowStatus("completed")) }),
+      startThread: () => ({
+        id: "thread-1",
+        run: async () => turnResult(1_000, workflowStatus("completed")),
+      }),
       resumeThread: () => {
         throw new Error("not expected");
       },
