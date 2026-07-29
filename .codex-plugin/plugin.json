@@ -1,6 +1,6 @@
 {
   "name": "spec-to-pr",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "Evidence-backed Codex workflow for full brief delivery, legacy migration, feature E2E, and Figma implementation into draft pull requests.",
   "author": {
     "name": "SpecToPR Team",

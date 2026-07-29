@@ -7,6 +7,22 @@ use the plugin tag format, for example `spec-to-pr--v0.1.0`.
 
 ## Unreleased
 
+## 0.3.5 - 2026-07-29
+
+### Added
+
+- Added project-selected Figma design-system contract support, including `@lessonpro/ui` and
+  optional Code Connect evidence.
+
+### Fixed
+
+- Normalized GitLab project-upload evidence URLs to exact-host absolute URLs, including
+  `/-/project/<id>/uploads/...` responses and URL-only upload responses.
+- Rendered feature recordings with a clickable browser-screenshot thumbnail and a direct link, and
+  derived default draft titles from the source branch.
+- Isolated publication tests from host-provided Git settings and retained Figma font metadata when
+  an immutable font binary digest is unavailable.
+
 ## 0.3.4 - 2026-07-29
 
 ### Added
