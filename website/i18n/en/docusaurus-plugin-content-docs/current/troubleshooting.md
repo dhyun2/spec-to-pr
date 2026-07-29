@@ -52,6 +52,12 @@ An empty/skipped/not-run required gate blocks. Execute the repository command an
 
 At the first completed boundary at or above 80%, the SDK checkpoints and resumes in a compact fresh thread. At the hard limit, `split-required` stops the next action without shrinking `requiredValidations`. Missing usage is `usage-unavailable`, not zero. Resume the same Run; do not replay passed stages.
 
+## A Run takes too long or returns `turn-timeout` / `run-timeout`
+
+The default time budget is 10 minutes per action turn and 45 minutes for the full Run. The SDK cancels work that reaches the deadline and returns the existing thread and latest durable state without a passing verdict. First inspect `budget.elapsedMs`, `budget.actionTurns`, and `budget.formatTurn` to identify whether implementation, review, or an external wait consumed the time. Only independent non-overlapping read-only discovery and the two post-implementation reviewers may run in parallel; repeated polling, generic helpers, and duplicate validation do not.
+
+Increase `--turn-timeout-seconds` or `--run-timeout-seconds` only when an external dependency legitimately needs more time, then resume the same Run. A timeout never becomes a pass or automatically creates a new Run or replacement reviewer.
+
 ## Draft and diagnostic publication
 
 Normal publication uses `workflow_publish intent: ready` and creates/updates a draft only. Verify publication is requested, the tree is clean, source is not target, authentication and remote are supported, intended changes are committed, source is at least one commit ahead, and required assets are synced.

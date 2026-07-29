@@ -48,6 +48,8 @@ Every entry in `artifactPaths` and every evidence path must be relative to the p
 
 After intake, `workflow_status` reports an `XS`–`XL` workload, estimated token range, confidence and reasons, the 80% checkpoint, and authoritative `requiredValidations`. Contracts can refine that estimate with numeric `workloadSignals`; this does not add another tool or stage. At the first completed boundary at or above 80%, the SDK saves a checkpoint and starts a compact new thread from `resumeContext`. At the hard limit it returns `split-required` without reducing validation. If usage cannot be measured, the next action is blocked as `usage-unavailable` rather than treating usage as zero.
 
+The default time budget is 10 minutes per action turn and 45 minutes for the full Run. When either deadline expires, the SDK cancels the active work and returns the existing thread and latest durable state; it never turns a validation pass into a timeout result or starts a new Run. Increase `--turn-timeout-seconds` or `--run-timeout-seconds` only with a reason, inspect `budget.elapsedMs`, `budget.actionTurns`, and `budget.formatTurn` to identify the wait, then resume the same Run.
+
 ## One implementation context
 
 One implementation writer owns both API and UI work. Before final UI implementation, API-backed work submits distinct, non-empty types, schemas, wrappers, mocks, a passing contract-test JSON, and operation-aware `operations` under one `implementationContextId`. The final implementation uses the same ID and supplies exact `apiCoverage`.
@@ -61,6 +63,8 @@ Ambiguous legacy APIs resolve only from project-local bounded HAR/request JSON (
 ## Delegation policy
 
 `delegationPolicy` derives from workload: zero read-only scout workers for XS/S, at most one for M, and at most two for L/XL. Scouts only do bounded independent read-heavy discovery; they do not edit, browse, call workflow MCP, nest, or create parallel writers. Only the fully read-only, workflow-MCP-free `functional-reviewer` and UI-only `design-reviewer` may run in parallel after implementation from immutable packets.
+
+To reduce elapsed time, the runtime does not parallelize generic helpers, repeated status polling, or duplicate validation. It parallelizes only independent non-overlapping read-only discovery within those workload caps, plus the two independent reviews after implementation from the same immutable packet. A reviewer timeout remains diagnostic; the runtime does not auto-create a replacement reviewer.
 
 ## Evidence by mode
 

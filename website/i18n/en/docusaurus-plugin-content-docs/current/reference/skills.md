@@ -43,6 +43,12 @@ Missing optional skills do not block the Run. Omit an unavailable hint from `app
 
 `review-functional` and `review-design` are workflow instructions; the independent roles are `functional-reviewer` and `design-reviewer`. Both profiles are workflow-MCP-free and fully read-only. They return verdicts from immutable status/contracts/diff/evidence packets and never edit implementation or call `workflow_*`. Design review is UI-only.
 
+## Keeping a Run fast
+
+`implement` keeps one implementation context. The runtime does not parallelize repeated status polling or duplicate tests/reviews; only independent read-only discovery may run in parallel within the workload cap. The two reviewers may assess the same immutable packet concurrently only after implementation is complete.
+
+The default time budget is 10 minutes per action turn and 45 minutes for the full Run. A timeout is a resumable diagnostic, not a pass: the active work is cancelled and the same thread/latest durable state is returned. Inspect `budget.elapsedMs`, `budget.actionTurns`, and `budget.formatTurn`, then change `--turn-timeout-seconds` or `--run-timeout-seconds` only when justified and resume the same Run. A reviewer timeout never auto-creates a replacement reviewer.
+
 ## Visual feedback loop
 
 `implement` runs the initial comparison and up to two repairs automatically at the fixed 92% threshold without asking the user. Acquisition with invalid geometry, fixture, or renderer lineage consumes no attempt. A third valid failure terminally blocks the Run and skips `review-design`; when publication preconditions allow, `publish` uses the same 15-section template with equal-size baseline/current media and separate diff/overlay links. Focused UI assertions in `review-functional` and `review-design` remain required even when the aggregate score reaches 92%.
