@@ -682,9 +682,10 @@ export function assertFigmaPublicApiCatalogEvidence(rawInput: {
   ]);
   const exportedNamesByPath = new Map<string, Set<string>>();
   for (const barrel of catalog.publicBarrels) {
-    const exportKey = barrel.module === catalog.packageName
-      ? "."
-      : `.${barrel.module.slice(catalog.packageName.length)}`;
+    const exportKey =
+      barrel.module === catalog.packageName
+        ? "."
+        : `.${barrel.module.slice(catalog.packageName.length)}`;
     const declaredTarget = packageExportTarget(packageManifest.exports[exportKey]);
     if (declaredTarget === undefined) {
       throw designMappingError(
@@ -900,7 +901,10 @@ export const FigmaDesignBindingSchema = z
       }
       return;
     }
-    if (!/^@frontend\/ui\/icons\/(?:vue|react)$/.test(binding.resolution.module) && binding.resolution.module !== "@lessonpro/ui/icons") {
+    if (
+      !/^@frontend\/ui\/icons\/(?:vue|react)$/.test(binding.resolution.module) &&
+      binding.resolution.module !== "@lessonpro/ui/icons"
+    ) {
       context.addIssue({
         code: "custom",
         path: ["resolution", "module"],
@@ -1558,7 +1562,9 @@ function namedModuleExports(input: {
   requestedNames?: ReadonlySet<string>;
 }): Set<string> {
   const cached =
-    input.requestedNames === undefined ? input.exportedNamesByPath.get(input.evidencePath) : undefined;
+    input.requestedNames === undefined
+      ? input.exportedNamesByPath.get(input.evidencePath)
+      : undefined;
   if (cached !== undefined) return cached;
   if (input.visiting.has(input.evidencePath)) {
     throw designMappingError(

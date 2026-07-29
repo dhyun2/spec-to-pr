@@ -447,6 +447,7 @@ export class PublisherService {
       runId: run.id,
       title: publishTitle({
         runId: run.id,
+        sourceBranch: input.sourceBranch,
         intent: input.intent,
         ...(input.title === undefined ? {} : { title: input.title }),
       }),
@@ -1633,7 +1634,11 @@ export class PublisherService {
       });
     }
     if (videoAsset !== undefined) {
-      body = injectFeatureVideoEvidence(body, videoAsset);
+      body = injectFeatureVideoEvidence(
+        body,
+        videoAsset,
+        visualAssets.find((asset) => asset.role === "browser" && asset.embeddable),
+      );
     }
     return {
       payload: ReviewRequestPayloadSchema.parse({
@@ -2752,7 +2757,11 @@ const VISUAL_PREVIEW_SLOT = "<!-- spec-to-pr:visual-evidence:slot -->";
 const FEATURE_VIDEO_START = "<!-- spec-to-pr:feature-video:start -->";
 const FEATURE_VIDEO_END = "<!-- spec-to-pr:feature-video:end -->";
 
-function injectFeatureVideoEvidence(body: string, asset: PublishedReviewAsset): string {
+function injectFeatureVideoEvidence(
+  body: string,
+  asset: PublishedReviewAsset,
+  thumbnail?: PublishedReviewAsset,
+): string {
   const start = body.indexOf(FEATURE_VIDEO_START);
   const end = body.indexOf(FEATURE_VIDEO_END);
   const cleanBody =
@@ -2767,6 +2776,14 @@ function injectFeatureVideoEvidence(body: string, asset: PublishedReviewAsset): 
     FEATURE_VIDEO_START,
     korean ? "## 기능 E2E 영상" : "## Feature E2E Evidence",
     "",
+    ...(thumbnail === undefined
+      ? []
+      : [
+          korean
+            ? `[![변경한 기능 영상 미리보기](${thumbnail.url})](${asset.url})`
+            : `[![Feature E2E video preview](${thumbnail.url})](${asset.url})`,
+          "",
+        ]),
     korean
       ? `[변경한 기능 녹화 보기](${asset.url})`
       : `[Open the targeted feature recording](${asset.url})`,
@@ -3188,18 +3205,34 @@ function assertPublishedAssetUrlsInBody(
   }
 }
 
-function defaultTitle(runId: string): string {
-  return `spec-to-pr evidence report for ${runId}`;
+function defaultTitle(sourceBranch: string, runId: string): string {
+  const readable = sourceBranch
+    .trim()
+    .replace(/^refs\/heads\//u, "")
+    .split("/")
+    .filter((segment) => segment !== "" && segment !== "codex" && segment !== "spec-to-pr")
+    .join(" ")
+    .replace(/[-_]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+
+  if (readable.length === 0) return `spec-to-pr evidence report for ${runId}`;
+  return readable.replace(/^\p{Ll}/u, (character) => character.toUpperCase());
 }
 
 function blockedTitle(runId: string): string {
   return `[Blocked] SpecToPR Run ${runId}`;
 }
 
-function publishTitle(input: { runId: string; intent: PublishIntent; title?: string }): string {
+function publishTitle(input: {
+  runId: string;
+  sourceBranch: string;
+  intent: PublishIntent;
+  title?: string;
+}): string {
   return input.intent === "blocked-diagnostic"
     ? blockedTitle(input.runId)
-    : (input.title ?? defaultTitle(input.runId));
+    : (input.title ?? defaultTitle(input.sourceBranch, input.runId));
 }
 
 function publishLabels(labels: string[], intent: PublishIntent): string[] {

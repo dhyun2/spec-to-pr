@@ -247,15 +247,15 @@ describe("visual capture receipts", () => {
     expect(() => assertReceipt(receipt)).toThrow(/VISUAL_CAPTURE_PROVENANCE_INVALID/);
   });
 
-  it("rejects mapped fonts without immutable digests", () => {
-    expect(() =>
+  it("omits mapped fonts without distributable immutable digests", () => {
+    expect(
       canonicalCaptureFontDigests([
         {
           family: "Pretendard",
           source: "assets/fonts/pretendard.woff2",
         },
       ]),
-    ).toThrow(/VISUAL_CAPTURE_PROVENANCE_INVALID.*Pretendard.*digest/i);
+    ).toEqual([]);
   });
 
   it("canonicalizes shared assets by path and rejects conflicting digests", () => {

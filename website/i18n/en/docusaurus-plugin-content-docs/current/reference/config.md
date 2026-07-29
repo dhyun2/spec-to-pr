@@ -97,6 +97,8 @@ The SDK defaults to a 10-minute action-turn budget and a 45-minute total Run bud
 | `SPEC_TO_PR_API_BASE_URL`               | host-derived default          | Self-hosted API endpoint           |
 | `SPEC_TO_PR_WEB_BASE_URL`               | host-derived default          | Review-request URL base            |
 
+For self-hosted GitLab or GitHub, set `SPEC_TO_PR_GIT_HOST`, `SPEC_TO_PR_WEB_BASE_URL`, and `SPEC_TO_PR_API_BASE_URL` together in the runtime environment. Every URL must use HTTPS on the exact remote hostname; the plugin manifest never hardcodes a particular instance as a default.
+
 The default SDK calibration file is `~/.codex/spec-to-pr/usage-history.jsonl`, outside the target repository. It stores only mode/workload and numeric counters—never prompts, code, diffs, repository paths, tool output, or final responses. Only new, non-resume completed Runs with complete usage become samples. Resume invocations with unknown whole-Run usage neither read mode history nor append a sample. I/O is best-effort; failures mark only `usageCalibration` as unavailable. Use `--usage-history` to relocate it or `--no-usage-calibration` to disable it.
 
 An enabled history path or symlink inside the target repository, or an existing hard-linked history file, is rejected because it can dirty publication state. Relative paths resolve from `--cwd`.

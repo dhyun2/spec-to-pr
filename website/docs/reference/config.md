@@ -118,6 +118,8 @@ SDK 기본 시간 예산은 한 작업 차례 10분, 전체 실행 45분입니�
 | `SPEC_TO_PR_API_BASE_URL`               | 호스트 기반 기본값                    | 자체 호스팅 API 주소            |
 | `SPEC_TO_PR_WEB_BASE_URL`               | 호스트 기반 기본값                    | 검토 요청의 웹 주소 기준        |
 
+자체 호스팅 GitLab/GitHub는 실행 환경에서 `SPEC_TO_PR_GIT_HOST`, `SPEC_TO_PR_WEB_BASE_URL`, `SPEC_TO_PR_API_BASE_URL`를 함께 설정합니다. 세 URL/호스트 값은 원격 저장소와 정확히 일치하는 HTTPS 호스트여야 하며, 플러그인 매니페스트에 특정 인스턴스를 기본값으로 고정하지 않습니다.
+
 SDK의 사용량 보정 파일은 기본적으로 대상 저장소 밖의 `~/.codex/spec-to-pr/usage-history.jsonl`에 둡니다. `mode`, 작업량, 숫자 사용량만 기록하며 프롬프트·코드·코드 차이·저장소 경로·도구 출력·최종 답변은 저장하지 않습니다.
 
 보정에는 사용량을 완전히 확인할 수 있는 새 완료 실행만 사용합니다. 재개한 실행에서 원래 `mode`나 전체 사용량을 알 수 없으면 과거 기록을 읽거나 새 표본을 추가하지 않습니다. 기록을 읽고 쓰는 데 실패해도 실행은 계속되며 `usageCalibration`만 `unavailable`로 표시합니다. `--usage-history`로 위치를 바꾸거나 `--no-usage-calibration`으로 기능을 끌 수 있습니다.

@@ -1479,8 +1479,7 @@ export const FigmaBundleSubmissionSchema = z
       context.addIssue({
         code: "custom",
         path: ["designMapping", "publicApiCatalog"],
-        message:
-          "Digest-bound public API evidence must use distinct non-baseline paths",
+        message: "Digest-bound public API evidence must use distinct non-baseline paths",
       });
     }
     const visualPaths = submission.artifactPaths.filter(

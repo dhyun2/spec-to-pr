@@ -636,6 +636,7 @@ describe("PublisherService", () => {
       repo: "spec-to-pr",
     });
     expect(plan.payload.mode).toBe("draft");
+    expect(plan.payload.title).toBe("Run 1");
     expect(plan.intent).toBe("ready");
     expect(plan.payload.body).toBe(reportBody.markdown);
 
@@ -1731,7 +1732,7 @@ describe("PublisherService", () => {
     });
     expect(githubPublisher.createdPayloads).toHaveLength(1);
     expect(githubPublisher.updatedMetadata.at(-1)).toEqual({
-      title: `spec-to-pr evidence report for ${run.id}`,
+      title: "Run 1",
       body: expect.stringContaining("ready"),
       labels: ["spec-to-pr"],
     });
@@ -2456,6 +2457,32 @@ describe("PublisherService", () => {
       featureVideoExpected: true,
       featureVideoSynced: true,
     });
+  });
+
+  it("links the feature E2E video from the browser evidence thumbnail", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    await addVisualEvidence(run.id);
+    await addFeatureVideoEvidence(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    gitCurrentBranch = "codex/profile-qualifications-left-lesson";
+
+    await publisherService.publish({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "codex/profile-qualifications-left-lesson",
+      targetBranch: "main",
+      pushBranch: false,
+      confirm: true,
+    });
+
+    const body = githubPublisher.createdPayloads[0]?.body ?? "";
+    expect(githubPublisher.createdPayloads[0]?.title).toBe("Profile qualifications left lesson");
+    expect(body).toContain(
+      "[![변경한 기능 영상 미리보기](https://github.example/assets/browser.png)](https://github.example/assets/e2e-video.webm)",
+    );
+    expect(body).toContain("[변경한 기능 녹화 보기](https://github.example/assets/e2e-video.webm)");
+    expect(body).not.toContain("<video");
   });
 });
 

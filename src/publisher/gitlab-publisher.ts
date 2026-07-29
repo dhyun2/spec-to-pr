@@ -222,15 +222,12 @@ export class GitLabPublisherAdapter implements ReviewRequestPublisher {
           message: "GitLab upload review asset returned a malformed response",
         };
       }
-      // GitLab uploads are project-scoped. `full_path` already includes the
-      // /{namespace}/{project}/uploads/... prefix; `url` is project-relative
-      // (/uploads/...). Both render inside the MR description because GitLab
-      // resolves them against the project. We keep the RELATIVE path and never
-      // prefix the instance root, which would drop the project path and 404.
-      const uploadPath =
-        projectRelativeUploadPath(uploaded["full_path"]) ??
-        projectRelativeUploadPath(uploaded["url"]);
-      if (uploadPath === undefined) {
+      const uploadUrl = gitLabUploadUrl({
+        fullPath: uploaded["full_path"],
+        relativePath: uploaded["url"],
+        target: input.target,
+      });
+      if (uploadUrl === undefined) {
         return {
           status: "failed",
           artifactId: asset.artifactId,
@@ -247,7 +244,7 @@ export class GitLabPublisherAdapter implements ReviewRequestPublisher {
           targetId: asset.targetId,
           role: asset.role,
           label: asset.label,
-          url: uploadPath,
+          url: uploadUrl,
           embeddable: asset.role !== "e2e-video",
         }),
       } satisfies ReviewAssetPublishOutcome;
@@ -340,7 +337,42 @@ function normalizeGitLabMr(
   });
 }
 
-function projectRelativeUploadPath(value: unknown): string | undefined {
+function gitLabUploadUrl(input: {
+  fullPath: unknown;
+  relativePath: unknown;
+  target: PublishTarget;
+}): string | undefined {
+  const projectPath =
+    gitLabProjectUploadPath(input.fullPath) ?? gitLabProjectUploadPath(input.relativePath);
+  const relativePath = gitLabRelativeUploadPath(input.relativePath, input.target.projectId);
+  const path = projectPath ?? relativePath;
+  if (path === undefined) return undefined;
+
+  let base: URL;
+  let url: URL;
+  try {
+    base = new URL(input.target.webBaseUrl);
+    url = new URL(path, base);
+  } catch {
+    return undefined;
+  }
+  if (
+    base.protocol !== "https:" ||
+    base.username !== "" ||
+    base.password !== "" ||
+    url.protocol !== "https:" ||
+    url.username !== "" ||
+    url.password !== "" ||
+    url.origin !== base.origin ||
+    url.search !== "" ||
+    url.hash !== ""
+  ) {
+    return undefined;
+  }
+  return url.toString();
+}
+
+function gitLabProjectUploadPath(value: unknown): string | undefined {
   if (
     typeof value !== "string" ||
     value !== value.trim() ||
@@ -351,20 +383,38 @@ function projectRelativeUploadPath(value: unknown): string | undefined {
   ) {
     return undefined;
   }
+
+  return isSafeGitLabUploadPath(value, 2) ? value : undefined;
+}
+
+function gitLabRelativeUploadPath(
+  value: unknown,
+  projectId: string | undefined,
+): string | undefined {
+  if (
+    typeof value !== "string" ||
+    projectId === undefined ||
+    !/^\d+$/u.test(projectId) ||
+    !value.startsWith("/uploads/")
+  ) {
+    return undefined;
+  }
+  const path = `/-/project/${projectId}${value}`;
+  return isSafeGitLabUploadPath(path, 4) ? path : undefined;
+}
+
+function isSafeGitLabUploadPath(value: string, minimumPrefixSegments: number): boolean {
   let decoded: string;
   try {
     decoded = decodeURIComponent(value);
   } catch {
-    return undefined;
+    return false;
   }
   const segments = decoded.split("/");
   const uploadsIndex = segments.lastIndexOf("uploads");
-  if (
-    segments.some((segment) => segment === "..") ||
-    uploadsIndex < 1 ||
-    segments.slice(uploadsIndex + 1).filter((segment) => segment.length > 0).length < 2
-  ) {
-    return undefined;
-  }
-  return value;
+  return (
+    !segments.some((segment) => segment === "." || segment === "..") &&
+    uploadsIndex >= minimumPrefixSegments &&
+    segments.slice(uploadsIndex + 1).filter((segment) => segment.length > 0).length >= 2
+  );
 }

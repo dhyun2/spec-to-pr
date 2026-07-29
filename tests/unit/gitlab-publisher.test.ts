@@ -135,7 +135,7 @@ describe("GitLabPublisherAdapter", () => {
     });
   });
 
-  it("uploads visual evidence as project-relative uploads (no instance-root prefix)", async () => {
+  it("uploads visual evidence with an absolute GitLab project URL", async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse({
         // Real GitLab responses include the project path in full_path.
@@ -175,8 +175,6 @@ describe("GitLabPublisherAdapter", () => {
         }),
       }),
     );
-    // Keeps the project-scoped RELATIVE path; never prefixes the instance root
-    // (which would drop the project path and 404).
     expect(result).toEqual([
       {
         status: "published",
@@ -186,10 +184,80 @@ describe("GitLabPublisherAdapter", () => {
           targetId: "home",
           role: "figma",
           label: "Figma",
-          url: "/acme/platform/spec-to-pr/uploads/abc123/figma.png",
+          url: "https://gitlab.com/acme/platform/spec-to-pr/uploads/abc123/figma.png",
           embeddable: true,
         },
       },
+    ]);
+  });
+
+  it("accepts the self-hosted project upload route returned by GitLab", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse({
+        url: "/-/project/638/uploads/abc123/figma.png",
+      }),
+    );
+    const adapter = new GitLabPublisherAdapter(fetchMock);
+
+    const result = await adapter.publishAssets({
+      target: gitlabTarget({
+        projectId: "638",
+        projectPath: "frontend/react-workspace/web",
+        webBaseUrl: "https://gitlab.golfzon.local",
+        apiBaseUrl: "https://gitlab.golfzon.local/api/v4",
+      }),
+      payload: payload(),
+      token: "glpat-example",
+      maxConcurrency: 3,
+      assets: [
+        {
+          artifactId: "art_22222222222222222222222222222222",
+          artifactDigest: `sha256:${"a".repeat(64)}`,
+          targetId: "home",
+          role: "figma",
+          label: "Figma",
+          filename: "figma.png",
+          mediaType: "image/png",
+          content: Buffer.from("png"),
+        },
+      ],
+    });
+
+    expect(result).toEqual([
+      expect.objectContaining({
+        status: "published",
+        asset: expect.objectContaining({
+          url: "https://gitlab.golfzon.local/-/project/638/uploads/abc123/figma.png",
+        }),
+      }),
+    ]);
+  });
+
+  it("reconstructs a canonical project upload URL when GitLab returns only url", async () => {
+    const adapter = new GitLabPublisherAdapter(
+      vi.fn().mockResolvedValueOnce(jsonResponse({ url: "/uploads/abc123/figma.png" })),
+    );
+
+    const result = await adapter.publishAssets({
+      target: gitlabTarget({
+        projectId: "638",
+        projectPath: "frontend/react-workspace/web",
+        webBaseUrl: "https://gitlab.golfzon.local",
+        apiBaseUrl: "https://gitlab.golfzon.local/api/v4",
+      }),
+      payload: payload(),
+      token: "glpat-example",
+      maxConcurrency: 3,
+      assets: [asset()],
+    });
+
+    expect(result).toEqual([
+      expect.objectContaining({
+        status: "published",
+        asset: expect.objectContaining({
+          url: "https://gitlab.golfzon.local/-/project/638/uploads/abc123/figma.png",
+        }),
+      }),
     ]);
   });
 
@@ -293,10 +361,12 @@ describe("GitLabPublisherAdapter", () => {
   it.each([
     { full_path: 42 },
     { url: { path: "/uploads/figma.png" } },
-    { full_path: "https://gitlab.com/acme/spec-to-pr/uploads/figma.png" },
+    { full_path: "https://attacker.test/uploads/figma.png" },
     { url: "//attacker.example/figma.png" },
     { url: "uploads/figma.png" },
     { url: "/not-an-upload.png" },
+    { full_path: "/-/project/638/uploads/%2e%2e/figma.png" },
+    { full_path: "/-/project/638/uploads/abc123/fi\\gma.png" },
   ])("rejects malformed successful upload paths %# as uncertain", async (uploaded) => {
     const adapter = new GitLabPublisherAdapter(
       vi.fn().mockResolvedValueOnce(jsonResponse(uploaded)),
@@ -366,7 +436,7 @@ describe("GitLabPublisherAdapter", () => {
     }));
 
     const outcomes = await adapter.publishAssets({
-      target: gitlabTarget(),
+      target: gitlabTarget({ projectId: "638" }),
       payload: payload(),
       token: "glpat-example",
       maxConcurrency: 99,
@@ -379,12 +449,26 @@ describe("GitLabPublisherAdapter", () => {
   });
 });
 
-function gitlabTarget(): PublishTarget {
+function gitlabTarget(overrides: Partial<PublishTarget> = {}): PublishTarget {
   return {
     host: "gitlab",
     webBaseUrl: "https://gitlab.com",
     apiBaseUrl: "https://gitlab.com/api/v4",
     projectPath: "acme/platform/spec-to-pr",
+    ...overrides,
+  };
+}
+
+function asset() {
+  return {
+    artifactId: "art_22222222222222222222222222222222",
+    artifactDigest: `sha256:${"a".repeat(64)}` as const,
+    targetId: "home",
+    role: "figma" as const,
+    label: "Figma",
+    filename: "figma.png",
+    mediaType: "image/png" as const,
+    content: Buffer.from("png"),
   };
 }
 

@@ -201,6 +201,7 @@ describe("plugin layout", () => {
     expect(marketplace.plugins[0]!.name).toBe(manifest.name);
     expect(existsSync(path.join(root, manifest.skills))).toBe(true);
     expect(manifest.mcpServers.spec_to_pr.args).toContain("./dist/mcp/server.js");
+    expect(manifest.mcpServers.spec_to_pr.env).toEqual({ SPEC_TO_PR_HOST: "codex" });
     expect(existsSync(path.join(root, "dist", "mcp", "server.js"))).toBe(true);
   });
 
@@ -509,6 +510,11 @@ describe("plugin layout", () => {
     expect(publish).toContain("source branch");
     expect(publish).toContain("working tree is clean");
     expect(publish).toContain("at least one commit ahead");
+    expect(publish).toContain("project routes such as");
+    expect(publish).toContain("clickable video thumbnail");
+    expect(implement).toContain("final UI state including any transition");
+    expect(implement).toContain("free of incidental keyboard focus styling");
+    expect(implement).toContain("500–800 ms before and after each meaningful action");
 
     const descriptions = Object.fromEntries(
       expectedSkills.map((skill) => {
