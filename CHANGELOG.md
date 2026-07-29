@@ -7,6 +7,22 @@ use the plugin tag format, for example `spec-to-pr--v0.1.0`.
 
 ## Unreleased
 
+## 0.3.4 - 2026-07-29
+
+### Added
+
+- Added bounded Codex action-turn (10 minutes) and whole-Run (45 minutes) deadlines with durable
+  timing diagnostics and same-Run resume context.
+
+### Changed
+
+- Limited parallel work to independent read-only discovery and the immutable-packet reviewer pair;
+  repeated polling, generic helpers, and duplicate validation no longer create parallel work.
+- Added per-request HTTP/Git timeouts and cancellation propagation so stalled external work returns a
+  resumable diagnostic instead of leaving a Run indefinitely active.
+- Updated the Korean and English web guide with the timeout, latency investigation, and safe resume
+  policy, and refreshed the guide visual-proof receipt.
+
 ## 0.3.3 - 2026-07-23
 
 ### Added

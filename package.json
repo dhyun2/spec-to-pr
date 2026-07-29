@@ -1,6 +1,6 @@
 {
   "name": "@spec-to-pr/plugin",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "private": true,
   "type": "module",
   "description": "Evidence-driven Codex workflow for full delivery, legacy migration, feature E2E, and Figma implementation.",
