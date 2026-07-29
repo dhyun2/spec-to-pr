@@ -626,10 +626,12 @@ describe("Codex SDK workload budget", () => {
       'workflow_status with {"runId":"run_12345678","view":"action"}',
     );
     expect(implementation).not.toContain('"view":"detail"');
-    expect(reviewer).toContain('workflow_status with {"runId":"run_12345678","view":"action"}');
     expect(reviewer).toContain('workflow_status with {"runId":"run_12345678","view":"detail"}');
+    expect(reviewer).not.toContain('workflow_status with {"runId":"run_12345678","view":"action"}');
     expect(reviewer).toContain("immutable reviewer evidence");
+    expect(reviewer).toContain("capture and functional review concurrently");
     expect(report).toContain('workflow_status with {"runId":"run_12345678","view":"detail"}');
+    expect(report).not.toContain('workflow_status with {"runId":"run_12345678","view":"action"}');
   });
 
   it("projects blocker, publication, delegation, and diagnostic publication status", () => {

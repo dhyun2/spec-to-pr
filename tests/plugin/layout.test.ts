@@ -701,6 +701,9 @@ describe("plugin layout", () => {
     expect(implementationSkill).toContain("pnpm check");
     expect(implementationSkill).toContain("case4:check");
     expect(implementationSkill).toContain("bench:runtime");
+
+    const workflowSkill = readFileSync(path.join(root, "skills", "spec-to-pr", "SKILL.md"), "utf8");
+    expect(workflowSkill).toContain("capture and functional reviewer concurrently");
   });
 
   it("keeps the MDX installation page free of raw container directives", () => {

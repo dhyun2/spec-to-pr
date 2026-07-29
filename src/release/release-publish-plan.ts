@@ -52,6 +52,12 @@ export function buildReleasePublishPlan(input: ReleasePublishOptions): ReleaseCo
         args: ["check"],
       },
       {
+        id: "reviewer-scheduling",
+        title: "Verify the release-only reviewer scheduling decision",
+        command: "pnpm",
+        args: ["reviewer-scheduling:check"],
+      },
+      {
         id: "release-build",
         title: "Validate plugins, then build and verify the release package",
         command: "pnpm",

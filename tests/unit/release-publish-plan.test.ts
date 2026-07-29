@@ -17,6 +17,7 @@ describe("release publish plan", () => {
 
     expect(plan.map((step) => step.id)).toEqual([
       "check",
+      "reviewer-scheduling",
       "release-build",
       "git-tag",
       "git-push-release",
@@ -26,13 +27,17 @@ describe("release publish plan", () => {
     ]);
     expect(plan[1]).toMatchObject({
       command: "pnpm",
-      args: ["release:build", "0.1.6", "--full"],
+      args: ["reviewer-scheduling:check"],
     });
     expect(plan[2]).toMatchObject({
+      command: "pnpm",
+      args: ["release:build", "0.1.6", "--full"],
+    });
+    expect(plan[3]).toMatchObject({
       command: "git",
       args: ["tag", "--annotate", "spec-to-pr--v0.1.6", "--message", "spec-to-pr 0.1.6"],
     });
-    expect(plan[3]).toMatchObject({
+    expect(plan[4]).toMatchObject({
       command: "git",
       args: ["push", "origin", "main", "refs/tags/spec-to-pr--v0.1.6"],
     });
@@ -50,7 +55,7 @@ describe("release publish plan", () => {
         version: "0.1.6",
         verifyOnly: true,
       }).map((step) => step.id),
-    ).toEqual(["check", "release-build"]);
+    ).toEqual(["check", "reviewer-scheduling", "release-build"]);
 
     expect(
       buildReleasePublishPlan({

@@ -197,12 +197,15 @@ export function buildCompactCheckpointPrompt(status, requiredValidations, effect
     ].join("\n");
 }
 export function buildBoundaryContinuationPrompt(status, requiredValidations, effectiveBudget) {
+    const immutableDetail = requiresImmutableDetail(status);
+    const statusView = immutableDetail ? "detail" : "action";
     return [
         `Continue spec-to-pr Run ${status.runId}.`,
-        `Call workflow_status with ${JSON.stringify({ runId: status.runId, view: "action" })} first, complete only the next external action group, and stop after its returned status. Independent functional and design reviews in the same group may run in parallel.`,
-        ...(requiresImmutableDetail(status)
+        `Call workflow_status with ${JSON.stringify({ runId: status.runId, view: statusView })} first, complete only the next external action group, and stop after its returned status. Independent functional and design reviews in the same group may run in parallel.`,
+        "When compare-visuals and review-functional are both exposed, start capture and functional review concurrently; keep each reviewer read-only and submit its verdict through the orchestrator after the capture result is available.",
+        ...(immutableDetail
             ? [
-                `Before preparing immutable reviewer evidence or report evidence, call workflow_status with ${JSON.stringify({ runId: status.runId, view: "detail" })} and use that detail snapshot with accepted contracts, diff, and evidence handles.`,
+                "Use that detail snapshot as the immutable reviewer evidence or report evidence, including accepted contracts, diff, and evidence handles.",
             ]
             : []),
         "Preserve every required validation; budget pressure never authorizes a waiver.",
