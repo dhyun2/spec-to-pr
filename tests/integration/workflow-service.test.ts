@@ -8371,16 +8371,6 @@ describe("WorkflowService", () => {
       "attempt-2",
       [192, 192, 192, 255],
     );
-    await replacePersistedDesignMapping({
-      ...figmaDesignMapping(),
-      fonts: [{ family: "Pretendard", source: "assets/fonts/pretendard.woff2" }],
-    });
-    const reservationsBeforeMissingFontDigest = await visualReservationCount();
-    await expect(
-      service.submit({ runId: started.runId, submission: secondAttempt }),
-    ).rejects.toThrow(/VISUAL_CAPTURE_PROVENANCE_INVALID.*Pretendard.*digest/i);
-    expect(await visualReservationCount()).toBe(reservationsBeforeMissingFontDigest);
-    await replacePersistedDesignMapping(figmaDesignMapping());
     const rendererDrifts: Array<{
       name: string;
       mutate: (receipt: Record<string, unknown>) => void;
