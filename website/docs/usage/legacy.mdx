@@ -100,7 +100,7 @@ publication: draft
 | `publish`           | 검증이 끝나고 `publication: draft`일 때만 초안 PR/MR을 생성하거나 갱신합니다.                           |
 | `archive`           | 병합이 확인된 뒤 사용자가 별도로 요청한 경우에만 실행합니다.                                            |
 
-작업량이 XS/S이면 별도 조사 담당자를 두지 않고, M이면 최대 1명, L/XL이면 최대 2명의 읽기 전용 조사 담당자를 둘 수 있습니다. 큰 레거시 조사도 서로 독립적이고 편집이 필요 없는 범위로만 나눕니다. 구현 파일은 한 명만 편집하며 중첩 위임과 동시 편집은 허용하지 않습니다. 검토자 동시 실행은 구현이 끝난 뒤 UI 범위의 L/XL 작업에서만 사용합니다.
+작업량이 XS/S이면 별도 조사 담당자를 두지 않고, M이면 최대 1명, L/XL이면 최대 2명의 읽기 전용 조사 담당자를 둘 수 있습니다. 큰 레거시 조사도 서로 독립적이고 편집이 필요 없는 범위로만 나눕니다. 구현 파일은 한 명만 편집하며 중첩 위임과 동시 편집은 허용하지 않습니다. UI 범위의 검토자 동시 실행은 구현이 끝난 뒤 작업량과 관계없이 사용하며, 두 판정은 같은 packet inbox에 보관합니다.
 
 - `stageSkillRoute`: 공개 작업은 `intake-contracts` → `implement` → `review-functional` 순서로 진행합니다. UI가 바뀌면 `review-design`, 초안 발행이면 `publish`가 이어집니다. 이 경로는 `deliveryProfile.recommendedSkills`와 별개입니다.
 - `recommendedSkills`: `figmaUrl`이 있으면 `figma`와 `design-system`, `openApiPaths`나 `openApiUrls`가 있으면 `api-generator`를 후보로 둡니다. React/Next 패키지가 확인되면 `react-best-practices`, `next-best-practices`를 선택 후보로 추가합니다.

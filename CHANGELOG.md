@@ -7,6 +7,24 @@ use the plugin tag format, for example `spec-to-pr--v0.1.0`.
 
 ## Unreleased
 
+## 0.3.6 - 2026-07-31
+
+### Added
+
+- Added candidate-bound `capture-session-v1` evidence so one Playwright invocation can collect
+  targeted E2E, feature video, actual visual captures, and applicable performance output.
+- Added verified `evidence-fingerprint-v1` carry-forward for unchanged same-Run dependency inputs
+  and packet-scoped reviewer-result inboxes.
+
+### Changed
+
+- UI functional and design reviews now start together for every immutable review packet; the
+  runtime applies their combined outcome without losing a sibling verdict.
+- Routed coordinator boundaries to medium reasoning and implementation/review boundaries to high
+  reasoning on the same selected model and conversation.
+- Synchronized the Korean and English guide, including the interactive Run pipeline, with the
+  capture, reuse, reviewer, and reasoning behavior.
+
 ## 0.3.5 - 2026-07-29
 
 ### Added

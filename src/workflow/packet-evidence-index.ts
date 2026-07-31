@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { ArtifactIdSchema } from "../runtime/ids.js";
 import { GitObjectIdSchema, Sha256DigestSchema } from "../runtime/scalars.js";
+import { EvidenceFingerprintV1Schema, canReuseEvidence } from "./evidence-fingerprint.js";
 
 export const PacketEvidenceEntrySchema = z
   .object({
@@ -12,6 +13,7 @@ export const PacketEvidenceEntrySchema = z
     headSha: GitObjectIdSchema,
     diffDigest: Sha256DigestSchema,
     adapterVersion: z.string().trim().min(1),
+    evidenceFingerprint: EvidenceFingerprintV1Schema.optional(),
   })
   .strict();
 
@@ -29,8 +31,10 @@ export function reusablePacketEvidence(
       entry.selector === requested.selector &&
       entry.resultDigest === requested.resultDigest &&
       entry.artifactId === requested.artifactId &&
-      entry.headSha === requested.headSha &&
-      entry.diffDigest === requested.diffDigest &&
-      entry.adapterVersion === requested.adapterVersion,
+      entry.adapterVersion === requested.adapterVersion &&
+      ((entry.headSha === requested.headSha && entry.diffDigest === requested.diffDigest) ||
+        (entry.evidenceFingerprint !== undefined &&
+          requested.evidenceFingerprint !== undefined &&
+          canReuseEvidence(entry.evidenceFingerprint, requested.evidenceFingerprint))),
   );
 }

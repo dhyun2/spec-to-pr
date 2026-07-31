@@ -86,9 +86,15 @@ export type BoundaryThread = {
   ): Promise<RunResult>;
 };
 
+export type BoundaryReasoningEffort = "medium" | "high";
+
+export type BoundaryThreadRoute = {
+  reasoningEffort: BoundaryReasoningEffort;
+};
+
 export type BoundaryClient = {
-  startThread(): BoundaryThread;
-  resumeThread(threadId: string): BoundaryThread;
+  startThread(route?: BoundaryThreadRoute): BoundaryThread;
+  resumeThread(threadId: string, route?: BoundaryThreadRoute): BoundaryThread;
 };
 
 export type BlockedDiagnosticPreflight =
@@ -180,10 +186,11 @@ export async function executeBudgetedBoundaryTurns(input: {
 
   const now = input.now ?? performance.now.bind(performance);
   const startedAtMs = now();
+  let activeRoute: BoundaryThreadRoute = { reasoningEffort: "medium" };
   let thread =
     input.resumeThreadId === undefined
-      ? input.client.startThread()
-      : input.client.resumeThread(input.resumeThreadId);
+      ? input.client.startThread(activeRoute)
+      : input.client.resumeThread(input.resumeThreadId, activeRoute);
   let prompt = input.initialPrompt;
   let usage: AggregatedUsage | null = null;
   let finalResponse = "";
@@ -326,7 +333,8 @@ export async function executeBudgetedBoundaryTurns(input: {
       }
       checkpointed = true;
       checkpointCount += 1;
-      thread = input.client.startThread();
+      activeRoute = routeForWorkflowStatus(workflowStatus);
+      thread = input.client.startThread(activeRoute);
       prompt = buildCompactCheckpointPrompt(workflowStatus, activeRequiredValidations, {
         usedTokens: usage.totalTokens,
         hardLimitTokens: normalTokenLimit,
@@ -339,6 +347,11 @@ export async function executeBudgetedBoundaryTurns(input: {
       break;
     }
 
+    const nextRoute = routeForWorkflowStatus(workflowStatus);
+    if (nextRoute.reasoningEffort !== activeRoute.reasoningEffort && thread.id !== null) {
+      thread = input.client.resumeThread(thread.id, nextRoute);
+      activeRoute = nextRoute;
+    }
     prompt = buildBoundaryContinuationPrompt(workflowStatus, activeRequiredValidations, {
       usedTokens: usage.totalTokens,
       hardLimitTokens: normalTokenLimit,
@@ -354,6 +367,10 @@ export async function executeBudgetedBoundaryTurns(input: {
       outputFormatting = "budget-skipped";
     } else {
       try {
+        if (activeRoute.reasoningEffort !== "medium" && thread.id !== null) {
+          activeRoute = { reasoningEffort: "medium" };
+          thread = input.client.resumeThread(thread.id, activeRoute);
+        }
         const formattedResult = await executeBoundaryTurnWithTimeout({
           thread,
           prompt: buildFinalResponsePrompt(workflowStatus!),
@@ -540,6 +557,32 @@ function assertPositiveTimeout(timeoutMs: number | undefined, name: string): voi
   if (timeoutMs !== undefined && (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0)) {
     throw new Error(`${name} must be a positive integer`);
   }
+}
+
+function routeForWorkflowStatus(status: BoundaryWorkflowStatus): BoundaryThreadRoute {
+  const highReasoningStages = new Set(["implementation", "functional-review", "design-review"]);
+  const highReasoningActions = new Set([
+    "implement",
+    "implementation-repair",
+    "review-functional",
+    "review-design",
+  ]);
+  const hasHighReasoningAction = status.nextActions.some(
+    (action) =>
+      typeof action === "object" &&
+      action !== null &&
+      "kind" in action &&
+      typeof action.kind === "string" &&
+      highReasoningActions.has(action.kind),
+  );
+  return {
+    reasoningEffort:
+      status.currentStage !== undefined &&
+      highReasoningStages.has(status.currentStage) &&
+      hasHighReasoningAction
+        ? "high"
+        : "medium",
+  };
 }
 
 function timeoutFinalResponse(input: {

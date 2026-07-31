@@ -31,5 +31,5 @@ export declare const VISUAL_POLICY: {
     readonly maxMaskedAreaRatio: 0.2;
     readonly maxComparisonAttempts: 3;
 };
-export declare function parallelReviewersForWorkload(workload: DeliveryPolicyInput["workload"]): boolean;
+export declare function parallelReviewersForWorkload(_workload: DeliveryPolicyInput["workload"]): boolean;
 export declare function resolveDeliveryPolicy(input: DeliveryPolicyInput): ResolvedDeliveryPolicy;

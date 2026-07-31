@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { EvidenceFingerprintV1Schema } from "./evidence-fingerprint.js";
+
 import { RunStageNameSchema } from "../run/stages.js";
 import { ArtifactIdSchema, RunIdSchema } from "../runtime/ids.js";
 import { GitObjectIdSchema, IsoDateTimeSchema, Sha256DigestSchema } from "../runtime/scalars.js";
@@ -429,6 +431,7 @@ export const ImplementationReviewPacketSchema = z
     snapshotArtifactId: ArtifactIdSchema.optional(),
     snapshotDigest: Sha256DigestSchema.optional(),
     evidenceIndex: PacketEvidenceIndexSchema.optional(),
+    evidenceFingerprints: z.array(EvidenceFingerprintV1Schema).max(100).optional(),
     visualLineageId: ReviewPacketIdSchema.optional(),
   })
   .strict()
@@ -1218,6 +1221,12 @@ export const ImplementationSubmissionSchema = z
     uiChanged: z.boolean(),
     changedFiles: z.array(z.string().trim().min(1)).default([]),
     artifactPaths: z.array(z.string().trim().min(1)).default([]),
+    evidenceFingerprints: z.array(EvidenceFingerprintV1Schema).max(100).default([]),
+    captureSessionPath: z
+      .string()
+      .trim()
+      .regex(/\.json$/i, "Capture-session evidence must be a JSON manifest")
+      .optional(),
     featureEvidence: FeatureEvidenceSchema.optional(),
     apiCoverage: z.array(ApiOperationCoverageSchema).max(1_000).default([]),
     legacyCoverage: z.array(LegacyCoverageSchema).max(500).default([]),
@@ -1249,6 +1258,27 @@ export const ImplementationSubmissionSchema = z
         message: "Passed implementation requires executable evidence artifacts",
       });
     }
+    if (
+      submission.captureSessionPath !== undefined &&
+      !submission.artifactPaths.includes(submission.captureSessionPath)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["captureSessionPath"],
+        message: "Capture-session manifest must be included in artifactPaths",
+      });
+    }
+    const fingerprintIds = new Set<string>();
+    submission.evidenceFingerprints.forEach((fingerprint, index) => {
+      if (fingerprintIds.has(fingerprint.fingerprint)) {
+        context.addIssue({
+          code: "custom",
+          path: ["evidenceFingerprints", index, "fingerprint"],
+          message: "Evidence fingerprints must be unique",
+        });
+      }
+      fingerprintIds.add(fingerprint.fingerprint);
+    });
 
     if (submission.featureEvidence !== undefined) {
       const evidence = submission.featureEvidence;

@@ -94,7 +94,7 @@ Every report section is `complete`, `not-run`, `blocked`, or `not-applicable`; s
 | `publish`           | Create/update a same-source/target draft only when `publication: draft` is ready.                        |
 | `archive`           | Run only after merge, authoritative evidence, and a separate user request.                               |
 
-Agent policy allows zero read-only scout workers for XS/S, at most one for M, and at most two for L/XL. Scouts only perform independent read-heavy discovery. Functional/design reviewers may run in parallel only for L/XL after implementation: **no nesting** and no **parallel writer**.
+Agent policy allows zero read-only scout workers for XS/S, at most one for M, and at most two for L/XL. Scouts only perform independent read-heavy discovery. For every UI packet, functional/design reviewers run in parallel after implementation: **no nesting** and no **parallel writer**.
 
 - `stageSkillRoute`: public actions route `intake-contracts` → `implement` → `review-functional`, adding `review-design` for UI and `publish` for draft delivery. This routing is not `deliveryProfile.recommendedSkills`.
 - `recommendedSkills`: `figmaUrl` → `figma`, `design-system`; `openApiPaths` → `api-generator`; detected React/Next packages → `react-best-practices`, `next-best-practices` optional candidates.

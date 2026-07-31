@@ -20,10 +20,12 @@ import { RunService } from "../../src/application/run-service.js";
 import { StageService } from "../../src/application/stage-service.js";
 import {
   buildParserSafeChunks,
+  captureGitSnapshot,
   WorkflowPublishInputSchema,
   WorkflowService,
   type WorkflowServiceDependencies,
 } from "../../src/application/workflow-service.js";
+import { captureSessionIdentity } from "../../src/workflow/capture-session.js";
 import { SourceSnapshotStore } from "../../src/source-registry/snapshot-store.js";
 import { SqliteRunStore } from "../../src/store/sqlite-run-store.js";
 import type { RunStore } from "../../src/store/run-store.js";
@@ -2219,7 +2221,10 @@ describe("WorkflowService", () => {
         artifactPaths: ["test-results/unit.json"],
       },
     });
-    expect(implemented.nextActions.map((action) => action.kind)).toEqual(["review-functional"]);
+    expect(implemented.nextActions.map((action) => action.kind).sort()).toEqual([
+      "review-design",
+      "review-functional",
+    ]);
     const functionallyReviewed = await service.submit({
       runId: started.runId,
       submission: {
@@ -5870,6 +5875,148 @@ describe("WorkflowService", () => {
     expect(JSON.stringify(jsonReport)).not.toContain('"inpMs":120');
   });
 
+  it("binds one candidate capture session to the implementation review packet", async () => {
+    const started = await service.start({
+      projectRoot: directory,
+      requestText: "Update the checkout UI with one browser capture session.",
+      scope: "ui",
+      publication: "none",
+    });
+    await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "contracts",
+        status: "passed",
+        summary: "Checkout contract ready.",
+        artifactPaths: ["contracts/requirements.json"],
+        requirementManifest: requirements("checkout"),
+      },
+    });
+    await changeSource(directory, "src/checkout.tsx", "export const checkout = 'session';\n");
+    await writeFile(
+      path.join(directory, ".gitignore"),
+      "artifacts/\nruns.sqlite3*\nsources/\ntest-results/session-*\ntest-results/capture-session.json\n",
+      "utf8",
+    );
+    const artifactPaths = [
+      "test-results/session-reporter.json",
+      "test-results/session-actual.png",
+      "test-results/session-observation.json",
+    ];
+    await Promise.all(
+      artifactPaths.map((artifactPath) =>
+        writeFile(path.join(directory, artifactPath), `${artifactPath}\n`, "utf8"),
+      ),
+    );
+    const run = await store.get(started.runId);
+    const snapshot = await captureGitSnapshot(run);
+    const digestFor = async (artifactPath: string) =>
+      `sha256:${createHash("sha256")
+        .update(await readFile(path.join(directory, artifactPath)))
+        .digest("hex")}` as const;
+    const reporterDigest = await digestFor(artifactPaths[0]!);
+    const actualDigest = await digestFor(artifactPaths[1]!);
+    const observationDigest = await digestFor(artifactPaths[2]!);
+    const captureSessionDraft = {
+      schemaVersion: "capture-session-v1" as const,
+      runId: started.runId,
+      implementationContextId: "ctx_checkout_01",
+      candidate: {
+        baseSha: run.baseCommit!,
+        headSha: snapshot.headSha,
+        diffDigest: snapshot.diffDigest,
+      },
+      invocation: {
+        runner: "playwright-test-cli" as const,
+        command: "playwright test e2e/checkout.spec.ts",
+        selector: "e2e/checkout.spec.ts",
+        invocationCount: 1 as const,
+        reporterResultPath: artifactPaths[0]!,
+        reporterResultDigest: reporterDigest,
+      },
+      environment: {
+        browser: {
+          family: "chromium",
+          channel: "chromium",
+          version: "1",
+          userAgent: "spec-to-pr-test",
+        },
+        renderer: {
+          adapter: "spec-to-pr-playwright" as const,
+          adapterVersion: "1",
+          playwrightVersion: "1",
+        },
+        locale: "en-US",
+        timezone: "UTC",
+        colorScheme: "light" as const,
+        reducedMotion: "no-preference" as const,
+        serverOrigin: "http://127.0.0.1:3000",
+        readiness: {
+          documentReadyState: "complete" as const,
+          fontsReady: true as const,
+          imagesReady: true as const,
+          assetsReady: true as const,
+        },
+      },
+      inputs: {
+        capturePlanDigest: `sha256:${"1".repeat(64)}` as const,
+        scenarioDigest: `sha256:${"2".repeat(64)}` as const,
+        fixtureDigest: `sha256:${"3".repeat(64)}` as const,
+        uiBundleDigest: `sha256:${"4".repeat(64)}` as const,
+        rendererLineageId: `sha256:${"5".repeat(64)}` as const,
+      },
+      outputs: {
+        targets: [
+          {
+            targetId: "checkout",
+            testId: "checkout visual",
+            actualPath: artifactPaths[1]!,
+            actualDigest,
+            observationPath: artifactPaths[2]!,
+            observationDigest,
+          },
+        ],
+      },
+    };
+    const captureSessionPath = "test-results/capture-session.json";
+    await writeFile(
+      path.join(directory, captureSessionPath),
+      JSON.stringify({
+        ...captureSessionDraft,
+        captureSessionId: captureSessionIdentity(captureSessionDraft),
+      }),
+      "utf8",
+    );
+
+    const implemented = await service.submit({
+      runId: started.runId,
+      submission: {
+        kind: "implementation",
+        status: "passed",
+        summary: "Checkout changed with one verified capture session.",
+        apiReady: false,
+        implementationContextId: "ctx_checkout_01",
+        uiChanged: true,
+        changedFiles: [".gitignore", "src/checkout.tsx"],
+        captureSessionPath,
+        artifactPaths: ["test-results/unit.json", ...artifactPaths, captureSessionPath],
+      },
+    });
+    const packet = reviewPacketId(implemented, "review-functional");
+    const persisted = await store.get(started.runId);
+    expect(persisted.artifacts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            adapter: "capture-session-binding-v1",
+            captureSessionId: captureSessionIdentity(captureSessionDraft),
+            reviewPacketId: packet,
+          }),
+        }),
+      ]),
+    );
+  });
+
   it("rejects malformed Figma manifests and fake visual files", async () => {
     const started = await service.start({
       projectRoot: directory,
@@ -8950,7 +9097,7 @@ describe("WorkflowService", () => {
       "review-functional",
     ]);
 
-    await service.submit({
+    const bufferedDesign = await service.submit({
       runId: started.runId,
       submission: {
         kind: "design-review",
@@ -8969,6 +9116,12 @@ describe("WorkflowService", () => {
         ],
       },
     });
+    expect(bufferedDesign.stages.find((stage) => stage.name === "design-review")?.status).toBe(
+      "running",
+    );
+    expect(bufferedDesign.stages.find((stage) => stage.name === "functional-review")?.status).toBe(
+      "pending",
+    );
     await service.submit({
       runId: started.runId,
       submission: {

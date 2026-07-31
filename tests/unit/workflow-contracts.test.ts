@@ -1230,6 +1230,32 @@ describe("workflow v2 contracts", () => {
     }
   });
 
+  it("requires a declared capture-session manifest to be part of implementation evidence", () => {
+    const implementation = {
+      kind: "implementation",
+      status: "passed",
+      summary: "One Playwright capture session produced the browser evidence.",
+      apiReady: false,
+      implementationContextId: "ctx_checkout_01",
+      uiChanged: true,
+      changedFiles: ["src/checkout.tsx"],
+      captureSessionPath: "artifacts/capture-session.json",
+    };
+
+    expect(
+      WorkflowSubmissionSchema.safeParse({
+        ...implementation,
+        artifactPaths: ["test-results/unit.json"],
+      }).success,
+    ).toBe(false);
+    expect(
+      WorkflowSubmissionSchema.safeParse({
+        ...implementation,
+        artifactPaths: ["test-results/unit.json", "artifacts/capture-session.json"],
+      }).success,
+    ).toBe(true);
+  });
+
   it("requires native v2 geometry plus exact target/node/state/fixture contracts", () => {
     const stateContract = (overrides: Record<string, unknown> = {}) => {
       const fields = {

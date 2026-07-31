@@ -54,8 +54,8 @@ export const VISUAL_POLICY = {
   maxComparisonAttempts: 3,
 } as const;
 
-export function parallelReviewersForWorkload(workload: DeliveryPolicyInput["workload"]): boolean {
-  return workload === "L" || workload === "XL";
+export function parallelReviewersForWorkload(_workload: DeliveryPolicyInput["workload"]): boolean {
+  return true;
 }
 
 export function resolveDeliveryPolicy(input: DeliveryPolicyInput): ResolvedDeliveryPolicy {

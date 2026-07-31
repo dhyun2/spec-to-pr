@@ -104,6 +104,7 @@ import {
   type WorkflowDetailStatus,
   type WorkflowResumeContext,
   type WorkflowSubmission,
+  type EvidenceFingerprintV1,
   DraftEvidenceManifestSchema,
 } from "../workflow/index.js";
 import {
@@ -168,6 +169,10 @@ import {
   latestVisualLineageOutcome,
   type VisualLineageOutcome,
 } from "../workflow/visual-repair-lineage.js";
+import {
+  CaptureSessionReceiptV1Schema,
+  type CaptureSessionReceiptV1,
+} from "../workflow/capture-session.js";
 import {
   nextCommittedVisualAttempt,
   reduceVisualReservations,
@@ -1071,6 +1076,9 @@ export class WorkflowService {
       await assertReviewPacketFresh(run, this.dependencies.artifactStore, this.metrics);
     }
     const evidenceArtifacts = await this.ingestSubmissionEvidence(run, submission);
+    if (submission.kind === "implementation") {
+      await this.assertEvidenceFingerprintInputs(run.projectRoot, submission.evidenceFingerprints);
+    }
     const implementationSnapshot =
       submission.kind === "implementation" && submission.status === "passed"
         ? await captureGitSnapshot(run, this.metrics, this.now())
@@ -1078,6 +1086,17 @@ export class WorkflowService {
     if (submission.kind === "implementation" && implementationSnapshot !== undefined) {
       assertChangedFilesMatch(submission.changedFiles, implementationSnapshot.changedFiles);
     }
+    const captureSession =
+      submission.kind === "implementation" && implementationSnapshot !== undefined
+        ? await this.assertImplementationCaptureSession(
+            run,
+            submission,
+            implementationSnapshot,
+            evidenceArtifacts,
+          )
+        : undefined;
+    const evidenceFingerprints =
+      submission.kind === "implementation" ? submission.evidenceFingerprints : [];
     const implementationSnapshotArtifact =
       submission.kind === "implementation" &&
       implementationSnapshot?.implementationSnapshot !== undefined
@@ -1098,12 +1117,18 @@ export class WorkflowService {
             this.dependencies.artifactStore,
             implementationSnapshotArtifact,
             evidenceIndex,
+            evidenceFingerprints,
           )
         : undefined;
-    const acceptedEvidenceArtifacts =
-      implementationSnapshotArtifact === undefined
-        ? evidenceArtifacts
-        : [...evidenceArtifacts, implementationSnapshotArtifact];
+    const captureSessionBinding =
+      captureSession === undefined || reviewPacket === undefined
+        ? undefined
+        : await this.writeCaptureSessionBinding(captureSession, reviewPacket);
+    const acceptedEvidenceArtifacts = [
+      ...evidenceArtifacts,
+      ...(implementationSnapshotArtifact === undefined ? [] : [implementationSnapshotArtifact]),
+      ...(captureSessionBinding === undefined ? [] : [captureSessionBinding]),
+    ];
 
     if (submission.kind === "figma-bundle") {
       await this.recordSubmissionArtifact(run, submission, evidenceArtifacts);
@@ -1147,32 +1172,35 @@ export class WorkflowService {
       reviewPacket,
     );
     const artifactIds = [...acceptedEvidenceArtifacts.map((item) => item.id), artifact.id];
-    const outcome = submissionOutcome(submission);
-
-    if (
-      (submission.kind === "functional-review" || submission.kind === "design-review") &&
-      submission.verdict === "changes-requested"
-    ) {
-      const current = await this.dependencies.runStore.get(run.id);
-      const reopened = reopenImplementationForReviewChanges(
-        current,
-        typedBlocker?.summary ?? genericBlockerSummary(submission.kind, "unexpected"),
-        this.now,
-      );
-      await this.dependencies.runStore.save(
-        {
-          ...reopened,
-          stages: reopened.stages.map((item) =>
-            item.name === "implementation"
-              ? { ...item, artifactIds: [...new Set([...item.artifactIds, artifact.id])] }
-              : item,
-          ),
-        },
-        current.revision,
-      );
-      this.completeReviewerTiming(submission.reviewPacketId, submission.kind);
+    if (submission.kind === "functional-review" || submission.kind === "design-review") {
+      if (
+        submission.verdict === "changes-requested" &&
+        !(await this.isReviewPacketSourceFresh(run))
+      ) {
+        const current = await this.dependencies.runStore.get(run.id);
+        const reopened = reopenImplementationForReviewChanges(
+          current,
+          typedBlocker?.summary ?? genericBlockerSummary(submission.kind, "unexpected"),
+          this.now,
+        );
+        await this.dependencies.runStore.save(
+          {
+            ...reopened,
+            stages: reopened.stages.map((item) =>
+              item.name === "implementation"
+                ? { ...item, artifactIds: [...new Set([...item.artifactIds, artifact.id])] }
+                : item,
+            ),
+          },
+          current.revision,
+        );
+        this.completeReviewerTiming(submission.reviewPacketId, submission.kind);
+        return this.mutatingStatus(run.id, view);
+      }
+      await this.bufferReviewResult(run.id, submission.reviewPacketId);
       return this.mutatingStatus(run.id, view);
     }
+    const outcome = submissionOutcome(submission);
 
     if (outcome === "passed") {
       await this.dependencies.stageService.complete({
@@ -1219,11 +1247,6 @@ export class WorkflowService {
       });
     }
 
-    if (submission.kind === "functional-review" || submission.kind === "design-review") {
-      this.completeReviewerTiming(submission.reviewPacketId, submission.kind);
-      await this.cleanupReviewerTimingIfTerminal(run.id, submission.reviewPacketId);
-    }
-
     return this.mutatingStatus(run.id, view);
   }
 
@@ -1241,12 +1264,105 @@ export class WorkflowService {
           stageName,
           workerId: WORKER_ID,
           expectedRevision: current.revision,
+          leaseTtlMs: 60 * 60 * 1_000,
         });
       } catch (error: unknown) {
         if (!(error instanceof RevisionConflictError)) throw error;
       }
     }
     throw new Error("REVIEW_PACKET_STALE: refresh the Run before submitting the reviewer result");
+  }
+
+  /**
+   * Reviewer submissions are immutable packet-scoped inbox entries.  A UI packet is only
+   * terminal once both independent reviewer results are present, so a quick changes-requested
+   * result cannot discard a concurrently running sibling review.
+   */
+  private async bufferReviewResult(runId: string, reviewPacketId: string): Promise<void> {
+    const run = await this.dependencies.runStore.get(runId);
+    const packet = reviewPacketFromRun(run);
+    if (packet?.id !== reviewPacketId || stage(run, "implementation").status !== "passed") {
+      throw new Error("REVIEW_PACKET_STALE: the review packet changed while buffering a result");
+    }
+    const expectedStages: Array<"functional-review" | "design-review"> = scopeFromRun(run).ui
+      ? ["functional-review", "design-review"]
+      : ["functional-review"];
+    const inbox = reviewResultInbox(run, reviewPacketId);
+    const results = expectedStages.map((stageName) => inbox.get(stageName));
+    if (results.some((result) => result === undefined)) return;
+
+    for (const result of results) {
+      const review = result!;
+      const current = await this.dependencies.runStore.get(runId);
+      const reviewStage = stage(current, review.stageName);
+      if (reviewStage.status === "passed" || reviewStage.status === "failed") continue;
+      if (reviewStage.status !== "running" || reviewStage.lease === undefined) {
+        throw new Error(
+          `REVIEW_PACKET_STALE: ${review.stageName} is not running for its buffered reviewer result`,
+        );
+      }
+      const artifactIds = [...review.evidenceArtifactIds, review.artifact.id];
+      if (review.verdict === "approved") {
+        await this.dependencies.stageService.complete({
+          runId,
+          stageName: review.stageName,
+          workerId: WORKER_ID,
+          leaseId: reviewStage.lease.id,
+          artifactIds,
+        });
+      } else {
+        await this.dependencies.stageService.fail({
+          runId,
+          stageName: review.stageName,
+          workerId: WORKER_ID,
+          leaseId: reviewStage.lease.id,
+          artifactIds,
+          error: {
+            code:
+              review.blocker?.code ??
+              (review.verdict === "blocked" ? "WORKFLOW_BLOCKED" : "CHANGES_REQUESTED"),
+            message:
+              review.blocker?.summary ?? `${review.stageName} stage reported ${review.verdict}.`,
+            retryable: review.blocker?.retryable ?? review.verdict !== "blocked",
+          },
+        });
+      }
+      this.completeReviewerTiming(reviewPacketId, review.stageName);
+    }
+
+    const changesRequested = results.find((result) => result!.verdict === "changes-requested");
+    if (changesRequested !== undefined) {
+      const current = await this.dependencies.runStore.get(runId);
+      const reopened = reopenImplementationForReviewChanges(
+        current,
+        changesRequested!.blocker?.summary ??
+          changesRequested!.summary ??
+          genericBlockerSummary(changesRequested!.stageName, "unexpected"),
+        this.now,
+      );
+      const reviewArtifactIds = results.map((result) => result!.artifact.id);
+      await this.dependencies.runStore.save(
+        {
+          ...reopened,
+          stages: reopened.stages.map((item) =>
+            item.name === "implementation"
+              ? { ...item, artifactIds: [...new Set([...item.artifactIds, ...reviewArtifactIds])] }
+              : item,
+          ),
+        },
+        current.revision,
+      );
+    }
+    await this.cleanupReviewerTimingIfTerminal(runId, reviewPacketId);
+  }
+
+  private async isReviewPacketSourceFresh(run: RunManifest): Promise<boolean> {
+    try {
+      await assertReviewPacketFresh(run, this.dependencies.artifactStore, this.metrics);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private async submitLegacyNetworkEvidence(
@@ -2185,6 +2301,7 @@ export class WorkflowService {
       { ...run, artifacts: [...run.artifacts, ...evidenceArtifacts] },
       submission,
     );
+    const persistedBlocker = blockerFromSubmission(persistedSubmission);
     const failureContext = failureContextForSubmission(run, submission);
     const persistedSummary =
       persistedSubmission.kind === "figma-bundle"
@@ -2257,6 +2374,7 @@ export class WorkflowService {
               ...(submission.performanceEvidence === undefined
                 ? {}
                 : { performanceEvidence: submission.performanceEvidence }),
+              evidenceFingerprints: submission.evidenceFingerprints,
             }),
         ...(submission.kind !== "api-ready" ? {} : { apiOperations: submission.operations }),
         ...(submission.kind !== "functional-review" && submission.kind !== "design-review"
@@ -2266,6 +2384,7 @@ export class WorkflowService {
               reviewedRequirements: submission.requirements,
               gateResults: submission.gateResults,
               findings: submission.findings,
+              ...(persistedBlocker === undefined ? {} : { workflowBlocker: persistedBlocker }),
             }),
       },
     });
@@ -2317,6 +2436,228 @@ export class WorkflowService {
         schemaVersion: parsed.schemaVersion,
         headSha: parsed.headSha,
         diffDigest: parsed.diffDigest,
+      },
+    });
+  }
+
+  private async assertImplementationCaptureSession(
+    run: RunManifest,
+    submission: Extract<WorkflowSubmission, { kind: "implementation" }>,
+    snapshot: GitSnapshot,
+    evidenceArtifacts: ArtifactRef[],
+  ): Promise<{ artifact: ArtifactRef; session: CaptureSessionReceiptV1 } | undefined> {
+    if (submission.captureSessionPath === undefined) return undefined;
+    const artifact = evidenceArtifacts.find(
+      (candidate) => candidate.metadata["projectRelativePath"] === submission.captureSessionPath,
+    );
+    if (artifact === undefined) {
+      throw new Error(
+        `CAPTURE_SESSION_INVALID: manifest was not ingested: ${submission.captureSessionPath}`,
+      );
+    }
+    let raw: unknown;
+    try {
+      raw = JSON.parse(
+        (await this.dependencies.artifactStore.readContent(artifact.digest)).toString("utf8"),
+      );
+    } catch {
+      throw new Error(
+        `CAPTURE_SESSION_INVALID: manifest must be strict JSON: ${submission.captureSessionPath}`,
+      );
+    }
+    const parsed = CaptureSessionReceiptV1Schema.safeParse(raw);
+    if (!parsed.success) {
+      throw new Error(
+        `CAPTURE_SESSION_INVALID: manifest schema is invalid: ${parsed.error.issues
+          .map((issue) => issue.message)
+          .join("; ")}`,
+      );
+    }
+    const session = parsed.data;
+    const expectedBaseSha = run.workspaceBinding?.baseSha ?? run.baseCommit;
+    const candidateDiffDigest = await captureCandidateDiffDigest({
+      run,
+      headSha: snapshot.headSha,
+      excludedEvidencePaths: [
+        submission.captureSessionPath,
+        session.invocation.reporterResultPath,
+        ...session.outputs.targets.flatMap((target) => [target.actualPath, target.observationPath]),
+        ...(session.outputs.featureResult === undefined
+          ? []
+          : [session.outputs.featureResult.path]),
+        ...(session.outputs.video === undefined ? [] : [session.outputs.video.path]),
+        ...(session.outputs.performance === undefined ? [] : [session.outputs.performance.path]),
+      ],
+      metrics: this.metrics,
+    });
+    if (
+      session.runId !== run.id ||
+      session.implementationContextId !== submission.implementationContextId ||
+      session.candidate.baseSha !== expectedBaseSha ||
+      session.candidate.headSha !== snapshot.headSha ||
+      session.candidate.diffDigest !== candidateDiffDigest ||
+      session.invocation.invocationCount !== 1
+    ) {
+      throw new Error(
+        "CAPTURE_SESSION_INVALID: manifest does not bind exactly to the Run, implementation context, candidate, and one Playwright invocation",
+      );
+    }
+
+    const assertSessionArtifact = (evidencePath: string, digest: string, role: string) => {
+      const evidence = evidenceArtifacts.find(
+        (candidate) => candidate.metadata["projectRelativePath"] === evidencePath,
+      );
+      if (evidence === undefined || evidence.digest !== digest) {
+        throw new Error(
+          `CAPTURE_SESSION_INVALID: ${role} is missing or its digest does not match ${evidencePath}`,
+        );
+      }
+    };
+    assertSessionArtifact(
+      session.invocation.reporterResultPath,
+      session.invocation.reporterResultDigest,
+      "Playwright reporter result",
+    );
+    for (const target of session.outputs.targets) {
+      assertSessionArtifact(
+        target.actualPath,
+        target.actualDigest,
+        `${target.targetId} actual PNG`,
+      );
+      assertSessionArtifact(
+        target.observationPath,
+        target.observationDigest,
+        `${target.targetId} assertion observation`,
+      );
+    }
+    if (session.outputs.featureResult !== undefined) {
+      assertSessionArtifact(
+        session.outputs.featureResult.path,
+        session.outputs.featureResult.digest,
+        "feature result",
+      );
+    }
+    if (session.outputs.video !== undefined) {
+      assertSessionArtifact(
+        session.outputs.video.path,
+        session.outputs.video.digest,
+        "feature video",
+      );
+    }
+    if (session.outputs.performance !== undefined) {
+      assertSessionArtifact(
+        session.outputs.performance.path,
+        session.outputs.performance.digest,
+        "performance result",
+      );
+    }
+    if (submission.featureEvidence !== undefined) {
+      if (
+        session.outputs.featureResult?.path !== submission.featureEvidence.resultPath ||
+        session.outputs.video?.path !== submission.featureEvidence.videoPath ||
+        session.invocation.command !== submission.featureEvidence.testCommand ||
+        session.invocation.selector !== submission.featureEvidence.testSelector
+      ) {
+        throw new Error(
+          "CAPTURE_SESSION_INVALID: feature E2E result, video, command, and selector must come from the capture session",
+        );
+      }
+    }
+    if (
+      submission.performanceEvidence !== undefined &&
+      session.outputs.performance?.path !== submission.performanceEvidence.lab.resultPath
+    ) {
+      throw new Error(
+        "CAPTURE_SESSION_INVALID: performance evidence must come from the capture session",
+      );
+    }
+    return { artifact, session };
+  }
+
+  private async assertEvidenceFingerprintInputs(
+    projectRoot: string,
+    fingerprints: EvidenceFingerprintV1[],
+  ): Promise<void> {
+    if (fingerprints.length === 0) return;
+    const root = await realpath(projectRoot);
+    const verified = new Map<string, string>();
+    for (const fingerprint of fingerprints) {
+      for (const input of fingerprint.inputs) {
+        if (!isSafeDurableEvidencePath(input.path)) {
+          throw new Error(
+            `EVIDENCE_FINGERPRINT_INVALID: unsafe dependency input path ${input.path}`,
+          );
+        }
+        const requestedPath = path.resolve(root, input.path);
+        assertWithinProjectRoot(root, requestedPath, input.path);
+        let resolvedPath: string;
+        try {
+          resolvedPath = await realpath(requestedPath);
+        } catch {
+          throw new Error(`EVIDENCE_FINGERPRINT_INVALID: missing dependency input ${input.path}`);
+        }
+        assertWithinProjectRoot(root, resolvedPath, input.path);
+        let digest = verified.get(resolvedPath);
+        if (digest === undefined) {
+          const details = await stat(resolvedPath);
+          if (!details.isFile() || details.size > 50 * 1024 * 1024) {
+            throw new Error(
+              `EVIDENCE_FINGERPRINT_INVALID: dependency input must be a non-oversized file ${input.path}`,
+            );
+          }
+          digest = `sha256:${createHash("sha256")
+            .update(await readFile(resolvedPath))
+            .digest("hex")}`;
+          verified.set(resolvedPath, digest);
+        }
+        if (digest !== input.digest) {
+          throw new Error(
+            `EVIDENCE_FINGERPRINT_INVALID: dependency input digest changed for ${input.path}`,
+          );
+        }
+      }
+    }
+  }
+
+  private async writeCaptureSessionBinding(
+    captureSession: { artifact: ArtifactRef; session: CaptureSessionReceiptV1 },
+    packet: ImplementationReviewPacket,
+  ): Promise<ArtifactRef> {
+    const timestamp = this.now();
+    const binding = {
+      schemaVersion: "capture-session-binding-v1",
+      captureSessionId: captureSession.session.captureSessionId,
+      captureSessionArtifactId: captureSession.artifact.id,
+      captureSessionDigest: captureSession.artifact.digest,
+      reviewPacketId: packet.id,
+      headSha: packet.headSha,
+      diffDigest: packet.diffDigest,
+    };
+    const content = Buffer.from(`${JSON.stringify(binding, null, 2)}\n`, "utf8");
+    const blob = await this.dependencies.artifactStore.writeBlob({
+      content,
+      mediaType: "application/json",
+      storedAt: timestamp,
+      label: "capture-session-binding-v1.json",
+    });
+    return ArtifactRefSchema.parse({
+      id: createArtifactId(),
+      kind: "agent-result-report",
+      uri: blob.uri,
+      mediaType: "application/json",
+      digest: blob.digest,
+      producedBy: "orchestrator",
+      evidenceIds: [],
+      createdAt: timestamp,
+      metadata: {
+        adapter: "capture-session-binding-v1",
+        schemaVersion: binding.schemaVersion,
+        captureSessionId: binding.captureSessionId,
+        captureSessionArtifactId: binding.captureSessionArtifactId,
+        captureSessionDigest: binding.captureSessionDigest,
+        reviewPacketId: binding.reviewPacketId,
+        headSha: binding.headSha,
+        diffDigest: binding.diffDigest,
       },
     });
   }
@@ -7010,6 +7351,46 @@ function currentReusablePacketEvidence(
   });
 }
 
+type BufferedReviewResult = {
+  artifact: ArtifactRef;
+  stageName: "functional-review" | "design-review";
+  verdict: "approved" | "changes-requested" | "blocked";
+  summary?: string;
+  blocker?: WorkflowBlocker;
+  evidenceArtifactIds: string[];
+};
+
+function reviewResultInbox(
+  run: RunManifest,
+  reviewPacketId: string,
+): Map<BufferedReviewResult["stageName"], BufferedReviewResult> {
+  const results = new Map<BufferedReviewResult["stageName"], BufferedReviewResult>();
+  for (const artifact of [...run.artifacts].reverse()) {
+    const kind = artifact.metadata["workflowSubmissionKind"];
+    if (kind !== "functional-review" && kind !== "design-review") continue;
+    if (artifact.metadata["reviewPacketId"] !== reviewPacketId || results.has(kind)) continue;
+    const verdict = artifact.metadata["verdict"];
+    if (verdict !== "approved" && verdict !== "changes-requested" && verdict !== "blocked") {
+      continue;
+    }
+    const parsedBlocker = WorkflowBlockerSchema.safeParse(artifact.metadata["workflowBlocker"]);
+    const evidenceArtifactIds = artifact.metadata["evidenceArtifactIds"];
+    results.set(kind, {
+      artifact,
+      stageName: kind,
+      verdict,
+      ...(typeof artifact.metadata["summary"] === "string"
+        ? { summary: artifact.metadata["summary"] }
+        : {}),
+      ...(parsedBlocker.success ? { blocker: parsedBlocker.data } : {}),
+      evidenceArtifactIds: Array.isArray(evidenceArtifactIds)
+        ? evidenceArtifactIds.filter((value): value is string => typeof value === "string")
+        : [],
+    });
+  }
+  return results;
+}
+
 function legacyFeatureKeysFromRun(run: RunManifest): Set<string> {
   const rawKeys = [...run.artifacts]
     .reverse()
@@ -9086,6 +9467,7 @@ async function createImplementationReviewPacket(
   artifactStore: ArtifactBlobStore,
   snapshotArtifact: ArtifactRef | undefined,
   evidenceIndex: PacketEvidenceEntry[],
+  evidenceFingerprints: EvidenceFingerprintV1[],
 ): Promise<ImplementationReviewPacket> {
   const previous = reviewPacketFromRun(run);
   const evidenceHex = createHash("sha256")
@@ -9114,6 +9496,7 @@ async function createImplementationReviewPacket(
           snapshotDigest: snapshotArtifact.digest,
         }),
     evidenceIndex,
+    ...(evidenceFingerprints.length === 0 ? {} : { evidenceFingerprints }),
   };
   const id = createHash("sha256").update(JSON.stringify(identity)).digest("hex");
   const packetId = `packet_${id}`;
@@ -9164,6 +9547,9 @@ function buildImplementationEvidenceIndex(
   );
   if (resultArtifact === undefined) return [];
   const adapter = resultArtifact.metadata["adapter"];
+  const evidenceFingerprint = submission.evidenceFingerprints.find(
+    (fingerprint) => fingerprint.family === "feature-e2e",
+  );
   return PacketEvidenceIndexSchema.parse([
     {
       command: featureEvidence.testCommand,
@@ -9173,6 +9559,7 @@ function buildImplementationEvidenceIndex(
       headSha: snapshot.headSha,
       diffDigest: snapshot.diffDigest,
       adapterVersion: typeof adapter === "string" ? adapter : "workflow-v2-evidence",
+      ...(evidenceFingerprint === undefined ? {} : { evidenceFingerprint }),
     },
   ]);
 }
@@ -9298,6 +9685,73 @@ export async function captureGitSnapshot(
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Unable to capture the implementation Git diff: ${message}`);
+  }
+}
+
+/**
+ * Capture-session manifests are themselves evidence outputs. Excluding only the session's
+ * declared generated outputs avoids a self-referential candidate digest while retaining a
+ * complete implementation-source freshness fence.
+ */
+async function captureCandidateDiffDigest(input: {
+  run: RunManifest;
+  headSha: string;
+  excludedEvidencePaths: string[];
+  metrics: RuntimeMetricsSink;
+}): Promise<`sha256:${string}`> {
+  const baseCommit = input.run.workspaceBinding?.baseSha ?? input.run.baseCommit;
+  const projectRoot = input.run.workspaceBinding?.repositoryRoot ?? input.run.projectRoot;
+  if (baseCommit === undefined) {
+    throw new Error("CAPTURE_SESSION_INVALID: implementation base commit is missing");
+  }
+  const excluded = [...new Set(input.excludedEvidencePaths)].sort();
+  if (excluded.some((evidencePath) => !isSafeDurableEvidencePath(evidencePath))) {
+    throw new Error("CAPTURE_SESSION_INVALID: capture-session output path is unsafe");
+  }
+  const strict = input.run.workspaceBinding !== undefined;
+  const diffRange = strict ? [baseCommit, input.headSha] : [baseCommit];
+  const pathspec = [".", ...excluded.map((evidencePath) => `:(exclude)${evidencePath}`)];
+  try {
+    input.metrics.increment("git.command_count", strict ? 1 : 2);
+    const [diffResult, untrackedResult] = await Promise.all([
+      execFileAsync("git", ["diff", "--binary", ...diffRange, "--", ...pathspec], {
+        cwd: projectRoot,
+        encoding: "buffer",
+        maxBuffer: 50 * 1024 * 1024,
+        timeout: GIT_COMMAND_TIMEOUT_MS,
+        killSignal: "SIGTERM",
+      }),
+      strict
+        ? Promise.resolve({ stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) })
+        : execFileAsync("git", ["ls-files", "--others", "--exclude-standard", "-z"], {
+            cwd: projectRoot,
+            encoding: "buffer",
+            maxBuffer: 5 * 1024 * 1024,
+            timeout: GIT_COMMAND_TIMEOUT_MS,
+            killSignal: "SIGTERM",
+          }),
+    ]);
+    const diff = diffResult.stdout;
+    const digest = createHash("sha256").update(Buffer.isBuffer(diff) ? diff : Buffer.from(diff));
+    const root = await realpath(projectRoot);
+    for (const relativePath of splitNullPaths(untrackedResult.stdout).sort()) {
+      if (excluded.includes(relativePath)) continue;
+      const requestedPath = path.resolve(root, relativePath);
+      assertWithinProjectRoot(root, requestedPath, relativePath);
+      const resolvedPath = await realpath(requestedPath);
+      assertWithinProjectRoot(root, resolvedPath, relativePath);
+      const details = await stat(resolvedPath);
+      if (!details.isFile() || details.size > 50 * 1024 * 1024) {
+        throw new Error(
+          `CAPTURE_SESSION_INVALID: untracked candidate file is invalid: ${relativePath}`,
+        );
+      }
+      digest.update(`\0untracked:${relativePath}\0`).update(await readFile(resolvedPath));
+    }
+    return `sha256:${digest.digest("hex")}`;
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`CAPTURE_SESSION_INVALID: unable to capture candidate diff: ${message}`);
   }
 }
 

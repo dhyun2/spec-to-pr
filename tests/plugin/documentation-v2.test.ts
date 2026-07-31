@@ -646,6 +646,7 @@ describe("v2 documentation", () => {
       "038-harden-evidence-trust-and-unify-delivery-policy.md",
       "039-bind-figma-delivery-to-workspace-and-native-captures.md",
       "040-use-a-92-percent-visual-gate-and-terminal-feedback-drafts.md",
+      "041-optimize-capture-reuse-review-concurrency-and-reasoning.md",
     ]);
     expect(relativeFiles(path.join(root, "website", "docs"))).toEqual([
       "concepts/comparison.mdx",

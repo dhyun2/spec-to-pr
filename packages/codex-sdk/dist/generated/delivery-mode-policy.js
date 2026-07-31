@@ -3,8 +3,8 @@ export const VISUAL_POLICY = {
     maxMaskedAreaRatio: 0.2,
     maxComparisonAttempts: 3,
 };
-export function parallelReviewersForWorkload(workload) {
-    return workload === "L" || workload === "XL";
+export function parallelReviewersForWorkload(_workload) {
+    return true;
 }
 export function resolveDeliveryPolicy(input) {
     if (!input.ui)

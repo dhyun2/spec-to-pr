@@ -66,7 +66,7 @@ describe("delivery policy", () => {
       requireApiReady: true,
       requirements: { apiCoverage: true, performanceEvidence: true, featureVideo: false },
       sectionApplicability: { api: true, legacy: false, visual: true, performance: true },
-      parallelReviewers: false,
+      parallelReviewers: true,
     });
     expect(feature).toMatchObject({
       requireApiReady: true,
@@ -106,10 +106,13 @@ describe("delivery policy", () => {
       singleWriter: true,
       allowNested: false,
       maxReadOnlyScouts: 0,
-      parallelReviewers: false,
+      parallelReviewers: true,
     });
     expect(buildDelegationPolicy("S").maxReadOnlyScouts).toBe(0);
     expect(buildDelegationPolicy("M").maxReadOnlyScouts).toBeLessThanOrEqual(1);
+    for (const size of ["S", "M", "L", "XL"] as const) {
+      expect(buildDelegationPolicy(size).parallelReviewers).toBe(true);
+    }
     for (const size of ["L", "XL"] as const) {
       expect(buildDelegationPolicy(size)).toMatchObject({
         singleWriter: true,

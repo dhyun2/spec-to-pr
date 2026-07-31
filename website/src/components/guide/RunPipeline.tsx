@@ -36,16 +36,17 @@ const stages: Record<Locale, Stage[]> = {
     {
       id: "implementation",
       owner: "구현 담당자",
-      action: "API 준비 상태를 먼저 증명한 뒤 같은 맥락에서 구현하고 관련 검사를 실행",
+      action: "API 준비 상태를 먼저 증명한 뒤 같은 맥락에서 구현하고 브라우저 근거를 한 번에 수집",
       input: "승인된 계약",
-      output: "API 준비 근거, 코드 변경, 관련 검증 자료",
+      output: "API 준비 근거, 코드 변경, capture-session 검증 자료",
       passCondition: "구현과 requiredValidations가 승인된 계약에 빠짐없이 연결됨",
       blocked: "API 준비 근거와 최종 구현의 맥락이 다름",
     },
     {
       id: "functional-review",
       owner: "기능 검토자",
-      action: "계약, 코드 변경, 실행 결과, API·레거시 검증 현황을 읽기 전용으로 검토",
+      action:
+        "동일한 검토 묶음에서 계약, 코드 변경, 실행 결과, API·레거시 검증 현황을 읽기 전용으로 검토",
       input: "현재 상태로 고정된 검토 묶음",
       output: "기능·계약 판정",
       passCondition: "현재 검토 묶음에 대한 판정이 승인됨",
@@ -54,7 +55,7 @@ const stages: Record<Locale, Stage[]> = {
     {
       id: "design-review",
       owner: "디자인 검토자",
-      action: "화면 출처, 상호작용, 반응형, 디자인 시스템, 접근성을 검토",
+      action: "기능 검토와 동시에 화면 출처, 상호작용, 반응형, 디자인 시스템, 접근성을 검토",
       input: "UI 검토 묶음과 화면 비교 보고서",
       output: "화면·상호작용·접근성 판정",
       passCondition: "UI 작업은 승인되고, UI가 아니면 해당 없음(not-applicable)으로 기록됨",
@@ -110,16 +111,18 @@ const stages: Record<Locale, Stage[]> = {
     {
       id: "implementation",
       owner: "implementation writer",
-      action: "Prove API-ready, then implement and run focused checks in the same context",
+      action:
+        "Prove API-ready, then implement and collect focused browser evidence once in the same context",
       input: "Accepted contracts",
-      output: "API-ready, implementation diff, focused evidence",
+      output: "API-ready, implementation diff, capture-session evidence",
       passCondition: "Implementation and requiredValidations fully map to accepted contracts",
       blocked: "API-ready and final context do not match",
     },
     {
       id: "functional-review",
       owner: "functional reviewer",
-      action: "Read contracts, diff, executable evidence, and API/legacy coverage",
+      action:
+        "Concurrently read the same packet's contracts, diff, executable evidence, and API/legacy coverage",
       input: "Immutable packet",
       output: "Functional and contract verdict",
       passCondition: "The current-packet verdict is approved",
@@ -128,7 +131,8 @@ const stages: Record<Locale, Stage[]> = {
     {
       id: "design-review",
       owner: "design reviewer",
-      action: "Review visual provenance, interaction, responsive states, design system, and a11y",
+      action:
+        "Concurrently review visual provenance, interaction, responsive states, design system, and a11y",
       input: "UI packet and visual report",
       output: "Visual, interaction, and a11y verdict",
       passCondition: "Approved for UI, or not-applicable for non-UI",

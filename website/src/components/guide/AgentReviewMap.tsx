@@ -10,7 +10,7 @@ const content = {
         name: "진행 담당자",
         scope: "실행·계약·상태 관리",
         reads: "사용자 요청, 입력 자료 출처, 실행 상태",
-        returns: "승인된 계약과 현재 상태로 고정된 검토 묶음",
+        returns: "승인된 계약과 결과 inbox를 갖춘 변경 불가 검토 묶음",
         boundary: "기능·디자인 검토자의 판정을 대신하지 않음",
       },
       {
@@ -23,14 +23,14 @@ const content = {
       {
         name: "기능 검토자 (functional-reviewer)",
         scope: "모든 코드 변경 범위를 독립적으로 판정",
-        reads: "계약, 코드 변경, 테스트, API·레거시 검증 자료",
+        reads: "계약, 코드 변경, 테스트, API·레거시 검증 자료 (디자인 검토와 동시)",
         returns: "승인(approved) 또는 수정 요청(changes-requested) 판정",
         boundary: "읽기 전용이며 워크플로 MCP를 호출하지 않음",
       },
       {
         name: "디자인 검토자 (design-reviewer)",
         scope: "UI 변경 범위를 독립적으로 판정",
-        reads: "기준·결과·차이·겹침 화면, 상호작용, 접근성",
+        reads: "기준·결과·차이·겹침 화면, 상호작용, 접근성 (기능 검토와 동시)",
         returns: "승인(approved) 또는 수정 요청(changes-requested) 판정",
         boundary: "점수 계산·코드 수정 금지",
       },
@@ -43,7 +43,7 @@ const content = {
         name: "orchestrator",
         scope: "Owns Run, contracts, and state",
         reads: "User request, source provenance, workflow status",
-        returns: "Accepted contracts and immutable packet",
+        returns: "Accepted contracts and immutable packet with a verdict inbox",
         boundary: "Never substitutes for review verdicts",
       },
       {
@@ -56,14 +56,15 @@ const content = {
       {
         name: "functional reviewer",
         scope: "Independent verdict for every code scope",
-        reads: "Contracts, diff, tests, API/legacy evidence",
+        reads: "Contracts, diff, tests, API/legacy evidence (concurrent with design review)",
         returns: "Approved or changes-requested verdict",
         boundary: "Read-only; no workflow MCP",
       },
       {
         name: "design reviewer",
         scope: "Independent verdict for UI scope",
-        reads: "Baseline, actual, diff/overlay, interaction and a11y",
+        reads:
+          "Baseline, actual, diff/overlay, interaction and a11y (concurrent with functional review)",
         returns: "Approved or changes-requested verdict",
         boundary: "Does not calculate scores or repair code",
       },

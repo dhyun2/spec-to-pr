@@ -18,6 +18,7 @@ import {
   type BlockedDiagnosticPreflight,
   type BoundaryClient,
   type BoundaryThread,
+  type BoundaryThreadRoute,
 } from "./boundary-runner.js";
 import {
   UsageCalibrationStore,
@@ -184,7 +185,7 @@ export async function runSpecToPrWithCodex(
   const hardLimitTokens = effectiveHardLimitForWorkload(initialWorkload.size);
   const requiredValidations = requiredValidationsForInput(input);
   const result = await executeBudgetedBoundaryTurns({
-    client: createBoundaryClient(codex, buildThreadOptions(input)),
+    client: createBoundaryClient(codex, buildThreadOptions(input), input.modelReasoningEffort),
     initialPrompt:
       input.resumeThreadId === undefined ? buildSpecToPrPrompt(input) : buildResumeSpecToPrPrompt(),
     ...(input.resumeThreadId === undefined ? {} : { resumeThreadId: input.resumeThreadId }),
@@ -603,10 +604,20 @@ function isHardLinkedFile(candidate: string): boolean {
   }
 }
 
-function createBoundaryClient(codex: Codex, options: ThreadOptions): BoundaryClient {
+function createBoundaryClient(
+  codex: Codex,
+  options: ThreadOptions,
+  fixedReasoningEffort?: ModelReasoningEffort,
+): BoundaryClient {
+  const optionsForRoute = (route?: BoundaryThreadRoute): ThreadOptions => ({
+    ...options,
+    modelReasoningEffort:
+      fixedReasoningEffort ?? route?.reasoningEffort ?? options.modelReasoningEffort ?? "medium",
+  });
   return {
-    startThread: () => adaptThread(codex.startThread(options)),
-    resumeThread: (threadId) => adaptThread(codex.resumeThread(threadId, options)),
+    startThread: (route) => adaptThread(codex.startThread(optionsForRoute(route))),
+    resumeThread: (threadId, route) =>
+      adaptThread(codex.resumeThread(threadId, optionsForRoute(route))),
   };
 }
 
@@ -783,7 +794,7 @@ function buildThreadOptions(input: SpecToPrCodexRunInput): ThreadOptions {
     workingDirectory: input.workingDirectory,
     sandboxMode: input.sandboxMode ?? "workspace-write",
     approvalPolicy: input.approvalPolicy ?? "on-request",
-    modelReasoningEffort: input.modelReasoningEffort ?? "high",
+    modelReasoningEffort: input.modelReasoningEffort ?? "medium",
   };
 
   if (input.model !== undefined) {

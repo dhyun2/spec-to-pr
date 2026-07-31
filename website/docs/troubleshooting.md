@@ -77,6 +77,7 @@ URL만으로는 검증 자료가 되지 않습니다.
 - 제공 프로필이 사용자 대상 `feature`
 - `scope: targeted-feature`
 - 선택자가 하나의 Playwright 명령에 실제 인자로 들어감
+- E2E·영상·실제 화면·성능 결과가 후보별 `capture-session-v1` 하나에 함께 기록됨
 - 엄격한 결과 JSON에 `status: passed`, 정확한 선택자, 구현 제출과 같은 `implementationContextId`, 양수인 `testCount`가 기록됨
 - 재생 시간이 0보다 큰 구조적으로 유효한 WebM/MP4 컨테이너가 정확히 한 개이고 25 MB 이하
 - 결과 경로와 영상 경로가 구현 결과물 목록에 포함됨
@@ -106,7 +107,7 @@ API를 사용하는 UI인데 명시적인 `api-ready` 체크포인트가 없거�
 3. Chrome DevTools MCP는 콘솔 오류, 네트워크 요청, 성능 추적 기록, 메모리, 실시간 DOM을 조사할 때만 사용합니다.
 4. 스크린샷, 영상, DevTools 추적 기록, 에이전트의 관찰만으로는 검증을 대신할 수 없습니다.
 
-필수 브라우저 명령이 없거나 실행할 수 없으면 `BROWSER_NOT_RUN`입니다. 테스트 경로·태그·프로젝트 선택자, 서버 시작 명령, 의존성·브라우저 설치, 실행 권한을 복구한 뒤 같은 실행에 Playwright 결과를 다시 제출하세요. `feature`에는 변경 기능 E2E와 정확히 1개의 영상이 필요하지만 `brief`, `legacy`, `figma`에는 이 비용을 자동으로 추가하지 않습니다. `brief`와 `legacy`는 대신 적용 가능한 실험실 Web Vitals와 현장 데이터의 사용 가능 여부를 PR에 남깁니다.
+필수 브라우저 명령이 없거나 실행할 수 없으면 `BROWSER_NOT_RUN`입니다. 테스트 경로·태그·프로젝트 선택자, 서버 시작 명령, 의존성·브라우저 설치, 실행 권한을 복구한 뒤 같은 실행에 Playwright 결과를 다시 제출하세요. 동일 후보에서 기능 E2E·영상·실제 캡처·성능 근거가 필요하면 분리 실행하지 말고 `capture-session-v1`의 한 번의 Playwright 호출로 수집합니다. 이후 `compare-visuals`는 그 세션의 캡처를 검증해 영수증으로 연결하므로 브라우저를 다시 실행하지 않습니다. `feature`에는 변경 기능 E2E와 정확히 1개의 영상이 필요하지만 `brief`, `legacy`, `figma`에는 이 비용을 자동으로 추가하지 않습니다. `brief`와 `legacy`는 대신 적용 가능한 실험실 Web Vitals와 현장 데이터의 사용 가능 여부를 PR에 남깁니다.
 
 ## 차단 사유 확인
 

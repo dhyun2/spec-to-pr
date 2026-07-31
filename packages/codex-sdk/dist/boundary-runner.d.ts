@@ -74,9 +74,13 @@ export type BoundaryThread = {
         signal?: AbortSignal;
     }): Promise<RunResult>;
 };
+export type BoundaryReasoningEffort = "medium" | "high";
+export type BoundaryThreadRoute = {
+    reasoningEffort: BoundaryReasoningEffort;
+};
 export type BoundaryClient = {
-    startThread(): BoundaryThread;
-    resumeThread(threadId: string): BoundaryThread;
+    startThread(route?: BoundaryThreadRoute): BoundaryThread;
+    resumeThread(threadId: string, route?: BoundaryThreadRoute): BoundaryThread;
 };
 export type BlockedDiagnosticPreflight = {
     eligible: true;

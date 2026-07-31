@@ -162,18 +162,19 @@ describe("Codex SDK workflow policy", () => {
     expect(prompt).toContain("one implementation context");
   });
 
-  it("routes only bounded read-only scouts and defers parallel reviewers", () => {
+  it("routes only bounded read-only scouts and enables parallel reviewers after implementation", () => {
     expect(scoutRoutingForWorkload("XS")).toEqual({
       maxReadOnlyScouts: 0,
       independentReadHeavyOnly: true,
       allowNested: false,
       parallelWriters: false,
-      parallelReviewersAfterImplementation: false,
+      parallelReviewersAfterImplementation: true,
     });
     expect(scoutRoutingForWorkload("S").maxReadOnlyScouts).toBe(0);
     expect(scoutRoutingForWorkload("M").maxReadOnlyScouts).toBe(1);
     expect(scoutRoutingForWorkload("L").maxReadOnlyScouts).toBe(2);
     expect(scoutRoutingForWorkload("XL").maxReadOnlyScouts).toBe(2);
+    expect(scoutRoutingForWorkload("S").parallelReviewersAfterImplementation).toBe(true);
     expect(scoutRoutingForWorkload("L").parallelReviewersAfterImplementation).toBe(true);
 
     const prompt = buildSpecToPrPrompt({

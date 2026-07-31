@@ -45,7 +45,9 @@ Missing optional skills do not block the Run. Omit an unavailable hint from `app
 
 ## Keeping a Run fast
 
-`implement` keeps one implementation context. The runtime does not parallelize repeated status polling or duplicate tests/reviews; only independent read-only discovery may run in parallel within the workload cap. The two reviewers may assess the same immutable packet concurrently only after implementation is complete.
+`implement` keeps one implementation context. UI/feature browser evidence is collected through one `capture-session-v1`; a result may be reused in the same Run only when its `evidence-fingerprint-v1` dependency inputs still match. The runtime does not parallelize repeated status polling or duplicate tests. For every UI packet, both reviewers assess the same immutable packet concurrently after implementation, and the packet inbox applies their result together.
+
+Coordination, status, and publication use `medium` reasoning on the selected model. Implementation and functional/design review use `high` reasoning on that same model and conversation; the routing changes neither writer ownership nor reviewer permissions.
 
 The default time budget is 10 minutes per action turn and 45 minutes for the full Run. A timeout is a resumable diagnostic, not a pass: the active work is cancelled and the same thread/latest durable state is returned. Inspect `budget.elapsedMs`, `budget.actionTurns`, and `budget.formatTurn`, then change `--turn-timeout-seconds` or `--run-timeout-seconds` only when justified and resume the same Run. A reviewer timeout never auto-creates a replacement reviewer.
 

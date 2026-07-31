@@ -20,7 +20,7 @@ When something goes wrong, start with `/spec-to-pr:doctor`. `workflow_info` shou
 
 ## Feature browser evidence
 
-Use one unchained Playwright Test/CLI command that selects the changed feature by path, tag, or project. Reject broad/full-project commands, list/pass-with-no-tests options, skipped/zero tests, or invalid structured JSON. Feature requires exactly one non-empty valid WebM/MP4 no larger than 25 MB; other profiles do not inherit that video requirement. Brief and legacy instead report applicable lab Web Vitals and explicitly mark field data available or unavailable.
+Use one unchained Playwright Test/CLI command that selects the changed feature by path, tag, or project. Bind its E2E, video, actual visual capture, and applicable performance output to `capture-session-v1`; the later visual receipt reuses that capture instead of launching Playwright again. Reject broad/full-project commands, list/pass-with-no-tests options, skipped/zero tests, or invalid structured JSON. Feature requires exactly one non-empty valid WebM/MP4 no larger than 25 MB; other profiles do not inherit that video requirement. Brief and legacy instead report applicable lab Web Vitals and explicitly mark field data available or unavailable.
 
 Playwright assertions and structured results decide whether browser requirements pass. Browser MCP or a host browser is optional for reproducing and inspecting interactions. Chrome DevTools MCP is used only when console, network, performance, memory, or live-DOM diagnosis is needed. Screenshots, video, DevTools traces, and agent observations do not replace assertions.
 

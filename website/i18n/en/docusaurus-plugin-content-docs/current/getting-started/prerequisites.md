@@ -49,6 +49,7 @@ Video is required only for user-facing `feature` mode:
 
 - Select only the changed feature by test path, tag, or project.
 - Record one unchained Playwright command that receives the selector as a real argument.
+- Bind that call's E2E, one video, and applicable actual visual/performance output to `capture-session-v1`.
 - Write strict project-local JSON containing only `status: passed`, the exact selector, the same `implementationContextId`, and a positive `testCount`.
 - Produce exactly one structurally valid WebM/MP4 with non-zero duration, no larger than 25 MB.
 

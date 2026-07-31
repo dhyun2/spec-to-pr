@@ -4,6 +4,19 @@ import {
   PacketEvidenceEntrySchema,
   reusablePacketEvidence,
 } from "../../src/workflow/packet-evidence-index.js";
+import { evidenceFingerprintIdentity } from "../../src/workflow/evidence-fingerprint.js";
+
+const fingerprintDraft = {
+  schemaVersion: "evidence-fingerprint-v1" as const,
+  family: "feature-e2e" as const,
+  algorithmVersion: "e2e-v1",
+  repositoryKey: `sha256:${"a".repeat(64)}` as const,
+  dependencyGraphDigest: `sha256:${"b".repeat(64)}` as const,
+  contractDigest: `sha256:${"c".repeat(64)}` as const,
+  toolchainDigest: `sha256:${"d".repeat(64)}` as const,
+  subjectDigest: `sha256:${"e".repeat(64)}` as const,
+  inputs: [{ role: "test", path: "e2e/checkout.spec.ts", digest: `sha256:${"1".repeat(64)}` }],
+};
 
 const entry = PacketEvidenceEntrySchema.parse({
   command: "pnpm exec playwright test e2e/checkout.spec.ts",
@@ -43,5 +56,31 @@ describe("PacketEvidenceEntry", () => {
     expect(reusablePacketEvidence([PacketEvidenceEntrySchema.parse(repaired)], repaired)).toEqual(
       repaired,
     );
+  });
+
+  it("permits same-Run evidence carry-forward only when the dependency fingerprint is identical", () => {
+    const fingerprint = {
+      ...fingerprintDraft,
+      fingerprint: evidenceFingerprintIdentity(fingerprintDraft),
+    };
+    const source = PacketEvidenceEntrySchema.parse({ ...entry, evidenceFingerprint: fingerprint });
+    const repaired = PacketEvidenceEntrySchema.parse({
+      ...entry,
+      headSha: "e".repeat(40),
+      diffDigest: `sha256:${"5".repeat(64)}`,
+      evidenceFingerprint: fingerprint,
+    });
+
+    expect(reusablePacketEvidence([source], repaired)).toEqual(source);
+    expect(
+      reusablePacketEvidence([source], {
+        ...repaired,
+        evidenceFingerprint: {
+          ...fingerprint,
+          subjectDigest: `sha256:${"9".repeat(64)}`,
+          fingerprint: `sha256:${"9".repeat(64)}`,
+        },
+      }),
+    ).toBeUndefined();
   });
 });

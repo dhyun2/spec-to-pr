@@ -14,9 +14,10 @@ export async function executeBudgetedBoundaryTurns(input) {
     assertPositiveTimeout(input.runTimeoutMs, "runTimeoutMs");
     const now = input.now ?? performance.now.bind(performance);
     const startedAtMs = now();
+    let activeRoute = { reasoningEffort: "medium" };
     let thread = input.resumeThreadId === undefined
-        ? input.client.startThread()
-        : input.client.resumeThread(input.resumeThreadId);
+        ? input.client.startThread(activeRoute)
+        : input.client.resumeThread(input.resumeThreadId, activeRoute);
     let prompt = input.initialPrompt;
     let usage = null;
     let finalResponse = "";
@@ -144,7 +145,8 @@ export async function executeBudgetedBoundaryTurns(input) {
             }
             checkpointed = true;
             checkpointCount += 1;
-            thread = input.client.startThread();
+            activeRoute = routeForWorkflowStatus(workflowStatus);
+            thread = input.client.startThread(activeRoute);
             prompt = buildCompactCheckpointPrompt(workflowStatus, activeRequiredValidations, {
                 usedTokens: usage.totalTokens,
                 hardLimitTokens: normalTokenLimit,
@@ -154,6 +156,11 @@ export async function executeBudgetedBoundaryTurns(input) {
         if (turnCount >= normalTurnLimit || !canAdmitAnotherNormalTurn) {
             state = "turn-limit";
             break;
+        }
+        const nextRoute = routeForWorkflowStatus(workflowStatus);
+        if (nextRoute.reasoningEffort !== activeRoute.reasoningEffort && thread.id !== null) {
+            thread = input.client.resumeThread(thread.id, nextRoute);
+            activeRoute = nextRoute;
         }
         prompt = buildBoundaryContinuationPrompt(workflowStatus, activeRequiredValidations, {
             usedTokens: usage.totalTokens,
@@ -172,6 +179,10 @@ export async function executeBudgetedBoundaryTurns(input) {
         }
         else {
             try {
+                if (activeRoute.reasoningEffort !== "medium" && thread.id !== null) {
+                    activeRoute = { reasoningEffort: "medium" };
+                    thread = input.client.resumeThread(thread.id, activeRoute);
+                }
                 const formattedResult = await executeBoundaryTurnWithTimeout({
                     thread,
                     prompt: buildFinalResponsePrompt(workflowStatus),
@@ -333,6 +344,27 @@ function assertPositiveTimeout(timeoutMs, name) {
     if (timeoutMs !== undefined && (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0)) {
         throw new Error(`${name} must be a positive integer`);
     }
+}
+function routeForWorkflowStatus(status) {
+    const highReasoningStages = new Set(["implementation", "functional-review", "design-review"]);
+    const highReasoningActions = new Set([
+        "implement",
+        "implementation-repair",
+        "review-functional",
+        "review-design",
+    ]);
+    const hasHighReasoningAction = status.nextActions.some((action) => typeof action === "object" &&
+        action !== null &&
+        "kind" in action &&
+        typeof action.kind === "string" &&
+        highReasoningActions.has(action.kind));
+    return {
+        reasoningEffort: status.currentStage !== undefined &&
+            highReasoningStages.has(status.currentStage) &&
+            hasHighReasoningAction
+            ? "high"
+            : "medium",
+    };
 }
 function timeoutFinalResponse(input) {
     const reason = input.timeout === "turn-timeout"

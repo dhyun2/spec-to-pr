@@ -28,6 +28,8 @@ import NextStep from "@site/src/components/guide/NextStep";
 - Actual comes from the target implementation at the same route, state, viewport, device scale, and deterministic fixture.
 - Both captures pin provider, ISO `capturedAt`, project-relative PNG path, and `sha256:` digest into the current immutable packet.
 
+Actual captures are collected through the candidate's `capture-session-v1`. Even when visual proof, feature E2E, a feature video, and performance output are all needed, the session spawns Playwright Test/CLI at most once. The later comparison stage verifies those actual PNGs and structured output to materialize receipts; it never recaptures the same screen.
+
 ## What `compare-visuals` calculates
 
 Runtime uses the `pngjs`-based bounded decoder to read both images as RGBA and rejects dimension mismatch. Every mask needs a reason and coordinates; masking more than `20%` or every pixel fails.

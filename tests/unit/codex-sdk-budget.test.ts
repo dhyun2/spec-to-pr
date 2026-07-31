@@ -75,6 +75,45 @@ describe("Codex SDK workload budget", () => {
     ]);
   });
 
+  it("reuses one thread while routing implementation turns to high reasoning", async () => {
+    const routes: string[] = [];
+    let calls = 0;
+    const thread = {
+      id: "thread-routed",
+      run: async () => {
+        calls += 1;
+        return turnResult(
+          1_000,
+          calls === 1
+            ? { ...workflowStatus("running", "implement"), currentStage: "implementation" }
+            : workflowStatus("completed"),
+        );
+      },
+    };
+    const client = {
+      startThread: (route?: { reasoningEffort: string }) => {
+        routes.push(`start:${route?.reasoningEffort}`);
+        return thread;
+      },
+      resumeThread: (_threadId: string, route?: { reasoningEffort: string }) => {
+        routes.push(`resume:${route?.reasoningEffort}`);
+        return thread;
+      },
+    };
+
+    const result = await executeBudgetedBoundaryTurns({
+      client,
+      initialPrompt: "start",
+      hardLimitTokens: 100_000,
+      workloadSize: "M",
+      requiredValidations: ["functional"],
+      maxTurns: 2,
+    });
+
+    expect(result.state).toBe("completed");
+    expect(routes).toEqual(["start:medium", "resume:high"]);
+  });
+
   it("reports a formatting deadline as a timeout without claiming the durable workflow verdict", async () => {
     let calls = 0;
     const client = {

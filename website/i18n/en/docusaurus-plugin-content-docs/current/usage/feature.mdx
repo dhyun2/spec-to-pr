@@ -78,7 +78,7 @@ Implement checkout end to end. Run only the checkout test path, tag, or project 
 3. **API-ready:** Submit distinct non-empty type/schema/wrapper/mock files plus a passing contract-test JSON under one `implementationContextId`.
 4. **UI / visual / performance:** Connect UI/API, make `apiCoverage` exactly match all intake operations, and record Web Vitals. Every actual capture repeats the target route/state/viewport/device scale/fixture and records provider, ISO capture time, PNG path, and `sha256:` digest. Runtime rejects target drift or digest mismatch without consuming an attempt before Figma/result `compare-visuals`, which requires the fixed 92%, at most 20% justified masking, and automatically runs the initial comparison plus at most two repairs. A third valid failure remains blocked with failed media; focused UI assertions remain independent.
 5. **Independent reviews:** Functional and design reviewers separately judge frozen contracts, diff, and evidence.
-6. **Targeted feature proof:** Run one Playwright invocation selecting the changed feature and record strict JSON plus one valid video.
+6. **Targeted feature proof:** Run one Playwright invocation selecting the changed feature and collect strict JSON, one valid video, and applicable actual visual/performance output in `capture-session-v1`.
 7. **Report / publish:** Put source/API/visual/performance/E2E/video in packet-bound 15-section `pr-report-v2.1` and publish the draft.
 
 Every report section is `complete`, `not-run`, `blocked`, or `not-applicable`; stale paths outside the current review packet are omitted. GitHub images, diffs, overlays, and video use immutable paths on one managed `spec-to-pr/evidence` branch and URLs pinned to the upload commit SHA, not a branch per Run.
@@ -96,7 +96,7 @@ Every report section is `complete`, `not-run`, `blocked`, or `not-applicable`; s
 | `publish`           | Use `workflow_publish intent: ready` to sync assets and create/update a draft only.                                            |
 | `archive`           | Run only after merge, authoritative evidence, and a separate request.                                                          |
 
-Agent policy allows zero read-only scout workers for XS/S, at most one for M, and at most two for L/XL. Scouts only read sources; one implementation writer owns API and UI. There is **no nesting** and no **parallel writer**. Functional/design reviewer parallelism starts only for L/XL after implementation.
+Agent policy allows zero read-only scout workers for XS/S, at most one for M, and at most two for L/XL. Scouts only read sources; one implementation writer owns API and UI. There is **no nesting** and no **parallel writer**. Functional and design reviewers start together for every UI packet after implementation, then their packet inbox applies the combined outcome.
 
 - `stageSkillRoute`: public actions route `intake-contracts` → `implement` → `review-functional`/`review-design` → `publish`. This routing is not `deliveryProfile.recommendedSkills`.
 - `recommendedSkills`: `figmaUrl` → `figma`, `design-system`; `openApiPaths` → `api-generator`; detected React/Next packages → `react-best-practices`, `next-best-practices`; `mode: feature` + UI → `playwright` optional candidates.
@@ -127,7 +127,7 @@ After recovery, resume the **same Run** and repeat only the failed required proo
 | Targeted result | `evidence/e2e/targeted-feature.json`              | Only `status: passed`, exact selector, same context ID, positive `testCount`        |
 | Video           | `evidence/e2e/checkout.webm`                      | `featureVideo: required`, WebM/MP4, non-zero duration, ≤25 MB, exactly one          |
 
-The command must be one unchained Playwright invocation whose real argument selects the changed test path, tag, or project. `--list`, `--pass-with-no-tests`, broad or full-project E2E, zero tests, and zero or multiple videos are rejected.
+The command must be one unchained Playwright invocation whose real argument selects the changed test path, tag, or project. It binds the required E2E, exactly one video, and applicable actual visual/performance output into the candidate's `capture-session-v1`; `compare-visuals` later reuses that verified capture rather than starting Playwright again. `--list`, `--pass-with-no-tests`, broad or full-project E2E, zero tests, and zero or multiple videos are rejected.
 
 ## Expected branch and commits <span id="branch-and-commits-feature"></span>
 

@@ -29,6 +29,8 @@ import NextStep from "@site/src/components/guide/NextStep";
 4. For UI scope, the `design-reviewer` reads baseline provenance, the real capture, visual report, interaction, responsive states, design-system use, and accessibility.
 5. Every applicable verdict must pass before `report` and draft `publish` open.
 
+UI review does not wait for one reviewer before starting the other. Both reviewers begin from the same immutable packet, and the runtime first stores each verdict in that packet's inbox. It applies the outcome only once all applicable verdicts arrive. A changes-requested verdict therefore cannot discard its sibling result; if repair is needed, implementation reopens once with both verdicts retained.
+
 :::info[What reviewers never do]
 Reviewers do not call workflow MCP, repair implementation, or calculate a new score. The design reviewer verifies that the metrics, diff, overlay, and provenance produced by `compare-visuals` belong to the current packet.
 :::

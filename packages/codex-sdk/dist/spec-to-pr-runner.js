@@ -54,7 +54,7 @@ export async function runSpecToPrWithCodex(input) {
     const hardLimitTokens = effectiveHardLimitForWorkload(initialWorkload.size);
     const requiredValidations = requiredValidationsForInput(input);
     const result = await executeBudgetedBoundaryTurns({
-        client: createBoundaryClient(codex, buildThreadOptions(input)),
+        client: createBoundaryClient(codex, buildThreadOptions(input), input.modelReasoningEffort),
         initialPrompt: input.resumeThreadId === undefined ? buildSpecToPrPrompt(input) : buildResumeSpecToPrPrompt(),
         ...(input.resumeThreadId === undefined ? {} : { resumeThreadId: input.resumeThreadId }),
         ...(input.outputSchema === undefined ? {} : { outputSchema: input.outputSchema }),
@@ -416,10 +416,14 @@ function isHardLinkedFile(candidate) {
         throw error;
     }
 }
-function createBoundaryClient(codex, options) {
+function createBoundaryClient(codex, options, fixedReasoningEffort) {
+    const optionsForRoute = (route) => ({
+        ...options,
+        modelReasoningEffort: fixedReasoningEffort ?? route?.reasoningEffort ?? options.modelReasoningEffort ?? "medium",
+    });
     return {
-        startThread: () => adaptThread(codex.startThread(options)),
-        resumeThread: (threadId) => adaptThread(codex.resumeThread(threadId, options)),
+        startThread: (route) => adaptThread(codex.startThread(optionsForRoute(route))),
+        resumeThread: (threadId, route) => adaptThread(codex.resumeThread(threadId, optionsForRoute(route))),
     };
 }
 export function adaptThread(thread) {
@@ -572,7 +576,7 @@ function buildThreadOptions(input) {
         workingDirectory: input.workingDirectory,
         sandboxMode: input.sandboxMode ?? "workspace-write",
         approvalPolicy: input.approvalPolicy ?? "on-request",
-        modelReasoningEffort: input.modelReasoningEffort ?? "high",
+        modelReasoningEffort: input.modelReasoningEffort ?? "medium",
     };
     if (input.model !== undefined) {
         options.model = input.model;
