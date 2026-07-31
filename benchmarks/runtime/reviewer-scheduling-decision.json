@@ -43,10 +43,10 @@
     "numericVisualResultCount": 35,
     "firstAttemptVisualFailures": 5,
     "firstAttemptVisualFailureRate": 0.16666666666666666,
-    "reviewerWallStartedBeforeVisualStabilityMs": 850,
-    "totalReviewerWallMs": 1390,
-    "invalidatedReviewerWallMs": 100,
-    "invalidationRatio": 0.07194244604316546,
+    "reviewerWallStartedBeforeVisualStabilityMs": 1175,
+    "totalReviewerWallMs": 2075,
+    "invalidatedReviewerWallMs": 125,
+    "invalidationRatio": 0.060240963855421686,
     "workloadDistribution": {
       "XS": 7,
       "S": 7,
@@ -71,11 +71,11 @@
     },
     "task1MetricTotals": {
       "review.wall_ms": {
-        "functional-review": 850,
-        "design-review": 540
+        "functional-review": 1175,
+        "design-review": 900
       },
       "review.invalidated_wall_ms": {
-        "functional-review": 100
+        "functional-review": 125
       }
     }
   },
