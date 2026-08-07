@@ -7,9 +7,9 @@ import {
   type DeliveryProfile,
   type WorkflowScope,
 } from "./workflow-contracts.js";
+import type { ModelRouting } from "./model-routing.js";
 import type { WorkloadSize } from "./workload-policy.js";
 import { parallelReviewersForWorkload, resolveDeliveryPolicy } from "./delivery-mode-policy.js";
-import { createDraftEvidenceBundle } from "./draft-evidence-bundle.js";
 
 export function buildDelegationPolicy(size: WorkloadSize): DelegationPolicy {
   const maxReadOnlyScouts = size === "XS" || size === "S" ? 0 : size === "M" ? 1 : 2;
@@ -41,6 +41,7 @@ export function buildDeliveryProfile(input: {
   skillHints?: string[];
   recommendedSkills?: string[];
   sourceProvenance?: DeliveryProfile["sourceProvenance"];
+  modelRouting?: ModelRouting;
 }): DeliveryProfile {
   const figmaUrls = [
     ...new Set([
@@ -85,7 +86,9 @@ export function buildDeliveryProfile(input: {
           targetedFeatureE2E: false,
           featureVideo: false,
           figmaBundle: false,
-          visualComparison: false,
+          // UI comparison follows actual UI scope, never a delivery-mode
+          // shortcut. Non-UI automatic work remains lightweight.
+          visualComparison: input.scope.ui,
           apiCoverage: false,
           performanceEvidence: false,
           mockData: false,
@@ -106,16 +109,6 @@ export function buildDeliveryProfile(input: {
     ...(input.legacyProjectRoot === undefined
       ? {}
       : { legacyProjectRoot: input.legacyProjectRoot }),
-    ...(input.mode === "legacy" &&
-    input.publication === "draft" &&
-    input.legacyProjectRoot !== undefined
-      ? {
-          draftEvidenceBundle: createDraftEvidenceBundle({
-            mode: "legacy",
-            legacyProjectRoot: input.legacyProjectRoot,
-          }),
-        }
-      : {}),
     ...(input.legacyNetworkEvidencePath === undefined
       ? {}
       : { legacyNetworkEvidencePath: input.legacyNetworkEvidencePath }),
@@ -131,6 +124,7 @@ export function buildDeliveryProfile(input: {
     skillHints: input.skillHints ?? [],
     recommendedSkills: input.recommendedSkills ?? [],
     sourceProvenance: input.sourceProvenance ?? [],
+    ...(input.modelRouting === undefined ? {} : { modelRouting: input.modelRouting }),
     requirements,
   });
 }

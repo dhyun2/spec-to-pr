@@ -82,7 +82,7 @@ API 담당 에이전트와 UI 담당 에이전트를 따로 두지 않습니다.
 <NextStep
 eyebrow="이제 실제 입력으로"
 title="기획서로 만든 전체 PR 예시를 확인하세요"
-description="필수·선택 입력, 차단 상태 복구, 시각·API·성능 검증 자료, 예상 보고서 15개 섹션을 이어서 볼 수 있습니다."
+description="필수·선택 입력, Gap 처리, 시각·API·성능 검증 자료, 리뷰어 우선 PR 본문을 이어서 볼 수 있습니다."
 href="/usage/brief"
 label="기획서 사용법 열기"
 secondary={{ label: "네 가지 케이스 비교", href: "/usage/" }}

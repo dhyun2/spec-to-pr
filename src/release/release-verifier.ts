@@ -489,6 +489,7 @@ function verifySdkRuntimeInventory(files: string[], failures: string[]): void {
     "boundary-runner",
     "cli",
     "generated/delivery-mode-policy",
+    "model-routing",
     "spec-to-pr-runner",
     "usage-calibration",
     "workflow-policy",

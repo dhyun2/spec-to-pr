@@ -14,7 +14,7 @@ Immediately after intake, status reports an `XS`–`XL` workload, estimated toke
 Use this case when Figma is the primary source and real APIs are out of scope. Implement deterministic mock-backed UI, compare the result with connected-host Figma PNGs, and publish a **draft PR by default**.
 
 :::tip[Input / result]
-**Input:** repository + valid Figma URL · **Result:** mock-backed UI, measured Figma ratio/diff/overlay, independent review, and a 15-section draft PR
+**Input:** repository + valid Figma URL · **Result:** mock-backed UI, per-state Figma ratios/diff/overlay, design/accessibility validation, and a Figma UI draft PR
 :::
 
 <RunPipeline locale="en" mode="figma" />
@@ -69,8 +69,8 @@ Create real Figma `visualTargets`, deterministic mock states, exact/review ratio
 2. **Figma contracts:** Read every URL's node, logical frame geometry, export bitmap size/scale, variables, component context, screenshots, fonts, and assets. A host thumbnail never becomes the browser viewport.
 3. **Design-system mapping:** Map each captured component exactly once to a verifiable installed design-system export, digest-bound canonical asset, or explicit exception before custom markup.
 4. **Implementation:** Submit `{deterministic:true, fixtures:[{id,path,sha256}]}` plus separate JSON fixtures. Every state is bound to a named fixture ID and digest.
-5. **Compare / repair:** Wait for the fixture, `document.fonts.ready`, and assets, then emit a receipt binding packet/head, logical geometry/DPR, capture provider, browser environment, fixture, fonts/assets, and PNG digest. Runtime owns sRGB normalization and the fixed 92% verdict. The initial comparison and repairs after the first two valid failures run automatically without asking the user. Acquisition errors consume no attempt. A third valid failure terminally blocks the Run and skips design review.
-6. **Review / report / publish:** A passing Run completes both independent reviews and the packet-bound 15-section `pr-report-v2.1`, then publishes only while the start-bound source/target/remote remain unchanged. When preconditions allow, a third-attempt failure publishes the same template with equal-size baseline/current media and separate diff/overlay links while remaining blocked.
+5. **Compare / repair:** Wait for the fixture, `document.fonts.ready`, and assets, then emit a receipt binding packet/head, logical geometry/DPR, capture provider, browser environment, fixture, fonts/assets, and PNG digest. Runtime owns sRGB normalization and the fixed 92% verdict. The initial comparison and repairs after the first two valid failures run automatically without asking the user. Acquisition errors consume no attempt. A third valid failure stops automatic repair and records equal-size baseline/current media with separate diff/overlay links as a visual-comparison Gap.
+6. **Review / report / publish:** Build the Figma UI body: Figma state mapping, per-state visual ratios, design and accessibility validation, and top-of-body Gaps. Functional and design reviewers independently record the evidence available before publication while the start-bound source/target/remote remain unchanged.
 
 Every report section is `complete`, `not-run`, `blocked`, or `not-applicable`; stale paths outside the current review packet are omitted. GitHub images, diffs, and overlays use immutable paths on one managed `spec-to-pr/evidence` branch and URLs pinned to the upload commit SHA, not a branch per Run.
 
@@ -91,7 +91,7 @@ Every report section is `complete`, `not-run`, `blocked`, or `not-applicable`; s
 | `implementation`    | One implementation writer maps the design system and implements deterministic mock-backed UI.              |
 | `functional-review` | The read-only `functional-reviewer` judges state behavior and relevant project checks.                     |
 | `design-review`     | The read-only `design-reviewer` judges visual/interaction/responsive/accessibility evidence against Figma. |
-| `report`            | Build 15-section `pr-report-v2.1` provenance, visual ratio/assets, review, gap, and blocker reporting.     |
+| `report`            | Build the reviewer-first Figma state mapping, per-state ratio, design/accessibility, and Gap body.         |
 | `publish`           | Create the packet-bound draft and synchronize current visual assets when ready.                            |
 | `archive`           | Run only after a published draft merges, authoritative evidence exists, and the user requests it.          |
 
@@ -106,7 +106,7 @@ Agent policy allows zero read-only scout workers for XS/S, at most one for M, an
 
 ### Ready, blocked diagnostic, and resume
 
-The normal result is a draft from `workflow_publish intent: ready`. Ready and blocked use the same 15-section `pr-report-v2.1`; a blocked draft exposes the stopped stage, unrun validations, and exact unblock action. Only passing preflight may create `workflow_publish intent: blocked-diagnostic`, which stays `status: blocked`. `PUBLISH_NO_DELTA` returns a **local blocked report** without empty commits or issue fallback.
+`workflow_publish` may create a Draft when code changes and publication preconditions exist, even if Figma or browser evidence remains unavailable. The top Gap section states its impact and reviewer decision, and the Draft cannot be labelled verified or merge-ready. `PUBLISH_NO_DELTA` returns a **local report** without empty commits or issue fallback.
 
 If an explicitly requested draft returns `diagnostic-publication-uncertain`, never publish automatically. Inspect GitHub/GitLab for a matching draft, show the result to the user, and call the same `workflow_publish` action with `recoverUncertain: true` only after explicit approval.
 

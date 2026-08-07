@@ -47,9 +47,9 @@ codex plugin add spec-to-pr@spec-to-pr
 
 그다음 사용 방식에 맞는 가이드의 프롬프트를 복사해 사용하세요. 각 가이드에는 필수 입력, 진행 과정, 검증 자료, 중단 시 해결 방법, 초안 PR 예시가 정리되어 있습니다.
 
-## 현재 릴리스
+## 현재 릴리스 (1.0.0)
 
-SpecToPR은 MCP 도구 7개, 실행 상태를 보존하는 단계 8개, 스킬 8개, 서로 독립된 검토자 2명으로 구성됩니다. 엄격한 UI 작업 방식은 `brief`, `legacy`, `feature`, `figma` 네 가지입니다.
+SpecToPR은 MCP 도구 7개, 실행 상태를 보존하는 단계 8개, 스킬 8개, 서로 독립된 검토자 2명으로 구성됩니다. 리뷰어용 Draft PR 템플릿은 `legacy-migration`, `brief-delivery`, `feature-flow`, `figma-ui` 네 가지입니다.
 
 시작할 때 `briefPath`, `figmaUrl`, `docsPaths`, `openApiPaths`, `openApiUrls`, `guidancePaths`, `skillHints`를 필요한 만큼 조합할 수 있습니다.
 
@@ -64,13 +64,15 @@ guidancePaths: []
 skillHints: []
 ```
 
-레거시 분석은 선택한 기능 범위를 벗어나지 않으며, 해당 코드가 직접 가져오거나 참조하는 설정만 따라갑니다. 실제 HTTP 요청은 API 근거로 사용하지만 생성자와 로컬 파사드는 별도 API 항목으로 중복 등록하지 않습니다.
+레거시 분석은 사용자가 지정한 정확한 기능 경계 안에서만 진행하고, 이해에 필요한 직접 import·설정 참조만 따라갑니다. 저장소 밖의 `legacyProjectRoot`도 명시했다면 읽기 전용으로 허용합니다. API·인증·인증서·동적 요청이 불명확하면 Gap으로 남깁니다. 확인된 UI·경로·상태·타입·읽기 동작은 계속 구현하되, 확정하지 못한 쓰기 동작을 추측해서 연결하지 않습니다.
 
-코드가 참조한 `.env*`의 URL 설정은 사용자 정보·쿼리·해시를 제거해 안전하게 정리합니다. 환경변수 이름·원본 주소·HTTP 클라이언트 호출 위치는 `legacyInventory`에 남깁니다. 정적 분석과 제공된 OpenAPI만으로 메서드와 경로를 하나로 확정할 수 없을 때만 `collect-legacy-network-evidence`를 요청합니다. 이때 범위를 좁힌 HAR을 제출하면 새 실행을 만들지 않고 이어서 진행합니다.
+UI 범위는 언제나 런타임 화면 비교를 시도합니다. 비교가 실패하거나 기준 화면을 얻지 못하면 병합을 막는 Gap으로 보이지만, 이미 구현한 작업을 숨기거나 Draft PR 발행을 막지는 않습니다. `feature-flow`에는 현재 review packet에 묶인 사용자 흐름 영상도 필수입니다. OpenSpec은 병합 후 선택적으로 연동할 수 있을 뿐, 구현과 Draft PR의 전제 조건이 아닙니다.
 
-레거시 이관의 검토 자료는 기능별로 `.spec-to-pr/<feature>/`에 모입니다. 계약, 검증 자료, 레거시와 현재 화면을 나란히 보여 주는 비교 자료, 검토 보고서, 무결성을 확인하는 `manifest.json`이 한곳에 들어갑니다. 요구사항 변경 내용은 `openspec/changes/`에 제안서, 변경 명세, 작업 목록으로도 남습니다. 자세한 구조와 발행 규칙은 [레거시 이관 가이드](https://dhyun2.github.io/spec-to-pr/usage/legacy)에서 확인할 수 있습니다.
+PR 본문은 짧고 리뷰 중심으로 만듭니다. 상태 아래에 Gap의 영향과 리뷰어 판단을 먼저 보이고, 변경 내용·화면 비교·필요한 경우 Feature 영상·검증 결과만 보여 줍니다. Run ID, 원시 로그, 내부 스키마/해시, 빈 체크리스트는 기본 본문에서 제외합니다.
 
-화면은 `visualTargets`와 `compare-visuals`로 비교하며 고정된 92% 일치율을 요구합니다. 최초 비교와 최대 두 번의 보정은 자동으로 이어지고, 잘못된 캡처는 횟수에 포함하지 않으며, 세 번째 유효 실패는 실행을 `blocked`로 유지합니다. 발행 조건이 갖춰지면 차단 초안도 정상 초안과 같은 보고서 구조로 동일 크기의 기준/결과 이미지와 별도 차이·겹침 이미지를 제공합니다. 디자인 시스템·상호작용·접근성의 집중 검증은 전체 점수와 별도로 통과해야 합니다. 중단된 실행은 로컬 진단 보고서를 남기고, 문제가 해결되면 기존 초안 PR을 갱신할 수 있습니다. 차단 사유와 재개 방법은 [문제 해결 가이드](https://dhyun2.github.io/spec-to-pr/troubleshooting)에 정리되어 있습니다.
+모델 라우팅은 역할과 호스트를 분리합니다. core는 `fast`·`build`·`expert`만 판단하고, Codex는 Luna/Terra/Sol, Claude는 Haiku/Sonnet/Opus으로 매핑합니다. 기본은 `adaptive-verified`이며, `pinned`는 사용자가 고른 한 모델을 모든 단계와 독립 리뷰에 유지하고 `custom`은 세 역할 모델을 모두 직접 지정합니다. 한 Run에서 두 호스트를 자동으로 섞지 않으며, 상위 모델을 쓸 수 없으면 검증을 몰래 약화하지 않고 품질 Gap으로 남깁니다.
+
+GitHub·GitLab 인증, TLS, 호스트 접근 문제로 게시할 수 없으면 로컬 진단 보고서와 publication Gap을 남깁니다. 문제가 해결된 뒤에는 새 Run을 만들지 않고 같은 Draft PR을 갱신합니다.
 
 ## 가이드
 

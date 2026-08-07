@@ -283,6 +283,8 @@ function requiredReleaseInventory(): string[] {
     "packages/codex-sdk/dist/cli.js",
     "packages/codex-sdk/dist/generated/delivery-mode-policy.d.ts",
     "packages/codex-sdk/dist/generated/delivery-mode-policy.js",
+    "packages/codex-sdk/dist/model-routing.d.ts",
+    "packages/codex-sdk/dist/model-routing.js",
     "packages/codex-sdk/dist/spec-to-pr-runner.d.ts",
     "packages/codex-sdk/dist/spec-to-pr-runner.js",
     "packages/codex-sdk/dist/usage-calibration.d.ts",

@@ -14,7 +14,7 @@ Immediately after intake, status reports an `XS`–`XL` workload, estimated toke
 Use this case to deliver a user-facing feature from a brief, Figma, and OpenAPI, then add **E2E targeting only that feature and exactly one video** to full-delivery evidence. It never records every feature or runs full-project E2E by default.
 
 :::tip[Input / result]
-**Input:** concrete user feature + `mode: feature` + UI scope · **Result:** API/UI implementation, independent functional/design reviews, targeted E2E, one video, and a draft PR
+**Input:** concrete user feature + `mode: feature` + UI scope · **Result:** before/after behavior, independent reviews, targeted E2E, one required video, visual comparison, and a Feature draft PR
 :::
 
 <RunPipeline locale="en" mode="feature" />
@@ -76,25 +76,25 @@ Implement checkout end to end. Run only the checkout test path, tag, or project 
 1. **Intake:** Normalize every source and feature boundary; report workload/token estimates and `requiredValidations`.
 2. **Contracts:** Freeze `sourceProvenance`, requirements, API operations, and Figma `visualTargets`.
 3. **API-ready:** Submit distinct non-empty type/schema/wrapper/mock files plus a passing contract-test JSON under one `implementationContextId`.
-4. **UI / visual / performance:** Connect UI/API, make `apiCoverage` exactly match all intake operations, and record Web Vitals. Every actual capture repeats the target route/state/viewport/device scale/fixture and records provider, ISO capture time, PNG path, and `sha256:` digest. Runtime rejects target drift or digest mismatch without consuming an attempt before Figma/result `compare-visuals`, which requires the fixed 92%, at most 20% justified masking, and automatically runs the initial comparison plus at most two repairs. A third valid failure remains blocked with failed media; focused UI assertions remain independent.
+4. **UI / visual / performance:** Connect UI to confirmed APIs and record Web Vitals. An uncertain method, body, auth boundary, or binding remains an API Gap rather than stopping safe UI, route, and state work. Every actual capture repeats the target route/state/viewport/device scale/fixture and records provider, ISO capture time, PNG path, and `sha256:` digest. Runtime rejects target drift or digest mismatch without consuming an attempt before Figma/result `compare-visuals`, which requires the fixed 92%, at most 20% justified masking, and automatically runs the initial comparison plus at most two repairs. A third valid failure stops automatic repair and preserves failed media as a visual-comparison Gap; focused UI assertions remain independent.
 5. **Independent reviews:** Functional and design reviewers separately judge frozen contracts, diff, and evidence.
 6. **Targeted feature proof:** Run one Playwright invocation selecting the changed feature and collect strict JSON, one valid video, and applicable actual visual/performance output in `capture-session-v1`.
-7. **Report / publish:** Put source/API/visual/performance/E2E/video in packet-bound 15-section `pr-report-v2.1` and publish the draft.
+7. **Report / publish:** Publish the Feature flow body: before/after behavior, regression proof, the required user-flow video, visual comparison, and top-of-body Gaps.
 
 Every report section is `complete`, `not-run`, `blocked`, or `not-applicable`; stale paths outside the current review packet are omitted. GitHub images, diffs, overlays, and video use immutable paths on one managed `spec-to-pr/evidence` branch and URLs pinned to the upload commit SHA, not a branch per Run.
 
 ## Execution policy: stages, agents, skills, and tools
 
-| Durable stage       | Exact behavior for this case                                                                                                   |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `intake`            | Fix the user journey, UI scope, all sources, publication, workload, and `requiredValidations`.                                 |
-| `contracts`         | Reconcile brief/OpenAPI/docs/Figma contracts and fix the changed-feature selector and browser evidence.                        |
-| `implementation`    | One implementation writer uses one `implementationContextId`, submits API-ready before UI, and creates targeted feature proof. |
-| `functional-review` | The read-only `functional-reviewer` judges contracts, diff, project checks, and targeted E2E.                                  |
-| `design-review`     | The read-only `design-reviewer` judges visual, interaction, responsive, and accessibility evidence.                            |
-| `report`            | Build 15-section `pr-report-v2.1` source/API/visual/Web Vitals/selector/result/video reporting.                                |
-| `publish`           | Use `workflow_publish intent: ready` to sync assets and create/update a draft only.                                            |
-| `archive`           | Run only after merge, authoritative evidence, and a separate request.                                                          |
+| Durable stage       | Exact behavior for this case                                                                                                                                  |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `intake`            | Fix the user journey, UI scope, all sources, publication, workload, and `requiredValidations`.                                                                |
+| `contracts`         | Reconcile brief/OpenAPI/docs/Figma contracts and fix the changed-feature selector and browser evidence.                                                       |
+| `implementation`    | One implementation writer uses one `implementationContextId`, connects confirmed APIs, keeps unsafe uncertainty as a Gap, and creates targeted feature proof. |
+| `functional-review` | The read-only `functional-reviewer` judges contracts, diff, project checks, and targeted E2E.                                                                 |
+| `design-review`     | The read-only `design-reviewer` judges visual, interaction, responsive, and accessibility evidence.                                                           |
+| `report`            | Build the reviewer-first before/after, regression, required video, visual comparison, and Gap body.                                                           |
+| `publish`           | Use `workflow_publish intent: ready` to sync assets and create/update a draft only.                                                                           |
+| `archive`           | Run only after merge, authoritative evidence, and a separate request.                                                                                         |
 
 Agent policy allows zero read-only scout workers for XS/S, at most one for M, and at most two for L/XL. Scouts only read sources; one implementation writer owns API and UI. There is **no nesting** and no **parallel writer**. Functional and design reviewers start together for every UI packet after implementation, then their packet inbox applies the combined outcome.
 
@@ -104,11 +104,11 @@ Agent policy allows zero read-only scout workers for XS/S, at most one for M, an
 - **workflow MCP:** required. **Figma host:** required with `figmaUrl`. **Playwright Test/CLI:** required as the acceptance oracle using one changed-feature test path/tag/project command, retrying assertions, structured results, and exactly one supporting video.
 - **Browser MCP:** optional interactive reproduction/inspection. **Chrome DevTools MCP:** conditional for console/network/performance/memory/live-DOM diagnosis. Neither replaces the exact Playwright selector, assertions, or positive `testCount`.
 
-Ready and blocked drafts use the same 15-section `pr-report-v2.1`. A blocked draft exposes the stopped stage, completed work, unrun validations, and exact unblock action while remaining `status: blocked`.
+The machine report preserves evidence, while the Feature flow Draft shows before/after behavior, regression proof, exactly one user-flow video, visual comparison, and top-of-body Gaps. Failed, not-run, skipped, or waived evidence never earns a verified or merge-ready label.
 
 ### Ready, blocked diagnostic, and resume
 
-The normal result is a video-linked draft from `workflow_publish intent: ready`. Browser evidence not run is a `BROWSER_NOT_RUN` blocker. An unresolved blocker records typed `blockerDetails` and the exact unblock action; only a clean non-target branch with supported authenticated remote, committed delta, and a one-commit lead may create a `workflow_publish intent: blocked-diagnostic` draft. It stays `status: blocked`. `PUBLISH_NO_DELTA` and other preflight failures return a **local blocked report** without empty commits or issue fallback.
+`workflow_publish` may create a Draft when code changes and publication preconditions exist, even if the video, browser evidence, or visual comparison is failed or not run. The Feature flow video remains mandatory evidence, so a missing video is a `BROWSER_NOT_RUN` Gap with impact and reviewer decision at the top; that Draft is never labelled verified or merge-ready. `PUBLISH_NO_DELTA` and other preflight failures return a **local report** without empty commits or issue fallback.
 
 For `diagnostic-publication-uncertain`, never publish automatically. Inspect GitHub/GitLab for a matching draft, show the result to the user, and call the same `workflow_publish` action with `recoverUncertain: true` only after explicit approval.
 

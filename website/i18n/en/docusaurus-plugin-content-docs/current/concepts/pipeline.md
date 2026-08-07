@@ -18,6 +18,13 @@ secondary={{ label: "Choose a use case", href: "/usage/" }}
 
 All four delivery modes use one Run and the same pipeline. The selected mode determines the result and required evidence, while input sources can be combined as needed. Project guidance is tracked, but it does not expand the requested scope.
 
+## 1.0 rules
+
+- Every UI scope runs every declared route/state/viewport comparison target, regardless of mode.
+- API, binding, authentication, and evidence-analysis failures do not stop confirmed work. Only an unsafe write stops the Run; everything else remains an open Gap.
+- `skipped` and `waived` are not passed. A Draft may carry Gaps or failed/not-run evidence, but it can never be labelled verified or merge-ready.
+- Exact `legacyProjectRoot` and `targetPaths` are used without similar-path inference. OpenSpec is an optional post-merge adapter, never a core prerequisite.
+
 ## Run map
 
 <RunPipeline locale="en" />
@@ -52,7 +59,7 @@ The default time budget is 10 minutes per action turn and 45 minutes for the ful
 
 ## One implementation context
 
-One implementation writer owns both API and UI work. Before final UI implementation, API-backed work submits distinct, non-empty types, schemas, wrappers, mocks, a passing contract-test JSON, and operation-aware `operations` under one `implementationContextId`. The final implementation uses the same ID and supplies exact `apiCoverage`.
+One implementation writer owns both API and UI work. Confirmed APIs are validated in that same context. If a method, body, or authentication boundary is uncertain, the interaction is kept safe and disclosed as a Gap instead of inventing a write; that analysis failure does not stop confirmed UI, state, or route work.
 
 ## Collect browser proof once
 
@@ -60,11 +67,11 @@ For a UI or `feature` candidate, `capture-session-v1` binds changed-feature E2E,
 
 Within the same Run, `evidence-fingerprint-v1` may carry forward evidence only when its dependency inputs, selector, toolchain, fixture, import closure, and result digest still match. A new requirement or source diff still creates a new review packet. Reuse never waives a gate or copies old evidence across Runs.
 
-Intake records timestamped local and remote `sourceProvenance` and the complete OpenAPI operation inventory. Figma and running-legacy baselines share `visualTargets`. Every actual capture repeats its target route/state/viewport/device scale/fixture and records the provider, ISO capture time, PNG path, and `sha256:` digest. Before `compare-visuals` runs, the runtime rejects changed comparison conditions, digest mismatches, and caller-provided scores; invalid acquisition consumes no attempt. It then computes exact and review ratios, diff, and overlay at the fixed 92% similarity threshold with no more than 20% justified masking. The initial comparison and at most two repairs run automatically. A third valid failure keeps the Run blocked, skips design review, and preserves equal-size baseline/current plus separate diff/overlay media in a diagnostic draft when publication preconditions allow. Focused UI assertions remain independent gates. Legacy contracts record stable keys as planned; final implementation replaces them with current-packet migrated or excluded coverage. Brief and feature API coverage must exactly match the OpenAPI operations recorded at intake. Legacy derives API candidates from an explicit, bounded list of source adapters. Existing candidates require complete API evidence; no candidates produce a `complete` API section tied to the adapter list and inventory digest. An ambiguous method or path is resolved only by one unique scoped runtime or OpenAPI match. Otherwise intake returns a durable blocker while preserving the Run ID. Reporting creates canonical 15-section `pr-report-v2.1` JSON and Markdown for both ready and blocked results. Historical v2.1 reports remain readable, while new publication requires current adapter and digest evidence.
+Intake records timestamped local and remote `sourceProvenance` and the confirmed OpenAPI operation inventory. Any UI work, regardless of mode, fixes Figma or running-legacy baselines in `visualTargets`. Every actual capture repeats its target route/state/viewport/device scale/fixture and records the provider, ISO capture time, PNG path, and `sha256:` digest. Before `compare-visuals` runs, the runtime rejects changed comparison conditions, digest mismatches, and caller-provided scores; invalid acquisition consumes no attempt. It then computes exact and review ratios, diff, and overlay at the fixed 92% similarity threshold with no more than 20% justified masking. The initial comparison and at most two repairs run automatically. A third valid failure stops automatic repair and preserves equal-size baseline/current plus separate diff/overlay media as a visual-comparison Gap. Focused UI assertions remain independent gates, and failed, not-run, skipped, or waived evidence is never passed. Legacy contracts record stable keys as planned; final implementation replaces them with current-packet migrated or excluded coverage. Legacy reads only the user-supplied `legacyProjectRoot` and `targetPaths`; it never infers similarly named paths. An uncertain API method, route, body, auth boundary, binding, or evidence record becomes an open Gap rather than blocking safe UI, route, state, and read-only work. The machine-readable `pr-report-v2.1` remains an evidence artifact, while publication selects one of four reviewer-first templates.
 
 Instruction precedence is current user request → explicit `guidancePaths` → automatically discovered guidance → available/applicable installed skill → SpecToPR defaults. Missing optional skills do not block.
 
-Ambiguous legacy APIs resolve only from project-local bounded HAR/request JSON (up to 1 MB and 1,000 requests) or uniquely matching scoped OpenAPI. Runtime evidence digest and adapter are pinned into the inventory; `collect-legacy-network-evidence` accepts a `legacy-network-evidence` submission and resumes intake in the same Run.
+Project-local bounded HAR/request JSON or scoped OpenAPI can resolve an ambiguous legacy API Gap in the same Run. Their runtime digest and adapter are pinned into the inventory, but neither OpenSpec nor extra evidence is a prerequisite for starting a core Run.
 
 ## Delegation policy
 
@@ -91,11 +98,11 @@ Playwright Test/CLI web-first assertions and structured results decide whether b
 
 `workflow_publish intent: ready` creates or updates only a draft PR/MR from a passed canonical report. A blocker stores typed, redacted `blockerDetails`: stage, code, kind, retryable/resumable flags, completed work, evidence, attempted recovery, unrun validations, and the exact unblock action—never raw prompts, secrets, tokens, transcripts, or unrestricted private paths.
 
-Ready and blocked publication use the same 15-section `pr-report-v2.1`. Every section is `complete`, `not-run`, `blocked`, or `not-applicable`, and stale evidence paths outside the current review packet are omitted. Ready sections expose sources, requirements, files, API, legacy, visuals, reviews, performance, feature evidence, risk, rollback, and evidence; blocked sections expose not-run status, stopped stage, and exact unblock action in the same shape.
+The machine report preserves evidence, but the PR body is one of four reviewer-first templates: Legacy migration (source→target, scope, legacy visual comparison, API Gaps), Brief delivery (requirements coverage, exclusions, visual comparison), Feature flow (before/after behavior, regression proof, required user-flow video, visual comparison), or Figma UI (state mapping, per-state ratios, design and accessibility validation). Every Gap appears at the top with impact and reviewer decision; raw logs, Run IDs, and empty checklists stay out of the default body.
 
 GitHub evidence uses one managed `spec-to-pr/evidence` branch with immutable run/packet/target/artifact paths instead of creating a branch per Run. PR URLs are pinned to the upload commit SHA, so later uploads cannot rewrite earlier evidence links.
 
-Legacy draft review material is kept under `.spec-to-pr/<feature>/` and the same change's `openspec/changes/<change-name>/`. The feature directory contains only `manifest.json`, `contracts/`, `evidence/`, `visual/`, and `report/`. The manifest is the contract-integrity authority for the current Run/revision, legacy-root digest, requirements, and OpenSpec file digests. Collapsed PR metadata shows only the Run, commit, and input digests needed to reproduce the review; the visible body leads with requirement status and side-by-side legacy/current screens. Raw HARs, cookies, tokens, complete logs, opaque feature keys, and repetitive lists of every implementation file stay out of the review surface.
+Legacy core review material is kept under `.spec-to-pr/<feature>/`. OpenSpec is an optional post-merge change record, not a prerequisite for a core Run or Draft PR. Raw HARs, cookies, tokens, complete logs, internal Run IDs, opaque feature keys, and repetitive lists of every implementation file stay out of the review body.
 
 When a GitLab project upload fails with 401/403/408/429, 5xx, or a transient network error, only legacy/current PNGs that are tracked regular files whose exact reviewed-commit blobs and clean-worktree files both match the captured SHA-256 may use raw URLs as a fallback. Synthetic diffs/overlays, video, missing/changed/digest-mismatched files never use this path; the original publication failure remains.
 

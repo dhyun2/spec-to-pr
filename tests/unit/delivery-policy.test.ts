@@ -81,16 +81,21 @@ describe("delivery policy", () => {
     });
     expect(emptyLegacy).toMatchObject({
       requireApiReady: false,
-      requirements: { apiCoverage: false, legacyInventory: true },
-      sectionApplicability: { api: true, legacy: true, performance: true },
+      requirements: {
+        apiCoverage: false,
+        legacyBaseline: true,
+        legacyInventory: true,
+        visualComparison: true,
+        performanceEvidence: false,
+      },
+      sectionApplicability: { api: true, legacy: true, visual: true, performance: false },
     });
     expect(apiLegacy).toMatchObject({
-      requireApiReady: true,
-      requirements: { apiCoverage: true },
+      requireApiReady: false,
+      requirements: { apiCoverage: false },
     });
-    expect(apiLegacy.modeValidations).toEqual(
-      expect.arrayContaining(["api-ready", "api-coverage"]),
-    );
+    expect(apiLegacy.modeValidations).not.toContain("api-ready");
+    expect(apiLegacy.modeValidations).not.toContain("api-coverage");
     expect(() =>
       resolveDeliveryPolicy({
         mode: "brief",
@@ -149,6 +154,17 @@ describe("delivery policy", () => {
     });
   });
 
+  it("requires visual comparison for automatic UI scope", () => {
+    expect(
+      buildDeliveryProfile({
+        mode: "auto",
+        changeKind: "design",
+        publication: "draft",
+        scope: uiScope,
+      }).requirements.visualComparison,
+    ).toBe(true);
+  });
+
   it("requires brief, Figma, and OpenAPI sources for full delivery", () => {
     for (const missing of ["briefPath", "figmaUrl", "openApiPaths"] as const) {
       const sources = { ...fullDeliverySources };
@@ -198,7 +214,7 @@ describe("delivery policy", () => {
     ).not.toThrow();
   });
 
-  it("requires a separate legacy project and the full migration evidence contract", () => {
+  it("requires a separate legacy project and keeps UI evidence mandatory", () => {
     expect(() =>
       buildDeliveryProfile({
         mode: "legacy",
@@ -225,12 +241,12 @@ describe("delivery policy", () => {
       figmaBundle: false,
       visualComparison: true,
       apiCoverage: false,
-      performanceEvidence: true,
+      performanceEvidence: false,
       mockData: false,
     });
   });
 
-  it("requires the draft review bundle only when legacy publication is draft", () => {
+  it("does not require a draft evidence bundle for legacy publication", () => {
     const draft = buildDeliveryProfile({
       mode: "legacy",
       changeKind: "migration",
@@ -246,7 +262,7 @@ describe("delivery policy", () => {
       legacyProjectRoot: "/tmp/legacy-app",
     });
 
-    expect(draft.draftEvidenceBundle).toBeDefined();
+    expect(draft.draftEvidenceBundle).toBeUndefined();
     expect(localOnly.draftEvidenceBundle).toBeUndefined();
   });
 

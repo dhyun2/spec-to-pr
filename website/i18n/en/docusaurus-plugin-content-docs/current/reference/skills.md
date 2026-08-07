@@ -20,7 +20,7 @@ The current repository exposes exactly **8 public marketplace skills**. Release 
 
 ## Mode routing
 
-Mode selects delivery/evidence policy. `brief` is brief/Figma/OpenAPI full delivery; `legacy` migrates from a separate `legacyProjectRoot`; `feature` adds changed-feature Playwright E2E and one video to full delivery; `figma` is mock-backed Figma implementation. All default to draft. `sourceProvenance`, `visualTargets`, `compare-visuals`, `legacyInventory`, `apiCoverage`, `performanceEvidence`, and 15-section `pr-report-v2.1` remain typed contracts inside the existing stages.
+Mode selects delivery/evidence policy. `brief` is brief/Figma/OpenAPI delivery; `legacy` migrates from a separate `legacyProjectRoot`; `feature` adds changed-feature Playwright E2E and one video; `figma` is mock-backed Figma implementation. All default to draft. `sourceProvenance`, `visualTargets`, `compare-visuals`, `legacyInventory`, `apiCoverage`, and `performanceEvidence` remain typed contracts; the machine report feeds one of four reviewer-first PR templates rather than exposing an internal report schema.
 
 ## Deterministic recommendations and applied trace
 
@@ -53,7 +53,7 @@ The default time budget is 10 minutes per action turn and 45 minutes for the ful
 
 ## Visual feedback loop
 
-`implement` runs the initial comparison and up to two repairs automatically at the fixed 92% threshold without asking the user. Acquisition with invalid geometry, fixture, or renderer lineage consumes no attempt. A third valid failure terminally blocks the Run and skips `review-design`; when publication preconditions allow, `publish` uses the same 15-section template with equal-size baseline/current media and separate diff/overlay links. Focused UI assertions in `review-functional` and `review-design` remain required even when the aggregate score reaches 92%.
+`implement` runs the initial comparison and up to two repairs automatically at the fixed 92% threshold without asking the user. Acquisition with invalid geometry, fixture, or renderer lineage consumes no attempt. A third valid failure stops automatic repair and preserves equal-size baseline/current media plus separate diff/overlay links as a visual-comparison Gap. Functional and design reviewers independently record the available evidence; failed, not-run, `skipped`, and `waived` evidence is never passed. A publishable Draft puts the reviewer decision, Gap impact, and comparison outcome first and is never labelled verified or merge-ready on that evidence.
 
 ## Public-tool and browser boundaries
 

@@ -13,13 +13,13 @@ pnpm build
 
 The runner passes one delivery profile to the shared v2 workflow:
 
-| `--mode`  | Delivery/evidence condition                                     |
-| --------- | --------------------------------------------------------------- |
-| `brief`   | requires brief + Figma + OpenAPI and full API/UI evidence       |
-| `legacy`  | migrates from a separate read-only `legacyProjectRoot`          |
-| `feature` | full delivery plus changed-feature E2E and exactly one video    |
-| `figma`   | mock-backed Figma implementation and measured visual comparison |
-| `auto`    | activates no mode-specific evidence by default                  |
+| `--mode`  | Delivery/evidence condition                                           |
+| --------- | --------------------------------------------------------------------- |
+| `brief`   | requires brief + Figma + OpenAPI and full API/UI evidence             |
+| `legacy`  | migrates from an exact separate read-only `legacyProjectRoot`         |
+| `feature` | full delivery plus changed-feature E2E and exactly one video          |
+| `figma`   | mock-backed Figma implementation and measured visual comparison       |
+| `auto`    | keeps evidence proportional to scope; UI scope still compares screens |
 
 The modes share one pipeline. They do not add tools, durable stages, implementation lanes, or reviewers.
 
@@ -50,34 +50,49 @@ node dist/cli.js \
 
 Options:
 
-| Option                                   | Meaning                                                                           |
-| ---------------------------------------- | --------------------------------------------------------------------------------- |
-| `--cwd <path>`                           | target repository; required                                                       |
-| `--prompt <text>`                        | requested change or extra constraints                                             |
-| `--mode <mode>`                          | `auto`, `brief`, `legacy`, `feature`, or `figma`                                  |
-| `--change-kind <kind>`                   | `auto`, `feature`, `fix`, `refactor`, `migration`, `design`, or `docs`            |
-| `--brief <path>`                         | brief/spec source                                                                 |
-| `--legacy-project <p>`                   | separate read-only legacy project root                                            |
-| `--legacy-network <p>`                   | project-local bounded HAR/request JSON for the scoped legacy flow                 |
-| `--docs <path>`                          | repeatable supporting documentation source                                        |
-| `--figma <url>`                          | Figma file or node URL                                                            |
-| `--openapi <path>`                       | repeatable OpenAPI source                                                         |
-| `--openapi-url <url>`                    | repeatable HTTPS OpenAPI or Swagger UI source                                     |
-| `--guidance <path>`                      | repeatable explicit project-guidance source                                       |
-| `--skill <name>`                         | repeatable optional installed-skill hint                                          |
-| `--publish`                              | create or update a draft PR/MR when ready                                         |
-| `--no-publish`                           | stop after evidence-backed implementation and review                              |
-| `--resume <task-id>`                     | resume an existing Codex task                                                     |
-| `--model <model>`                        | optional model override                                                           |
-| `--max-turns <n>`                        | maximum total SDK turns, including optional finalization/formatting; default `12` |
-| `--blocked-diagnostic-token-reserve <n>` | tokens held for finalizing an eligible blocked draft; default `24000`             |
-| `--usage-history <p>`                    | numeric-only JSONL calibration path                                               |
-| `--no-usage-calibration`                 | disable calibration reads and writes                                              |
-| `--no-review-agents`                     | omit independent reviewer instructions                                            |
+| Option                                            | Meaning                                                                           |
+| ------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `--cwd <path>`                                    | target repository; required                                                       |
+| `--prompt <text>`                                 | requested change or extra constraints                                             |
+| `--mode <mode>`                                   | `auto`, `brief`, `legacy`, `feature`, or `figma`                                  |
+| `--change-kind <kind>`                            | `auto`, `feature`, `fix`, `refactor`, `migration`, `design`, or `docs`            |
+| `--brief <path>`                                  | brief/spec source                                                                 |
+| `--legacy-project <p>`                            | separate read-only legacy project root                                            |
+| `--legacy-network <p>`                            | project-local bounded HAR/request JSON for the scoped legacy flow                 |
+| `--docs <path>`                                   | repeatable supporting documentation source                                        |
+| `--figma <url>`                                   | Figma file or node URL                                                            |
+| `--openapi <path>`                                | repeatable OpenAPI source                                                         |
+| `--openapi-url <url>`                             | repeatable HTTPS OpenAPI or Swagger UI source                                     |
+| `--guidance <path>`                               | repeatable explicit project-guidance source                                       |
+| `--skill <name>`                                  | repeatable optional installed-skill hint                                          |
+| `--publish`                                       | create or update a draft PR/MR when ready                                         |
+| `--no-publish`                                    | stop after evidence-backed implementation and review                              |
+| `--resume <task-id>`                              | resume an existing Codex task                                                     |
+| `--model <model>`                                 | optional model override                                                           |
+| `--model-routing <strategy>`                      | `adaptive-verified` (default), `pinned`, or `custom`                              |
+| `--pinned-model <model>`                          | one exact model for every stage and independent review                            |
+| `--fast-model`, `--build-model`, `--expert-model` | all three direct models for `custom` routing                                      |
+| `--max-turns <n>`                                 | maximum total SDK turns, including optional finalization/formatting; default `12` |
+| `--blocked-diagnostic-token-reserve <n>`          | tokens held for finalizing an eligible blocked draft; default `24000`             |
+| `--usage-history <p>`                             | numeric-only JSONL calibration path                                               |
+| `--no-usage-calibration`                          | disable calibration reads and writes                                              |
+| `--no-review-agents`                              | omit independent reviewer instructions                                            |
 
 Without an explicit mode, a legacy root resolves to `legacy`, a brief resolves to `brief`, a Figma URL resolves to `figma`, and other requests resolve to `auto`. All four explicit profiles request draft publication unless `--no-publish` is supplied.
 
 The delivery profile records `docsPaths`, `openApiPaths`, explicit `guidancePaths`, automatically populated `discoveredGuidancePaths`, and `skillHints`. Guidance discovery checks only `AGENTS.md`, `CLAUDE.md`, `README.md`, `docs/architecture/ARCHITECTURE.md`, and `docs/etc/folder-structure.md`; it does not scan the repository recursively. Explicit sources must exist. Missing automatic candidates and optional skills are ignored. Precedence is: current user request; explicit `guidancePaths`; automatically discovered project guidance; applicable installed skills; SpecToPR defaults. Guidance is traceable but excluded from scope classification.
+
+## Model routing
+
+The workflow core selects only `fast`, `build`, and `expert` roles. This Codex adapter maps them
+to Luna, Terra, and Sol; the Claude adapter maps them to Haiku, Sonnet, and Opus. The default
+`adaptive-verified` route uses the relevant role for status work, implementation/visual work, and
+independent review respectively. `pinned` keeps one requested model through every stage and review;
+`custom` requires all three role models. A Run never automatically mixes Codex and Claude.
+
+If this adapter knows that a higher role model is unavailable, it continues confirmed development
+with the next configured role and records an open model-quality Gap in the Run and PR body. This
+does not weaken visual comparison, tests, independent review, or any other evidence requirement.
 
 Raw runtime network headers, cookies, bodies, and query strings are never copied into durable intake/report artifacts. The file is validated before Run creation; only its project-relative locator, digest, normalized method/path, and adapter remain. Store it under a gitignored project-local evidence directory so publication preflight stays clean.
 
@@ -97,7 +112,7 @@ It never asks for the full-project E2E suite by default. A broad command, missin
 
 The runner does not call a SpecToPR Figma microtool. Whenever `figmaUrl` is supplied, Codex uses the Figma capability connected to its host, captures real nodes/screenshots/variables/assets/component context, writes project-local evidence, and submits exactly one `figma-bundle` through `workflow_submit`. The bundle declares `provider: host-connected-figma`, ISO `capturedAt`, matching `fileUrl`, non-empty `nodeIds`, `manifestPath`, and one or more real PNG artifacts. The strict manifest repeats the provenance and lists the PNG `visualPaths`. URL-only assertions, malformed images, repeated bundles, and provider polling are rejected.
 
-Intake pins timestamped `sourceProvenance`. Brief/feature pin the supplied OpenAPI operations; legacy derives bounded API candidates through reported source adapters and uses optional OpenAPI only as enrichment. `--legacy-network` accepts standard HAR JSON, `{requests:[{method,url}]}`, or `[{method,url}]`, bounded to 1 MB and 1,000 requests; runtime binds its digest and adapter into the inventory. A zero-operation legacy inventory produces a complete API section bound to the adapter list and inventory digest. An ambiguous method/path resolves only from a unique scoped OpenAPI/runtime match; otherwise intake returns a durable blocker with no downstream action or submission bypass. Figma and running-legacy baselines declare `visualTargets`; every `compare-visuals` capture repeats target route/state/viewport/device-scale/fixture and records provider, ISO capture time, actual PNG path, and `sha256:` digest. Runtime rejects target drift or digest mismatch without consuming an attempt and computes alpha-aware exact/review ratios, diff, overlay, a fixed 92% threshold, at most 20% justified masking, and three automatic valid comparison attempts (the initial comparison plus at most two repairs). A third valid failure leaves the Run blocked and preserves the failed media for blocked-diagnostic publication when preconditions allow. Focused design-system and accessibility assertions remain independent gates. Figma-only uses digest-bound JSON fixtures. Canonical `pr-report-v2.1` JSON and Markdown use 15 sections with explicit section status and stale-packet exclusion; historical v2.1 remains readable, but current publication requires the adapter/digest evidence. GitHub media reuses `spec-to-pr/evidence` and returns upload-commit-SHA-pinned URLs.
+Intake pins timestamped `sourceProvenance`. Brief/feature pin supplied OpenAPI operations; legacy derives bounded API candidates through source adapters and treats optional OpenAPI or `--legacy-network` as enrichment. `--legacy-network` accepts standard HAR JSON, `{requests:[{method,url}]}`, or `[{method,url}]`, bounded to 1 MB and 1,000 requests. An ambiguous method/path becomes a durable Gap rather than an intake stop: the runner continues confirmed UI, route, state, type, and read behavior, and it does not invent an unconfirmed write or authenticated interaction. Figma and running-legacy baselines declare the complete `visualTargets` manifest; each target ends `passed`, `failed`, or `not-run`. Every UI scope attempts `compare-visuals` with identical route/state/viewport/device-scale/fixture and records provider, ISO capture time, image path, and digest. Runtime computes alpha-aware exact/review ratios, diff, overlay, a fixed 92% threshold, at most 20% justified masking, and up to three valid comparisons. Failed or unavailable comparison evidence remains a visible merge-blocking Gap but can still be published as a Draft. Focused design-system and accessibility assertions remain independent gates. Feature mode also binds exactly one playable user-flow video to the current review packet. The current reviewer-first report uses the matching `legacy-migration`, `brief-delivery`, `feature-flow`, or `figma-ui` template; it puts open Gaps, their impact, and the requested reviewer decision at the top, and omits Run IDs, raw logs, and empty checklists.
 
 ## Workflow contract
 

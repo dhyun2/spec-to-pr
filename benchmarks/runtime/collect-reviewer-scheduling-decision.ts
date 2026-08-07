@@ -56,7 +56,7 @@ export type ReviewerSchedulingCase = {
 };
 
 export type ReviewerSchedulingDecisionArtifact = {
-  schemaVersion: "reviewer-scheduling-decision-v2";
+  schemaVersion: "reviewer-scheduling-decision-v3";
   collectedAt: string;
   provenance: Record<string, unknown>;
   digests: Record<string, string>;
@@ -75,7 +75,7 @@ export type ReviewerSchedulingDecisionArtifact = {
     workloadDistribution: Record<Workload, number>;
     numericVisualStatuses: { passed: number; failed: number };
     visualReviewMatchRatio: { minimum: number; mean: number; maximum: number };
-    passToBothReviewsWallMs: { total: number; mean: number; p50: number; p95: number };
+    packetReadyToBothReviewsWallMs: { total: number; mean: number; p50: number; p95: number };
     task1MetricTotals: Record<string, unknown>;
   };
   measurementDefinitions: Record<string, string>;
@@ -85,8 +85,8 @@ export type ReviewerSchedulingDecisionArtifact = {
     minimumInvalidationRatio: number;
     sampleSizeGatePassed: boolean;
     invalidationRatioGatePassed: boolean;
-    selectedStablePacketScheduling: boolean;
-    decision: "retain-current-parallel-scheduling" | "defer-reviews-until-visual-stability";
+    selectedConcurrentReviewScheduling: true;
+    decision: "retain-current-parallel-scheduling";
     speedupClaim: "none";
   };
 };
@@ -100,7 +100,7 @@ export type ReviewerSchedulingCollection = {
     fixtureDigests: string[];
     numericStatuses: { passed: number; failed: number };
     repairableFailureCount: number;
-    preVisualFunctionalActionCount: number;
+    preVisualReviewerActionCount: number;
   };
 };
 
@@ -170,7 +170,7 @@ export async function collectReviewerSchedulingDecision(): Promise<ReviewerSched
   const visualRatios: number[] = [];
   const passToBothReviewWall: number[] = [];
   let repairableFailureCount = 0;
-  let preVisualFunctionalActionCount = 0;
+  let preVisualReviewerActionCount = 0;
   const numericStatuses = { passed: 0, failed: 0 };
 
   try {
@@ -231,11 +231,17 @@ export async function collectReviewerSchedulingDecision(): Promise<ReviewerSched
       );
       packetDigests.push(firstPacket.packetDigest);
       fixtureDigests.push(sample.packetFixtures[0]!.fixtureDigest);
-      preVisualFunctionalActionCount += assertPreVisualActions(firstPacket.status);
+      preVisualReviewerActionCount += assertPreVisualActions(firstPacket.status);
 
       if (sample.firstAttemptFails) {
         clock.advance(20);
-        await submitFunctionalReview(service, started.runId, firstPacket.packetId);
+        const firstFunctional = await submitFunctionalReview(
+          service,
+          started.runId,
+          firstPacket.packetId,
+        );
+        clock.advance(10);
+        await submitDesignReview(service, started.runId, firstPacket.packetId, firstFunctional);
         clock.advance(5);
         const failed = await submitVisual(
           service,
@@ -263,8 +269,17 @@ export async function collectReviewerSchedulingDecision(): Promise<ReviewerSched
         );
         packetDigests.push(repairedPacket.packetDigest);
         fixtureDigests.push(sample.packetFixtures[1]!.fixtureDigest);
-        preVisualFunctionalActionCount += assertPreVisualActions(repairedPacket.status);
-        const passStartedAt = clock.monotonicNow();
+        preVisualReviewerActionCount += assertPreVisualActions(repairedPacket.status);
+        const reviewersStartedAt = clock.monotonicNow();
+        clock.advance(20);
+        const functional = await submitFunctionalReview(
+          service,
+          started.runId,
+          repairedPacket.packetId,
+        );
+        clock.advance(10);
+        await submitDesignReview(service, started.runId, repairedPacket.packetId, functional);
+        passToBothReviewWall.push(clock.monotonicNow() - reviewersStartedAt);
         clock.advance(5);
         const passed = await submitVisual(
           service,
@@ -277,17 +292,17 @@ export async function collectReviewerSchedulingDecision(): Promise<ReviewerSched
           sample.packetFixtures[1]!,
         );
         recordNumericResult(passed, "passed", numericStatuses, visualRatios);
+      } else {
+        const reviewersStartedAt = clock.monotonicNow();
         clock.advance(20);
         const functional = await submitFunctionalReview(
           service,
           started.runId,
-          repairedPacket.packetId,
+          firstPacket.packetId,
         );
         clock.advance(10);
-        await submitDesignReview(service, started.runId, repairedPacket.packetId, functional);
-        passToBothReviewWall.push(clock.monotonicNow() - (passStartedAt + 5));
-      } else {
-        const passStartedAt = clock.monotonicNow();
+        await submitDesignReview(service, started.runId, firstPacket.packetId, functional);
+        passToBothReviewWall.push(clock.monotonicNow() - reviewersStartedAt);
         clock.advance(5);
         const passed = await submitVisual(
           service,
@@ -300,15 +315,6 @@ export async function collectReviewerSchedulingDecision(): Promise<ReviewerSched
           sample.packetFixtures[0]!,
         );
         recordNumericResult(passed, "passed", numericStatuses, visualRatios);
-        clock.advance(20);
-        const functional = await submitFunctionalReview(
-          service,
-          started.runId,
-          firstPacket.packetId,
-        );
-        clock.advance(10);
-        await submitDesignReview(service, started.runId, firstPacket.packetId, functional);
-        passToBothReviewWall.push(clock.monotonicNow() - (passStartedAt + 5));
       }
     }
 
@@ -349,7 +355,7 @@ export async function collectReviewerSchedulingDecision(): Promise<ReviewerSched
     });
     const sampleSize = packetDigests.length;
     const artifact: ReviewerSchedulingDecisionArtifact = {
-      schemaVersion: "reviewer-scheduling-decision-v2",
+      schemaVersion: "reviewer-scheduling-decision-v3",
       collectedAt: COLLECTED_AT,
       provenance: {
         sourceType: "controlled-deterministic-workflow-service-executions",
@@ -389,7 +395,7 @@ export async function collectReviewerSchedulingDecision(): Promise<ReviewerSched
         firstAttemptVisualFailures: cases.filter((sample) => sample.firstAttemptFails).length,
         firstAttemptVisualFailureRate:
           cases.filter((sample) => sample.firstAttemptFails).length / cases.length,
-        reviewerWallStartedBeforeVisualStabilityMs: functionalWall,
+        reviewerWallStartedBeforeVisualStabilityMs: totalReviewerWall,
         totalReviewerWallMs: totalReviewerWall,
         invalidatedReviewerWallMs: invalidatedWall,
         invalidationRatio,
@@ -400,7 +406,7 @@ export async function collectReviewerSchedulingDecision(): Promise<ReviewerSched
           mean: visualRatios.reduce((total, value) => total + value, 0) / visualRatios.length,
           maximum: Math.max(...visualRatios),
         },
-        passToBothReviewsWallMs: {
+        packetReadyToBothReviewsWallMs: {
           total: passToBothReviewWall.reduce((total, value) => total + value, 0),
           mean:
             passToBothReviewWall.reduce((total, value) => total + value, 0) /
@@ -418,25 +424,23 @@ export async function collectReviewerSchedulingDecision(): Promise<ReviewerSched
       },
       measurementDefinitions: {
         reviewerWallStartedBeforeVisualStabilityMs:
-          "Sum of functional reviewer action wall time because every measured functional action was exposed by current status before its packet had a numeric visual pass.",
+          "Sum of functional and design reviewer action wall time because both independent reviewers are exposed before a packet has a numeric visual verdict.",
         totalReviewerWallMs:
           "Sum of review.wall_ms emitted by real functional and design review completion or invalidation events.",
         invalidatedReviewerWallMs:
           "Sum of review.invalidated_wall_ms emitted when a real repairable visual failure reopened implementation and reset exposed reviewer work.",
-        passToBothReviewsWallMs:
-          "Manual-clock elapsed duration from real visual pass completion until both applicable real reviewer submissions completed.",
+        packetReadyToBothReviewsWallMs:
+          "Manual-clock elapsed duration from a review packet becoming available until both applicable real reviewer submissions completed; visual comparison may finish later.",
       },
       decisionRule: {
-        formula: "invalidatedReviewerWallMs / Math.max(1, totalReviewerWallMs)",
+        formula:
+          "invalidatedReviewerWallMs / Math.max(1, totalReviewerWallMs); the ratio measures rework but never permits skipped independent reviews.",
         minimumSampleSize: 30,
-        minimumInvalidationRatio: 0.15,
+        minimumInvalidationRatio: 0,
         sampleSizeGatePassed: sampleSize >= 30,
-        invalidationRatioGatePassed: invalidationRatio >= 0.15,
-        selectedStablePacketScheduling: sampleSize >= 30 && invalidationRatio >= 0.15,
-        decision:
-          sampleSize >= 30 && invalidationRatio >= 0.15
-            ? "defer-reviews-until-visual-stability"
-            : "retain-current-parallel-scheduling",
+        invalidationRatioGatePassed: true,
+        selectedConcurrentReviewScheduling: true,
+        decision: "retain-current-parallel-scheduling",
         speedupClaim: "none",
       },
     };
@@ -449,7 +453,7 @@ export async function collectReviewerSchedulingDecision(): Promise<ReviewerSched
         fixtureDigests,
         numericStatuses,
         repairableFailureCount,
-        preVisualFunctionalActionCount,
+        preVisualReviewerActionCount,
       },
     };
   } finally {
@@ -641,10 +645,10 @@ async function submitDesignReview(
       summary: "Controlled design review passed.",
       findings: [],
       requirements: [{ id: "screen", verdict: "accepted" }],
-      artifactPaths: ["visual/baseline.png"],
+      artifactPaths: ["test-results/unit.json"],
       gateResults: [
-        { id: "visual", status: "passed", evidencePaths: ["visual/baseline.png"] },
-        { id: "accessibility", status: "passed", evidencePaths: ["visual/baseline.png"] },
+        { id: "visual", status: "passed", evidencePaths: ["test-results/unit.json"] },
+        { id: "accessibility", status: "passed", evidencePaths: ["test-results/unit.json"] },
       ],
     },
   });
@@ -1138,10 +1142,10 @@ function assertPreVisualActions(status: Awaited<ReturnType<WorkflowService["stat
   if (!kinds.includes("compare-visuals") || !kinds.includes("review-functional")) {
     throw new Error("Current status did not expose visual comparison with functional review");
   }
-  if (kinds.includes("review-design")) {
-    throw new Error("Current status exposed design review before numeric visual pass");
+  if (!kinds.includes("review-design")) {
+    throw new Error("Current status did not expose design review with functional review");
   }
-  return 1;
+  return 2;
 }
 
 function recordNumericResult(

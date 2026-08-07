@@ -1,6 +1,7 @@
 import { type ApprovalMode, type ModelReasoningEffort, type RunResult, type SandboxMode } from "@openai/codex-sdk";
 import { type BlockedDiagnosticPreflight, type BoundaryThread } from "./boundary-runner.js";
 import { type AggregatedUsage, type SdkWorkloadEstimate } from "./workload-budget.js";
+import { type CodexModelRouting, type CodexModelRoutingInput } from "./model-routing.js";
 export declare const DEFAULT_BLOCKED_DIAGNOSTIC_TOKEN_RESERVE = 24000;
 export declare const DEFAULT_BOUNDARY_TURN_TIMEOUT_MS: number;
 export declare const DEFAULT_BOUNDARY_RUN_TIMEOUT_MS: number;
@@ -25,6 +26,8 @@ export type SpecToPrCodexRunInput = {
     skillHints?: string[];
     resumeThreadId?: string;
     model?: string;
+    /** Host-neutral strategy whose Codex mapping is Luna/Terra/Sol by default. */
+    modelRouting?: CodexModelRoutingInput;
     modelReasoningEffort?: ModelReasoningEffort;
     sandboxMode?: SandboxMode;
     approvalPolicy?: ApprovalMode;
@@ -78,6 +81,7 @@ export type SpecToPrCodexRunResult = {
         write: "recorded" | "unavailable" | "skipped" | "disabled";
         sampleCount: number;
     };
+    modelRouting: CodexModelRouting["workflow"];
 };
 export declare function runSpecToPrWithCodex(input: SpecToPrCodexRunInput): Promise<SpecToPrCodexRunResult>;
 export declare function buildSpecToPrPrompt(input: SpecToPrCodexRunInput): string;

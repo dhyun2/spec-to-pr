@@ -14,10 +14,12 @@ After intake, the status shows an `XS`–`XL` workload estimate, token range, co
 Use this case to move behavior from a separate legacy project into the target repository. SpecToPR inventories the relevant routes, components, APIs, and state, runs both applications, and implements the behavior in the target architecture. The visual baseline is the **running legacy application**, not Figma.
 
 :::tip[Input / result]
-**Input:** target repository + separate `legacyProjectRoot` + migration scope · **Result:** migration coverage, comparison with the running legacy application, Web Vitals, API usage and gaps derived from the legacy code, and a 15-section draft PR
+**Input:** target repository + separate `legacyProjectRoot` + migration scope · **Result:** source-to-target migration scope, running-legacy comparison, API Gaps, and a reviewer-first draft PR
 :::
 
 <RunPipeline locale="en" mode="legacy" />
+
+`legacyProjectRoot` is the exact user-supplied read-only source path. SpecToPR never substitutes a similarly named directory, and OpenSpec is an optional post-merge adapter rather than a prerequisite for migration, comparison, or Draft publication.
 
 ## Required inputs <span id="required-inputs-legacy"></span>
 
@@ -79,9 +81,9 @@ Improve the target implementation without copying the old architecture blindly.
 1. **Intake and legacy inventory:** Normalize the separate root as read-only and create a bounded `legacyInventory` of routes, components, APIs, state, persistence, bridges, and assets. The AST records only concrete HTTP requests as `apiCandidates`; constructors and local facades do not become duplicate operations. When HAR/JSON is supplied, its raw digest, the `runtime-network-har` adapter, and the observed method/path are tied to the same inventory digest. A genuinely dynamic unresolved call returns `collect-legacy-network-evidence`; submitting `legacy-network-evidence` resumes the same Run.
 2. **Contracts:** Map stable keys to acceptance conditions and `planned` coverage, then declare running-legacy screenshots as `visualTargets`. Migrated files and evidence are not claimed before implementation.
 3. **Implementation:** One writer moves the feature into the target architecture and replaces each planned key with current-packet migrated or excluded coverage. The legacy inventory records API candidates, environment origins, transport callsites, and confidence through semantic AST and bounded adapters such as `source-fetch-literal`, `source-http-client`, and `source-request-config`. When candidates exist, each operation needs exact `apiCoverage` and `api-ready` evidence tied to its client, mock, and test. If there are no candidates, the API section is marked `complete` and tied to the adapter list and inventory digest. An ambiguous method/path is resolved only by one unique match in scoped runtime evidence or OpenAPI. Optional OpenAPI enriches the inventory but does not decide which features are in scope.
-4. **Visual comparison and performance:** Run both apps with matching route, state, fixture, and viewport. Every capture repeats the target's route/state/viewport/device scale/fixture and records its provider, ISO capture time, PNG path, and `sha256:` digest. Before `compare-visuals` runs, the runtime rejects changed comparison conditions and digest mismatches without consuming an attempt. The comparison requires the fixed 92% similarity, permits no more than 20% justified masking, and automatically runs the initial comparison and up to two repairs. A third valid failure remains blocked with failed media; focused UI assertions remain independent. Web Vitals are recorded as well.
+4. **Visual comparison and performance:** Run both apps with matching route, state, fixture, and viewport. Every capture repeats the target's route/state/viewport/device scale/fixture and records its provider, ISO capture time, PNG path, and `sha256:` digest. Before `compare-visuals` runs, the runtime rejects changed comparison conditions and digest mismatches without consuming an attempt. The comparison requires the fixed 92% similarity, permits no more than 20% justified masking, and automatically runs the initial comparison and up to two repairs. A third valid failure stops automatic repair and preserves failed media as a visual-comparison Gap; focused UI assertions remain independent. Web Vitals are recorded as well.
 5. **Independent reviews:** Functional and design reviewers judge migration, visuals, interaction, and accessibility.
-6. **Report / publish:** Publish 15-section packet-bound `pr-report-v2.1` with migrated/out-of-scope/gap/blocked coverage.
+6. **Report / publish:** Publish the Legacy migration template: source→target, migration scope, legacy visual comparison, and API Gaps, with the Gap impact and reviewer decision first.
 
 Every report section is `complete`, `not-run`, `blocked`, or `not-applicable`. Paths from earlier review packets are omitted. GitHub images, diffs, and overlays use immutable paths on one managed `spec-to-pr/evidence` branch, with URLs pinned to the upload commit SHA instead of creating a branch for every Run.
 
@@ -94,7 +96,7 @@ Every report section is `complete`, `not-run`, `blocked`, or `not-applicable`. P
 | `implementation`    | One implementation writer migrates into the target architecture with API/performance evidence.         |
 | `functional-review` | The read-only `functional-reviewer` judges before/after evidence and affected regressions.             |
 | `design-review`     | The read-only `design-reviewer` applies only to a UI delta; otherwise it is not applicable.            |
-| `report`            | Build 15-section `pr-report-v2.1` migration/API/visual/performance/blocker reporting.                  |
+| `report`            | Build the reviewer-first source→target, scope, visual comparison, and API Gap body.                    |
 | `publish`           | Create/update a draft only when ready and `publication: draft`.                                        |
 | `archive`           | Run only after verified merge and a separate user action.                                              |
 
@@ -109,7 +111,7 @@ Agent policy allows zero read-only scout workers for XS/S, at most one for M, an
 
 ### Ready, blocked diagnostic, and resume
 
-The normal path uses `workflow_publish intent: ready`. Ready and blocked results share the same 15-section `pr-report-v2.1`, so a diagnostic draft shows where the Run stopped, what migration work finished, which checks did not run, and exactly how to unblock it. `workflow_publish intent: blocked-diagnostic` is available only after publication preflight passes, and the result remains `status: blocked`. `PUBLISH_NO_DELTA` returns a **local blocked report** without creating an empty commit or issue.
+`workflow_publish` may create a Draft when the migration has code changes even if API Gaps, failed visual comparison, or unrun review evidence remains. Such a Draft is never labelled verified or merge-ready, and `skipped` or `waived` never means passed. `PUBLISH_NO_DELTA` returns a **local report** without creating an empty commit or issue.
 
 For `diagnostic-publication-uncertain`, never publish automatically. Inspect GitHub/GitLab for a matching draft, show the result to the user, and call the same `workflow_publish` action with `recoverUncertain: true` only after explicit approval.
 
@@ -145,7 +147,7 @@ openspec/changes/<change-name>/
 └── tasks.md
 ```
 
-`manifest.json` binds the Run ID and revision at the `pre-implementation` phase to the legacy-root digest, requirement IDs, and each OpenSpec path and file digest. Contracts cannot pass when those values differ from the current Run or files. The PR body leads with requirement titles, status, result files, and a **side-by-side legacy/current view**. Opaque feature keys and repetitive lists of every implementation file are hidden by default. Raw HARs, cookies, tokens, and complete logs are never copied into the bundle or PR.
+`manifest.json` binds the current Run/revision, legacy-root digest, requirement IDs, and any optionally linked OpenSpec file digests. A core Run without OpenSpec is valid; when OpenSpec is linked, only those linked files are checked for drift. The PR body leads with requirement titles, status, result files, and a **side-by-side legacy/current view**. Opaque feature keys and repetitive lists of every implementation file are hidden by default. Raw HARs, cookies, tokens, and complete logs are never copied into the bundle or PR.
 
 ### When a GitLab image upload fails
 

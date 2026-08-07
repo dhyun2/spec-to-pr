@@ -7,11 +7,13 @@ import { executeBudgetedBoundaryTurns, } from "./boundary-runner.js";
 import { UsageCalibrationStore, calibrateTokenRange, isUsageCalibrationReadEnabled, isUsageCalibrationEligible, readCalibrationBestEffort, recordCalibrationBestEffort, } from "./usage-calibration.js";
 import { defaultTokenRangeForWorkload, effectiveHardLimitForWorkload, estimateSdkWorkload, } from "./workload-budget.js";
 import { CODEX_WORKFLOW_TOOL_NAMES, buildCodexActionEnvelopeInstructions, } from "./workflow-policy.js";
+import { resolveCodexModelRouting, } from "./model-routing.js";
 export const DEFAULT_BLOCKED_DIAGNOSTIC_TOKEN_RESERVE = 24_000;
 export const DEFAULT_BOUNDARY_TURN_TIMEOUT_MS = 10 * 60_000;
 export const DEFAULT_BOUNDARY_RUN_TIMEOUT_MS = 45 * 60_000;
 export async function runSpecToPrWithCodex(input) {
     validateSpecToPrRunInput(input);
+    const modelRouting = resolveCodexModelRouting(input.modelRouting, input.model);
     const composableSources = normalizeComposableSources(input);
     const codex = new Codex(buildCodexOptions(input));
     const deliveryMode = resolveDeliveryMode(input);
@@ -54,7 +56,7 @@ export async function runSpecToPrWithCodex(input) {
     const hardLimitTokens = effectiveHardLimitForWorkload(initialWorkload.size);
     const requiredValidations = requiredValidationsForInput(input);
     const result = await executeBudgetedBoundaryTurns({
-        client: createBoundaryClient(codex, buildThreadOptions(input), input.modelReasoningEffort),
+        client: createBoundaryClient(codex, buildThreadOptions(input), modelRouting, input.modelReasoningEffort),
         initialPrompt: input.resumeThreadId === undefined ? buildSpecToPrPrompt(input) : buildResumeSpecToPrPrompt(),
         ...(input.resumeThreadId === undefined ? {} : { resumeThreadId: input.resumeThreadId }),
         ...(input.outputSchema === undefined ? {} : { outputSchema: input.outputSchema }),
@@ -156,10 +158,12 @@ export async function runSpecToPrWithCodex(input) {
             write: calibrationWrite,
             sampleCount: runtimeCalibration.sampleCount,
         },
+        modelRouting: modelRouting.workflow,
     };
 }
 export function buildSpecToPrPrompt(input) {
     validateSpecToPrRunInput(input);
+    const modelRouting = resolveCodexModelRouting(input.modelRouting, input.model);
     const composableSources = normalizeComposableSources(input);
     const figmaUrls = normalizedFigmaUrls(input);
     const sources = [
@@ -186,6 +190,7 @@ export function buildSpecToPrPrompt(input) {
         `mode: ${JSON.stringify(deliveryMode)}`,
         `changeKind: ${JSON.stringify(changeKind)}`,
         `publication: ${JSON.stringify(publication)}`,
+        `modelRouting: ${JSON.stringify(modelRouting.workflow)}`,
         ...(input.legacyProjectRoot === undefined
             ? []
             : [`legacyProjectRoot: ${JSON.stringify(input.legacyProjectRoot)}`]),
@@ -216,20 +221,30 @@ export function buildSpecToPrPrompt(input) {
         modeInstructions(deliveryMode),
         `Call workflow_info to read the contract. Call workflow_start exactly once with the request and these delivery fields: ${startFields}.`,
         "Apply instructions in this precedence order: current user request > explicit project guidance > automatically discovered project guidance > applicable installed skills > SpecToPR defaults.",
+        "Model routing is host-local: use fast/build/expert roles only, never mix Codex and Claude within one Run. Pinned routing uses one exact model for every stage and independent review; custom routing uses its declared role models. Neither strategy weakens visual comparison, tests, independent review, or Gap disclosure. If modelRouting.qualityGaps is non-empty, retain development and make each quality reduction a reviewer-facing open Gap.",
         "For each optional skill hint, ask the host to use the named skill only when it is installed and applicable. Missing optional skills do not block the Run; never assume a hinted capability is available.",
         "When submitting evidence, include an optional skill in guidanceTrace.appliedSkills only when it was actually applied. Do not copy unused skill hints or recommendations.",
         "Use workflow_advance until it returns an external action or terminal status. Fulfill external actions and return compact evidence with workflow_submit; use workflow_status to resume or inspect blockers.",
         "When workflow_status includes workspaceBinding, treat its repositoryRoot, sourceBranch, targetBranch, remoteName, remoteUrl, baseSha, and publicationTarget as immutable. Use those exact values for workflow_publish preview and execute; never infer or substitute a different branch, remote, host, or repository.",
         "SDK publication preflight is advisory only and cannot authorize a later mutation; workflow_publish must resolve its own authoritative execution fence after all read-only checks.",
-        buildCodexActionEnvelopeInstructions({
-            publication,
-            includeReviewAgents: input.enableReviewAgents !== false,
-            includeDesignReview: hasUiScope,
-        }),
-        'For API-backed UI, generate distinct physical non-empty project-local types, schemas, wrappers, mocks, and a passing JSON contract-test result before UI work and UI completion evidence; path, symlink, and hard-link aliases do not count separately. Submit workflow_submit with kind: "api-ready", status: "passed", one stable implementationContextId, artifactPaths, apiArtifacts with nonempty types/schemas/wrappers/mocks/contractTests arrays, and operation-aware operations. Continue UI in the same context and repeat that implementationContextId on final implementation only after workflow_status records the checkpoint; apiReady: true alone is not evidence. Final implementation must include apiCoverage mapping every documented operation to production call sites, mock handlers, and executable evidence, or an explicit blocking gap.',
-        "Treat deliveryProfile.sourceProvenance as immutable pinned input evidence. For each UI state, declare visualTargets with baseline kind/path, route, state, fixture, viewport, deviceScaleFactor, and only justified masks. After capturing a target screenshot, answer compare-visuals with a capture manifest that repeats targetId, route, state, viewport, deviceScaleFactor, and fixture and records provider, ISO capturedAt, actualPath, and its sha256 actualDigest. The runtime rejects target drift or digest mismatch without consuming an attempt, then computes alpha-aware exact/review scores, diff, and overlay at the fixed 92% threshold. Run the initial comparison plus at most two repairs automatically without pausing; a third valid failure leaves the Run blocked and proceeds only to truthful blocked-diagnostic reporting/publication when preconditions allow. Focused design-system, geometry, interaction, and accessibility assertions remain independent gates. Never submit caller-computed scores or verdicts.",
-        "When deliveryProfile.draftEvidenceBundle is present, use it as the stable feature-scoped review bundle. Keep product code and test source in their existing project paths; store only compact final contracts, JSON evidence, final visual PNGs, and reviewer report material below the bundle root. The manifest records run ID and digests, but no directory name includes a run ID. For legacy migration, create and submit the bundle manifest plus an OpenSpec proposal, delta spec, and tasks document as draftBundle contract evidence. Never place credentials, headers, full HAR files, raw browser logs, or transient output in that bundle.",
-        "For brief, legacy, and feature delivery, include measured lab performance and Web Vitals evidence plus an explicit field-data source or unavailable reason. The final canonical pr-report-v2.1 binds source provenance, requirements, changed files, API coverage/gaps, legacy coverage, visual ratios/assets, both independent reviews, performance, feature evidence when applicable, blockers, risks, rollback, and the evidence index to the immutable review packet. Every section is complete, not-run, blocked, or not-applicable; stale packet paths are omitted. A blocked diagnostic uses the same 15-section PR shape and identifies the stopped stage and exact unblock action.",
+        ...(deliveryMode === "legacy"
+            ? []
+            : [
+                buildCodexActionEnvelopeInstructions({
+                    publication,
+                    includeReviewAgents: input.enableReviewAgents !== false,
+                    includeDesignReview: hasUiScope,
+                }),
+            ]),
+        ...(deliveryMode === "legacy"
+            ? [
+                "For legacy migration, preserve the supplied exact legacy root as read-only and begin implementation once contracts capture the selected source-to-target scope. Always capture the legacy inventory, run the UI visual comparison, and obtain independent functional and design review. API/auth uncertainty, dynamic call binding, certificates, and unavailable runtime evidence are Gap records: do not invent a request contract and do not stop confirmed UI work. A visual or review failure is never a pass; publish a truthful Draft with the Gap, impact, and reviewer decision when publication is requested.",
+            ]
+            : [
+                'For API-backed UI, generate distinct physical non-empty project-local types, schemas, wrappers, mocks, and a passing JSON contract-test result before UI work and UI completion evidence; path, symlink, and hard-link aliases do not count separately. Submit workflow_submit with kind: "api-ready", status: "passed", one stable implementationContextId, artifactPaths, apiArtifacts with nonempty types/schemas/wrappers/mocks/contractTests arrays, and operation-aware operations. Continue UI in the same context and repeat that implementationContextId on final implementation only after workflow_status records the checkpoint; apiReady: true alone is not evidence. Final implementation must include apiCoverage mapping every documented operation to production call sites, mock handlers, and executable evidence, or an explicit blocking gap.',
+                "Treat deliveryProfile.sourceProvenance as immutable pinned input evidence. For each UI state, declare visualTargets with baseline kind/path, route, state, fixture, viewport, deviceScaleFactor, and only justified masks. After capturing a target screenshot, answer compare-visuals with a capture manifest that repeats targetId, route, state, viewport, deviceScaleFactor, and fixture and records provider, ISO capturedAt, actualPath, and its sha256 actualDigest. The runtime rejects target drift or digest mismatch without consuming an attempt, then computes alpha-aware exact/review scores, diff, and overlay at the fixed 92% threshold. Run the initial comparison plus at most two repairs automatically without pausing; a third valid failure leaves the Run blocked and proceeds only to truthful blocked-diagnostic reporting/publication when preconditions allow. Focused design-system, geometry, interaction, and accessibility assertions remain independent gates. Never submit caller-computed scores or verdicts.",
+                "For brief and feature delivery, include measured lab performance and Web Vitals evidence plus an explicit field-data source or unavailable reason. The final canonical pr-report-v2.1 binds source provenance, requirements, changed files, API coverage/gaps, legacy coverage, visual ratios/assets, both independent reviews, performance, feature evidence when applicable, blockers, risks, rollback, and the evidence index to the immutable review packet. Every section is complete, not-run, blocked, or not-applicable; stale packet paths are omitted. A blocked diagnostic uses the same 15-section PR shape and identifies the stopped stage and exact unblock action.",
+            ]),
         "Run the fast default gates selected by workflow applicability. Run full matrices, hardening suites, package verification, and cross-host manifest validation only for an explicit release workflow.",
         "",
         "User request:",
@@ -416,10 +431,11 @@ function isHardLinkedFile(candidate) {
         throw error;
     }
 }
-function createBoundaryClient(codex, options, fixedReasoningEffort) {
+function createBoundaryClient(codex, options, modelRouting, fixedReasoningEffort) {
     const optionsForRoute = (route) => ({
         ...options,
         modelReasoningEffort: fixedReasoningEffort ?? route?.reasoningEffort ?? options.modelReasoningEffort ?? "medium",
+        model: modelRouting.models[route?.role ?? "fast"],
     });
     return {
         startThread: (route) => adaptThread(codex.startThread(optionsForRoute(route))),
@@ -578,9 +594,6 @@ function buildThreadOptions(input) {
         approvalPolicy: input.approvalPolicy ?? "on-request",
         modelReasoningEffort: input.modelReasoningEffort ?? "medium",
     };
-    if (input.model !== undefined) {
-        options.model = input.model;
-    }
     const additionalDirectories = uniqueInputValues(input.additionalDirectories ?? []);
     if (additionalDirectories.length > 0)
         options.additionalDirectories = additionalDirectories;
@@ -796,7 +809,7 @@ function modeInstructions(mode) {
         return "Brief mode is full delivery: require the supplied brief, Figma source, and local OpenAPI path or HTTPS openApiUrls source before workflow_start; preserve acceptance criteria; implement API and UI in one context; produce sourceProvenance, visualTargets, API gap, apiCoverage, compare-visuals, accessibility, Web Vitals/performance, and pr-report-v2.1 evidence; do not invent missing requirements.";
     }
     if (mode === "legacy") {
-        return "Legacy mode is cross-project migration: require a separate legacyProjectRoot, treat it as read-only, inspect workflow_status.legacyInventory, map every in-scope stable feature key through legacyCoverage, derive API candidates from the explicitly listed bounded source adapters, run both projects, use the running legacy screen as the mandatory visual baseline, compare the target at the same route/state/viewport through compare-visuals, and report migration/API/performance gaps in pr-report-v2.1. Treat legacyProjectRoot and workflow_status.legacyInventory as the immutable feature boundary, not a dependency visibility boundary. Resolve every requested feature only against that inventory; if no feature key matches, report an in-bound scope mismatch. A sibling, parent, or keyword-similar module requires an explicit replacement legacyProjectRoot and is never inferred from repository-wide search. Inspect directly referenced dependency evidence outside that root only through explicit in-root import or configuration edges and only to resolve or run an in-bound feature; bounded examples are HTTP client or alias configuration, environment-name schemas/examples, package metadata/type declarations, and enclosing build/start metadata. Never scan dependency trees or build output broadly, read or persist secret values, or turn dependency evidence into unrelated feature keys, routes, screens, or API candidates. When source discovery leaves an ambiguous method or path, optionally supply a project-local legacyNetworkEvidencePath containing bounded HAR JSON or a request array captured from the scoped legacy flow. API candidates require complete api-ready/apiCoverage evidence; zero candidates require a complete API section bound to the adapter list and inventory digest. Ambiguous methods/paths resolve only from a unique scoped OpenAPI/runtime match and otherwise remain a durable intake blocker. Optional OpenAPI enriches candidates but never controls API-section applicability.";
+        return "Legacy mode is progressive migration: require the exact separate read-only legacyProjectRoot, inventory and map the selected source-to-target scope, then migrate confirmed behavior. UI visual comparison and independent functional/design review are required. API/auth uncertainty, dynamic bindings, certificates, and unavailable runtime evidence must be disclosed as reviewer-facing Gaps instead of stopping confirmed work; never invent request contracts or treat skipped validation as passed. OpenSpec is optional unless the project explicitly requires it.";
     }
     if (mode === "feature") {
         return [

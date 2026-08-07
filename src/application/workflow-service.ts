@@ -93,6 +93,7 @@ import {
   isSafeDurableEvidencePath,
   resolveDeliveryPolicy,
   type WorkflowScope,
+  type ModelProvider,
   type WorkflowBlocker,
   type DeliveryProfile,
   type ImplementationReviewPacket,
@@ -106,6 +107,7 @@ import {
   type WorkflowSubmission,
   type EvidenceFingerprintV1,
   DraftEvidenceManifestSchema,
+  resolveModelRouting,
 } from "../workflow/index.js";
 import {
   reopenImplementationForReviewChanges,
@@ -287,6 +289,34 @@ export const WorkflowStartInputSchema = z
     openApiUrls: ComposableSourceUrlsSchema,
     guidancePaths: ComposableSourcePathsSchema,
     skillHints: SkillHintsSchema,
+    modelRouting: z
+      .object({
+        strategy: z.enum(["adaptive-verified", "pinned", "custom"]).default("adaptive-verified"),
+        pinnedModel: z.string().trim().min(1).max(200).optional(),
+        customModels: z
+          .object({
+            fast: z.string().trim().min(1).max(200),
+            build: z.string().trim().min(1).max(200),
+            expert: z.string().trim().min(1).max(200),
+          })
+          .strict()
+          .optional(),
+        qualityGaps: z
+          .array(
+            z
+              .object({
+                role: z.enum(["fast", "build", "expert"]),
+                requestedModel: z.string().trim().min(1).max(200),
+                actualModel: z.string().trim().min(1).max(200),
+                reason: z.string().trim().min(1).max(2_000),
+              })
+              .strict(),
+          )
+          .max(10)
+          .default([]),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .superRefine((input, context) => {
@@ -539,6 +569,8 @@ export type WorkflowServiceDependencies = {
   monotonicNow?: () => number;
   externalLeaseTtlMs?: number;
   externalHeartbeatMs?: number;
+  /** Host identity selects an adapter-owned model catalog; core stores roles only. */
+  hostProvider?: ModelProvider;
 };
 
 type VisualAttemptReservationResult =
@@ -627,6 +659,12 @@ export class WorkflowService {
     view: MutatingStatusView,
   ): Promise<MutatingWorkflowStatus> {
     const input = WorkflowStartInputSchema.parse(rawInput);
+    const effectiveMode = resolveWorkflowDeliveryMode(input);
+    const modelRouting = resolveModelRouting({
+      provider: this.dependencies.hostProvider ?? "codex",
+      ...(input.modelRouting === undefined ? {} : { routing: input.modelRouting }),
+    });
+    const publication = input.publication ?? "draft";
     const workspaceBinding =
       input.workspace === undefined
         ? undefined
@@ -635,7 +673,6 @@ export class WorkflowService {
             ...input.workspace,
           });
     const projectRoot = workspaceBinding?.repositoryRoot ?? input.projectRoot;
-    const effectiveMode = resolveWorkflowDeliveryMode(input);
     const canonicalLegacyProjectRoot = await canonicalLegacyDirectory({
       projectRoot,
       ...(input.legacyProjectRoot === undefined
@@ -647,15 +684,25 @@ export class WorkflowService {
       { ...input, projectRoot },
       this.dependencies.fetchOpenApiSource ?? fetchOpenApiDocument,
     );
-    if (sources.legacyNetwork !== undefined) {
-      validateLegacyRuntimeNetworkEvidence(sources.legacyNetwork.text);
+    let usableLegacyNetwork = sources.legacyNetwork;
+    let legacyNetworkEvidenceGap: string | undefined;
+    if (usableLegacyNetwork !== undefined) {
+      try {
+        validateLegacyRuntimeNetworkEvidence(usableLegacyNetwork.text);
+      } catch {
+        // Optional runtime evidence can improve the API map, but a malformed
+        // capture must not prevent safe work confirmed in the legacy source.
+        legacyNetworkEvidenceGap =
+          "The supplied legacy runtime network evidence could not be parsed and was not used.";
+        usableLegacyNetwork = undefined;
+      }
     }
     const sourceCapturedAt = this.now();
     const normalizedProfilePaths = NormalizedDeliveryProfilePathsSchema.parse({
       ...(sources.brief === undefined ? {} : { briefPath: sources.brief.path }),
-      ...(sources.legacyNetwork === undefined
+      ...(usableLegacyNetwork === undefined
         ? {}
-        : { legacyNetworkEvidencePath: sources.legacyNetwork.path }),
+        : { legacyNetworkEvidencePath: usableLegacyNetwork.path }),
       docsPaths: sources.docs.map((file) => file.path),
       openApiPaths: sources.openApi
         .filter((source) => source.origin === "file")
@@ -667,7 +714,6 @@ export class WorkflowService {
       discoveredGuidancePaths: sources.discoveredGuidance.map((file) => file.path),
     });
     const sourceOpenApiOperations = inventoryOpenApiOperations(sources.openApi);
-    const publication = input.publication ?? "draft";
     const initialHead =
       workspaceBinding?.baseSha ?? (await currentGitHead(projectRoot, this.metrics));
     const created = await this.dependencies.runService.createRun({
@@ -710,7 +756,7 @@ export class WorkflowService {
         : await this.recordLegacyInventory(
             created.id,
             canonicalLegacyProjectRoot,
-            sources.legacyNetwork,
+            usableLegacyNetwork,
           );
     const legacyInventoryArtifact = legacyInventoryResult?.artifact;
     const legacyApiResult =
@@ -761,15 +807,12 @@ export class WorkflowService {
           : classifiedScope.api ||
             sources.openApi.length > 0 ||
             effectiveMode === "brief" ||
-            effectiveMode === "legacy" ||
             effectiveMode === "feature",
       specification: classifiedScope.specification || sources.openApi.length > 0,
-      hasVisualBaseline:
-        classifiedScope.hasVisualBaseline || figmaUrl !== undefined || effectiveMode === "legacy",
+      hasVisualBaseline: classifiedScope.hasVisualBaseline || figmaUrl !== undefined,
       performanceSensitive:
         classifiedScope.performanceSensitive ||
         effectiveMode === "brief" ||
-        effectiveMode === "legacy" ||
         effectiveMode === "feature",
     });
     const gatePlan = buildGatePlan(scope);
@@ -804,6 +847,7 @@ export class WorkflowService {
       skillHints: sources.skillHints,
       recommendedSkills,
       sourceProvenance: sourceProvenanceForPreparedSources(sources, sourceCapturedAt),
+      modelRouting,
     });
     const workload = estimateWorkload({
       phase: "intake",
@@ -825,16 +869,19 @@ export class WorkflowService {
       const gap = GapSchema.parse({
         id: createGapId(),
         category: "api",
-        severity: "blocker",
+        severity: "major",
         status: "open",
         title: "Legacy API method or path is unresolved",
         expected:
-          "Every detected legacy API call maps to a unique method/path using source, runtime, or scoped OpenAPI evidence.",
+          "Every detected legacy API call is either mapped from source evidence or disclosed for reviewer confirmation.",
         observed: legacyApiResult.unresolved
           .map((candidate) => `${candidate.normalizedKey} at ${candidate.sourcePath}`)
           .join("; ")
           .slice(0, 4_000),
-        impact: "API coverage cannot be proven without inventing a legacy operation.",
+        impact:
+          "The affected interaction must not invent a request contract; implementation can continue for confirmed behavior.",
+        reviewerDecision:
+          "Confirm the request contract before enabling the affected write or authenticated interaction.",
         sourceEvidenceIds: [],
         resolutionArtifactIds: [],
         createdAt: timestamp,
@@ -842,6 +889,7 @@ export class WorkflowService {
         metadata: {
           unresolvedCandidates: legacyApiResult.unresolved,
           discoveryAdapters: legacyInventoryResult?.inventory.apiDiscoveryAdapters ?? [],
+          blockingPhase: "merge-ready",
         },
       });
       const current = await this.dependencies.runStore.get(created.id);
@@ -854,36 +902,70 @@ export class WorkflowService {
         },
         current.revision,
       );
-      await this.dependencies.stageService.block({
-        runId: created.id,
-        stageName: "intake",
-        workerId: WORKER_ID,
-        leaseId: started.stage.lease!.id,
-        error: {
-          code: "LEGACY_API_METHOD_UNKNOWN",
-          message:
-            "A detected legacy API call needs scoped runtime network evidence or uniquely matching OpenAPI before migration can continue.",
-          retryable: true,
-        },
-        gapIds: [gap.id],
-        artifactIds: [
-          ...intakeArtifactIds,
-          ...(legacyInventoryArtifact === undefined ? [] : [legacyInventoryArtifact.id]),
-        ],
-        checkpoint: {
-          name: "scope-classified",
-          data: {
-            scope,
-            gatePlan,
-            deliveryProfile,
-            workload,
-            ...(effectiveMode === "legacy"
-              ? { legacyOpenApiEvidence: sourceOpenApiOperations }
-              : {}),
-          },
-        },
+    }
+
+    for (const qualityGap of modelRouting.qualityGaps) {
+      const timestamp = this.now();
+      const current = await this.dependencies.runStore.get(created.id);
+      const gap = GapSchema.parse({
+        id: createGapId(),
+        category: "tooling",
+        severity: "major",
+        status: "open",
+        title: `Model verification quality reduced for ${qualityGap.role} role`,
+        expected: `Use ${qualityGap.requestedModel} for the ${qualityGap.role} role.`,
+        observed: `Using ${qualityGap.actualModel}. ${qualityGap.reason}`,
+        impact:
+          "Development continues, but the affected evidence or independent review has reduced model verification quality.",
+        reviewerDecision:
+          "Decide whether the affected verification must be repeated with the requested model before merge.",
+        sourceEvidenceIds: [],
+        resolutionArtifactIds: [],
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        metadata: { modelRouting: qualityGap, blockingPhase: "merge-ready" },
       });
-      return this.mutatingStatus(created.id, view);
+      await this.dependencies.runStore.save(
+        {
+          ...current,
+          revision: current.revision + 1,
+          updatedAt: timestamp,
+          gaps: [...current.gaps, gap],
+        },
+        current.revision,
+      );
+    }
+
+    if (legacyNetworkEvidenceGap !== undefined) {
+      const timestamp = this.now();
+      const current = await this.dependencies.runStore.get(created.id);
+      const gap = GapSchema.parse({
+        id: createGapId(),
+        category: "api",
+        severity: "major",
+        status: "open",
+        title: "Legacy runtime network evidence is unavailable",
+        expected: "Optional runtime evidence is parseable and can enrich the legacy API mapping.",
+        observed: legacyNetworkEvidenceGap,
+        impact:
+          "Confirmed source behavior can be implemented, but unresolved API or authentication behavior remains a Gap.",
+        reviewerDecision:
+          "Provide corrected runtime evidence only if the unresolved interaction must be enabled before merge.",
+        sourceEvidenceIds: [],
+        resolutionArtifactIds: [],
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        metadata: { blockingPhase: "merge-ready" },
+      });
+      await this.dependencies.runStore.save(
+        {
+          ...current,
+          revision: current.revision + 1,
+          updatedAt: timestamp,
+          gaps: [...current.gaps, gap],
+        },
+        current.revision,
+      );
     }
 
     await this.dependencies.stageService.complete({
@@ -1003,8 +1085,11 @@ export class WorkflowService {
 
       if (
         reportStage.status === "pending" &&
+        stage(run, "implementation").status === "passed" &&
         functionalStage.status === "passed" &&
-        ["passed", "skipped", "waived"].includes(stage(run, "design-review").status)
+        (scope.ui
+          ? stage(run, "design-review").status === "passed"
+          : stage(run, "design-review").status === "skipped")
       ) {
         await this.generateReport(run.id);
         if (input.until === "report") {
@@ -1528,9 +1613,7 @@ export class WorkflowService {
     );
     this.startExposedReviewerTimings(run, deliveryProfile, nextActions);
     const requiredValidations = requiredValidationsForRun(scope, deliveryProfile);
-    const currentStage = run.stages.find(
-      (item) => !["passed", "skipped", "waived"].includes(item.status),
-    );
+    const currentStage = run.stages.find((item) => !["passed", "skipped"].includes(item.status));
     const blockerDetails = await this.blockerDetailsForRun(run, requiredValidations);
     const blockers = blockerDetails.flatMap((blocker) =>
       blocker.retryable ? [] : [blocker.summary],
@@ -1562,6 +1645,9 @@ export class WorkflowService {
       deliveryProfile: {
         publication: deliveryProfile.publication,
         recommendedSkills: deliveryProfile.recommendedSkills,
+        ...(deliveryProfile.modelRouting === undefined
+          ? {}
+          : { modelRouting: deliveryProfile.modelRouting }),
       },
       ...(run.workspaceBinding === undefined ? {} : { workspaceBinding: run.workspaceBinding }),
       workload,
@@ -1650,7 +1736,7 @@ export class WorkflowService {
     if (
       visualStable &&
       stage(run, "functional-review").status === "passed" &&
-      ["passed", "skipped", "waived"].includes(stage(run, "design-review").status)
+      ["passed", "skipped"].includes(stage(run, "design-review").status)
     ) {
       this.reviewerTimings.delete(packetId);
     }
@@ -1681,6 +1767,7 @@ export class WorkflowService {
         symbol: entry.symbol,
       })),
       apiCandidates: inventory.apiCandidates.slice(0, 500).map((candidate) => ({
+        candidateKey: candidate.candidateKey,
         operationKey: candidate.operationKey,
         ...(candidate.originRef === undefined
           ? {}
@@ -1721,6 +1808,13 @@ export class WorkflowService {
             ),
           ),
         ].slice(0, 100),
+        callSites: candidate.callSites.slice(0, 100).map((callSite) => ({
+          callSiteKey: callSite.callSiteKey,
+          ownerSourcePath: callSite.ownerSourcePath,
+          terminalSourcePath: callSite.terminalSourcePath,
+          line: callSite.line,
+          column: callSite.column,
+        })),
       })),
       supportingDependencies: inventory.supportingDependencies
         .slice(0, 500)
@@ -1730,7 +1824,7 @@ export class WorkflowService {
 
   private async assertLegacyReferenceFresh(run: RunManifest): Promise<void> {
     const profile = deliveryProfileFromRun(run);
-    if (!profile.requirements.legacyInventory || profile.legacyProjectRoot === undefined) return;
+    if (profile.mode !== "legacy" || profile.legacyProjectRoot === undefined) return;
     const artifact = [...run.artifacts]
       .reverse()
       .find((candidate) => candidate.kind === "legacy-feature-inventory");
@@ -4812,7 +4906,8 @@ export class WorkflowService {
     const implementation = submissions.get("implementation");
     const functional = submissions.get("functional-review");
     const design = submissions.get("design-review");
-    if (contracts?.kind !== "contracts" || implementation?.kind !== "implementation") {
+    const profile = deliveryProfileFromRun(run);
+    if (implementation?.kind !== "implementation" || contracts?.kind !== "contracts") {
       throw new Error("PR report requires current contracts and implementation evidence");
     }
     const reviews = [functional, design].filter(
@@ -4825,15 +4920,15 @@ export class WorkflowService {
     const reviewedRequirements = new Set(
       reviews.flatMap((review) => review.requirements.map((r) => r.id)),
     );
-    const unreviewed = contracts.requirementManifest
+    const reportRequirements = contracts.requirementManifest;
+    const unreviewed = reportRequirements
       .map((requirement) => requirement.id)
       .filter((requirementId) => !reviewedRequirements.has(requirementId));
     if (unreviewed.length > 0) {
       throw new Error(`PR report requires review coverage for: ${unreviewed.join(", ")}`);
     }
-    const profile = deliveryProfileFromRun(run);
     const sectionApplicability = reportSectionApplicabilityForRun(run, profile);
-    const sectionStatuses = readyReportSectionStatuses(sectionApplicability);
+    let sectionStatuses = readyReportSectionStatuses(sectionApplicability);
     const legacyRootDigest = legacyRootDigestFromRun(run);
     const legacyApiDiscoveryAdapters = legacyApiDiscoveryAdaptersFromRun(run);
     const visualArtifact = currentVisualReport(run, packet.id);
@@ -4851,7 +4946,11 @@ export class WorkflowService {
     );
     const evidencePaths = [
       ...new Set([
-        ...[contracts, implementation, ...reviews].flatMap((item) => item.artifactPaths),
+        ...[
+          ...(contracts?.kind === "contracts" ? [contracts] : []),
+          implementation,
+          ...reviews,
+        ].flatMap((item) => item.artifactPaths),
         ...packetArtifacts.flatMap((artifact) => {
           const evidencePath = artifact.metadata["projectRelativePath"];
           return typeof evidencePath === "string" ? [evidencePath] : [];
@@ -4874,12 +4973,20 @@ export class WorkflowService {
         (operation) =>
           `${operation.operationKey}: ${operation.notes ?? "gap reported without details"}`,
       );
+    const gapDetails = reportGapDetailsForRun(run, implementation.apiCoverage);
+    if (gapDetails.some((gap) => gap.category === "api" && gap.status !== "resolved")) {
+      sectionStatuses = PrReportSectionStatusesSchema.parse({
+        ...sectionStatuses,
+        api: "not-run",
+      });
+    }
     const report = PrReportV2Schema.parse({
       schemaVersion: "pr-report-v2.1",
       runId: run.id,
       generatedAt: timestamp,
       decision: "ready",
       mode: profile.mode,
+      ...reportTemplateForMode(profile.mode),
       sectionStatuses,
       binding: {
         reviewPacketId: packet.id,
@@ -4896,10 +5003,10 @@ export class WorkflowService {
       },
       sources: publicSourceRows(profile, legacyRootDigest),
       skills: {
-        hints: contracts.guidanceTrace.skillHints,
-        applied: contracts.guidanceTrace.appliedSkills,
+        hints: contracts?.kind === "contracts" ? contracts.guidanceTrace.skillHints : [],
+        applied: contracts?.kind === "contracts" ? contracts.guidanceTrace.appliedSkills : [],
       },
-      requirements: contracts.requirementManifest.map((requirement) => ({
+      requirements: reportRequirements.map((requirement) => ({
         ...requirement,
         implementationFiles: packet.changedFiles,
         reviewVerdicts: reviews.flatMap((review) =>
@@ -4946,6 +5053,7 @@ export class WorkflowService {
       },
       ...(featureEvidence === undefined ? {} : { featureEvidence }),
       gaps: apiGaps,
+      gapDetails,
       blockers: [],
       unrunValidations: [],
       risks: reviews.flatMap((review) =>
@@ -5260,6 +5368,28 @@ export class WorkflowService {
         .filter((gap) => gap.category === "api" && gap.status === "open")
         .map((gap) => `${gap.title}: ${gap.observed}`),
     ];
+    const gapDetails = reportGapDetailsForRun(run, implementationSubmission?.apiCoverage ?? [], {
+      ...(sectionApplicability.visual && visualArtifact === undefined
+        ? {
+            visual: {
+              title: "UI visual comparison was not run",
+              impact: "The migrated UI has no measured comparison against its required baseline.",
+              reviewerDecision:
+                "Run the comparison or explicitly decide whether this Draft remains blocked.",
+            },
+          }
+        : {}),
+      ...(profile.requirements.featureVideo && featureEvidence === undefined
+        ? {
+            featureVideo: {
+              title: "Feature user-flow video was not captured",
+              impact:
+                "The reviewer cannot verify the required end-to-end user flow from this Draft.",
+              reviewerDecision: "Capture the packet-bound video before approving the feature flow.",
+            },
+          }
+        : {}),
+    });
     const evidencePaths = [
       ...new Set([
         ...blocker.evidencePaths,
@@ -5284,6 +5414,7 @@ export class WorkflowService {
       generatedAt: timestamp,
       decision: "blocked",
       mode: profile.mode,
+      ...reportTemplateForMode(profile.mode),
       sectionStatuses,
       ...(packet === undefined
         ? {}
@@ -5373,6 +5504,7 @@ export class WorkflowService {
             },
           }),
       gaps: apiGaps,
+      gapDetails,
       blockers: [`${blocker.stage}/${blocker.code}: ${blocker.summary}`],
       unrunValidations: blocker.unrunValidations,
       risks: reviews.flatMap((review) =>
@@ -6147,7 +6279,7 @@ function blockerCodeForKind(kind: WorkflowBlocker["kind"]): string {
 
 function completedWorkForRun(run: RunManifest): string[] {
   return run.stages
-    .filter((item) => ["passed", "skipped", "waived"].includes(item.status))
+    .filter((item) => ["passed", "skipped"].includes(item.status))
     .map((item) => `${item.name} stage ${item.status}.`);
 }
 
@@ -6759,8 +6891,7 @@ async function actionsForRun(
   if (
     scope.ui &&
     isActionable(stage(run, "design-review")) &&
-    (parallelReviewers || stage(run, "functional-review").status === "passed") &&
-    (!profile.requirements.visualComparison || currentVisual?.metadata["visualStatus"] === "passed")
+    (parallelReviewers || stage(run, "functional-review").status === "passed")
   ) {
     actions.push(
       WorkflowActionSchema.parse({
@@ -6860,9 +6991,10 @@ function assertSubmissionPrerequisites(
   }
   const profile = deliveryProfileFromRun(run);
   if (submission.kind === "design-review") {
-    if (submission.verdict === "approved" && profile.requirements.visualComparison) {
-      assertCurrentVisualComparisonPassed(run, submission.reviewPacketId, nowIso);
-    }
+    // A design reviewer may independently approve the implementation even
+    // while the mandatory runtime comparison is failed or not-run. The visual
+    // evidence remains its own open merge-blocking Gap and is never converted
+    // into a pass by this review verdict.
     const scope = scopeFromRun(run);
     const parallelReviewers =
       deliveryPolicyForRun(run, scope, profile)?.parallelReviewers ??
@@ -7052,6 +7184,14 @@ function assertSubmissionPrerequisites(
     throw new Error(
       "User-facing feature mode requires targeted feature E2E evidence and one video",
     );
+  }
+  if (
+    submission.kind === "implementation" &&
+    submission.status === "passed" &&
+    profile.requirements.featureVideo &&
+    submission.captureSessionPath === undefined
+  ) {
+    throw new Error("Feature user-flow video requires a packet-bound capture-session receipt");
   }
   if (
     submission.kind === "implementation" &&
@@ -7441,9 +7581,16 @@ function apiReadyOperationKeysFromRun(run: RunManifest): Set<string> {
 
 function visualTargetsFromRun(run: RunManifest): VisualTargetManifest[] {
   const profile = deliveryProfileFromRun(run);
-  const expectedSubmissionKind = profile.requirements.legacyBaseline ? "contracts" : "figma-bundle";
+  const expectedSubmissionKinds = profile.requirements.legacyBaseline
+    ? ["contracts"]
+    : ["figma-bundle", "contracts"];
   for (const artifact of [...run.artifacts].reverse()) {
-    if (artifact.metadata["workflowSubmissionKind"] !== expectedSubmissionKind) continue;
+    if (
+      typeof artifact.metadata["workflowSubmissionKind"] !== "string" ||
+      !expectedSubmissionKinds.includes(artifact.metadata["workflowSubmissionKind"])
+    ) {
+      continue;
+    }
     const parsed = z
       .array(VisualTargetManifestCompatibilitySchema)
       .safeParse(artifact.metadata["visualTargets"]);
@@ -8813,6 +8960,7 @@ function deriveLegacyApiOperations(
               ...(candidate.originRef?.kind === "runtime-origin"
                 ? { origin: candidate.originRef.sanitizedOrigin }
                 : {}),
+              callSiteKeys: candidate.callSites.map((callSite) => callSite.callSiteKey),
             },
           ]
         : [],
@@ -9006,6 +9154,82 @@ function mergeDeliveryApiOperations(
 
 function boundedServerOrigins(...groups: readonly (readonly string[])[]): string[] {
   return [...new Set(groups.flat())].sort().slice(0, 20);
+}
+
+function prTemplateForMode(mode: DeliveryProfile["mode"]): PrReportV2["template"] {
+  if (mode === "legacy") return "legacy-migration";
+  if (mode === "brief") return "brief-delivery";
+  if (mode === "feature") return "feature-flow";
+  if (mode === "figma") return "figma-ui";
+  // `auto` is retained only to render historical 0.x Runs. New 1.0 starts
+  // resolve an explicit mode; this neutral delivery template keeps old Drafts
+  // reviewer-first without incorrectly presenting them as Figma work.
+  return "brief-delivery";
+}
+
+function reportTemplateForMode(mode: DeliveryProfile["mode"]): Pick<PrReportV2, "template"> {
+  const template = prTemplateForMode(mode);
+  return { template };
+}
+
+function reportGapDetailsForRun(
+  run: RunManifest,
+  apiCoverage: ReadonlyArray<{
+    operationKey: string;
+    status: string;
+    notes?: string | undefined;
+  }>,
+  supplemental: {
+    visual?: { title: string; impact: string; reviewerDecision: string };
+    featureVideo?: { title: string; impact: string; reviewerDecision: string };
+  } = {},
+): NonNullable<PrReportV2["gapDetails"]> {
+  const durable = run.gaps
+    .filter((gap) => gap.status !== "resolved")
+    .map((gap) => ({
+      id: gap.id,
+      category: gap.category,
+      severity: gap.severity,
+      status: gap.status,
+      title: gap.title,
+      impact: gap.impact,
+      reviewerDecision: gap.reviewerDecision,
+    }));
+  const titles = new Set(durable.map((gap) => gap.title));
+  const api = apiCoverage
+    .filter((operation) => operation.status === "gap")
+    .map((operation) => ({
+      category: "api",
+      severity: "major",
+      status: "open",
+      title: `${operation.operationKey}: ${operation.notes ?? "API contract is unresolved"}`,
+      impact: "The affected API behavior is not asserted as complete and must not be invented.",
+      reviewerDecision: "Confirm the contract or keep this interaction disabled before merge.",
+    }))
+    .filter((gap) => !titles.has(gap.title));
+  const extra = [
+    ...(supplemental.visual === undefined
+      ? []
+      : [
+          {
+            category: "visual",
+            severity: "blocker",
+            status: "open",
+            ...supplemental.visual,
+          },
+        ]),
+    ...(supplemental.featureVideo === undefined
+      ? []
+      : [
+          {
+            category: "user-flow",
+            severity: "blocker",
+            status: "open",
+            ...supplemental.featureVideo,
+          },
+        ]),
+  ].filter((gap) => !titles.has(gap.title));
+  return [...durable, ...api, ...extra];
 }
 
 function exclusionsForProfile(profile: DeliveryProfile): string[] {
@@ -9585,7 +9809,7 @@ export async function captureGitSnapshot(
   if (headSha === null)
     throw new Error("Implementation review packets require a readable Git HEAD");
   try {
-    const strictBinding = run.workspaceBinding;
+    const strictBinding = bindingWithLegacyDraftEvidenceRoots(run);
     if (strictBinding !== undefined) {
       metrics.increment("git.command_count", 2);
       const [{ stdout: checkedOutBranch }, { stdout: trackedStatus }] = await Promise.all([
@@ -9686,6 +9910,33 @@ export async function captureGitSnapshot(
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Unable to capture the implementation Git diff: ${message}`);
   }
+}
+
+/**
+ * Versions before the fast legacy path required durable evidence below `.spec-to-pr`
+ * and `openspec`. Keep those already-started Runs viable without relaxing their
+ * product-code scope.
+ */
+function bindingWithLegacyDraftEvidenceRoots(run: RunManifest) {
+  const binding = run.workspaceBinding;
+  if (binding === undefined) return undefined;
+
+  const rawProfile = DeliveryProfileSchema.safeParse(
+    stage(run, "intake").checkpoint?.data["deliveryProfile"],
+  );
+  if (
+    !rawProfile.success ||
+    rawProfile.data.mode !== "legacy" ||
+    rawProfile.data.publication !== "draft" ||
+    rawProfile.data.draftEvidenceBundle === undefined
+  ) {
+    return binding;
+  }
+
+  return {
+    ...binding,
+    supportingPaths: [...new Set([...binding.supportingPaths, ".spec-to-pr", "openspec"])],
+  };
 }
 
 /**

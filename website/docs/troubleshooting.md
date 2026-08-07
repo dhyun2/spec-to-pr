@@ -88,7 +88,7 @@ URL만으로는 검증 자료가 되지 않습니다.
 
 ### UI 구현 제출이 거부된다
 
-API를 사용하는 UI인데 명시적인 `api-ready` 체크포인트가 없거나, 최종 `apiReady`가 `false`이거나, `implementationContextId`가 다른 경우입니다. 같은 구현 맥락에서 서로 다른 실제 타입, 스키마, 호출 모듈·클라이언트, 모의 응답 파일과 `status: passed`인 계약 테스트 JSON을 먼저 `apiArtifacts`로 제출하세요. 최종 구현에도 같은 ID를 사용해야 합니다. 경로 별칭, 심볼릭 링크, 하드 링크는 별도 증거로 인정하지 않습니다. 불리언 값만 `true`로 바꾸거나 API 작업을 별도 에이전트에게 맡긴 뒤 나중에 합치는 방식은 v2 계약에 맞지 않습니다.
+확인된 API를 연결하는 UI인데 명시적인 `api-ready` 체크포인트가 없거나, 최종 `apiReady`가 `false`이거나, `implementationContextId`가 다른 경우입니다. 같은 구현 맥락에서 서로 다른 실제 타입, 스키마, 호출 모듈·클라이언트, 모의 응답 파일과 `status: passed`인 계약 테스트 JSON을 `apiArtifacts`로 제출하세요. 다만 메서드·body·인증·binding이 불명확하면 추측해 쓰지 않고 API Gap으로 남기며, 안전한 UI·상태·라우트 구현은 계속할 수 있습니다. 최종 구현에도 같은 ID를 사용해야 합니다. 경로 별칭, 심볼릭 링크, 하드 링크는 별도 증거로 인정하지 않습니다. 불리언 값만 `true`로 바꾸거나 API 작업을 별도 에이전트에게 맡긴 뒤 나중에 합치는 방식은 v2 계약에 맞지 않습니다.
 
 ## 검토와 필수 검증
 
@@ -164,7 +164,7 @@ SDK는 Codex 작업 차례가 끝난 뒤에야 사용량을 받습니다. 실행
 - 제공 프로필의 `publication`이 `draft`인지 확인
 - `workflow_status`가 발행 가능한 상태이고 필수 차단 사유가 없는지 확인
 - GitHub: `GITHUB_TOKEN` → `GH_TOKEN` → `gh auth token`
-- GitLab: `GITLAB_TOKEN` → `GITLAB_PRIVATE_TOKEN` → `glab auth token`
+- GitLab: `GITLAB_TOKEN` → `GITLAB_PRIVATE_TOKEN` → `glab config get token --host <hostname>`
 - `feature` 방식: 영상 동기화가 성공했는지 확인
 - `sourceBranch`와 `targetBranch`가 다르고, 작업 트리가 깨끗하며, 의도한 변경이 소스 브랜치에 커밋되어 대상 브랜치보다 한 커밋 이상 앞서는지 확인
 

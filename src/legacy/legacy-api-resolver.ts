@@ -12,6 +12,8 @@ export type LegacyRuntimeRequestEvidence = {
   method: Exclude<LegacyApiCandidate["method"], "UNKNOWN">;
   path: string;
   origin?: string;
+  /** Optional explicit link for otherwise indistinguishable dynamic call sites. */
+  callSiteKeys?: string[];
 };
 
 export type ResolvedLegacyApiOperation = {
@@ -140,20 +142,24 @@ function resolveCandidate(
   if (openApiMatches.length === 1) return openApiMatches[0];
 
   if (candidate.pathTemplate === undefined) {
+    const matchingRuntime = runtime.filter(
+      (request) =>
+        (candidate.method === "UNKNOWN" || candidate.method === request.method) &&
+        runtimeOriginMatches(candidate, request.origin),
+    );
+    const explicitLinks = matchingRuntime.filter((request) =>
+      request.callSiteKeys?.some((key) =>
+        candidate.callSites.some((callSite) => callSite.callSiteKey === key),
+      ),
+    );
     const runtimeMatches = uniqueRuntimeMatches(
-      runtime
-        .filter(
-          (request) =>
-            (candidate.method === "UNKNOWN" || candidate.method === request.method) &&
-            runtimeOriginMatches(candidate, request.origin),
-        )
-        .map((request) => ({
-          method: request.method,
-          path: request.path,
-          sourceLocator: "legacy-runtime-network",
-          resolution: "runtime" as const,
-          runtimeEvidenceKey: runtimeRequestIdentity(request),
-        })),
+      (explicitLinks.length > 0 ? explicitLinks : matchingRuntime).map((request) => ({
+        method: request.method,
+        path: request.path,
+        sourceLocator: "legacy-runtime-network",
+        resolution: "runtime" as const,
+        runtimeEvidenceKey: runtimeRequestIdentity(request),
+      })),
     );
     return runtimeMatches.length === 1 ? runtimeMatches[0] : undefined;
   }

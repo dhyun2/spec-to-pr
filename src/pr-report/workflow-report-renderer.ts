@@ -157,6 +157,9 @@ export function renderReadyWorkflowReport(input: ReadyWorkflowReportInput): stri
 }
 
 export function renderPrReportV2Markdown(report: PrReportV2): string {
+  if (report.template !== undefined) {
+    return renderReviewerFirstPrBody(report);
+  }
   const apiExcluded = report.api.operations.filter((operation) =>
     /out-of-scope|excluded/i.test(operation.status),
   ).length;
@@ -450,6 +453,324 @@ export function renderPrReportV2Markdown(report: PrReportV2): string {
 }
 
 const VISUAL_PREVIEW_SLOT = "<!-- spec-to-pr:visual-evidence:slot -->";
+
+/**
+ * The 1.0 PR body is deliberately small: it is a review surface, not a Run
+ * export. Durable JSON artifacts retain provenance, logs, digests, and other
+ * machine-facing detail without making every reviewer parse them.
+ */
+function renderReviewerFirstPrBody(report: PrReportV2): string {
+  const template = report.template ?? templateForMode(report.mode);
+  const gaps = reviewerFacingGaps(report);
+  const changedFilePreview = report.changedFiles.slice(0, 8).map(markdownInline);
+  const omittedChangedFileCount = report.changedFiles.length - changedFilePreview.length;
+  const visualRows = report.visual.results.map((result) => {
+    const score = `${(result.metrics.reviewMatchRatio * 100).toFixed(2)}%`;
+    return `| ${markdownTableCell(result.name)} | ${markdownTableCell(`${result.route} · ${visualStateName(result.state)}`)} | ${koreanBaselineKind(result.baselineKind)} | ${score} | ${koreanOperationStatus(result.status)} |`;
+  });
+  const reviewRows: Array<[string, string, string]> = [
+    [
+      "기능 리뷰",
+      reportSectionStatus(report, "functional-review", true),
+      reviewVerdict(report, "functional-review"),
+    ],
+    [
+      "디자인·접근성 리뷰",
+      reportSectionStatus(report, "design-review", report.visual.applicable),
+      reviewVerdict(report, "design-review"),
+    ],
+  ];
+  const feature = asRecord(report.featureEvidence);
+  const featureVideo =
+    typeof feature?.["videoPath"] === "string" ? feature["videoPath"] : undefined;
+  const featureResult =
+    typeof feature?.["resultPath"] === "string" ? feature["resultPath"] : undefined;
+  const showApi =
+    report.api.applicable &&
+    (report.api.operations.some(
+      (operation) =>
+        operation.status !== "exercised" && operation.status !== "intentionally-out-of-scope",
+    ) ||
+      report.api.gaps.length > 0);
+  const apiGapOperations = report.api.operations.filter(
+    (operation) =>
+      operation.status !== "exercised" && operation.status !== "intentionally-out-of-scope",
+  );
+  const showLegacy = report.legacy.applicable && report.legacy.coverage.length > 0;
+  const legacySources = report.sources
+    .filter((source) => source.kind === "legacy")
+    .map((source) => source.resolvedLocator ?? source.locator);
+  const figmaSources = report.sources
+    .filter((source) => source.kind === "figma")
+    .map((source) => source.resolvedLocator ?? source.locator);
+  const lines = [
+    `# ${templateTitle(template)}`,
+    "",
+    `**${report.decision === "ready" ? "Draft review" : "Draft · merge blocked"}**`,
+    "",
+    ...(gaps.length === 0
+      ? []
+      : [
+          "## 먼저 확인할 Gap",
+          "",
+          "| 상태 | Gap | 영향 | 리뷰어 결정 |",
+          "| --- | --- | --- | --- |",
+          ...gaps.map(
+            (gap) =>
+              `| ${koreanGapStatus(gap.status)} | ${markdownTableCell(gap.title)} | ${markdownTableCell(gap.impact)} | ${markdownTableCell(gap.reviewerDecision)} |`,
+          ),
+          "",
+        ]),
+    "## 변경 내용",
+    "",
+    ...(report.summary.bullets.length > 0
+      ? report.summary.bullets.map((bullet) => `- ${markdownBullet(bullet)}`)
+      : ["- 구현 범위와 증빙을 준비했습니다."]),
+    ...(changedFilePreview.length === 0
+      ? []
+      : [
+          "",
+          "주요 변경 모듈: " +
+            changedFilePreview.join(", ") +
+            (omittedChangedFileCount > 0 ? ` 외 ${omittedChangedFileCount}개` : ""),
+        ]),
+    "",
+    ...(showLegacy
+      ? [
+          "## 레거시 이관 범위",
+          "",
+          "| 상태 | 요구사항 | 대상 파일 |",
+          "| --- | --- | --- |",
+          ...report.legacy.coverage.map(
+            (coverage) =>
+              `| ${koreanOperationStatus(coverage.status)} | ${markdownTableCell(coverage.requirementIds.join(", "))} | ${markdownTableCell(coverage.targetFiles.join(", ") || "—")} |`,
+          ),
+          "",
+        ]
+      : []),
+    ...(template === "legacy-migration"
+      ? [
+          "## 원본 → 대상",
+          "",
+          "| 원본 | 대상 | 이관 상태 |",
+          "| --- | --- | --- |",
+          ...(report.legacy.coverage.length === 0
+            ? ["| 원본 범위 미확정 | — | Gap 확인 필요 |"]
+            : report.legacy.coverage.map(
+                (coverage) =>
+                  `| ${markdownTableCell(legacySources.join(", ") || coverage.featureKey)} | ${markdownTableCell(coverage.targetFiles.join(", ") || "—")} | ${koreanOperationStatus(coverage.status)} |`,
+              )),
+          "",
+        ]
+      : []),
+    ...(template === "brief-delivery"
+      ? [
+          "## 요구사항 충족",
+          "",
+          "| 요구사항 | 구현 파일 | 리뷰 판정 |",
+          "| --- | --- | --- |",
+          ...(report.requirements.length === 0
+            ? ["| 요구사항 추출 없음 | — | 미실행 |"]
+            : report.requirements.map(
+                (requirement) =>
+                  `| ${markdownTableCell(requirement.title)} | ${markdownTableCell(requirement.implementationFiles.join(", ") || "—")} | ${markdownTableCell(requirement.reviewVerdicts.join(", ") || "미실행")} |`,
+              )),
+          ...(report.summary.exclusions.length === 0
+            ? []
+            : [
+                "",
+                "## 제외 범위",
+                "",
+                ...report.summary.exclusions.map((exclusion) => `- ${markdownBullet(exclusion)}`),
+              ]),
+          "",
+        ]
+      : []),
+    ...(template === "feature-flow"
+      ? [
+          "## 변경 전후 동작",
+          "",
+          "| 구분 | 확인 내용 |",
+          "| --- | --- |",
+          `| 변경 후 | ${markdownTableCell(report.implementationNotes.join(" ") || report.summary.bullets.join(" "))} |`,
+          `| 변경 전 | ${markdownTableCell(legacySources.join(", ") || "명시된 기준 화면·요구사항을 비교 기준으로 사용")} |`,
+          "",
+          "## 회귀 검증",
+          "",
+          `- 기능 리뷰: ${reviewVerdict(report, "functional-review")}`,
+          `- 사용자 흐름 테스트: ${featureResult === undefined ? "미실행" : markdownInline(featureResult)}`,
+          "",
+        ]
+      : []),
+    ...(template === "figma-ui"
+      ? [
+          "## Figma 상태 매핑",
+          "",
+          "| Figma 기준 | 구현 경로 · 상태 | 상태별 일치율 | 결과 |",
+          "| --- | --- | ---: | --- |",
+          ...(report.visual.results.length === 0
+            ? [
+                "| " +
+                  markdownTableCell(figmaSources.join(", ") || "Figma 기준 미확인") +
+                  " | — | — | 미실행 |",
+              ]
+            : report.visual.results.map(
+                (result) =>
+                  `| ${markdownTableCell(figmaSources.join(", ") || result.name)} | ${markdownTableCell(`${result.route} · ${visualStateName(result.state)}`)} | ${(result.metrics.reviewMatchRatio * 100).toFixed(2)}% | ${koreanOperationStatus(result.status)} |`,
+              )),
+          "",
+          "## 디자인·접근성 검증",
+          "",
+          `- ${reviewVerdict(report, "design-review")}`,
+          "",
+        ]
+      : []),
+    ...(report.visual.applicable
+      ? [
+          "## 화면 비교",
+          "",
+          "| 화면 | 경로 · 상태 | 기준 출처 | 일치율 | 결과 |",
+          "| --- | --- | --- | ---: | --- |",
+          ...(visualRows.length === 0 ? ["| 비교 결과 없음 | — | — | — | 미실행 |"] : visualRows),
+          "",
+          VISUAL_PREVIEW_SLOT,
+          "",
+        ]
+      : []),
+    ...(template === "feature-flow"
+      ? [
+          "## 사용자 흐름 영상",
+          "",
+          "| 실행 상태 | 영상 | 테스트 결과 |",
+          "| --- | --- | --- |",
+          `| ${featureVideo === undefined ? "미실행" : "실행됨"} | ${markdownTableCell(featureVideo ?? "—")} | ${markdownTableCell(featureResult ?? "—")} |`,
+          "",
+        ]
+      : []),
+    "## 검증",
+    "",
+    "| 검증 | 실행 상태 | 판정/핵심 결과 |",
+    "| --- | --- | --- |",
+    ...(report.visual.applicable
+      ? [
+          `| 화면 비교 | ${koreanSectionStatus(reportSectionStatus(report, "visual", true))} | ${visualSummary(report)} |`,
+        ]
+      : []),
+    ...reviewRows.map(
+      ([label, execution, verdict]) =>
+        `| ${label} | ${koreanSectionStatus(execution)} | ${markdownTableCell(verdict)} |`,
+    ),
+    ...(report.performance.applicable
+      ? [
+          `| 성능 | ${koreanSectionStatus(reportSectionStatus(report, "performance", true))} | ${report.performance.evidence === undefined ? "미실행" : "측정 완료"} |`,
+        ]
+      : []),
+    ...(showApi
+      ? [
+          `| API | ${koreanSectionStatus(reportSectionStatus(report, "api", true))} | ${apiSummary(report)} |`,
+        ]
+      : []),
+    "",
+    ...(showApi
+      ? [
+          "## API Gap",
+          "",
+          "| API | 상태 | 메모 |",
+          "| --- | --- | --- |",
+          ...apiGapOperations.map(
+            (operation) =>
+              `| ${markdownTableCell(operation.operationKey)} | ${koreanOperationStatus(operation.status)} | ${markdownTableCell(operation.notes ?? "—")} |`,
+          ),
+          ...report.api.gaps.map((gap) => `| — | 미해결 | ${markdownTableCell(gap)} |`),
+          "",
+        ]
+      : []),
+  ];
+
+  return redactSecretShapes(lines.join("\n"));
+}
+
+type ReviewerFacingGap = {
+  category: string;
+  status: string;
+  title: string;
+  impact: string;
+  reviewerDecision: string;
+};
+
+function reviewerFacingGaps(report: PrReportV2): ReviewerFacingGap[] {
+  const details = report.gapDetails
+    .filter((gap) => gap.status !== "resolved")
+    .map((gap) => ({
+      category: gap.category,
+      status: gap.status,
+      title: gap.title,
+      impact: gap.impact,
+      reviewerDecision: gap.reviewerDecision ?? "영향과 다음 조치를 확인해 주세요.",
+    }));
+  const detailedTitles = new Set(details.map((gap) => gap.title));
+  const derived = [
+    ...report.gaps,
+    ...report.blockers,
+    ...report.unrunValidations.map((validation) => `${validation}: 실행되지 않았습니다.`),
+  ]
+    .filter((title) => !detailedTitles.has(title))
+    .map((title) => ({
+      category: "workflow",
+      status: "open",
+      title,
+      impact: "검증 또는 동작 범위가 아직 확정되지 않았습니다.",
+      reviewerDecision: "병합 전 해결 또는 위험 수용 여부를 결정해 주세요.",
+    }));
+  return [...details, ...derived];
+}
+
+function templateForMode(mode: PrReportV2["mode"]): NonNullable<PrReportV2["template"]> {
+  if (mode === "legacy") return "legacy-migration";
+  if (mode === "brief") return "brief-delivery";
+  if (mode === "feature") return "feature-flow";
+  return "figma-ui";
+}
+
+function templateTitle(template: NonNullable<PrReportV2["template"]>): string {
+  const titles: Record<NonNullable<PrReportV2["template"]>, string> = {
+    "legacy-migration": "레거시 이관",
+    "brief-delivery": "Brief 전달",
+    "feature-flow": "기능 개발",
+    "figma-ui": "Figma UI 구현",
+  };
+  return titles[template];
+}
+
+function koreanGapStatus(status: string): string {
+  const labels: Record<string, string> = {
+    open: "미해결",
+    assumed: "가정",
+    waived: "면제",
+    resolved: "해결",
+  };
+  return labels[status] ?? status;
+}
+
+function koreanBaselineKind(kind: "figma" | "legacy-screenshot"): string {
+  return kind === "figma" ? "Figma" : "레거시 캡처";
+}
+
+function visualSummary(report: PrReportV2): string {
+  if (report.visual.status === "not-run") return "비교를 실행하지 못했습니다.";
+  if (report.visual.status === "blocked") return "비교가 차단되었습니다.";
+  const passed = report.visual.results.filter((result) => result.status === "passed").length;
+  return `${passed}/${report.visual.results.length} 화면 통과`;
+}
+
+function apiSummary(report: PrReportV2): string {
+  const unresolved =
+    report.api.operations.filter((operation) => operation.status === "gap").length +
+    report.api.gaps.length;
+  return unresolved === 0
+    ? `${report.api.operations.length}개 항목 확인`
+    : `${report.api.operations.length}개 중 ${unresolved}개 Gap`;
+}
 
 function koreanMode(mode: PrReportV2["mode"]): string {
   const labels: Record<PrReportV2["mode"], string> = {

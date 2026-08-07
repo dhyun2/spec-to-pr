@@ -218,6 +218,61 @@ describe("legacy API evidence resolver", () => {
     expect(result.unresolved).toEqual([first, second]);
   });
 
+  it("uses an explicit runtime callSiteKey to resolve competing dynamic calls", () => {
+    const first = {
+      ...candidate({
+        method: "UNKNOWN",
+        pathTemplate: undefined,
+        operationKey: "UNKNOWN path:unknown:first",
+        originRef: undefined,
+      }),
+      candidateKey: "candidate_first",
+      endpointKey: "endpoint_first",
+      callSites: [
+        {
+          ...candidate({ method: "UNKNOWN", pathTemplate: undefined }).callSites[0]!,
+          callSiteKey: "call_first",
+        },
+      ],
+    };
+    const second = {
+      ...candidate({
+        method: "UNKNOWN",
+        pathTemplate: undefined,
+        operationKey: "UNKNOWN path:unknown:second",
+        originRef: undefined,
+      }),
+      candidateKey: "candidate_second",
+      endpointKey: "endpoint_second",
+      callSites: [
+        {
+          ...candidate({ method: "UNKNOWN", pathTemplate: undefined }).callSites[0]!,
+          callSiteKey: "call_second",
+        },
+      ],
+    };
+
+    const result = resolveLegacyApiCandidates({
+      candidates: [first, second],
+      openApiOperations: [],
+      runtimeRequests: [
+        { method: "GET", path: "/voc/types", callSiteKeys: ["call_first"] },
+        { method: "POST", path: "/voc", callSiteKeys: ["call_second"] },
+      ],
+    });
+
+    expect(result.unresolved).toEqual([]);
+    expect(result.operations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          candidateKeys: ["candidate_first"],
+          operationKey: "GET /voc/types",
+        }),
+        expect.objectContaining({ candidateKeys: ["candidate_second"], operationKey: "POST /voc" }),
+      ]),
+    );
+  });
+
   it("keeps equal method paths separate across gateways and preserves their endpoint identity", () => {
     const firstOrigin = {
       kind: "environment" as const,

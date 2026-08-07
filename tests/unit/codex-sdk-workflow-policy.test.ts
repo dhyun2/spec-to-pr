@@ -421,14 +421,12 @@ describe("Codex SDK workflow policy", () => {
     expect(legacy).toContain('mode: "legacy"');
     expect(legacy).toContain('legacyProjectRoot: "/tmp/legacy-project"');
     expect(legacy).toContain('legacyNetworkEvidencePath: "evidence/legacy.har"');
-    expect(legacy).toContain("running legacy screen");
-    expect(legacy).toContain("legacyInventory");
-    expect(legacy).toContain("legacyCoverage");
-    expect(legacy).toContain("immutable feature boundary");
-    expect(legacy).toContain("not a dependency visibility boundary");
-    expect(legacy).toContain("directly referenced dependency evidence");
-    expect(legacy).not.toContain("complete source boundary");
-    expect(legacy).toContain("report an in-bound scope mismatch");
+    expect(legacy).toContain("progressive migration");
+    expect(legacy).toContain("read-only legacyProjectRoot");
+    expect(legacy).toContain("visual comparison");
+    expect(legacy).toContain("functional and design review");
+    expect(legacy).toContain("Gap records");
+    expect(legacy).toContain("OpenSpec is optional");
     expect(legacy).toContain('- Legacy project: "/tmp/legacy-project"');
   });
 

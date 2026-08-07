@@ -562,7 +562,9 @@ function computeRunStatus(run: RunManifest, changedStage: StageState): RunManife
     return "running";
   }
 
-  if (stages.every((stage) => ["passed", "skipped", "waived"].includes(stage.status))) {
+  // `waived` records risk acceptance, not successful evidence. It must never
+  // complete a Run as though the stage had passed.
+  if (stages.every((stage) => ["passed", "skipped"].includes(stage.status))) {
     return "completed";
   }
 

@@ -14,7 +14,7 @@ import NextStep from "@site/src/components/guide/NextStep";
 Figma를 기준으로 실제 API 없이 고정된 모의 데이터로 화면을 구현할 때 사용합니다. 연결된 호스트에서 노드와 기준 PNG를 읽어 기존 디자인 시스템에 연결하고, 결과 화면을 수치로 비교한 뒤 **초안 PR**을 만듭니다.
 
 :::tip[입력 / 결과]
-**입력:** 저장소 + 유효한 Figma URL · **결과:** 모의 데이터 기반 UI, Figma 일치율과 차이·겹침 이미지, 독립 검토, 15개 섹션 초안 PR
+**입력:** 저장소 + 유효한 Figma URL · **결과:** 모의 데이터 기반 UI, 상태별 Figma 일치율과 차이·겹침 이미지, 디자인·접근성 검증이 있는 Figma UI 초안 PR
 :::
 
 <RunPipeline locale="ko" mode="figma" />
@@ -70,8 +70,8 @@ publication: draft
 2. **Figma 계약 확정:** 연결된 호스트에서 모든 URL의 노드 ID, 논리 프레임 크기, export bitmap 크기/배율, 변수, 컴포넌트, 화면, 글꼴과 자산을 읽습니다. 썸네일 크기를 브라우저 viewport로 사용하지 않습니다.
 3. **디자인 시스템 연결:** 새 마크업 전에 각 Figma 컴포넌트를 설치된 사내 컴포넌트 export, 해시로 고정한 canonical asset, 또는 명시적 예외에 정확히 한 번 대응시킵니다. `Logo/Normal/nxplus_park` 같은 이름을 CSS로 추측하지 않습니다.
 4. **구현:** `{deterministic:true, fixtures:[{id,path,sha256}]}` 형태의 엄격한 모의 데이터 매니페스트와 별도 JSON fixture를 제출합니다. 모든 화면 상태가 이름 있는 fixture ID와 해시에 연결되어야 합니다.
-5. **화면 비교 및 보정:** 브라우저는 fixture·`document.fonts.ready`·자산 로드를 기다리고 현재 패킷/HEAD, 논리 크기, DPR, 자료 제공자와 실행 환경, 글꼴·자산·fixture 해시, PNG 해시를 담은 receipt를 만듭니다. 런타임이 sRGB 정규화와 고정 92% 비교를 소유합니다. 최초 비교와 첫 두 유효 실패의 `implementation-repair`는 사용자에게 묻지 않고 코드를 수정·커밋한 새 패킷으로 자동 진행합니다. 잘못된 receipt나 geometry는 시도 횟수를 소비하지 않습니다. 세 번째 유효 비교도 실패하면 실행은 `blocked`가 되고 디자인 검토는 실행하지 않습니다.
-6. **검토·보고서·발행:** 통과한 실행은 두 독립 검토와 `pr-report-v2.1` 15개 섹션을 만든 뒤, 시작 시 고정한 source/target/remote가 그대로일 때만 초안 PR을 발행합니다. 세 번째 유효 비교에서 막힌 실행도 발행 조건을 만족하면 같은 템플릿에 동일 크기의 기준/결과와 별도 차이·겹침 이미지를 포함한 진단 초안을 발행합니다.
+5. **화면 비교 및 보정:** 브라우저는 fixture·`document.fonts.ready`·자산 로드를 기다리고 현재 패킷/HEAD, 논리 크기, DPR, 자료 제공자와 실행 환경, 글꼴·자산·fixture 해시, PNG 해시를 담은 receipt를 만듭니다. 런타임이 sRGB 정규화와 고정 92% 비교를 소유합니다. 최초 비교와 첫 두 유효 실패의 `implementation-repair`는 사용자에게 묻지 않고 자동 진행합니다. 잘못된 receipt나 geometry는 시도 횟수를 소비하지 않습니다. 세 번째 유효 비교도 실패하면 자동 보정만 멈추고 동일 크기 기준/결과와 차이·겹침 이미지를 **화면 비교 Gap**으로 남깁니다.
+6. **검토·보고서·발행:** Figma UI 본문에 Figma 상태 매핑, 상태별 일치율, 디자인·접근성 검증과 상단 Gap을 만든 뒤, 시작 시 고정한 source/target/remote가 그대로일 때 초안 PR을 발행합니다. 독립 디자인 검토는 가능한 증거를 별도로 판정합니다.
 
 각 보고서 섹션은 `complete`, `not-run`, `blocked`, `not-applicable` 중 하나입니다. 현재 검토 묶음에 속하지 않는 이전 검증 자료는 PR에서 제외합니다. 초안 PR에는 Figma 기준·결과·차이 이미지와 일치율을 제공합니다. GitHub용 이미지는 실행마다 새 브랜치를 만들지 않고 관리 브랜치 `spec-to-pr/evidence`의 변경되지 않는 경로에 올린 뒤 업로드 커밋 SHA로 고정합니다.
 
@@ -85,16 +85,16 @@ publication: draft
 
 ## 단계와 작업 담당
 
-| 단계                | 이 방식에서 수행하는 작업                                                                    |
-| ------------------- | -------------------------------------------------------------------------------------------- |
-| `intake`            | Figma 파일·노드, UI 상태·반응형 범위, 발행 방식, 예상 작업량을 고정합니다.                   |
-| `contracts`         | 연결된 호스트에서 실제 노드·변수·자산·화면을 읽고 엄격한 `figma-bundle`을 제출합니다.        |
-| `implementation`    | 한 명의 구현 담당자가 기존 디자인 시스템에 연결하고 고정된 모의 데이터 기반 UI를 구현합니다. |
-| `functional-review` | 읽기 전용 `functional-reviewer`가 상태 동작과 관련 프로젝트 검사를 판정합니다.               |
-| `design-review`     | 읽기 전용 `design-reviewer`가 Figma 대비 화면·상호작용·반응형 상태·접근성을 판정합니다.      |
-| `report`            | `pr-report-v2.1` 15개 섹션에 출처, 화면 일치율·자료, 검토, 차이, 차단 사유를 기록합니다.     |
-| `publish`           | 검증을 통과하면 검토 묶음에 연결된 본문과 화면 자료가 있는 초안을 만듭니다.                  |
-| `archive`           | 발행한 초안이 병합되었다는 근거가 있고 사용자가 별도로 요청한 경우에만 실행합니다.           |
+| 단계                | 이 방식에서 수행하는 작업                                                                      |
+| ------------------- | ---------------------------------------------------------------------------------------------- |
+| `intake`            | Figma 파일·노드, UI 상태·반응형 범위, 발행 방식, 예상 작업량을 고정합니다.                     |
+| `contracts`         | 연결된 호스트에서 실제 노드·변수·자산·화면을 읽고 엄격한 `figma-bundle`을 제출합니다.          |
+| `implementation`    | 한 명의 구현 담당자가 기존 디자인 시스템에 연결하고 고정된 모의 데이터 기반 UI를 구현합니다.   |
+| `functional-review` | 읽기 전용 `functional-reviewer`가 상태 동작과 관련 프로젝트 검사를 판정합니다.                 |
+| `design-review`     | 읽기 전용 `design-reviewer`가 Figma 대비 화면·상호작용·반응형 상태·접근성을 판정합니다.        |
+| `report`            | Figma 상태 매핑, 상태별 일치율, 디자인·접근성 검증과 상단 Gap을 리뷰어 우선 본문으로 만듭니다. |
+| `publish`           | `publication: draft`이면 Gap·실패·미실행 증빙이 있어도 검토 묶음에 연결된 초안을 만듭니다.     |
+| `archive`           | 발행한 초안이 병합되었다는 근거가 있고 사용자가 별도로 요청한 경우에만 실행합니다.             |
 
 작업량이 XS/S이면 별도 조사 담당자를 두지 않고, M이면 최대 1명, L/XL이면 최대 2명의 읽기 전용 조사 담당자를 둘 수 있습니다. 조사 담당자는 큰 Figma 자료와 저장소의 대응 관계처럼 서로 겹치지 않는 항목만 탐색합니다. 구현은 한 명의 담당자만 편집하며 중첩 위임과 여러 구현 담당자의 동시 편집은 허용하지 않습니다. UI의 두 검토는 작업량과 관계없이 구현이 끝난 직후 동시에 진행하고 결과를 같은 packet inbox에서 함께 적용합니다.
 
@@ -112,7 +112,7 @@ publication: draft
 
 ### 정상 발행, 차단 진단, 재개
 
-정상 흐름에서는 `workflow_publish intent: ready`로 검증 자료가 포함된 초안을 만듭니다. 정상 발행과 차단 진단은 같은 `pr-report-v2.1` 15개 섹션을 사용합니다. Figma나 브라우저 검증 자료가 없으면 `BROWSER_NOT_RUN` 같은 구조화된 `blockerDetails`, 실행하지 못한 검증, 정확한 해결 방법을 남깁니다. 발행 사전 조건을 충족할 때만 `workflow_publish intent: blocked-diagnostic`으로 진단용 초안을 만들며 상태는 계속 `status: blocked`입니다. 조건을 충족하지 못하거나 `PUBLISH_NO_DELTA`가 발생하면 빈 커밋이나 대체 이슈를 만들지 않고 **로컬 차단 보고서**를 반환합니다.
+`workflow_publish`는 Figma나 브라우저 검증 자료가 없어도 코드 변경과 발행 사전 조건이 있으면 Draft를 만들 수 있습니다. 이 경우 `BROWSER_NOT_RUN` 같은 Gap의 영향·리뷰어 결정을 상단에 표시하고 verified나 merge-ready로 표시하지 않습니다. 조건을 충족하지 못하거나 `PUBLISH_NO_DELTA`이면 빈 커밋이나 대체 이슈를 만들지 않고 **로컬 보고서**를 반환합니다.
 
 명시적으로 초안을 요청한 실행이 `diagnostic-publication-uncertain`을 반환하면 자동으로 다시 발행하지 않습니다. GitHub/GitLab에서 소스와 대상 브랜치가 같은 기존 초안을 확인해 사용자에게 보여 주고, 명시적인 승인을 받은 경우에만 같은 `workflow_publish`를 `recoverUncertain: true`로 호출합니다.
 

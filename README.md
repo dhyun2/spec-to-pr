@@ -47,9 +47,9 @@ Start every request with the target repository:
 
 Then copy the prompt from the guide for your use case. The guide explains required inputs, the execution pipeline, validation evidence, blockers, and the expected draft PR.
 
-## Current release
+## Current release (1.0.0)
 
-SpecToPR exposes 7 MCP tools, 8 durable stages, 8 skills, and 2 independent reviewers. The four strict UI modes are `brief`, `legacy`, `feature`, and `figma`.
+SpecToPR exposes 7 MCP tools, 8 durable stages, 8 skills, and 2 independent reviewers. The four reviewer-facing Draft templates are `legacy-migration`, `brief-delivery`, `feature-flow`, and `figma-ui`.
 
 Composable intake fields include `briefPath`, `figmaUrl`, `docsPaths`, `openApiPaths`, `openApiUrls`, `guidancePaths`, and `skillHints`. For example:
 
@@ -64,11 +64,15 @@ guidancePaths: []
 skillHints: []
 ```
 
-Legacy analysis stays inside the selected feature boundary and follows only direct imports and configuration references needed to understand it. Concrete HTTP calls are authoritative; constructors and local facades are not recorded as separate API operations. URL settings referenced from `.env*` are sanitized by removing user info, query, and fragments, then their variable names, origins, and HTTP-client callsites remain in `legacyInventory`. `collect-legacy-network-evidence` is requested only when static analysis and supplied OpenAPI cannot uniquely determine a method and path; submitting a scoped HAR then resumes the same Run.
+Legacy analysis stays inside the exact requested feature boundary and follows direct imports and configuration references needed to understand it. An explicit external `legacyProjectRoot` is read-only. API, auth, certificate, or dynamic-request uncertainty is recorded as a Gap: confirmed UI, route, state, type, and read behavior can continue, while an unconfirmed write interaction is never invented.
 
-Legacy review material is grouped by feature under `.spec-to-pr/<feature>/`: contracts, evidence, side-by-side legacy/current visuals, the reviewer-facing report, and an integrity manifest. The same change also records its proposal, delta spec, and task list under `openspec/changes/`. The manifest binds the current Run and revision to the legacy source digest, requirements, and OpenSpec file digests, so reviewers never need to interpret internal feature keys.
+Every UI scope attempts a runtime-owned visual comparison. A failed or unavailable comparison is visible as a merge-blocking Gap, but it does not hide the Draft PR or erase completed work. `feature-flow` additionally requires a review-packet-bound user-flow video. OpenSpec is optional post-merge integration, not an implementation or publication prerequisite.
 
-Status includes `requiredValidations`, `resumeContext`, and `blockerDetails`. Reports use `pr-report-v2.1`; `visualTargets` and `compare-visuals` measure visual similarity at runtime with a fixed 92% threshold. The initial comparison and at most two repairs run automatically; invalid acquisition consumes no attempt, while a third valid failure leaves the Run blocked. When publication preconditions allow, the blocked draft keeps the same report template with equal-size baseline/current images plus separately inspectable diff and overlay. Focused design-system, interaction, and accessibility assertions remain independent gates. If a GitLab image upload fails temporarily, verified legacy/current PNGs may use raw URLs pinned to the exact review commit. This fallback is never used for a digest mismatch, a changed worktree, or generated diffs, overlays, or video. A blocked Run can produce a local diagnostic report with `intent: blocked-diagnostic`, then update the same draft PR after recovery. Common local blockers include `PUBLISH_NO_DELTA` and `BROWSER_NOT_RUN`.
+The PR body is deliberately concise: status, any top-level Gaps with impact and a reviewer decision, what changed, visual-comparison results, Feature video when applicable, and validation verdicts. It excludes Run IDs, raw logs, internal schema/digest dumps, and empty checklists.
+
+Model routing is role-based and host-local: the core uses `fast`, `build`, and `expert`; Codex maps them to Luna/Terra/Sol and Claude maps them to Haiku/Sonnet/Opus. The default is `adaptive-verified`. `pinned` keeps one user-selected model through every stage and independent review, while `custom` supplies all three role models. A Run never auto-mixes hosts, and an unavailable higher role becomes a visible quality Gap rather than a weaker hidden verification.
+
+If GitHub or GitLab authentication, TLS, or host access prevents publication, SpecToPR keeps a local diagnostic report and records a publication Gap; after recovery it updates the same draft PR rather than creating a replacement Run.
 
 ## Documentation
 

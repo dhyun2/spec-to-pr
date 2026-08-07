@@ -14,7 +14,7 @@ Immediately after intake, status reports an `XS`–`XL` workload, estimated toke
 Use this case for full delivery from a brief, Figma, and API documentation. It implements API and UI, measures the result against Figma, reports API usage/gaps and Web Vitals, and publishes a draft PR. Feature-targeted E2E and video are excluded.
 
 :::tip[Input / result]
-**Input:** target repository + PDF/Markdown brief + Figma URL + OpenAPI path/URL · **Result:** API/UI implementation, measured visual comparison, API gaps, Web Vitals, and a 15-section draft PR
+**Input:** target repository + PDF/Markdown brief + Figma URL + OpenAPI path/URL · **Result:** requirement coverage, measured visual comparison, exclusions, API Gaps, and a Brief draft PR
 :::
 
 <RunPipeline locale="en" mode="brief" />
@@ -75,9 +75,9 @@ Create API contract evidence first, then implement the UI in the same implementa
 1. **Intake:** Normalize paths and publication intent; report workload, token range, and confidence.
 2. **Contracts:** Freeze raw-digest `sourceProvenance`, acceptance criteria, API operations, and Figma `visualTargets`.
 3. **Implementation:** Produce API types/schema/wrapper/mock/contract tests first, connect UI in the same `implementationContextId`, and map operation-complete `apiCoverage`.
-4. **Visual / performance:** Every actual capture repeats the target route/state/viewport/device scale/fixture and records provider, ISO capture time, PNG path, and `sha256:` digest. Runtime rejects target drift or digest mismatch without consuming an attempt before `compare-visuals` computes exact/review ratios, diff, and overlay. It enforces the fixed 92%, no more than 20% justified masking, and automatically runs the initial comparison plus at most two repairs. A third valid failure remains blocked with failed media; focused UI assertions remain independent. Record lab metrics and field Web Vitals or an unavailable reason.
+4. **Visual / performance:** Every actual capture repeats the target route/state/viewport/device scale/fixture and records provider, ISO capture time, PNG path, and `sha256:` digest. Runtime rejects target drift or digest mismatch without consuming an attempt before `compare-visuals` computes exact/review ratios, diff, and overlay. It enforces the fixed 92%, no more than 20% justified masking, and automatically runs the initial comparison plus at most two repairs. A third valid failure stops automatic repair and preserves failed media as a visual-comparison Gap; focused UI assertions remain independent. Record lab metrics and field Web Vitals or an unavailable reason.
 5. **Independent reviews:** `functional-reviewer` and `design-reviewer` judge the same immutable packet independently.
-6. **Report / publish:** Create packet-bound `pr-report-v2.1` JSON and Markdown with 15 sections, then publish the draft.
+6. **Report / publish:** Create the Brief delivery body: requirements coverage, exclusions, visual comparison, and a top-of-body Gap section, then publish the draft.
 
 Every report section is `complete`, `not-run`, `blocked`, or `not-applicable`; stale paths outside the current review packet are omitted. GitHub images, diffs, and overlays use immutable paths on one managed `spec-to-pr/evidence` branch and URLs pinned to the upload commit SHA, not a branch per Run.
 
@@ -90,7 +90,7 @@ Every report section is `complete`, `not-run`, `blocked`, or `not-applicable`; s
 | `implementation`    | One implementation writer works in one `implementationContextId`; API-ready precedes API-backed UI.      |
 | `functional-review` | The read-only `functional-reviewer` judges contracts, diff, and focused checks from an immutable packet. |
 | `design-review`     | The read-only `design-reviewer` applies only to UI scope; otherwise it is not applicable.                |
-| `report`            | Build 15-section `pr-report-v2.1` source/API/visual/Web Vitals/review/risk/rollback reporting.           |
+| `report`            | Build the reviewer-first requirements coverage, exclusions, visual comparison, and Gap body.             |
 | `publish`           | Create/update a same-source/target draft only when `publication: draft` is ready.                        |
 | `archive`           | Run only after merge, authoritative evidence, and a separate user request.                               |
 
@@ -103,11 +103,11 @@ Agent policy allows zero read-only scout workers for XS/S, at most one for M, an
 - **workflow MCP:** required for Run/status/submission/publication. **Figma host:** required only when `figmaUrl` is supplied. **Playwright Test/CLI:** the assertion/structured-result oracle only when brief `requiredValidations` include browser acceptance; this profile does not inherit feature E2E or video.
 - **Browser MCP:** optional interactive reproduction/inspection on capable hosts. **Chrome DevTools MCP:** conditional for console, network, performance, memory, or live-DOM diagnosis; screenshots/traces never replace assertions.
 
-Ready and blocked drafts use the same 15-section `pr-report-v2.1`. A blocked draft exposes the stopped stage, completed work, unrun validations, and exact unblock action.
+The machine report preserves evidence, while the Brief delivery Draft shows requirements coverage, exclusions, visual comparison, and the top Gap section. Raw logs, Run IDs, and empty checklists are omitted from the default body.
 
 ### Ready, blocked diagnostic, and resume
 
-The normal path uses `workflow_publish intent: ready` for an evidence-backed draft. A blocker records typed `blockerDetails` and the exact unblock action. Only a valid publication preflight may use `workflow_publish intent: blocked-diagnostic`; that diagnostic draft remains `status: blocked` and is not a passed report/publish verdict. If the tree is not clean, the branch is the target, authentication/remote is unsupported, there is no committed delta or one-commit lead, or the code is `PUBLISH_NO_DELTA`, return a **local blocked report** without an empty commit or issue fallback.
+`workflow_publish` may create a Draft when code changes and publication preconditions exist, even with API Gaps, failed visual comparison, or unrun review evidence. The Draft puts impact and reviewer decision first and is never labelled verified or merge-ready on that evidence. If the tree, branch, authentication/remote, or committed delta precondition fails, or the code is `PUBLISH_NO_DELTA`, return a **local report** without an empty commit or issue fallback.
 
 For `diagnostic-publication-uncertain`, never publish automatically. Inspect GitHub/GitLab for a matching draft, show the result to the user, and call the same `workflow_publish` action with `recoverUncertain: true` only after explicit approval.
 

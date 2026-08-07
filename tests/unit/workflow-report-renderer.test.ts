@@ -557,6 +557,76 @@ describe("workflow report renderer", () => {
     expect(translatedStatusesMarkdown).toContain(
       "| 계획 | REQ-SHOP-ROUTING | 아직 이관하지 않았습니다. |",
     );
+
+    const reviewerFirst = PrReportV2Schema.parse({
+      ...ready,
+      template: "legacy-migration",
+      gapDetails: [
+        {
+          id: `gap_${"a".repeat(32)}`,
+          category: "api",
+          severity: "major",
+          status: "open",
+          title: "POST /shops/{id}/favorite contract is unresolved",
+          impact: "The favorite action must not send an invented request body.",
+          reviewerDecision: "Confirm the write contract before merge.",
+        },
+      ],
+    });
+    const reviewerFirstMarkdown = renderPrReportV2Markdown(reviewerFirst);
+    expect(reviewerFirstMarkdown).toContain("# 레거시 이관");
+    expect(reviewerFirstMarkdown).toContain("## 먼저 확인할 Gap");
+    expect(reviewerFirstMarkdown).toContain("Confirm the write contract before merge.");
+    expect(reviewerFirstMarkdown).toContain("## 화면 비교");
+    expect(reviewerFirstMarkdown).toContain("## 원본 → 대상");
+    expect(reviewerFirstMarkdown).toContain("## 검증");
+    expect(reviewerFirstMarkdown).not.toContain("## API Gap");
+    expect(reviewerFirstMarkdown).not.toContain("실행 메타데이터");
+    expect(reviewerFirstMarkdown).not.toContain("run_");
+    expect(reviewerFirstMarkdown).not.toContain("검증 자료 목록");
+
+    const conciseFileMarkdown = renderPrReportV2Markdown(
+      PrReportV2Schema.parse({
+        ...reviewerFirst,
+        changedFiles: Array.from({ length: 10 }, (_, index) => `src/module-${index}.ts`),
+      }),
+    );
+    expect(conciseFileMarkdown).toContain("주요 변경 모듈:");
+    expect(conciseFileMarkdown).toContain("외 2개");
+    expect(conciseFileMarkdown).not.toContain("src/module-9.ts");
+
+    const apiGapMarkdown = renderPrReportV2Markdown(
+      PrReportV2Schema.parse({
+        ...reviewerFirst,
+        api: { ...reviewerFirst.api, gaps: ["POST /shops write payload is unresolved"] },
+      }),
+    );
+    expect(apiGapMarkdown).toContain("## API Gap");
+    expect(apiGapMarkdown).toContain("POST /shops write payload is unresolved");
+    expect(apiGapMarkdown).not.toContain("## API 상태");
+
+    const briefMarkdown = renderPrReportV2Markdown(
+      PrReportV2Schema.parse({
+        ...ready,
+        template: "brief-delivery",
+        summary: { ...ready.summary, exclusions: ["관리자 설정은 이번 범위에서 제외"] },
+      }),
+    );
+    expect(briefMarkdown).toContain("## 요구사항 충족");
+    expect(briefMarkdown).toContain("## 제외 범위");
+
+    const featureMarkdown = renderPrReportV2Markdown(
+      PrReportV2Schema.parse({ ...ready, template: "feature-flow" }),
+    );
+    expect(featureMarkdown).toContain("## 변경 전후 동작");
+    expect(featureMarkdown).toContain("## 회귀 검증");
+    expect(featureMarkdown).toContain("## 사용자 흐름 영상");
+
+    const figmaMarkdown = renderPrReportV2Markdown(
+      PrReportV2Schema.parse({ ...ready, template: "figma-ui" }),
+    );
+    expect(figmaMarkdown).toContain("## Figma 상태 매핑");
+    expect(figmaMarkdown).toContain("## 디자인·접근성 검증");
   });
 
   it("rejects a visual report reference without a canonical packet binding", () => {

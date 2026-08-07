@@ -307,6 +307,35 @@ export const DeliveryProfileSchema = z
       .default([]),
     skillHints: NormalizedSkillHintsSchema.default([]),
     recommendedSkills: NormalizedSkillHintsSchema.default([]),
+    modelRouting: z
+      .object({
+        provider: z.enum(["codex", "claude"]),
+        strategy: z.enum(["adaptive-verified", "pinned", "custom"]),
+        pinnedModel: z.string().trim().min(1).max(200).optional(),
+        customModels: z
+          .object({
+            fast: z.string().trim().min(1).max(200),
+            build: z.string().trim().min(1).max(200),
+            expert: z.string().trim().min(1).max(200),
+          })
+          .strict()
+          .optional(),
+        qualityGaps: z
+          .array(
+            z
+              .object({
+                role: z.enum(["fast", "build", "expert"]),
+                requestedModel: z.string().trim().min(1).max(200),
+                actualModel: z.string().trim().min(1).max(200),
+                reason: z.string().trim().min(1).max(2_000),
+              })
+              .strict(),
+          )
+          .max(10)
+          .default([]),
+      })
+      .strict()
+      .optional(),
     requirements: z
       .object({
         brief: z.boolean(),
@@ -1920,6 +1949,7 @@ const WorkflowActionDeliveryProfileSchema = z
   .object({
     publication: PublicationIntentSchema,
     recommendedSkills: NormalizedSkillHintsSchema.default([]),
+    modelRouting: DeliveryProfileSchema.shape.modelRouting,
   })
   .strict();
 
@@ -1992,11 +2022,25 @@ export const WorkflowDetailStatusSchema = z
           .array(
             z
               .object({
+                candidateKey: z.string(),
                 operationKey: z.string(),
                 originRef: z.string().optional(),
                 origins: z.array(z.string()).max(20).optional(),
                 sourcePaths: z.array(z.string()).max(100),
                 transportRefs: z.array(z.string()).max(100),
+                callSites: z
+                  .array(
+                    z
+                      .object({
+                        callSiteKey: z.string(),
+                        ownerSourcePath: z.string(),
+                        terminalSourcePath: z.string(),
+                        line: z.number().int().positive(),
+                        column: z.number().int().positive(),
+                      })
+                      .strict(),
+                  )
+                  .max(100),
               })
               .strict(),
           )

@@ -37,7 +37,7 @@ Runtime uses the `pngjs`-based bounded decoder to read both images as RGBA and r
 For each compared pixel, sRGB channels move into linear color space, alpha is premultiplied, and normalized Euclidean RGBA distance is calculated. Byte-identical pixels count as exact matches; distance at or below `0.02` counts as a review match. `reviewMatchRatio` must reach the fixed `92%` threshold; exactly 92% passes the numeric gate but cannot waive a focused UI assertion.
 
 :::info[Repair is deliberately bounded]
-Three valid numeric comparisons run automatically: the initial attempt and at most two repairs, without pausing for user approval. Invalid geometry, fixture, or renderer-lineage acquisition consumes no attempt. A third valid failure leaves the Run blocked and skips design review; when publication preconditions allow, the diagnostic draft shows equal-size baseline/current media and separately inspectable `diff.png` and `overlay.png`. Runtime rejects caller-supplied scores.
+Three valid numeric comparisons run automatically: the initial attempt and at most two repairs, without pausing for user approval. Invalid geometry, fixture, or renderer-lineage acquisition consumes no attempt. A third valid failure stops automatic repair and records a visual-comparison Gap with equal-size baseline/current media and separately inspectable `diff.png` and `overlay.png`. Runtime rejects caller-supplied scores; the independent design review records its own verdict from the available evidence, and the Draft cannot be labelled verified or merge-ready.
 :::
 
 ## Defects the aggregate score cannot waive

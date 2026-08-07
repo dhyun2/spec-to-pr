@@ -17,6 +17,11 @@ type ParsedArgs = {
   skills: string[];
   resume?: string;
   model?: string;
+  modelRouting?: "adaptive-verified" | "pinned" | "custom";
+  pinnedModel?: string;
+  fastModel?: string;
+  buildModel?: string;
+  expertModel?: string;
   mode?: SpecToPrCodexRunInput["deliveryMode"];
   changeKind?: SpecToPrCodexRunInput["changeKind"];
   publication?: SpecToPrCodexRunInput["publication"];
@@ -76,6 +81,45 @@ if (args.resume !== undefined) {
 if (args.model !== undefined) {
   input.model = args.model;
 }
+if (
+  args.modelRouting !== undefined ||
+  args.pinnedModel !== undefined ||
+  args.fastModel !== undefined ||
+  args.buildModel !== undefined ||
+  args.expertModel !== undefined
+) {
+  const customValues = [args.fastModel, args.buildModel, args.expertModel];
+  if (
+    customValues.some((value) => value !== undefined) &&
+    customValues.some((value) => value === undefined)
+  ) {
+    throw new Error("--fast-model, --build-model, and --expert-model must be supplied together");
+  }
+  input.modelRouting = {
+    ...(args.modelRouting === undefined
+      ? {
+          strategy:
+            args.pinnedModel !== undefined
+              ? "pinned"
+              : args.fastModel !== undefined
+                ? "custom"
+                : "adaptive-verified",
+        }
+      : { strategy: args.modelRouting }),
+    ...(args.pinnedModel === undefined ? {} : { pinnedModel: args.pinnedModel }),
+    ...(args.fastModel === undefined ||
+    args.buildModel === undefined ||
+    args.expertModel === undefined
+      ? {}
+      : {
+          customModels: {
+            fast: args.fastModel,
+            build: args.buildModel,
+            expert: args.expertModel,
+          },
+        }),
+  };
+}
 if (args.mode !== undefined) {
   input.deliveryMode = args.mode;
 }
@@ -119,6 +163,7 @@ console.log(
       turnCount: result.turnCount,
       outputFormatting: result.outputFormatting,
       usageCalibration: result.usageCalibration,
+      modelRouting: result.modelRouting,
     },
     null,
     2,
@@ -210,6 +255,24 @@ function parseArgs(argv: string[]): ParsedArgs {
       case "--model":
         parsed.model = value;
         break;
+      case "--model-routing":
+        if (!["adaptive-verified", "pinned", "custom"].includes(value)) {
+          throw new Error(`Invalid model routing strategy: ${value}`);
+        }
+        parsed.modelRouting = value as NonNullable<ParsedArgs["modelRouting"]>;
+        break;
+      case "--pinned-model":
+        parsed.pinnedModel = value;
+        break;
+      case "--fast-model":
+        parsed.fastModel = value;
+        break;
+      case "--build-model":
+        parsed.buildModel = value;
+        break;
+      case "--expert-model":
+        parsed.expertModel = value;
+        break;
       case "--max-turns":
         parsed.maxTurns = parsePositiveInteger(value, arg);
         break;
@@ -278,7 +341,12 @@ Options:
   --guidance <path>     Project guidance file path (repeatable)
   --skill <name>        Optional installed-skill hint (repeatable)
   --resume <thread-id>  Resume an existing Codex thread
-  --model <model>       Optional Codex model override
+  --model <model>       Compatibility alias for --model-routing pinned --pinned-model
+  --model-routing <s>   adaptive-verified (default), pinned, or custom
+  --pinned-model <m>    One exact model for every stage and independent review
+  --fast-model <m>      Custom fast-role model (requires all three custom roles)
+  --build-model <m>     Custom build-role model
+  --expert-model <m>    Custom expert/reviewer model
   --max-turns <n>       Maximum workflow boundary turns (default: 12)
   --turn-timeout-seconds <n>
                         Stop and preserve a resumable thread when one turn exceeds n seconds

@@ -16,7 +16,9 @@ export const GapCategorySchema = z.enum([
   "observability",
   "security",
   "architecture",
+  "tooling",
   "legacy-coverage",
+  "user-flow",
 ]);
 
 export const GapSeveritySchema = z.enum(["blocker", "major", "minor", "info"]);
@@ -49,6 +51,10 @@ export const GapSchema = z
     expected: z.string().trim().min(1).max(4_000),
     observed: z.string().trim().min(1).max(4_000),
     impact: z.string().trim().min(1).max(2_000),
+    // The PR renderer keeps this beside the impact so reviewers know the one
+    // decision that is needed. Optional only for persisted pre-1.0 Runs;
+    // newly-created workflow Gaps must supply it at their creation site.
+    reviewerDecision: z.string().trim().min(1).max(2_000).optional(),
     sourceEvidenceIds: z.array(EvidenceIdSchema).default([]),
     owner: AgentRoleSchema.optional(),
     resolutionArtifactIds: z.array(ArtifactIdSchema).default([]),

@@ -14,7 +14,7 @@ export async function executeBudgetedBoundaryTurns(input) {
     assertPositiveTimeout(input.runTimeoutMs, "runTimeoutMs");
     const now = input.now ?? performance.now.bind(performance);
     const startedAtMs = now();
-    let activeRoute = { reasoningEffort: "medium" };
+    let activeRoute = { role: "fast", reasoningEffort: "medium" };
     let thread = input.resumeThreadId === undefined
         ? input.client.startThread(activeRoute)
         : input.client.resumeThread(input.resumeThreadId, activeRoute);
@@ -158,7 +158,9 @@ export async function executeBudgetedBoundaryTurns(input) {
             break;
         }
         const nextRoute = routeForWorkflowStatus(workflowStatus);
-        if (nextRoute.reasoningEffort !== activeRoute.reasoningEffort && thread.id !== null) {
+        if ((nextRoute.reasoningEffort !== activeRoute.reasoningEffort ||
+            nextRoute.role !== activeRoute.role) &&
+            thread.id !== null) {
             thread = input.client.resumeThread(thread.id, nextRoute);
             activeRoute = nextRoute;
         }
@@ -179,8 +181,9 @@ export async function executeBudgetedBoundaryTurns(input) {
         }
         else {
             try {
-                if (activeRoute.reasoningEffort !== "medium" && thread.id !== null) {
-                    activeRoute = { reasoningEffort: "medium" };
+                if ((activeRoute.reasoningEffort !== "medium" || activeRoute.role !== "fast") &&
+                    thread.id !== null) {
+                    activeRoute = { role: "fast", reasoningEffort: "medium" };
                     thread = input.client.resumeThread(thread.id, activeRoute);
                 }
                 const formattedResult = await executeBoundaryTurnWithTimeout({
@@ -346,25 +349,35 @@ function assertPositiveTimeout(timeoutMs, name) {
     }
 }
 function routeForWorkflowStatus(status) {
-    const highReasoningStages = new Set(["implementation", "functional-review", "design-review"]);
-    const highReasoningActions = new Set([
+    const expertStages = new Set(["functional-review", "design-review"]);
+    const expertActions = new Set(["review-functional", "review-design"]);
+    // Keep the established boundary behavior: a route changes only when the
+    // durable stage and its matching external action both authorize the work.
+    // A free-form status label such as "implement" is not a stage transition.
+    const buildStages = new Set(["implementation"]);
+    const buildActions = new Set([
+        "prepare-contracts",
         "implement",
         "implementation-repair",
-        "review-functional",
-        "review-design",
+        "compare-visuals",
     ]);
-    const hasHighReasoningAction = status.nextActions.some((action) => typeof action === "object" &&
+    const actionKinds = status.nextActions.flatMap((action) => typeof action === "object" &&
         action !== null &&
         "kind" in action &&
-        typeof action.kind === "string" &&
-        highReasoningActions.has(action.kind));
-    return {
-        reasoningEffort: status.currentStage !== undefined &&
-            highReasoningStages.has(status.currentStage) &&
-            hasHighReasoningAction
-            ? "high"
-            : "medium",
-    };
+        typeof action.kind === "string"
+        ? [action.kind]
+        : []);
+    const hasExpertAction = actionKinds.some((kind) => expertActions.has(kind));
+    const hasBuildAction = actionKinds.some((kind) => buildActions.has(kind));
+    if (status.currentStage !== undefined &&
+        expertStages.has(status.currentStage) &&
+        hasExpertAction) {
+        return { role: "expert", reasoningEffort: "high" };
+    }
+    if (status.currentStage !== undefined && buildStages.has(status.currentStage) && hasBuildAction) {
+        return { role: "build", reasoningEffort: "high" };
+    }
+    return { role: "fast", reasoningEffort: "medium" };
 }
 function timeoutFinalResponse(input) {
     const reason = input.timeout === "turn-timeout"

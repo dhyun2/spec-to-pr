@@ -59,6 +59,7 @@ export function createLazyServicesProvider(): ServicesProvider {
         publisherService,
         archiveService,
         metrics,
+        hostProvider: process.env.SPEC_TO_PR_HOST === "claude" ? "claude" : "codex",
       }),
       metrics,
     };

@@ -403,7 +403,7 @@ describe("v2 documentation", () => {
       ko: "website/docs/usage",
       en: "website/i18n/en/docusaurus-plugin-content-docs/current/usage",
     };
-    const cases = ["brief", "legacy", "feature", "figma"];
+    const cases = ["brief", "legacy", "feature", "figma"] as const;
     const headingIds = [
       "use-this-case",
       "required-inputs",
@@ -436,7 +436,7 @@ describe("v2 documentation", () => {
         }
         expect(guide).toContain("requiredValidations");
         expect(guide).toContain("80%");
-        expect(guide).toContain("pr-report-v2.1");
+        expect(guide).toContain("Gap");
         expect(guide).toContain("complete");
         expect(guide).toContain("not-run");
         expect(guide).toContain("not-applicable");
@@ -489,12 +489,11 @@ describe("v2 documentation", () => {
                 ["Playwright Test/CLI", /Playwright Test\/CLI/],
                 ["Browser MCP", /Browser MCP/],
                 ["Chrome DevTools MCP", /Chrome DevTools MCP/],
-                ["ready intent", /intent: ready/],
-                ["blocked diagnostic intent", /intent: blocked-diagnostic/],
-                ["local blocked report", /로컬 차단 보고서/],
+                ["draft publication", /Draft/],
+                ["draft is not verified", /verified|merge-ready/],
+                ["local report", /로컬 (?:차단 )?보고서/],
                 ["same Run", /같은 (?:실행|Run)/],
                 ["same draft PR", /기존 (?:초안|draft) PR/],
-                ["blocked status", /status: blocked/],
                 ["PUBLISH_NO_DELTA", /PUBLISH_NO_DELTA/],
               ] as const)
             : ([
@@ -510,12 +509,11 @@ describe("v2 documentation", () => {
                 ["Playwright Test/CLI", /Playwright Test\/CLI/],
                 ["Browser MCP", /Browser MCP/],
                 ["Chrome DevTools MCP", /Chrome DevTools MCP/],
-                ["ready intent", /intent: ready/],
-                ["blocked diagnostic intent", /intent: blocked-diagnostic/],
-                ["local blocked report", /local blocked report/],
+                ["draft publication", /Draft/],
+                ["draft is not verified", /verified|merge-ready/],
+                ["local report", /local (?:blocked )?report/],
                 ["same Run", /same Run/],
                 ["same draft PR", /same draft PR|existing draft PR for the same source and target/],
-                ["blocked status", /status: blocked/],
                 ["PUBLISH_NO_DELTA", /PUBLISH_NO_DELTA/],
               ] as const);
         for (const [policy, expectation] of localizedPolicies) {
@@ -567,15 +565,13 @@ describe("v2 documentation", () => {
       expect(guides.legacy).toMatch(
         locale === "ko" ? /실제로 실행한 레거시|실행한 레거시/ : /running legacy/,
       );
-      expect(guides.legacy).toContain("source-fetch-literal");
-      expect(guides.legacy).toMatch(locale === "ko" ? /실행 ID/ : /durable|Run ID/);
       expect(guides.legacy).toMatch(
-        locale === "ko" ? /빈 목록 해시|목록 해시를 근거/ : /empty-inventory/,
+        locale === "ko"
+          ? /이름이 비슷한 폴더로\s*바꾸지 않으며/
+          : /never substitutes a similarly named directory/,
       );
-      expect(guides.legacy).toMatch(locale === "ko" ? /OpenAPI는 목록을 보완/ : /Optional OpenAPI/);
-      expect(guides.legacy).not.toMatch(
-        /API gaps? when OpenAPI is supplied|OpenAPI 제공 시 API gap|OpenAPI를 제공한 경우에만|required only when OpenAPI was supplied/,
-      );
+      expect(guides.legacy).toMatch(locale === "ko" ? /선택적 사후 보관/ : /optional post-merge/);
+      expect(guides.legacy).toMatch(locale === "ko" ? /API Gap/ : /API Gap/);
       expect(guides.legacy, `${locale}:legacy examples must remain scope-neutral`).not.toMatch(
         /결제\s*재시도|payment[-_\s]?retry|legacy_checkout_retry/i,
       );
@@ -588,10 +584,23 @@ describe("v2 documentation", () => {
       expect(guides.figma).toMatch(locale === "ko" ? /모의 데이터/ : /mock/);
       expect(guides.figma).toContain("sha256");
       expect(guides.figma).toContain("92%");
+      const templateTerms =
+        locale === "ko"
+          ? {
+              legacy: "원본→대상",
+              brief: "요구사항 충족표",
+              feature: "사용자 흐름 영상",
+              figma: "상태별 일치율",
+            }
+          : {
+              legacy: "source→target",
+              brief: "requirements coverage",
+              feature: "user-flow video",
+              figma: "per-state",
+            };
       for (const caseName of cases) {
-        expect(guides[caseName]).toContain("pr-report-v2.1");
-        expect(guides[caseName]).toContain("15");
-        expect(guides[caseName]).toContain("blocked");
+        expect(guides[caseName]).toContain(templateTerms[caseName]);
+        expect(guides[caseName]).toContain("Gap");
         expect(guides[caseName]).toContain("`none`");
         expect(guides[caseName]).toContain("sha256");
         expect(guides[caseName]).toMatch(locale === "ko" ? /자료 제공자|provider/ : /provider/);
@@ -647,6 +656,7 @@ describe("v2 documentation", () => {
       "039-bind-figma-delivery-to-workspace-and-native-captures.md",
       "040-use-a-92-percent-visual-gate-and-terminal-feedback-drafts.md",
       "041-optimize-capture-reuse-review-concurrency-and-reasoning.md",
+      "042-use-progressive-evidence-gates-and-reviewer-first-drafts-for-1.0.md",
     ]);
     expect(relativeFiles(path.join(root, "website", "docs"))).toEqual([
       "concepts/comparison.mdx",

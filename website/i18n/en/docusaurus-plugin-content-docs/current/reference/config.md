@@ -14,6 +14,7 @@ Mode selects delivery/evidence behavior; sources compose independently.
 | `mode`                      | `auto`, `brief`, `legacy`, `feature`, `figma`                       | Delivery/evidence profile                           |
 | `changeKind`                | `auto`, `feature`, `fix`, `refactor`, `migration`, `design`, `docs` | Change classification                               |
 | `publication`               | `draft`, `none`                                                     | Draft publication intent                            |
+| `modelRouting`              | `adaptive-verified`, `pinned`, `custom`                             | Host-local `fast`/`build`/`expert` model roles      |
 | `briefPath`                 | project-relative path                                               | One brief source                                    |
 | `legacyProjectRoot`         | absolute directory                                                  | Separate read-only legacy source                    |
 | `legacyNetworkEvidencePath` | project-relative HAR/JSON                                           | Optional runtime evidence for ambiguous legacy APIs |
@@ -25,7 +26,11 @@ Mode selects delivery/evidence behavior; sources compose independently.
 | `discoveredGuidancePaths`   | normalized project-relative paths                                   | Runtime-discovered guidance recorded in the profile |
 | `skillHints`                | installed skill names                                               | Optional availability checks, maximum 20            |
 
-`brief` and `feature` require brief + Figma + OpenAPI. `legacy` requires a separate `legacyProjectRoot` and running-legacy baseline. Its semantic inventory preserves terminal API candidates, environment `originRef`, transport/callsites, and confidence; constructors and local facades are not duplicate operations, while optional OpenAPI only enriches candidates. Optional `legacyNetworkEvidencePath` accepts bounded standard HAR/request JSON up to 1 MB and 1,000 requests and pins its digest plus `runtime-network-har` adapter. A genuinely ambiguous method/path returns `collect-legacy-network-evidence`; `legacy-network-evidence` resumes the same Run. `figma` requires a digest-bound deterministic mock manifest and fixtures. Only feature adds `targetedFeatureE2E` and `featureVideo`. Intake pins timestamped `sourceProvenance`; contracts declare `visualTargets` and planned legacy coverage; implementation records current-packet legacy/API coverage and `performanceEvidence`. Every visual capture repeats its target route/state/viewport/device scale/fixture and records provider, ISO capture time, PNG path, and digest. Runtime rejects target drift or digest mismatch without consuming an attempt, enforces the fixed 92% review ratio and no more than 20% masking, and runs three valid comparisons automatically. A third valid failure keeps the Run blocked and preserves failed media for diagnostic publication; focused UI assertions remain independent gates. Report emits ready/blocked 15-section `pr-report-v2.1` JSON and Markdown, and new publication verifies the legacy adapter list plus inventory digest.
+`brief` and `feature` require brief + Figma + OpenAPI. `legacy` requires a separate exact `legacyProjectRoot` and running-legacy baseline. Its semantic inventory preserves terminal API candidates, environment `originRef`, transport/callsites, and confidence; constructors and local facades are not duplicate operations, while optional OpenAPI only enriches candidates. An ambiguous method/path is an open API Gap: optional runtime HAR/request JSON can resolve it, but it does not stop confirmed implementation and uncertain writes are not invented. `figma` requires a digest-bound deterministic mock manifest and fixtures. Only feature adds `targetedFeatureE2E` and `featureVideo`. Every UI capture repeats its target route/state/viewport/device scale/fixture and records provider, ISO capture time, PNG path, and digest. Runtime rejects target drift or digest mismatch without consuming an attempt, enforces the fixed 92% review ratio and no more than 20% masking, and runs three valid comparisons automatically. A failed or not-run comparison remains a merge-blocking Gap but can appear in a Draft; focused UI assertions remain independent gates. Machine `pr-report-v2.1` data remains available, while the default PR body is exactly one concise Legacy, Brief, Feature, or Figma template with Gaps first.
+
+### Model routing
+
+Core stores `fast`, `build`, and `expert` roles rather than provider model names. Codex defaults to Luna/Terra/Sol and Claude to Haiku/Sonnet/Opus; `adaptive-verified` is the default. `pinned` keeps one user-selected model for every stage and independent review, while `custom` supplies all three role models. A Run never auto-mixes hosts. If a higher role is unavailable, confirmed development continues and the requested/actual model and impact become a quality Gap.
 
 ### Bounded guidance discovery
 
@@ -88,14 +93,14 @@ The SDK defaults to a 10-minute action-turn budget and a 45-minute total Run bud
 
 ## Environment variables
 
-| Variable                                | Default/interpretation        | Use                                |
-| --------------------------------------- | ----------------------------- | ---------------------------------- |
-| `SPEC_TO_PR_DATA_DIR`                   | host plugin data or temp path | Durable Run/evidence storage       |
-| `GITHUB_TOKEN` / `GH_TOKEN`             | fallback to `gh auth token`   | GitHub API auth                    |
-| `GITLAB_TOKEN` / `GITLAB_PRIVATE_TOKEN` | fallback to `glab auth token` | GitLab API auth                    |
-| `SPEC_TO_PR_GIT_HOST`                   | detected from remote          | Self-hosted GitHub/GitLab override |
-| `SPEC_TO_PR_API_BASE_URL`               | host-derived default          | Self-hosted API endpoint           |
-| `SPEC_TO_PR_WEB_BASE_URL`               | host-derived default          | Review-request URL base            |
+| Variable                                | Default/interpretation                                | Use                                |
+| --------------------------------------- | ----------------------------------------------------- | ---------------------------------- |
+| `SPEC_TO_PR_DATA_DIR`                   | host plugin data or temp path                         | Durable Run/evidence storage       |
+| `GITHUB_TOKEN` / `GH_TOKEN`             | fallback to `gh auth token`                           | GitHub API auth                    |
+| `GITLAB_TOKEN` / `GITLAB_PRIVATE_TOKEN` | fallback to `glab config get token --host <hostname>` | GitLab API auth                    |
+| `SPEC_TO_PR_GIT_HOST`                   | detected from remote                                  | Self-hosted GitHub/GitLab override |
+| `SPEC_TO_PR_API_BASE_URL`               | host-derived default                                  | Self-hosted API endpoint           |
+| `SPEC_TO_PR_WEB_BASE_URL`               | host-derived default                                  | Review-request URL base            |
 
 For self-hosted GitLab or GitHub, set `SPEC_TO_PR_GIT_HOST`, `SPEC_TO_PR_WEB_BASE_URL`, and `SPEC_TO_PR_API_BASE_URL` together in the runtime environment. Every URL must use HTTPS on the exact remote hostname; the plugin manifest never hardcodes a particular instance as a default.
 

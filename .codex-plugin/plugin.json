@@ -1,6 +1,6 @@
 {
   "name": "spec-to-pr",
-  "version": "0.3.6",
+  "version": "1.0.0",
   "description": "Evidence-backed Codex workflow for full brief delivery, legacy migration, feature E2E, and Figma implementation into draft pull requests.",
   "author": {
     "name": "SpecToPR Team",
@@ -24,16 +24,16 @@
   "interface": {
     "displayName": "SpecToPR",
     "shortDescription": "Turn briefs, migrations, features, and Figma into verified draft PRs.",
-    "longDescription": "SpecToPR provides four strict deliveries on a seven-tool workflow: brief/Figma/OpenAPI full delivery, separate-project legacy migration, feature-targeted E2E and video, and mock-backed Figma implementation with measured visual evidence and safe draft publishing.",
+    "longDescription": "SpecToPR provides four reviewer-first deliveries: brief, separate-project legacy migration, feature flow with a packet-bound video, and Figma UI. UI work always records measured visual comparison; API and binding uncertainty stays visible as a Gap instead of stopping confirmed work.",
     "developerName": "SpecToPR Team",
     "category": "Developer Tools",
     "capabilities": ["Interactive", "Read", "Write"],
     "websiteURL": "https://github.com/dhyun2/spec-to-pr",
     "termsOfServiceURL": "https://github.com/dhyun2/spec-to-pr/blob/main/LICENSE",
     "defaultPrompt": [
-      "Use workflow_info, choose one of the four strict delivery modes, then call workflow_start once.",
-      "Keep API and UI in one context; use Figma or running legacy as the measured visual baseline.",
-      "Publish the packet-bound 15-section draft report without dropping required validation."
+      "Use workflow_info, choose one of the four delivery modes, then call workflow_start once.",
+      "For UI, use Figma or the running legacy screen as the measured visual baseline; never treat skipped validation as passed.",
+      "Keep API or binding uncertainty as a reviewer-facing Gap and publish the compact four-template Draft body."
     ],
     "brandColor": "#2563EB",
     "screenshots": []

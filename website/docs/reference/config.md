@@ -9,21 +9,22 @@ title: 설정 · CLI · 환경변수
 
 `mode`는 최종 결과와 필요한 검증을 정합니다. 입력 자료는 필요한 만큼 조합할 수 있습니다.
 
-| 필드                        | 값                                                                  | 의미                                      |
-| --------------------------- | ------------------------------------------------------------------- | ----------------------------------------- |
-| `mode`                      | `auto`, `brief`, `legacy`, `feature`, `figma`                       | 제공 방식과 검증 기준                     |
-| `changeKind`                | `auto`, `feature`, `fix`, `refactor`, `migration`, `design`, `docs` | 변경 성격                                 |
-| `publication`               | `draft`, `none`                                                     | 초안 발행 여부                            |
-| `briefPath`                 | 프로젝트 상대 경로                                                  | 기획서 파일 하나                          |
-| `legacyProjectRoot`         | 절대 경로                                                           | 별도의 읽기 전용 레거시 프로젝트          |
-| `legacyNetworkEvidencePath` | 프로젝트 상대 HAR/JSON 경로                                         | 모호한 레거시 API를 확인할 실행 자료      |
-| `figmaUrl`                  | URL                                                                 | Figma 파일 또는 노드                      |
-| `docsPaths`                 | 프로젝트 상대 경로 배열                                             | 보조 문서, 최대 20개                      |
-| `openApiPaths`              | 프로젝트 상대 경로 배열                                             | OpenAPI 문서, 최대 20개                   |
-| `openApiUrls`               | HTTPS URL 배열                                                      | OpenAPI 또는 Swagger UI 주소, 최대 20개   |
-| `guidancePaths`             | 프로젝트 상대 경로 배열                                             | 직접 지정할 프로젝트 지침, 최대 20개      |
-| `discoveredGuidancePaths`   | 정규화한 프로젝트 상대 경로 배열                                    | 실행 엔진이 찾아 설정에 기록한 지침       |
-| `skillHints`                | 설치된 스킬 이름 배열                                               | 적용 가능성을 확인할 선택 스킬, 최대 20개 |
+| 필드                        | 값                                                                  | 의미                                         |
+| --------------------------- | ------------------------------------------------------------------- | -------------------------------------------- |
+| `mode`                      | `auto`, `brief`, `legacy`, `feature`, `figma`                       | 제공 방식과 검증 기준                        |
+| `changeKind`                | `auto`, `feature`, `fix`, `refactor`, `migration`, `design`, `docs` | 변경 성격                                    |
+| `publication`               | `draft`, `none`                                                     | 초안 발행 여부                               |
+| `modelRouting`              | `adaptive-verified`, `pinned`, `custom`                             | host-local `fast`·`build`·`expert` 모델 역할 |
+| `briefPath`                 | 프로젝트 상대 경로                                                  | 기획서 파일 하나                             |
+| `legacyProjectRoot`         | 절대 경로                                                           | 별도의 읽기 전용 레거시 프로젝트             |
+| `legacyNetworkEvidencePath` | 프로젝트 상대 HAR/JSON 경로                                         | 모호한 레거시 API를 확인할 실행 자료         |
+| `figmaUrl`                  | URL                                                                 | Figma 파일 또는 노드                         |
+| `docsPaths`                 | 프로젝트 상대 경로 배열                                             | 보조 문서, 최대 20개                         |
+| `openApiPaths`              | 프로젝트 상대 경로 배열                                             | OpenAPI 문서, 최대 20개                      |
+| `openApiUrls`               | HTTPS URL 배열                                                      | OpenAPI 또는 Swagger UI 주소, 최대 20개      |
+| `guidancePaths`             | 프로젝트 상대 경로 배열                                             | 직접 지정할 프로젝트 지침, 최대 20개         |
+| `discoveredGuidancePaths`   | 정규화한 프로젝트 상대 경로 배열                                    | 실행 엔진이 찾아 설정에 기록한 지침          |
+| `skillHints`                | 설치된 스킬 이름 배열                                               | 적용 가능성을 확인할 선택 스킬, 최대 20개    |
 
 ### 방식별 필수 자료
 
@@ -38,13 +39,17 @@ title: 설정 · CLI · 환경변수
 
 `legacyInventory`에는 실제 HTTP 요청 후보, 환경별 `originRef`, 전송 방식과 호출 위치, 신뢰도를 기록합니다. 생성자와 로컬 파사드는 별도 API 작업으로 중복 등록하지 않습니다.
 
-코드만으로 메서드와 경로를 하나로 확정할 수 없으면 `collect-legacy-network-evidence`를 요청합니다. `legacyNetworkEvidencePath`에는 최대 1 MB, 1,000개 요청의 표준 HAR 또는 요청 JSON만 받을 수 있습니다. 파일 해시와 `runtime-network-har` 탐지 방식도 함께 기록합니다. 자료를 `legacy-network-evidence`로 제출하면 새 실행을 만들지 않고 같은 실행의 접수 단계에서 이어갑니다.
+코드만으로 메서드와 경로를 하나로 확정할 수 없으면 해당 호출은 open API Gap입니다. `legacyNetworkEvidencePath`의 표준 HAR 또는 요청 JSON은 이 Gap을 해소할 수 있는 선택 자료일 뿐, 확인된 화면·상태·라우트 구현을 멈추게 하지 않습니다. 불명확한 쓰기·인증 상호작용은 추측해 활성화하지 않습니다.
 
 ### 화면 비교와 보고서
 
 기준 화면과 결과 화면은 같은 경로·상태·화면 크기·기기 배율·테스트 데이터로 캡처합니다. 자료 제공자, ISO 형식의 촬영 시각, PNG 경로, 해시도 함께 기록합니다. 실행 엔진은 조건이나 해시가 다르면 시도 횟수를 소비하지 않고 비교를 거부하며, `compare-visuals`는 고정 일치율 92% 이상과 제외 영역 20% 이하를 요구합니다. 유효 비교 세 번은 자동으로 이어지고, 세 번째 실패는 실행을 `blocked`로 유지하며 실패 이미지를 포함한 진단 초안을 허용합니다.
 
-보고서는 정상 결과와 차단 결과 모두 `pr-report-v2.1`의 15개 섹션을 JSON과 Markdown으로 만듭니다. 새 초안을 발행할 때는 레거시 어댑터 목록과 `legacyInventory` 해시가 현재 검토 묶음과 일치하는지도 확인합니다.
+기계용 `pr-report-v2.1`은 유지하지만, 기본 PR 본문은 Legacy migration, Brief delivery, Feature flow, Figma UI 중 하나의 간결한 템플릿입니다. unresolved Gap은 상태 바로 아래에 영향과 리뷰어 결정으로 표시하고, Run ID·원시 로그·빈 checklist는 넣지 않습니다.
+
+### 모델 라우팅
+
+core는 공급자 모델명이 아니라 `fast`·`build`·`expert` 역할만 저장합니다. Codex 기본값은 Luna/Terra/Sol, Claude 기본값은 Haiku/Sonnet/Opus이며 기본 전략은 `adaptive-verified`입니다. `pinned`는 사용자가 고른 하나의 모델을 모든 단계와 독립 리뷰에 유지하고, `custom`은 세 역할 모델을 직접 지정합니다. 한 Run은 두 host를 자동으로 섞지 않습니다. 상위 역할 모델을 쓸 수 없으면 개발은 계속하되 요청·실제 모델과 영향은 품질 Gap으로 공개합니다.
 
 ### 프로젝트 지침을 찾는 범위
 
@@ -109,14 +114,14 @@ SDK 기본 시간 예산은 한 작업 차례 10분, 전체 실행 45분입니�
 
 ## 환경변수
 
-| 변수                                    | 기본/해석                             | 용도                            |
-| --------------------------------------- | ------------------------------------- | ------------------------------- |
-| `SPEC_TO_PR_DATA_DIR`                   | 호스트 플러그인 데이터 또는 임시 경로 | 실행 상태와 검증 자료 저장 위치 |
-| `GITHUB_TOKEN` / `GH_TOKEN`             | 없으면 `gh auth token`                | GitHub API 인증                 |
-| `GITLAB_TOKEN` / `GITLAB_PRIVATE_TOKEN` | 없으면 `glab auth token`              | GitLab API 인증                 |
-| `SPEC_TO_PR_GIT_HOST`                   | 원격 저장소에서 감지                  | 자체 호스팅 GitHub/GitLab 지정  |
-| `SPEC_TO_PR_API_BASE_URL`               | 호스트 기반 기본값                    | 자체 호스팅 API 주소            |
-| `SPEC_TO_PR_WEB_BASE_URL`               | 호스트 기반 기본값                    | 검토 요청의 웹 주소 기준        |
+| 변수                                    | 기본/해석                                        | 용도                            |
+| --------------------------------------- | ------------------------------------------------ | ------------------------------- |
+| `SPEC_TO_PR_DATA_DIR`                   | 호스트 플러그인 데이터 또는 임시 경로            | 실행 상태와 검증 자료 저장 위치 |
+| `GITHUB_TOKEN` / `GH_TOKEN`             | 없으면 `gh auth token`                           | GitHub API 인증                 |
+| `GITLAB_TOKEN` / `GITLAB_PRIVATE_TOKEN` | 없으면 `glab config get token --host <hostname>` | GitLab API 인증                 |
+| `SPEC_TO_PR_GIT_HOST`                   | 원격 저장소에서 감지                             | 자체 호스팅 GitHub/GitLab 지정  |
+| `SPEC_TO_PR_API_BASE_URL`               | 호스트 기반 기본값                               | 자체 호스팅 API 주소            |
+| `SPEC_TO_PR_WEB_BASE_URL`               | 호스트 기반 기본값                               | 검토 요청의 웹 주소 기준        |
 
 자체 호스팅 GitLab/GitHub는 실행 환경에서 `SPEC_TO_PR_GIT_HOST`, `SPEC_TO_PR_WEB_BASE_URL`, `SPEC_TO_PR_API_BASE_URL`를 함께 설정합니다. 세 URL/호스트 값은 원격 저장소와 정확히 일치하는 HTTPS 호스트여야 하며, 플러그인 매니페스트에 특정 인스턴스를 기본값으로 고정하지 않습니다.
 

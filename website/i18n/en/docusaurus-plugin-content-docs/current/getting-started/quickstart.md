@@ -83,7 +83,7 @@ Start with [Brief → draft PR](/usage/brief) for copyable prompts, process deta
 <NextStep
 eyebrow="Now use real inputs"
 title="See the complete PR example for brief delivery"
-description="Continue into required inputs, blocked recovery, visual/API/performance evidence, and the expected 15-section report."
+description="Continue into required inputs, Gap handling, visual/API/performance evidence, and reviewer-first PR bodies."
 href="/usage/brief"
 label="Open brief usage"
 secondary={{ label: "Compare all four cases", href: "/usage/" }}

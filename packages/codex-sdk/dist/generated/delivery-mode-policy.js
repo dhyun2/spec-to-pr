@@ -19,8 +19,10 @@ export function resolveDeliveryPolicy(input) {
     const legacy = input.mode === "legacy";
     const feature = input.mode === "feature";
     const figma = input.mode === "figma";
-    const hasLegacyApiOperations = legacy && input.legacyApiOperationCount > 0;
-    const apiCoverage = fullDelivery || hasLegacyApiOperations;
+    // Legacy migration must discover and disclose API uncertainty, but it must not
+    // require full API-ready artifacts before any implementation can begin. Full
+    // operation coverage remains a delivery requirement for brief and feature.
+    const apiCoverage = fullDelivery;
     const requirements = {
         brief: fullDelivery,
         legacyBaseline: legacy,
@@ -28,9 +30,12 @@ export function resolveDeliveryPolicy(input) {
         targetedFeatureE2E: feature,
         featureVideo: feature,
         figmaBundle: fullDelivery || figma,
+        // Every UI mode, including legacy migration, has a runtime-owned visual
+        // comparison. A failed comparison is reported as a Gap; it is never
+        // silently disabled by the input mode.
         visualComparison: true,
         apiCoverage,
-        performanceEvidence: fullDelivery || legacy,
+        performanceEvidence: fullDelivery,
         mockData: figma,
     };
     const modeValidations = [];
@@ -52,7 +57,7 @@ export function resolveDeliveryPolicy(input) {
         modeValidations.push("performance-evidence");
     if (requirements.mockData)
         modeValidations.push("mock-data");
-    const requireApiReady = fullDelivery || hasLegacyApiOperations;
+    const requireApiReady = fullDelivery;
     if (requireApiReady)
         modeValidations.push("api-ready");
     return {
@@ -60,6 +65,8 @@ export function resolveDeliveryPolicy(input) {
         requireApiReady,
         modeValidations,
         sectionApplicability: {
+            // Legacy API candidates and unresolved call-sites belong in the report
+            // even when they are not complete enough to require api-ready evidence.
             api: fullDelivery || legacy,
             legacy,
             visual: true,

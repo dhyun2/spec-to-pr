@@ -44,7 +44,7 @@ Retryable does not make required evidence optional. Resumable means continuing f
 
 ## API/UI and review
 
-API-backed UI needs distinct non-empty type/schema/wrapper/mock files, a passing contract-test JSON, and one stable `implementationContextId` submitted as API-ready before final UI. Path aliases or `apiReady: true` alone fail. Functional review applies to code; design review applies only to UI. Both reviewers are read-only and workflow-MCP-free.
+Confirmed API-backed UI needs distinct non-empty type/schema/wrapper/mock files, a passing contract-test JSON, and one stable `implementationContextId` submitted as API-ready before that API is connected. An uncertain method, body, auth boundary, or binding remains an API Gap rather than stopping safe UI, state, and route work. Path aliases or `apiReady: true` alone fail. Functional review applies to code; design review applies only to UI. Both reviewers are read-only and workflow-MCP-free.
 
 An empty/skipped/not-run required gate blocks. Execute the repository command and submit project-local evidence, or classify it not applicable only with scope evidence.
 

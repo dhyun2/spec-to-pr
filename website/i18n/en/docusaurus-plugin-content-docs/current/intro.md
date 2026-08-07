@@ -20,8 +20,12 @@ secondary={{ label: "Choose a delivery", href: "/usage/" }}
 />
 
 :::info[The version you are reading]
-This site describes the released behavior of SpecToPR `0.3.0`. The public surface stays deliberately small: 7 MCP tools, 8 durable stages, 8 skills, and 2 independent reviewers.
+This site describes the released behavior of SpecToPR `1.0.0`. The public surface stays deliberately small: 7 MCP tools, 8 durable stages, 8 skills, and 2 independent reviewers.
 :::
+
+Every UI change runs visual comparison regardless of delivery mode. API, binding, authentication,
+or evidence-analysis uncertainty becomes a reviewer-visible Gap unless it would cause an unsafe write.
+`skipped` and `waived` never mean passed.
 
 ## Choose the input; keep one Run
 
@@ -39,7 +43,8 @@ Select a stage to see what it receives and what it leaves behind. One implementa
 
 - Briefs, Figma, and OpenAPI are pinned through `sourceProvenance` and accepted contracts.
 - Figma or a running legacy screen is captured at the same route, state, viewport, and fixture; `compare-visuals` performs the comparison.
-- Ready and blocked outcomes share the 15-section `pr-report-v2.1`, so a stopped Run still shows completed work, unrun checks, and the exact resume action.
+- The PR body uses exactly one of Legacy migration, Brief delivery, Feature flow, or Figma UI. Gaps appear directly below status with impact and the requested reviewer decision; Run IDs, raw logs, and empty checklists stay out.
+- A failed or not-run comparison/test can still produce a Draft for feedback, but never a verified or merge-ready label.
 - SpecToPR only creates or updates drafts. People retain approval, ready, and merge authority.
 
 <NextStep

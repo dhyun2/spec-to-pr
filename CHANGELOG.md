@@ -7,6 +7,21 @@ use the plugin tag format, for example `spec-to-pr--v0.1.0`.
 
 ## Unreleased
 
+## 1.0.0 - 2026-08-07
+
+### Changed
+
+- Made visual comparison mandatory for the four explicit UI delivery modes.
+- Kept unresolved legacy API and binding evidence as reviewer-facing Gaps instead of blocking confirmed implementation.
+- Added reviewer-first PR templates for legacy migration, brief delivery, feature flow, and Figma UI.
+- Bound Feature user-flow videos to the implementation review packet.
+- Added host-neutral `fast`/`build`/`expert` model roles with Codex (Luna/Terra/Sol) and Claude
+  (Haiku/Sonnet/Opus) adapters, including adaptive-verified, pinned, and custom routing.
+- Made `skipped`, `waived`, failed, and not-run evidence explicitly ineligible for a passed,
+  verified, or merge-ready result; Drafts may still surface their Gaps for review.
+- Made OpenSpec an optional post-merge adapter so it cannot block a core Run or Draft PR.
+- Enforced exact user-supplied legacy source and target paths without similar-name inference.
+
 ## 0.3.6 - 2026-07-31
 
 ### Added

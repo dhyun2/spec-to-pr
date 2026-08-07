@@ -56,12 +56,13 @@ export const ReportCheckSummarySchema = z
 
 export const ReportGapSummarySchema = z
   .object({
-    id: GapIdSchema,
+    id: GapIdSchema.optional(),
     category: z.string(),
     severity: z.string(),
     status: z.string(),
     title: z.string(),
     impact: z.string(),
+    reviewerDecision: z.string().optional(),
   })
   .strict();
 
@@ -289,6 +290,9 @@ export const PrReportV2Schema = z
     generatedAt: z.string().datetime({ offset: true }),
     decision: z.enum(["ready", "blocked"]),
     mode: z.enum(["auto", "brief", "legacy", "feature", "figma"]),
+    // The reviewer-facing shape is selected by delivery intent, not by
+    // whichever internal workflow path happened to create this report.
+    template: z.enum(["legacy-migration", "brief-delivery", "feature-flow", "figma-ui"]).optional(),
     sectionStatuses: PrReportSectionStatusesSchema.optional(),
     binding: PrReportBindingV2Schema.optional(),
     summary: z
@@ -335,6 +339,7 @@ export const PrReportV2Schema = z
       .strict(),
     featureEvidence: z.record(z.string(), z.unknown()).optional(),
     gaps: z.array(z.string()),
+    gapDetails: z.array(ReportGapSummarySchema).default([]),
     blockers: z.array(z.string()),
     unrunValidations: z.array(z.string()),
     risks: z.array(

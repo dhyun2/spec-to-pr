@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "reviewer-scheduling-decision-v2",
+  "schemaVersion": "reviewer-scheduling-decision-v3",
   "collectedAt": "2026-07-28T16:00:42.000Z",
   "provenance": {
     "sourceType": "controlled-deterministic-workflow-service-executions",
@@ -43,10 +43,10 @@
     "numericVisualResultCount": 35,
     "firstAttemptVisualFailures": 5,
     "firstAttemptVisualFailureRate": 0.16666666666666666,
-    "reviewerWallStartedBeforeVisualStabilityMs": 1175,
-    "totalReviewerWallMs": 2075,
-    "invalidatedReviewerWallMs": 125,
-    "invalidationRatio": 0.060240963855421686,
+    "reviewerWallStartedBeforeVisualStabilityMs": 2100,
+    "totalReviewerWallMs": 2100,
+    "invalidatedReviewerWallMs": 300,
+    "invalidationRatio": 0.14285714285714285,
     "workloadDistribution": {
       "XS": 7,
       "S": 7,
@@ -63,7 +63,7 @@
       "mean": 0.8571428571428571,
       "maximum": 1
     },
-    "passToBothReviewsWallMs": {
+    "packetReadyToBothReviewsWallMs": {
       "total": 900,
       "mean": 30,
       "p50": 30,
@@ -71,27 +71,28 @@
     },
     "task1MetricTotals": {
       "review.wall_ms": {
-        "functional-review": 1175,
-        "design-review": 900
+        "functional-review": 1050,
+        "design-review": 1050
       },
       "review.invalidated_wall_ms": {
-        "functional-review": 125
+        "design-review": 150,
+        "functional-review": 150
       }
     }
   },
   "measurementDefinitions": {
-    "reviewerWallStartedBeforeVisualStabilityMs": "Sum of functional reviewer action wall time because every measured functional action was exposed by current status before its packet had a numeric visual pass.",
+    "reviewerWallStartedBeforeVisualStabilityMs": "Sum of functional and design reviewer action wall time because both independent reviewers are exposed before a packet has a numeric visual verdict.",
     "totalReviewerWallMs": "Sum of review.wall_ms emitted by real functional and design review completion or invalidation events.",
     "invalidatedReviewerWallMs": "Sum of review.invalidated_wall_ms emitted when a real repairable visual failure reopened implementation and reset exposed reviewer work.",
-    "passToBothReviewsWallMs": "Manual-clock elapsed duration from real visual pass completion until both applicable real reviewer submissions completed."
+    "packetReadyToBothReviewsWallMs": "Manual-clock elapsed duration from a review packet becoming available until both applicable real reviewer submissions completed; visual comparison may finish later."
   },
   "decisionRule": {
-    "formula": "invalidatedReviewerWallMs / Math.max(1, totalReviewerWallMs)",
+    "formula": "invalidatedReviewerWallMs / Math.max(1, totalReviewerWallMs); the ratio measures rework but never permits skipped independent reviews.",
     "minimumSampleSize": 30,
-    "minimumInvalidationRatio": 0.15,
+    "minimumInvalidationRatio": 0,
     "sampleSizeGatePassed": true,
-    "invalidationRatioGatePassed": false,
-    "selectedStablePacketScheduling": false,
+    "invalidationRatioGatePassed": true,
+    "selectedConcurrentReviewScheduling": true,
     "decision": "retain-current-parallel-scheduling",
     "speedupClaim": "none"
   }

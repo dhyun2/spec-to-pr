@@ -44,7 +44,7 @@
     "description": "The label of footer link with label=GitHub linking to https://github.com/dhyun2/spec-to-pr"
   },
   "copyright": {
-    "message": "Copyright © 2026 SpecToPR · Documentation · v0.3.0",
+    "message": "Copyright © 2026 SpecToPR · Documentation · v1.0.0",
     "description": "The footer copyright"
   }
 }

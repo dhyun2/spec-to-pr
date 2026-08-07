@@ -1,0 +1,78 @@
+flowchart TD
+  INFO["workflow_info<br/>1.0.0 · current protocol 2.0.0 / target 3.0.0 · policy digest"]
+  PLAN["workflow_plan<br/>exact scope/binding + one PR template"]
+  SAFE{"Safe write target?"}
+  STOP["Unsafe stop<br/>Run is not created"]
+  START["workflow_start(planToken)<br/>create exactly one durable Run"]
+  INTAKE["Intake<br/>bounded source, route, state, API discovery"]
+  GAP[("Gap ledger<br/>open · resolved · assumed · waived")]
+  IMPLEMENT["Implementation<br/>build confirmed parts; inspect legacy directly"]
+  PACKET["Freeze review packet<br/>runtime computes base→HEAD diff"]
+  UI{"UI scope?"}
+  VISUAL["Mandatory baseline/current capture and comparison"]
+  FUNCTIONAL["Independent functional review"]
+  DESIGN["Independent design and accessibility review"]
+  UI_GATE["UI gate terminal<br/>passed · failed · not-run · not-applicable<br/>timeout → not-run + Gap"]
+  FEATURE{"Feature flow template?"}
+  VIDEO["Mandatory packet-bound user-flow video"]
+  VIDEO_GATE["Video gate terminal<br/>passed · failed · not-run · not-applicable<br/>timeout → not-run + Gap"]
+  REVIEW_JOIN["AND barrier<br/>functional + UI gate + video gate terminal"]
+  VRESULT{"Visual result"}
+  REPAIR{"Repair attempt available<br/>and safe to auto-fix?"}
+  REPORT["pr-report-v3<br/>Gap-first four-template renderer"]
+  PUBLISH_PRE["Publish preflight<br/>remote · TLS · auth · project"]
+  PRE_RESULT{"Preflight passed?"}
+  DRAFT["Create or update same Draft PR"]
+  LOCAL["Keep local report<br/>requestSynced: false"]
+  FEEDBACK{"Changes requested?"}
+  MERGED{"Merge verified?"}
+  ARCHIVE["Archive immutable Run"]
+
+  INFO --> PLAN
+  PLAN --> SAFE
+  SAFE -->|"No"| STOP
+  SAFE -->|"Yes"| START
+  START --> INTAKE
+  INTAKE -->|"API, binding, evidence uncertainty"| GAP
+  INTAKE --> IMPLEMENT
+  GAP -. "does not stop safe development" .-> IMPLEMENT
+  IMPLEMENT --> PACKET
+  PACKET --> UI
+  PACKET --> FUNCTIONAL
+  PACKET --> FEATURE
+  UI -->|"Yes"| VISUAL
+  UI -->|"No"| UI_GATE
+  FEATURE -->|"Yes"| VIDEO
+  FEATURE -->|"No"| VIDEO_GATE
+  VIDEO --> VIDEO_GATE
+  VIDEO -. "failed or not-run" .-> GAP
+  VISUAL --> VRESULT
+  VRESULT -->|"passed"| DESIGN
+  VRESULT -->|"failed"| GAP
+  VRESULT -->|"not-run"| GAP
+  VRESULT -->|"failed"| REPAIR
+  VRESULT -->|"not-run"| DESIGN
+  REPAIR -->|"Yes"| IMPLEMENT
+  REPAIR -->|"No"| DESIGN
+  FUNCTIONAL --> REVIEW_JOIN
+  DESIGN --> UI_GATE
+  UI_GATE --> REVIEW_JOIN
+  VIDEO_GATE --> REVIEW_JOIN
+  REVIEW_JOIN --> REPORT
+  GAP -. "always visible" .-> REPORT
+  REPORT --> PUBLISH_PRE
+  PUBLISH_PRE --> PRE_RESULT
+  PRE_RESULT -->|"Yes"| DRAFT
+  PRE_RESULT -->|"No"| GAP
+  PRE_RESULT -->|"No"| LOCAL
+  DRAFT --> FEEDBACK
+  FEEDBACK -->|"Yes"| IMPLEMENT
+  FEEDBACK -->|"No"| MERGED
+  MERGED -->|"Yes"| ARCHIVE
+
+  classDef hardStop fill:#fee2e2,stroke:#b91c1c,color:#7f1d1d;
+  classDef gap fill:#fef3c7,stroke:#b45309,color:#78350f;
+  classDef verify fill:#dbeafe,stroke:#1d4ed8,color:#1e3a8a;
+  class STOP hardStop;
+  class GAP gap;
+  class VISUAL,VIDEO,FUNCTIONAL,DESIGN,UI_GATE,VIDEO_GATE verify;

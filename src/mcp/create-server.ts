@@ -103,6 +103,19 @@ export function createKernelServer(servicesProvider: ServicesProvider): McpServe
           operationAwareApiCoverage: true,
           performanceEvidence: true,
           canonicalPrReportV2: true,
+          modelRoleRouting: true,
+        },
+        modelRouting: {
+          defaultStrategy: "adaptive-verified",
+          roles: ["fast", "build", "expert"],
+          strategies: ["adaptive-verified", "pinned", "custom"],
+          hostProvider: process.env.SPEC_TO_PR_HOST === "claude" ? "claude" : "codex",
+          invariants: [
+            "one-host-per-run",
+            "pinned-keeps-one-model-for-all-stages-and-reviews",
+            "routing-never-weakens-visual-tests-reviews-or-gaps",
+            "unavailable-higher-role-is-an-open-quality-gap",
+          ],
         },
       }),
   );

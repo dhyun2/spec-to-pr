@@ -2,8 +2,8 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "spec-to-pr",
   "displayName": "SpecToPR",
-  "version": "0.3.6",
-  "description": "Evidence-backed workflow for full brief delivery, legacy migration, feature E2E, and Figma implementation into draft pull requests.",
+  "version": "1.0.0",
+  "description": "Reviewer-first workflow for brief delivery, legacy migration, feature-flow video, and Figma UI into truthful draft pull requests.",
   "author": {
     "name": "SpecToPR Team"
   },

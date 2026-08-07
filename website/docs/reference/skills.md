@@ -77,7 +77,7 @@ title: 공개 스킬 8개
 
 ## 시각 피드백 루프
 
-`implement`는 고정 92% 기준으로 최초 비교와 최대 두 번의 보정을 사용자 확인 없이 이어갑니다. geometry·fixture·renderer lineage가 맞지 않는 취득 오류는 횟수에 넣지 않습니다. 세 번째 유효 실패는 실행을 `blocked`로 끝내고 `review-design`을 호출하지 않으며, `publish`는 발행 조건을 만족할 때 같은 15개 섹션 템플릿에 동일 크기 기준/결과와 별도 diff/overlay를 담은 진단 초안을 만듭니다. `review-functional`과 `review-design`의 집중 UI assertion은 전체 점수가 92% 이상이어도 별도로 통과해야 합니다.
+`implement`는 고정 92% 기준으로 최초 비교와 최대 두 번의 보정을 사용자 확인 없이 이어갑니다. geometry·fixture·renderer lineage가 맞지 않는 취득 오류는 횟수에 넣지 않습니다. 세 번째 유효 실패는 자동 보정만 멈추고, 동일 크기 기준/결과와 diff·overlay를 **화면 비교 Gap**으로 보존합니다. 기능·디자인 독립 검토는 가능한 증거를 각각 판정하며, 실패·미실행·`skipped`·`waived`는 통과가 아닙니다. 발행 가능한 Draft에는 리뷰어가 먼저 보는 Gap 영향·결정과 화면 비교 결과를 표시하며, verified/merge-ready로 표시하지 않습니다.
 
 ## 공개 도구와 브라우저의 경계
 

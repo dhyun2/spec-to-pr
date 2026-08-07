@@ -75,7 +75,9 @@ export type BoundaryThread = {
     }): Promise<RunResult>;
 };
 export type BoundaryReasoningEffort = "medium" | "high";
+export type BoundaryModelRole = "fast" | "build" | "expert";
 export type BoundaryThreadRoute = {
+    role: BoundaryModelRole;
     reasoningEffort: BoundaryReasoningEffort;
 };
 export type BoundaryClient = {

@@ -31,7 +31,7 @@ export function createResumePlan(run: RunManifest, nowIso: string): ResumePlan {
     .map((stage) => stage.name);
 
   const completedStages = run.stages
-    .filter((stage) => ["passed", "skipped", "waived"].includes(stage.status))
+    .filter((stage) => ["passed", "skipped"].includes(stage.status))
     .map((stage) => stage.name);
 
   return {

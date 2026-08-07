@@ -430,6 +430,7 @@ type RuntimeNetworkRequest = {
   method: string;
   url: string;
   sourceIndex: number;
+  callSiteKey?: string;
 };
 
 export function mergeLegacyRuntimeNetworkEvidence(
@@ -468,33 +469,44 @@ export function mergeLegacyRuntimeNetworkEvidence(
       ...(originRef === undefined ? {} : { originRef }),
     });
     const locator = `${sourcePath}#request-${index + 1}`;
+    const runtimeCandidate = LegacyApiCandidateSchema.parse({
+      candidateKey: `candidate_${endpointKey.slice("endpoint_".length)}`,
+      endpointKey,
+      operationKey: normalizedKey,
+      method,
+      pathTemplate: operationPath,
+      ...(originRef === undefined ? {} : { originRef }),
+      confidence: "high",
+      terminalKind: "request-config",
+      callSites: [
+        {
+          callSiteKey: request.callSiteKey ?? `call_runtime_${index + 1}`,
+          ownerSourcePath: sourcePath,
+          terminalSourcePath: sourcePath,
+          line: index + 1,
+          column: 1,
+          receiver: "runtime-network",
+          transportRef: "runtime-network-har",
+          wrapperChain: [],
+        },
+      ],
+      requestEvidence: { queryKeys: [], bodySymbols: [], headerKeys: [] },
+      responseEvidence: { selectors: [] },
+      witnesses: [{ kind: "runtime", locator }],
+    });
+    const existing = apiCandidates.get(endpointKey);
     apiCandidates.set(
       endpointKey,
-      LegacyApiCandidateSchema.parse({
-        candidateKey: `candidate_${endpointKey.slice("endpoint_".length)}`,
-        endpointKey,
-        operationKey: normalizedKey,
-        method,
-        pathTemplate: operationPath,
-        ...(originRef === undefined ? {} : { originRef }),
-        confidence: "high",
-        terminalKind: "request-config",
-        callSites: [
-          {
-            callSiteKey: `call_runtime_${index + 1}`,
-            ownerSourcePath: sourcePath,
-            terminalSourcePath: sourcePath,
-            line: index + 1,
-            column: 1,
-            receiver: "runtime-network",
-            transportRef: "runtime-network-har",
-            wrapperChain: [],
-          },
-        ],
-        requestEvidence: { queryKeys: [], bodySymbols: [], headerKeys: [] },
-        responseEvidence: { selectors: [] },
-        witnesses: [{ kind: "runtime", locator }],
-      }),
+      existing === undefined
+        ? runtimeCandidate
+        : LegacyApiCandidateSchema.parse({
+            ...existing,
+            callSites: uniqueCallSites([...existing.callSites, ...runtimeCandidate.callSites]),
+            witnesses: uniqueRuntimeWitnesses([
+              ...existing.witnesses,
+              ...runtimeCandidate.witnesses,
+            ]),
+          }),
     );
   });
 
@@ -598,13 +610,46 @@ function runtimeNetworkRequests(value: unknown): RuntimeNetworkRequest[] {
         );
       }
       runtimeRequestPath(request["url"], sourceIndex);
+      const callSiteKey = runtimeCallSiteKey(request["callSiteKey"], sourceIndex);
       return {
-        request: { method: request["method"], url: request["url"], sourceIndex },
+        request: {
+          method: request["method"],
+          url: request["url"],
+          sourceIndex,
+          ...(callSiteKey === undefined ? {} : { callSiteKey }),
+        },
         authoritative,
       };
     })
     .filter(({ authoritative }) => authoritative)
     .map(({ request }) => request);
+}
+
+function runtimeCallSiteKey(value: unknown, sourceIndex: number): string | undefined {
+  if (value === undefined) return undefined;
+  if (
+    typeof value !== "string" ||
+    value.trim().length === 0 ||
+    value.trim().length > 500 ||
+    /[\u0000-\u001f\u007f]/u.test(value)
+  ) {
+    throw new Error(`Legacy runtime network request ${sourceIndex + 1} has an invalid callSiteKey`);
+  }
+  return value.trim();
+}
+
+function uniqueCallSites<T extends { callSiteKey: string }>(callSites: T[]): T[] {
+  return [
+    ...new Map(callSites.map((callSite) => [callSite.callSiteKey, callSite] as const)).values(),
+  ];
+}
+
+function uniqueRuntimeWitnesses<T extends { kind: string; locator: string }>(witnesses: T[]): T[] {
+  return [
+    ...new Map(
+      witnesses.map((witness) => [`${witness.kind}\0${witness.locator}`, witness] as const),
+    ).values(),
+  ];
 }
 
 function authoritativeHarApiEntry(entry: unknown): boolean {
