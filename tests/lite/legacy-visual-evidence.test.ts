@@ -65,12 +65,18 @@ describe("legacy visual evidence", () => {
     expect(report.markdown).toContain("@frontend/ui");
   });
 
-  it("uses Computer Use by default and makes a Browser fallback reviewer-visible", async () => {
+  it("accepts a disclosed Browser fallback without creating a Gap and renders only side-by-side images", async () => {
     const manifest = createManifest();
     manifest.visualTargets[0]!.baselineCapture = {
       provider: "browser",
       authState: "authenticated",
       capturedAt: "2026-08-10T00:00:00.000Z",
+      fallbackReason: "Computer Use capability was not available in this host.",
+    };
+    manifest.visualTargets[0]!.attempts[0]!.capture = {
+      provider: "browser",
+      authState: "authenticated",
+      capturedAt: "2026-08-10T00:00:01.000Z",
       fallbackReason: "Computer Use capability was not available in this host.",
     };
 
@@ -79,11 +85,29 @@ describe("legacy visual evidence", () => {
       requireStaged: false,
     });
 
-    expect(report.status).toBe("not-verified");
-    expect(report.captureEvidence.status).toBe("gap");
-    expect(report.markdown).toContain("캡처 방식 (기준 → 대상)");
+    expect(report.status).toBe("verified");
+    expect(report.captureEvidence).toMatchObject({ status: "passed", messages: [] });
+    expect(report.captureEvidence.disclosures).toHaveLength(1);
+    expect(report.gaps).toEqual([]);
+    expect(report.markdown).toContain("## 좌우 이미지 비교");
+    expect(report.markdown).not.toContain("## 화면 비교");
+    expect(report.markdown).toContain("| 레거시 | Vue 3 |");
+    expect(report.markdown).toContain("[Diff 이미지]");
     expect(report.markdown).toContain("Computer Use capability was not available");
     expect(report.markdown).toContain("Browser fallback");
+  });
+
+  it("keeps SpecToPR 1.0.3 fallback policy manifests readable without a Gap", async () => {
+    const manifest = createManifest();
+    manifest.capturePolicy!.fallback = "browser-or-playwright-with-gap";
+
+    const report = await buildLegacyEvidenceReport(manifest, {
+      projectRoot: await createProject(),
+      requireStaged: false,
+    });
+
+    expect(report.status).toBe("verified");
+    expect(report.captureEvidence.status).toBe("passed");
   });
 
   it("rejects credential-shaped fallback text", async () => {
@@ -270,7 +294,7 @@ function createManifest(): LegacyVisualManifest {
     targetPaths: ["apps/gzApp/src/pages/mapfinder"],
     capturePolicy: {
       preferredProvider: "computer-use",
-      fallback: "browser-or-playwright-with-gap",
+      fallback: "browser-or-playwright-when-unavailable",
     },
     migration: {
       strategy: "preserve-legacy",

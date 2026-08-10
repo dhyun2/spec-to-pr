@@ -45,7 +45,9 @@ describe("SpecToPR Lite package", () => {
     const featureTemplate = readFileSync(path.join(templates, "feature-flow.md"), "utf8");
     const figmaTemplate = readFileSync(path.join(templates, "figma-ui.md"), "utf8");
 
-    expect(legacyTemplate).toContain("기준 · 이관 결과 · Diff");
+    expect(legacyTemplate).toContain("좌우 이미지 비교");
+    expect(legacyTemplate).toContain("LEGACY_VISUAL_PAIRS_WITH_DIFF_LINKS");
+    expect(legacyTemplate).not.toContain("## 화면 비교");
     expect(briefTemplate).toContain("요구사항 충족");
     expect(featureTemplate).toContain("사용자 흐름 영상");
     expect(figmaTemplate).toContain("Figma 상태 매핑");

@@ -1,6 +1,6 @@
 {
   "name": "@spec-to-pr/plugin",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "private": true,
   "type": "module",
   "description": "A lightweight skill for turning four delivery cases into Korean draft pull requests.",

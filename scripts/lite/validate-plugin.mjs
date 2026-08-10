@@ -93,8 +93,10 @@ const templates = {
   figma: readFileSync(path.join(templateRoot, "figma-ui.md"), "utf8"),
 };
 assert(
-  templates.legacy.includes("기준 · 이관 결과 · Diff"),
-  "Legacy template must show all visual evidence",
+  templates.legacy.includes("좌우 이미지 비교") &&
+    templates.legacy.includes("LEGACY_VISUAL_PAIRS_WITH_DIFF_LINKS") &&
+    !templates.legacy.includes("## 화면 비교"),
+  "Legacy template must show baseline and Vue 3 images side by side without a duplicate matrix",
 );
 assert(
   templates.brief.includes("요구사항 충족"),

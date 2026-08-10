@@ -112,7 +112,10 @@ export type LegacyCaptureAuthState =
  */
 export type LegacyCapturePolicy = {
   preferredProvider: "computer-use";
-  fallback: "browser-or-playwright-with-gap";
+  fallback:
+    | "browser-or-playwright-when-unavailable"
+    /** @deprecated Kept readable for manifests created by SpecToPR 1.0.3. */
+    | "browser-or-playwright-with-gap";
 };
 
 export type LegacyCaptureEvidence = {
@@ -195,6 +198,7 @@ export type SourcePreservationReport = {
 export type CaptureEvidenceReport = {
   status: "passed" | "gap";
   messages: string[];
+  disclosures: string[];
 };
 
 /**
@@ -737,35 +741,48 @@ async function inspectSourcePreservation(
 
 function inspectCaptureEvidence(manifest: LegacyVisualManifest): CaptureEvidenceReport {
   const messages: string[] = [];
+  const disclosures: string[] = [];
   if (manifest.schemaVersion < 3 || manifest.capturePolicy === undefined) {
     messages.push(
       "Computer Use 우선 캡처 정책 또는 제공자 기록이 없습니다. 새 캡처를 schemaVersion 3 manifest로 다시 기록합니다.",
     );
   } else if (
     manifest.capturePolicy.preferredProvider !== "computer-use" ||
-    manifest.capturePolicy.fallback !== "browser-or-playwright-with-gap"
+    !["browser-or-playwright-when-unavailable", "browser-or-playwright-with-gap"].includes(
+      manifest.capturePolicy.fallback,
+    )
   ) {
     messages.push("legacy 캡처 정책은 Computer Use 우선과 공개된 fallback이어야 합니다.");
   }
   for (const target of manifest.visualTargets) {
-    inspectOneCapture(target.baselineCapture, `${target.id} 레거시 기준`, messages);
-    inspectOneCapture(target.attempts.at(-1)?.capture, `${target.id} Vue 3 이관 결과`, messages);
+    inspectOneCapture(target.baselineCapture, `${target.id} 레거시 기준`, messages, disclosures);
+    inspectOneCapture(
+      target.attempts.at(-1)?.capture,
+      `${target.id} Vue 3 이관 결과`,
+      messages,
+      disclosures,
+    );
   }
-  return { status: messages.length === 0 ? "passed" : "gap", messages };
+  return {
+    status: messages.length === 0 ? "passed" : "gap",
+    messages,
+    disclosures: [...new Set(disclosures)],
+  };
 }
 
 function inspectOneCapture(
   capture: LegacyCaptureEvidence | undefined,
   label: string,
   messages: string[],
+  disclosures: string[],
 ): void {
   if (capture === undefined) {
     messages.push(`${label}의 capture provider·인증 상태 기록이 없습니다.`);
     return;
   }
   if (capture.provider !== "computer-use") {
-    messages.push(
-      `${label}은 ${captureProviderLabel(capture.provider)} fallback으로 캡처했습니다 (인증: ${captureAuthLabel(capture.authState)}). 사유: ${capture.fallbackReason}`,
+    disclosures.push(
+      `${captureProviderLabel(capture.provider)} fallback · ${captureAuthLabel(capture.authState)} · ${capture.fallbackReason}`,
     );
   }
 }
@@ -1102,27 +1119,31 @@ function renderLegacyMarkdown(
         `| ${escapeCell(`${item.route} · ${item.state}`)} | ${escapeCell(item.sourceFiles.join(", "))} | ${escapeCell(item.targetFiles.join(", "))} | ${targetStatus(report.targets, report.exclusions, item.id)} |`,
     )
     .join("\n");
-  const visualRows = report.targets
+  const visualPairs = report.targets
     .map((target) => {
-      const finalAttempt = target.target.attempts.at(-1);
-      const images = [
-        imageMarkdown("레거시", target.artifacts.baseline, options),
+      const score = target.result === undefined ? "측정하지 못함" : target.result.matchPercent;
+      const actual =
         target.artifacts.actual === undefined
           ? "이관 이미지 없음"
-          : imageMarkdown("Vue 3", target.artifacts.actual, options),
+          : imageMarkdown("Vue 3", target.artifacts.actual, options);
+      const diff =
         target.artifacts.diff === undefined
           ? "Diff 없음"
-          : linkMarkdown("Diff", target.artifacts.diff, options),
-      ].join("<br>");
-      const score = target.result === undefined ? "측정하지 못함" : target.result.matchPercent;
-      const critical =
-        target.result === undefined
-          ? "-"
-          : target.result.regions.map((region) => `${region.id} ${region.matchPercent}`).join(", ");
-      const capture = `${captureSummary(target.target.baselineCapture)} → ${captureSummary(finalAttempt?.capture)}`;
-      return `| ${escapeCell(`${target.inventory.route} · ${target.inventory.state}`)} | ${escapeCell(target.target.fixture)} | ${target.target.viewport.width}×${target.target.viewport.height} @${target.target.viewport.dpr} | ${escapeCell(capture)} | ${score} | ${critical} | ${statusLabel(target.status)} | ${images} |`;
+          : linkMarkdown("Diff 이미지", target.artifacts.diff, options);
+      return `### ${target.inventory.route} · ${target.inventory.state}
+
+**${statusLabel(target.status)} · ${score}** · ${target.target.viewport.width}×${target.target.viewport.height} @${target.target.viewport.dpr} · ${escapeCell(target.target.fixture)}
+
+| 레거시 | Vue 3 |
+| --- | --- |
+| ${imageMarkdown("레거시", target.artifacts.baseline, options)} | ${actual} |
+
+${diff}`;
     })
-    .join("\n");
+    .join("\n\n");
+  const captureDisclosure = report.captureEvidence.disclosures.length
+    ? `> 캡처: ${report.captureEvidence.disclosures.map(escapeCell).join("<br>")}`
+    : "";
   const exclusions = report.exclusions.length
     ? report.exclusions
         .map(
@@ -1142,7 +1163,7 @@ function renderLegacyMarkdown(
 
   return `## 검토자 결정
 
-> **${report.status === "verified" ? "VERIFIED" : "NOT VERIFIED"}** · 화면 비교 ${report.coverage.passed}/${report.coverage.required} 통과 · 제외 ${report.coverage.excluded}개
+> **${report.status === "verified" ? "VERIFIED" : "NOT VERIFIED"}** · 좌우 비교 ${report.coverage.passed}/${report.coverage.required} 통과 · 제외 ${report.coverage.excluded}개
 >
 > ${verification}
 
@@ -1152,11 +1173,11 @@ function renderLegacyMarkdown(
 | --- | --- | --- | --- |
 ${scopeRows}
 
-## 화면 비교
+## 좌우 이미지 비교
 
-| 경로 · 상태 | Fixture | Viewport | 캡처 방식 (기준 → 대상) | 전체 일치율 | 핵심 UI 영역 | 결과 | 기준 · 이관 결과 · Diff |
-| --- | --- | --- | --- | ---: | --- | --- | --- |
-${visualRows || "| 비교 대상 없음 | - | - | - | - | - | Gap | - |"}
+${captureDisclosure}
+
+${visualPairs || "비교 대상 없음"}
 
 ## 보존 이관 확인
 
@@ -1225,13 +1246,6 @@ function statusLabel(status: LegacyEvidenceTargetResult["status"]): string {
   if (status === "passed") return "통과";
   if (status === "failed") return "미달";
   return "Gap";
-}
-
-function captureSummary(capture: LegacyCaptureEvidence | undefined): string {
-  if (capture === undefined) return "기록 없음";
-  const fallback =
-    capture.provider === "computer-use" ? "" : ` fallback: ${capture.fallbackReason}`;
-  return `${captureProviderLabel(capture.provider)} · ${captureAuthLabel(capture.authState)}${fallback}`;
 }
 
 function captureProviderLabel(provider: LegacyCaptureProvider): string {

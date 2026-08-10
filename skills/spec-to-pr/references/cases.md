@@ -65,7 +65,7 @@ node /absolute/path/to/legacy-source-inventory.cjs \
 
 레거시 화면은 호스트에 Computer Use가 있으면 이를 먼저 사용합니다. 이미 로그인된 실제 앱에서 모든 route·state를 순회하고, 같은 앱 컨텍스트에서 기준·이관 결과 PNG를 얻습니다. 화면 비교만을 위해 독립 Browser/Playwright 창을 먼저 띄우지 않습니다.
 
-Computer Use가 현재 호스트에 노출되지 않았거나 동일 조건의 PNG를 만들 수 없을 때만 Browser 또는 Playwright를 fallback으로 사용합니다. fallback은 통과로 숨기지 않습니다. provider, 인증 상태, 캡처 시각, 사유를 manifest와 PR 화면 비교 표에 기록하고 Open Gap으로 남깁니다. 인증 쿠키·토큰 값은 어떤 증빙에도 기록하지 않습니다.
+Computer Use가 현재 호스트에 노출되지 않았거나 동일 조건의 PNG를 만들 수 없을 때만 Browser 또는 Playwright를 fallback으로 사용합니다. provider, 인증 상태, 캡처 시각, 사유를 manifest에 기록하고 PR 좌우 이미지 비교 위에 중복 없이 공개합니다. 같은 조건의 PNG와 기능 검증을 확보했다면 fallback 자체는 Gap이 아닙니다. provider 기록·사유가 없거나 캡처 조건을 확인할 수 없을 때만 Gap입니다. 인증 쿠키·토큰 값은 어떤 증빙에도 기록하지 않습니다.
 
 ### 화면 매트릭스는 필수
 
@@ -92,7 +92,7 @@ Computer Use가 현재 호스트에 노출되지 않았거나 동일 조건의 P
   "targetPaths": ["apps/gzApp/src/pages/mapfinder"],
   "capturePolicy": {
     "preferredProvider": "computer-use",
-    "fallback": "browser-or-playwright-with-gap"
+    "fallback": "browser-or-playwright-when-unavailable"
   },
   "migration": {
     "strategy": "preserve-legacy",
@@ -180,7 +180,7 @@ Computer Use가 현재 호스트에 노출되지 않았거나 동일 조건의 P
 }
 ```
 
-`legacy-visual-evidence.cjs`는 전체 이미지와 `criticalRegions`를 모두 비교하고, Computer Use 우선 capture policy·fallback 공개, route/asset/CSS/runtime mapping, glyph/placeholder 대체, 발행 실패를 검증합니다. 큰 빈 지도 영역이 높은 점수를 만들어도 검색·필터·목록·하단 컨트롤 영역이 미달하면 해당 상태는 통과가 아닙니다.
+`legacy-visual-evidence.cjs`는 전체 이미지와 `criticalRegions`를 모두 비교하고, Computer Use 우선 capture policy·fallback 공개, route/asset/CSS/runtime mapping, glyph/placeholder 대체, 발행 실패를 검증합니다. PR section은 경로·상태별 레거시와 Vue 3 이미지를 좌우로 놓고 Diff 링크를 바로 아래에 생성하며, 별도의 요약형 화면 비교 표를 만들지 않습니다. 큰 빈 지도 영역이 높은 점수를 만들어도 검색·필터·목록·하단 컨트롤 영역이 미달하면 해당 상태는 통과가 아닙니다.
 
 ### 이미지 전달
 

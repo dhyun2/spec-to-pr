@@ -1,6 +1,6 @@
 # [레거시 이관] {{TITLE}}
 
-> Draft PR · **{{VERIFICATION_LABEL}}** · 화면 비교 {{VISUAL_PASSED}}/{{VISUAL_REQUIRED}} 통과 · 명시적 제외 {{VISUAL_EXCLUDED}}개 · Gap {{GAP_COUNT}}개
+> Draft PR · **{{VERIFICATION_LABEL}}** · 좌우 비교 {{VISUAL_PASSED}}/{{VISUAL_REQUIRED}} 통과 · 명시적 제외 {{VISUAL_EXCLUDED}}개 · Gap {{GAP_COUNT}}개
 
 ## 검토자 결정
 
@@ -12,11 +12,11 @@
 | ------------------------ | --------- | --------- | --------- |
 | {{MIGRATION_SCOPE_ROWS}} |
 
-## 화면 비교
+## 좌우 이미지 비교
 
-| 경로 · 상태            | Fixture | Viewport | 캡처 방식 (기준 → 대상) | 전체 일치율 | 핵심 UI 영역 | 결과 | 기준 · 이관 결과 · Diff |
-| ---------------------- | ------- | -------: | ----------------------- | ----------: | ------------ | ---- | ----------------------- |
-| {{LEGACY_VISUAL_ROWS}} |
+{{CAPTURE_PROVIDER_DISCLOSURE_IF_FALLBACK}}
+
+{{LEGACY_VISUAL_PAIRS_WITH_DIFF_LINKS}}
 
 ## 보존 이관 확인
 

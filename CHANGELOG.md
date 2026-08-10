@@ -1,5 +1,13 @@
 # 변경 이력
 
+## 1.0.4 - 2026-08-10
+
+### 수정
+
+- 레거시 PR 증빙은 중복된 요약형 `화면 비교` 표를 제거하고, 경로·상태별 레거시와 Vue 3 이미지를 좌우 두 열로 표시한 뒤 Diff 링크를 바로 아래에 생성합니다.
+- Computer Use가 호스트에 없거나 필요한 PNG를 만들 수 없어 Browser/Playwright를 쓴 경우 provider·인증 상태·사유를 한 번 공개하되, 동일 조건의 이미지와 기능 검증이 있으면 fallback 자체를 Gap으로 만들지 않습니다.
+- SpecToPR 1.0.3의 `browser-or-playwright-with-gap` manifest도 계속 읽으며, 새 manifest는 `browser-or-playwright-when-unavailable` 정책을 사용합니다.
+
 ## 1.0.3 - 2026-08-10
 
 ### 수정

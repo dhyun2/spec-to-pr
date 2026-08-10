@@ -13,7 +13,7 @@ title: 문제 해결
 
 ## 왜 Browser/Playwright가 Computer Use보다 먼저 쓰였나요?
 
-legacy 기본은 Computer Use입니다. 현재 호스트에 Computer Use capability가 없거나 필요한 PNG를 만들 수 없을 때만 Browser/Playwright를 fallback으로 씁니다. fallback은 숨기지 않고 `legacy-visual-manifest.json`의 provider·인증 상태·사유와 PR의 Open Gap에 기록해야 합니다. 쿠키·토큰 값은 증빙에 기록하지 않습니다.
+legacy 기본은 Computer Use입니다. 현재 호스트에 Computer Use capability가 없거나 필요한 PNG를 만들 수 없을 때만 Browser/Playwright를 fallback으로 씁니다. fallback은 숨기지 않고 `legacy-visual-manifest.json`과 PR 좌우 이미지 비교 위에 provider·인증 상태·사유를 기록합니다. 같은 조건의 PNG와 기능 검증이 있으면 fallback 자체는 Gap이 아니며, provider 기록이나 사유가 빠졌을 때만 Gap입니다. 쿠키·토큰 값은 증빙에 기록하지 않습니다.
 
 ## 레거시 기본 화면만 통과했어요
 

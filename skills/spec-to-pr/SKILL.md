@@ -55,12 +55,12 @@ targetBranch: main # 선택
 
 7. 화면을 캡처하고 비교합니다.
    - `legacy`는 호스트에 Computer Use가 노출돼 있으면 이를 **우선** 사용해 이미 로그인된 실제 앱에서 route·state를 순회하고 기준·이관 결과를 캡처합니다. 화면 비교만을 위해 별도 브라우저를 먼저 띄우지 않습니다.
-   - Computer Use가 이 호스트에 없거나 필요한 캡처를 만들 수 없을 때만 Browser 또는 Playwright를 fallback으로 사용합니다. 이 경우 provider, 인증 상태, 시각, fallback 사유를 manifest와 PR에 기록하고 Open Gap으로 남깁니다. 쿠키 값·토큰은 기록하지 않습니다.
+   - Computer Use가 이 호스트에 없거나 필요한 캡처를 만들 수 없을 때만 Browser 또는 Playwright를 fallback으로 사용합니다. 이 경우 provider, 인증 상태, 시각, fallback 사유를 manifest와 PR에 한 번만 공개합니다. 같은 조건의 PNG와 기능 검증을 확보했다면 fallback 자체는 Gap이 아닙니다. 쿠키 값·토큰은 기록하지 않습니다.
    - 기준·구현 이미지는 같은 route, UI state, fixture, viewport, DPR, 인증 상태에서 캡처합니다.
    - `legacy`는 [레거시 화면 매트릭스](references/cases.md#legacy)를 먼저 만들고, 레거시 라우터에서 발견한 **모든 사용자 노출 route·대표 상태**를 하나씩 비교하거나 명시적으로 제외합니다. 기본 화면 하나만 비교해 전체 이관을 통과 처리하면 안 됩니다.
    - 이미지는 `spec-to-pr-evidence/<change>/`에 `baseline`, `actual`, `diff`로 저장합니다. 비교 결과는 최대 3회까지 시도하며 92% 미만·캡처 실패·미실행은 Gap입니다.
    - 빈 영역이 점수를 부풀리지 않도록 legacy target마다 검색·필터·목록·지도 컨트롤 같은 핵심 UI 영역을 하나 이상 지정해 전체 화면과 별도로 비교합니다.
-8. `legacy`는 `spec-to-pr-evidence/<change>/legacy-visual-manifest.json` schema v3을 만들고 아래 도구로 검증합니다. 이 manifest는 Computer Use 우선 capture policy와 baseline·actual 각각의 provider/인증 상태/fallback 사유를 포함합니다. 도구는 빠진 화면, capture fallback, source asset/CSS/runtime mapping, 금지된 glyph·placeholder, 비교 이미지의 Git index 누락을 숨기지 않고 `NOT VERIFIED`와 Gap을 만듭니다.
+8. `legacy`는 `spec-to-pr-evidence/<change>/legacy-visual-manifest.json` schema v3을 만들고 아래 도구로 검증합니다. 이 manifest는 Computer Use 우선 capture policy와 baseline·actual 각각의 provider/인증 상태/fallback 사유를 포함합니다. 도구는 빠진 화면, 누락된 capture 기록, source asset/CSS/runtime mapping, 금지된 glyph·placeholder, 비교 이미지의 Git index 누락을 숨기지 않고 `NOT VERIFIED`와 Gap을 만듭니다. Computer Use 미노출·캡처 불가 사유가 기록된 Browser/Playwright fallback은 캡처 방법으로만 공개하며 Gap으로 만들지 않습니다.
 
    ```bash
    node /absolute/path/to/legacy-visual-evidence.cjs \
@@ -71,7 +71,7 @@ targetBranch: main # 선택
      --write-pr-section /absolute/path/to/project/spec-to-pr-evidence/<change>/legacy-pr-section.md
    ```
 
-   이 명령은 `git add spec-to-pr-evidence/<change>/` 뒤에 실행합니다. 기준·이관·Diff를 PR 본문에 실제 이미지 링크로 넣으므로, 로컬 경로만 적거나 Diff 하나만 올리지 않습니다.
+   이 명령은 `git add spec-to-pr-evidence/<change>/` 뒤에 실행합니다. PR에는 경로·상태별 레거시와 Vue 3 이미지를 좌우 두 열로 놓고 바로 아래에 Diff 링크를 하나만 둡니다. 같은 이미지를 별도의 요약형 화면 비교 표에 중복하지 않으며, 로컬 경로만 적거나 Diff 하나만 올리지 않습니다.
 
 9. 구현과 증빙을 읽지 않은 새 컨텍스트에서 기능 검토하고, UI가 있으면 디자인·접근성 검토도 합니다. `passed` 판정만 검증 통과로 씁니다. 실패·미실행·모델/환경 부재는 Gap이며, 상위 모델을 쓸 수 없다고 이 검토를 생략하거나 통과로 바꾸지 않습니다.
 10. 최종 `git diff`, 화면 증빙, 검증 결과를 바탕으로 **case 전용** PR 템플릿 하나를 채웁니다. 템플릿 선택 기준은 [assets/pr-templates/README.md](assets/pr-templates/README.md)입니다. 내부 실행 식별자·로그, 토큰·쿠키, 비어 있는 체크리스트, 중복 discovery 행은 PR 본문에 넣지 않습니다.
