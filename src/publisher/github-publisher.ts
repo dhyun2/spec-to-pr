@@ -75,7 +75,7 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
       return undefined;
     }
 
-    return normalizeGitHubPr(first, false, true, input.payload);
+    return normalizeGitHubPr(first, false, true, input.payload, true);
   }
 
   public async create(input: {
@@ -572,18 +572,36 @@ function normalizeGitHubPr(
   created: boolean,
   updated: boolean,
   payload: Pick<ReviewRequestPayload, "sourceBranch" | "targetBranch">,
+  verifyBranches = false,
 ): PublishedReviewRequest {
+  const sourceBranch = githubBranch(pr["head"]);
+  const targetBranch = githubBranch(pr["base"]);
+  if (
+    verifyBranches &&
+    (sourceBranch === undefined ||
+      targetBranch === undefined ||
+      sourceBranch !== payload.sourceBranch ||
+      targetBranch !== payload.targetBranch)
+  ) {
+    throw new Error("GITHUB_PUBLICATION_MISMATCH: existing pull request branches do not match");
+  }
   return PublishedReviewRequestSchema.parse({
     host: "github",
     url: String(pr["html_url"]),
     number: String(pr["number"]),
     id: String(pr["id"]),
     draft: pr["draft"] === true,
-    sourceBranch: payload.sourceBranch,
-    targetBranch: payload.targetBranch,
+    sourceBranch: sourceBranch ?? payload.sourceBranch,
+    targetBranch: targetBranch ?? payload.targetBranch,
     created,
     updated,
   });
+}
+
+function githubBranch(value: unknown): string | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const ref = (value as Record<string, unknown>)["ref"];
+  return typeof ref === "string" && ref.trim() !== "" ? ref : undefined;
 }
 
 function encodePath(path: string): string {
