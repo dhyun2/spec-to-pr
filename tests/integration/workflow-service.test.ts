@@ -757,7 +757,7 @@ describe("WorkflowService", () => {
       skipped: false,
       blocker: {
         stage: "contracts",
-        code: "MISSING_INPUT",
+        code: "MISSING_APPROVAL",
         kind: "missing-input",
         exactUnblockAction: blocked.blockerDetails[0]!.exactUnblockAction,
       },
@@ -814,8 +814,8 @@ describe("WorkflowService", () => {
       skipped: true,
       reason: "diagnostic-context-changed",
       retryable: true,
-      expectedReportKey: "contracts:0:MISSING_INPUT",
-      actualReportKey: "contracts:1:MISSING_INPUT",
+      expectedReportKey: "contracts:0:MISSING_APPROVAL",
+      actualReportKey: "contracts:1:NEWER_MISSING_APPROVAL",
       diagnosticReport: {
         artifactId: expect.stringMatching(/^art_/),
         path: expect.stringMatching(/^artifact:\/\/sha256\//),
@@ -1037,7 +1037,7 @@ describe("WorkflowService", () => {
       }),
     ).resolves.toMatchObject({ result: { sent: true } });
     expect(publish).toHaveBeenCalledTimes(1);
-    expect(report.metadata["idempotencyKey"]).toBe("contracts:0:MISSING_INPUT");
+    expect(report.metadata["idempotencyKey"]).toBe("contracts:0:MISSING_APPROVAL");
   });
 
   it("aborts and fences a live diagnostic owner after heartbeat persistence fails", async () => {
@@ -2261,17 +2261,17 @@ describe("WorkflowService", () => {
       reportIntent: "blocked-diagnostic",
       decision: "blocked",
       blockedStage: "contracts",
-      errorCode: "MISSING_INPUT",
+      errorCode: "MISSING_APPROVAL",
       blockedStageAttempt: 0,
       sourceRunRevision: blockedRun.revision,
-      idempotencyKey: "contracts:0:MISSING_INPUT",
+      idempotencyKey: "contracts:0:MISSING_APPROVAL",
     });
     expect(reportedRun.revision).toBe(blockedRun.revision + 1);
     expect(reportedRun.stages.find((item) => item.name === "report")).toEqual(reportStageBefore);
     const markdown = (await artifactStore.readContent(first.digest)).toString("utf8");
     expect(markdown).toContain("**Draft · merge blocked**");
     expect(markdown).toContain("## 먼저 확인할 Gap");
-    expect(markdown).toContain("MISSING_INPUT");
+    expect(markdown).toContain("MISSING_APPROVAL");
     expect(markdown).toContain("## 검증");
     expect(markdown).not.toContain("## 실행 메타데이터");
     expect(markdown).not.toContain("## 롤백");
@@ -4886,6 +4886,18 @@ describe("WorkflowService", () => {
       path.join(directory, contractSubmission.draftBundle.proposalPath),
       `${contractSubmission.draftBundle.proposalPath}\n`,
       "utf8",
+    );
+
+    await writeFile(
+      path.join(directory, "visual/legacy.png"),
+      PNG.sync.write(new PNG({ width: 2, height: 1 })),
+    );
+    await expect(
+      service.submit({ runId: started.runId, submission: contractSubmission }),
+    ).rejects.toThrow(/VISUAL_BASELINE_GEOMETRY_INVALID.*tiled capture plan/i);
+    await writeFile(
+      path.join(directory, "visual/legacy.png"),
+      PNG.sync.write(new PNG({ width: 1, height: 1 })),
     );
 
     const accepted = await service.submit({

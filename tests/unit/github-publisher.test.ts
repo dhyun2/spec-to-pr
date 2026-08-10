@@ -23,6 +23,21 @@ describe("GitHubPublisherAdapter", () => {
     expect(fetchMock.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
   });
 
+  it("rejects ambiguous existing GitHub drafts instead of choosing the first response", async () => {
+    const adapter = new GitHubPublisherAdapter(
+      vi.fn().mockResolvedValueOnce(
+        jsonResponse([
+          { html_url: "https://github.com/acme/spec-to-pr/pull/7", number: 7, id: 70, draft: true },
+          { html_url: "https://github.com/acme/spec-to-pr/pull/8", number: 8, id: 80, draft: true },
+        ]),
+      ),
+    );
+
+    await expect(
+      adapter.findExisting({ target: githubTarget(), payload: payload(), token: "ghp_example" }),
+    ).rejects.toThrow(/GITHUB_PUBLICATION_AMBIGUOUS/);
+  });
+
   it("creates draft pull requests with report body", async () => {
     const fetchMock = vi
       .fn()

@@ -578,7 +578,9 @@ describe("workflow report renderer", () => {
     expect(reviewerFirstMarkdown).toContain("## 먼저 확인할 Gap");
     expect(reviewerFirstMarkdown).toContain("Confirm the write contract before merge.");
     expect(reviewerFirstMarkdown).toContain("## 화면 비교");
-    expect(reviewerFirstMarkdown).toContain("## 원본 → 대상");
+    expect(reviewerFirstMarkdown).toContain("## 레거시 이관 범위");
+    expect(reviewerFirstMarkdown).toContain("| 이관 | REQ-SHOP-ROUTING | src/pages/shop/App.vue |");
+    expect(reviewerFirstMarkdown).not.toContain("## 원본 → 대상");
     expect(reviewerFirstMarkdown).toContain("## 검증");
     expect(reviewerFirstMarkdown).not.toContain("## API Gap");
     expect(reviewerFirstMarkdown).not.toContain("실행 메타데이터");

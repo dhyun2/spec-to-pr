@@ -4,6 +4,8 @@ export const MAX_VISUAL_PIXEL_COUNT = 8_388_608;
 
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 
+export type PngGeometry = { width: number; height: number };
+
 export async function decodeBoundedPng(content: Buffer, role: string): Promise<PngImage> {
   assertBoundedPng(content, role);
   try {
@@ -18,6 +20,20 @@ export async function decodeBoundedPng(content: Buffer, role: string): Promise<P
 }
 
 export function assertBoundedPng(content: Buffer, role: string): void {
+  const { width, height } = readPngGeometry(content, role);
+  if (width > Math.floor(MAX_VISUAL_PIXEL_COUNT / height)) {
+    throw new Error(
+      `VISUAL_PIXEL_LIMIT: ${role} ${width}x${height} exceeds ${MAX_VISUAL_PIXEL_COUNT} pixels`,
+    );
+  }
+}
+
+/**
+ * Reads PNG dimensions without decoding pixel data or applying the comparison
+ * memory budget. Contract intake uses this to reject a viewport/full-page
+ * mismatch before the comparison path reaches the generic pixel-limit error.
+ */
+export function readPngGeometry(content: Buffer, role: string): PngGeometry {
   if (
     content.byteLength < 24 ||
     !content.subarray(0, PNG_SIGNATURE.byteLength).equals(PNG_SIGNATURE) ||
@@ -31,9 +47,5 @@ export function assertBoundedPng(content: Buffer, role: string): void {
   if (width < 1 || height < 1) {
     throw new Error(`VISUAL_INVALID_PNG: ${role} must be a valid PNG with non-empty dimensions`);
   }
-  if (width > Math.floor(MAX_VISUAL_PIXEL_COUNT / height)) {
-    throw new Error(
-      `VISUAL_PIXEL_LIMIT: ${role} ${width}x${height} exceeds ${MAX_VISUAL_PIXEL_COUNT} pixels`,
-    );
-  }
+  return { width, height };
 }

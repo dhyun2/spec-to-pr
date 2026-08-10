@@ -535,32 +535,24 @@ function renderReviewerFirstPrBody(report: PrReportV2): string {
             (omittedChangedFileCount > 0 ? ` 외 ${omittedChangedFileCount}개` : ""),
         ]),
     "",
-    ...(showLegacy
+    ...(showLegacy || template === "legacy-migration"
       ? [
           "## 레거시 이관 범위",
           "",
-          "| 상태 | 요구사항 | 대상 파일 |",
-          "| --- | --- | --- |",
-          ...report.legacy.coverage.map(
-            (coverage) =>
-              `| ${koreanOperationStatus(coverage.status)} | ${markdownTableCell(coverage.requirementIds.join(", "))} | ${markdownTableCell(coverage.targetFiles.join(", ") || "—")} |`,
-          ),
-          "",
-        ]
-      : []),
-    ...(template === "legacy-migration"
-      ? [
-          "## 원본 → 대상",
-          "",
-          "| 원본 | 대상 | 이관 상태 |",
-          "| --- | --- | --- |",
+          ...(legacySources.length === 0
+            ? []
+            : [`원본 기준: ${legacySources.map(markdownInline).join(", ")}`, ""]),
           ...(report.legacy.coverage.length === 0
-            ? ["| 원본 범위 미확정 | — | Gap 확인 필요 |"]
-            : report.legacy.coverage.map(
-                (coverage) =>
-                  `| ${markdownTableCell(legacySources.join(", ") || coverage.featureKey)} | ${markdownTableCell(coverage.targetFiles.join(", ") || "—")} | ${koreanOperationStatus(coverage.status)} |`,
-              )),
-          "",
+            ? ["- 원본 범위 또는 요구사항이 아직 확정되지 않았습니다.", ""]
+            : [
+                "| 상태 | 요구사항 | 대상 파일 |",
+                "| --- | --- | --- |",
+                ...report.legacy.coverage.map(
+                  (coverage) =>
+                    `| ${koreanOperationStatus(coverage.status)} | ${markdownTableCell(coverage.requirementIds.join(", "))} | ${markdownTableCell(coverage.targetFiles.join(", ") || "—")} |`,
+                ),
+                "",
+              ]),
         ]
       : []),
     ...(template === "brief-delivery"

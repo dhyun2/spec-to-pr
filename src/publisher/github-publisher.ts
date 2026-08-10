@@ -64,6 +64,11 @@ export class GitHubPublisherAdapter implements ReviewRequestPublisher {
     }
 
     const pulls = (await response.json()) as Array<Record<string, unknown>>;
+    if (pulls.length > 1) {
+      throw new Error(
+        "GITHUB_PUBLICATION_AMBIGUOUS: more than one open draft matches the source and target branches",
+      );
+    }
     const first = pulls[0];
 
     if (first === undefined) {

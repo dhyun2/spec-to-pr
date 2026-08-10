@@ -129,7 +129,7 @@ import {
   type VisualTargetManifest,
 } from "../visual/visual-comparator.js";
 import { defaultVisualComparisonPool } from "../visual/visual-comparison-pool.js";
-import { decodeBoundedPng } from "../visual/png-decoder.js";
+import { decodeBoundedPng, readPngGeometry } from "../visual/png-decoder.js";
 import { normalizeVisualPng } from "../visual/visual-normalizer.js";
 import {
   VisualCaptureReceiptSchema,
@@ -2242,6 +2242,7 @@ export class WorkflowService {
       run.id,
       reportArtifact.id,
       executionIdentity,
+      blocker,
       input.recoverUncertain,
     );
     if (claim.state === "synchronized") {
@@ -3056,6 +3057,21 @@ export class WorkflowService {
       }
 
       const content = await readFile(resolvedPath);
+      const compatibilityTarget =
+        submission.kind === "contracts"
+          ? submission.visualTargets.find(
+              (target) =>
+                target.baselineKind === "legacy-screenshot" &&
+                target.figmaCapture === undefined &&
+                target.baselinePath === evidencePath,
+            )
+          : undefined;
+      if (compatibilityTarget !== undefined) {
+        assertCompatibilityBaselineGeometry(
+          compatibilityTarget,
+          readPngGeometry(content, evidencePath),
+        );
+      }
       if (featureEvidenceRole === "video" && videoDurationMs(content) === undefined) {
         throw new Error(
           `Feature video must be a valid WebM or MP4 container with non-zero duration: ${evidencePath}`,
@@ -5655,9 +5671,11 @@ export class WorkflowService {
     runId: string,
     reportArtifactId: string,
     executionIdentity: DiagnosticExecutionIdentity,
+    blocker: WorkflowBlocker,
     recoverUncertain: boolean,
   ) {
     const executionKey = diagnosticClaimFenceKey(executionIdentity);
+    const compatibleExecutionKeys = diagnosticClaimFenceKeys(runId, executionIdentity, blocker);
 
     for (let attempt = 0; attempt < MAX_DIAGNOSTIC_CLAIM_ATTEMPTS; attempt += 1) {
       const run = await this.dependencies.runStore.get(RunIdSchema.parse(runId));
@@ -5671,7 +5689,7 @@ export class WorkflowService {
       }
 
       const timestamp = this.now();
-      const activeClaim = latestDiagnosticPublishClaimEvent(run, executionKey);
+      const activeClaim = latestDiagnosticPublishClaimEvent(run, compatibleExecutionKeys);
       if (diagnosticPublishClaimIsActive(activeClaim, timestamp)) {
         return {
           state: "in-progress" as const,
@@ -6138,16 +6156,44 @@ function diagnosticClaimFenceKey(identity: DiagnosticExecutionIdentity): string 
   return createHash("sha256").update(JSON.stringify(fenceIdentity)).digest("hex");
 }
 
+/**
+ * Before blocker diagnostics preserved safe source codes, claims used the
+ * generic code derived from `kind`. Treat that older key as the same fence so
+ * a changed presenter cannot silently bypass an uncertain host mutation.
+ */
+function diagnosticClaimFenceKeys(
+  runId: string,
+  identity: DiagnosticExecutionIdentity,
+  blocker: WorkflowBlocker,
+): string[] {
+  const current = diagnosticClaimFenceKey(identity);
+  const genericCode = blockerCodeForKind(blocker.kind);
+  if (genericCode === blocker.code) return [current];
+  const legacyIdentity: DiagnosticExecutionIdentity = {
+    ...identity,
+    runId,
+    reportKey: `${blocker.stage}:${stageAttemptFromReportKey(identity.reportKey)}:${genericCode}`,
+  };
+  return [current, diagnosticClaimFenceKey(legacyIdentity)];
+}
+
+function stageAttemptFromReportKey(reportKey: string): string {
+  const [, attempt] = reportKey.split(":", 3);
+  return /^\d+$/.test(attempt ?? "") ? attempt! : "0";
+}
+
 function latestDiagnosticPublishClaimEvent(
   run: RunManifest,
-  executionKey: string,
+  executionKeys: string | readonly string[],
 ): ArtifactRef | undefined {
+  const keys = new Set(typeof executionKeys === "string" ? [executionKeys] : executionKeys);
   return [...run.artifacts]
     .reverse()
     .find(
       (artifact) =>
         artifact.metadata["reportKind"] === "diagnostic-publish-claim" &&
-        artifact.metadata["diagnosticExecutionKey"] === executionKey,
+        typeof artifact.metadata["diagnosticExecutionKey"] === "string" &&
+        keys.has(artifact.metadata["diagnosticExecutionKey"]),
     );
 }
 
@@ -6303,7 +6349,9 @@ function reconstructWorkflowBlocker(
       attemptedRecoveryForStage(failedStage),
     ),
     unrunValidations: uniqueSafeWorkflowDiagnostics(
-      blocker.unrunValidations,
+      blocker.unrunValidations.filter((validation) =>
+        remainingValidationsForRun(run, requiredValidations).includes(validation),
+      ),
       remainingValidationsForRun(run, requiredValidations),
     ),
     exactUnblockAction: safeWorkflowDiagnostic(blocker.exactUnblockAction)
@@ -8704,6 +8752,21 @@ function assertFigmaManifest(
 
 async function assertPng(content: Buffer, evidencePath: string): Promise<void> {
   await decodeBoundedPng(content, evidencePath);
+}
+
+function assertCompatibilityBaselineGeometry(
+  target: VisualTargetManifest,
+  bitmapSize: { width: number; height: number },
+): void {
+  const expected = {
+    width: Math.round(target.viewport.width * target.deviceScaleFactor),
+    height: Math.round(target.viewport.height * target.deviceScaleFactor),
+  };
+  if (bitmapSize.width === expected.width && bitmapSize.height === expected.height) return;
+
+  throw new Error(
+    `VISUAL_BASELINE_GEOMETRY_INVALID: target ${target.targetId} legacy baseline is ${bitmapSize.width}x${bitmapSize.height}, expected ${expected.width}x${expected.height} for the declared viewport; full-page legacy baselines require a tiled capture plan before contract acceptance`,
+  );
 }
 
 function videoDurationMs(content: Buffer): number | undefined {

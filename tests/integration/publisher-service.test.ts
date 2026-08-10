@@ -2112,7 +2112,7 @@ describe("PublisherService", () => {
     expect(body).not.toContain("legacy_01e68a8c011c37b4b997f938");
   });
 
-  it("records failed publish and no publisher AgentResult when API body sync fails", async () => {
+  it("quarantines an unreconciled create response and records no publisher AgentResult", async () => {
     const run = await runService.createRun({
       projectRoot,
     });
@@ -2135,16 +2135,40 @@ describe("PublisherService", () => {
 
     expect(published.result).toMatchObject({
       status: "failed",
+      errorCode: "PUBLISH_CREATE_UNCERTAIN",
       requestSynced: false,
       visualPreviewExpected: false,
       visualPreviewSynced: false,
     });
-    expect(published.result.partialReasons.join("\n")).toContain("body sync failed");
+    expect(published.result.retryable).toBe(true);
     expect(published.agentResultId).toBeUndefined();
 
     const loadedRun = await store.get(run.id);
 
     expect(loadedRun.agentResults.some((result) => result.kind === "publishing")).toBe(false);
+  });
+
+  it("reconciles a lost create response without issuing a second review-request create", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    githubPublisher.createResponseLost = true;
+
+    const published = await publisherService.publish({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      pushBranch: false,
+      confirm: true,
+    });
+
+    expect(githubPublisher.createdPayloads).toHaveLength(1);
+    expect(githubPublisher.updatedMetadata).toHaveLength(1);
+    expect(published.result).toMatchObject({
+      status: "passed",
+      request: { number: "123", created: false, updated: true },
+    });
   });
 
   it("records blocked partial publish when required visual evidence upload cannot be synchronized", async () => {
@@ -3514,6 +3538,7 @@ class FakePublisher implements ReviewRequestPublisher {
   public readonly uploadedAssetIds: string[][] = [];
   public readonly receivedSignals: Array<AbortSignal | undefined> = [];
   public failCreate = false;
+  public createResponseLost = false;
   public failAssetUpload = false;
   public assetUploadError: Error | undefined;
   public preflightError: Error | undefined;
@@ -3605,7 +3630,7 @@ class FakePublisher implements ReviewRequestPublisher {
 
     this.createdPayloads.push(input.payload);
 
-    return {
+    const request: PublishedReviewRequest = {
       host: this.host,
       url:
         this.host === "github"
@@ -3619,6 +3644,12 @@ class FakePublisher implements ReviewRequestPublisher {
       created: true,
       updated: false,
     };
+    if (this.createResponseLost) {
+      this.existingRequest = { ...request, created: false, updated: false };
+      throw new Error("simulated review-host response loss after create");
+    }
+
+    return request;
   }
 
   public async update(input: {

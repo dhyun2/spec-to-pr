@@ -196,6 +196,21 @@ class PublishNoDeltaError extends Error {
   }
 }
 
+/**
+ * A create request may have reached the review host even when its response was
+ * lost.  Callers must not blindly repeat the POST in that state: a subsequent
+ * publication starts with `findExisting`, so it is safe to retry only after
+ * the host can be reconciled.
+ */
+class PublishCreateUncertainError extends Error {
+  public constructor() {
+    super(
+      "PUBLISH_CREATE_UNCERTAIN: the review-request create response was unavailable and reconciliation found no matching draft; retry only after the review host is reachable",
+    );
+    this.name = "PublishCreateUncertainError";
+  }
+}
+
 export type GitCommandRunner = (
   cwd: string,
   args: string[],
@@ -1224,21 +1239,54 @@ export class PublisherService {
         throw new Error(`Refusing to update non-draft review request ${existing.number}`);
       }
       await this.assertPublicationFenceCurrent(input);
-      const request =
-        existing === undefined
-          ? await publisher.create({
+      let request: PublishedReviewRequest;
+      if (existing !== undefined) {
+        request = await publisher.update({
+          target: input.plan.target,
+          requestNumber: existing.number,
+          update: reviewRequestUpdateFromPayload(prepared.payload),
+          token: input.token,
+          ...(input.signal === undefined ? {} : { signal: input.signal }),
+        });
+      } else {
+        try {
+          request = await publisher.create({
+            target: input.plan.target,
+            payload: prepared.payload,
+            token: input.token,
+            ...(input.signal === undefined ? {} : { signal: input.signal }),
+          });
+        } catch (error: unknown) {
+          // A synchronization error contains the host-created request and is
+          // handled as a partial publication below.  All other create errors
+          // are potentially an unknown POST outcome and must be reconciled
+          // before another create can ever be attempted.
+          if (error instanceof ReviewRequestSynchronizationError) throw error;
+
+          let recovered: PublishedReviewRequest | undefined;
+          try {
+            recovered = await publisher.findExisting({
               target: input.plan.target,
               payload: prepared.payload,
               token: input.token,
               ...(input.signal === undefined ? {} : { signal: input.signal }),
-            })
-          : await publisher.update({
-              target: input.plan.target,
-              requestNumber: existing.number,
-              update: reviewRequestUpdateFromPayload(prepared.payload),
-              token: input.token,
-              ...(input.signal === undefined ? {} : { signal: input.signal }),
             });
+          } catch {
+            throw new PublishCreateUncertainError();
+          }
+          if (recovered === undefined || !recovered.draft) {
+            throw new PublishCreateUncertainError();
+          }
+          await this.assertPublicationFenceCurrent(input);
+          request = await publisher.update({
+            target: input.plan.target,
+            requestNumber: recovered.number,
+            update: reviewRequestUpdateFromPayload(prepared.payload),
+            token: input.token,
+            ...(input.signal === undefined ? {} : { signal: input.signal }),
+          });
+        }
+      }
       if (!request.draft) {
         throw new Error(`Review request ${request.number} is not a draft after publication`);
       }
@@ -3072,7 +3120,12 @@ function failedPublishResult(input: {
     featureVideoSynced: false,
     fallbackMode: "none",
     partialReasons,
-    errorCode: synchronizationDetails === undefined ? "PUBLISH_FAILED" : "PUBLISH_PARTIAL_SYNC",
+    errorCode:
+      synchronizationDetails !== undefined
+        ? "PUBLISH_PARTIAL_SYNC"
+        : input.error instanceof PublishCreateUncertainError
+          ? "PUBLISH_CREATE_UNCERTAIN"
+          : "PUBLISH_FAILED",
     errorMessage: message,
     retryable: synchronizationDetails?.phase !== "reviewers",
     publishedAt: input.publishedAt,
