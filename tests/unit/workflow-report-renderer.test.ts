@@ -578,10 +578,17 @@ describe("workflow report renderer", () => {
     expect(reviewerFirstMarkdown).toContain("## 먼저 확인할 Gap");
     expect(reviewerFirstMarkdown).toContain("Confirm the write contract before merge.");
     expect(reviewerFirstMarkdown).toContain("## 화면 비교");
-    expect(reviewerFirstMarkdown).toContain("## 레거시 이관 범위");
-    expect(reviewerFirstMarkdown).toContain("| 이관 | REQ-SHOP-ROUTING | src/pages/shop/App.vue |");
+    expect(reviewerFirstMarkdown).toContain("## 레거시 이관");
+    expect(reviewerFirstMarkdown).toContain("| 전체 | 이관 | 범위 제외 | 미해결 |");
+    expect(reviewerFirstMarkdown).toContain("<summary>이관 항목 상세</summary>");
+    expect(reviewerFirstMarkdown).toContain(
+      "| 이관 | Shop 메인 화면을 이관했습니다. | src/pages/shop/App.vue |",
+    );
+    expect(reviewerFirstMarkdown).not.toContain("REQ-SHOP-ROUTING");
     expect(reviewerFirstMarkdown).not.toContain("## 원본 → 대상");
     expect(reviewerFirstMarkdown).toContain("## 검증");
+    expect(reviewerFirstMarkdown).toContain("## API");
+    expect(reviewerFirstMarkdown).toContain("<summary>API 상세</summary>");
     expect(reviewerFirstMarkdown).not.toContain("## API Gap");
     expect(reviewerFirstMarkdown).not.toContain("실행 메타데이터");
     expect(reviewerFirstMarkdown).not.toContain("run_");
@@ -603,9 +610,9 @@ describe("workflow report renderer", () => {
         api: { ...reviewerFirst.api, gaps: ["POST /shops write payload is unresolved"] },
       }),
     );
-    expect(apiGapMarkdown).toContain("## API Gap");
+    expect(apiGapMarkdown).toContain("## API");
     expect(apiGapMarkdown).toContain("POST /shops write payload is unresolved");
-    expect(apiGapMarkdown).not.toContain("## API 상태");
+    expect(apiGapMarkdown).toContain("<summary>API 상세</summary>");
 
     const briefMarkdown = renderPrReportV2Markdown(
       PrReportV2Schema.parse({

@@ -485,18 +485,49 @@ function renderReviewerFirstPrBody(report: PrReportV2): string {
     typeof feature?.["videoPath"] === "string" ? feature["videoPath"] : undefined;
   const featureResult =
     typeof feature?.["resultPath"] === "string" ? feature["resultPath"] : undefined;
-  const showApi =
-    report.api.applicable &&
-    (report.api.operations.some(
-      (operation) =>
-        operation.status !== "exercised" && operation.status !== "intentionally-out-of-scope",
-    ) ||
-      report.api.gaps.length > 0);
+  // API evidence is material to a legacy migration even when every operation
+  // passed.  Hiding it in the zero-gap case made a successful migration look
+  // as though no API contract had been checked at all.
+  const showApi = report.api.applicable;
   const apiGapOperations = report.api.operations.filter(
     (operation) =>
       operation.status !== "exercised" && operation.status !== "intentionally-out-of-scope",
   );
+  const apiExcluded = report.api.operations.filter((operation) =>
+    /out-of-scope|excluded/i.test(operation.status),
+  ).length;
+  const apiUnresolvedOperations = report.api.operations.filter((operation) =>
+    /^(gap|planned|blocked)$/i.test(operation.status),
+  );
+  const apiUnresolvedKeys = new Set(
+    apiUnresolvedOperations.map((operation) => operation.operationKey),
+  );
+  for (const gap of report.api.gaps) {
+    const matchingOperation = apiUnresolvedOperations.find((operation) =>
+      gapReferencesOperation(gap, operation.operationKey),
+    );
+    apiUnresolvedKeys.add(matchingOperation?.operationKey ?? `gap:${normalizeGap(gap)}`);
+  }
+  const apiGapCount = apiUnresolvedKeys.size;
+  const apiVerified = report.api.operations.filter(
+    (operation) => operation.status === "exercised",
+  ).length;
+  const apiAdditionalGapCount = [...apiUnresolvedKeys].filter((key) =>
+    key.startsWith("gap:"),
+  ).length;
+  const apiTotal = report.api.operations.length + apiAdditionalGapCount;
+  const apiRows = report.api.operations.map(
+    (operation) =>
+      `| ${markdownTableCell(operation.operationKey)} | ${koreanOperationStatus(operation.status)} | ${markdownTableCell(operation.productionCallSites.join(", ") || "—")} | ${markdownTableCell(operation.executableEvidencePaths.join(", ") || "—")} |`,
+  );
   const showLegacy = report.legacy.applicable && report.legacy.coverage.length > 0;
+  const legacyMigrated = report.legacy.coverage.filter(
+    (coverage) => coverage.status === "migrated",
+  ).length;
+  const legacyExcluded = report.legacy.coverage.filter((coverage) =>
+    /excluded|out-of-scope/i.test(coverage.status),
+  ).length;
+  const legacyUnresolved = report.legacy.coverage.length - legacyMigrated - legacyExcluded;
   const legacySources = report.sources
     .filter((source) => source.kind === "legacy")
     .map((source) => source.resolvedLocator ?? source.locator);
@@ -537,20 +568,29 @@ function renderReviewerFirstPrBody(report: PrReportV2): string {
     "",
     ...(showLegacy || template === "legacy-migration"
       ? [
-          "## 레거시 이관 범위",
+          "## 레거시 이관",
           "",
           ...(legacySources.length === 0
             ? []
             : [`원본 기준: ${legacySources.map(markdownInline).join(", ")}`, ""]),
+          "| 전체 | 이관 | 범위 제외 | 미해결 |",
+          "| ---: | ---: | ---: | ---: |",
+          `| ${report.legacy.coverage.length} | ${legacyMigrated} | ${legacyExcluded} | ${Math.max(legacyUnresolved, 0)} |`,
+          "",
           ...(report.legacy.coverage.length === 0
             ? ["- 원본 범위 또는 요구사항이 아직 확정되지 않았습니다.", ""]
             : [
-                "| 상태 | 요구사항 | 대상 파일 |",
+                "<details>",
+                "<summary>이관 항목 상세</summary>",
+                "",
+                "| 상태 | 이관 내용 | 대상 파일 |",
                 "| --- | --- | --- |",
                 ...report.legacy.coverage.map(
                   (coverage) =>
-                    `| ${koreanOperationStatus(coverage.status)} | ${markdownTableCell(coverage.requirementIds.join(", "))} | ${markdownTableCell(coverage.targetFiles.join(", ") || "—")} |`,
+                    `| ${koreanOperationStatus(coverage.status)} | ${markdownTableCell(coverage.rationale)} | ${markdownTableCell(coverage.targetFiles.join(", ") || "—")} |`,
                 ),
+                "",
+                "</details>",
                 "",
               ]),
         ]
@@ -659,21 +699,47 @@ function renderReviewerFirstPrBody(report: PrReportV2): string {
       : []),
     ...(showApi
       ? [
-          `| API | ${koreanSectionStatus(reportSectionStatus(report, "api", true))} | ${apiSummary(report)} |`,
+          `| API | ${koreanSectionStatus(reportSectionStatus(report, "api", true))} | ${apiVerified}/${apiTotal} 사용·검증 · ${apiGapCount}개 Gap |`,
         ]
       : []),
     "",
     ...(showApi
       ? [
-          "## API Gap",
+          "## API",
           "",
-          "| API | 상태 | 메모 |",
-          "| --- | --- | --- |",
-          ...apiGapOperations.map(
-            (operation) =>
-              `| ${markdownTableCell(operation.operationKey)} | ${koreanOperationStatus(operation.status)} | ${markdownTableCell(operation.notes ?? "—")} |`,
-          ),
-          ...report.api.gaps.map((gap) => `| — | 미해결 | ${markdownTableCell(gap)} |`),
+          "| 전체 | 사용·검증 | 범위 제외 | 미해결 |",
+          "| ---: | ---: | ---: | ---: |",
+          `| ${apiTotal} | ${apiVerified} | ${apiExcluded} | ${apiGapCount} |`,
+          "",
+          "<details>",
+          "<summary>API 상세</summary>",
+          "",
+          ...(report.api.inventoryDigest === undefined
+            ? []
+            : [`- 인벤토리 해시: ${report.api.inventoryDigest}`]),
+          ...(report.api.discoveryAdapters === undefined
+            ? []
+            : [`- 탐지 방식: ${report.api.discoveryAdapters.join(", ")}`]),
+          ...(apiRows.length === 0
+            ? ["- 탐지·검증된 API 항목이 없습니다."]
+            : [
+                "",
+                "| API | 상태 | 호출 위치 | 실행 증거 |",
+                "| --- | --- | --- | --- |",
+                ...apiRows,
+              ]),
+          ...(apiGapOperations.length === 0 && report.api.gaps.length === 0
+            ? []
+            : [
+                "",
+                ...apiGapOperations.map(
+                  (operation) =>
+                    `- 미해결: ${markdownBullet(`${operation.operationKey} · ${operation.notes ?? "실행 증거를 확인해 주세요."}`)}`,
+                ),
+                ...report.api.gaps.map((gap) => `- 미해결: ${markdownBullet(gap)}`),
+              ]),
+          "",
+          "</details>",
           "",
         ]
       : []),
