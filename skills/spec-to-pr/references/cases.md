@@ -1,42 +1,115 @@
 # 네 가지 케이스
 
-공통 입력은 `case`, 대상 프로젝트 절대 경로, 구현 요청입니다. 대상 브랜치를 받지 않으면 프로젝트의 기본 브랜치를 사용합니다.
-
-GitLab remote라면 어떤 케이스든 구현 전에 `scripts/check-gitlab-mr.cjs`로 읽기 전용 사전 진단을 합니다. 사전 진단이 막히면 구현을 시작하지 않고 인증·권한·보호 브랜치 설정을 해결합니다. 이 규칙은 네 케이스의 참고 기준을 바꾸지 않습니다.
-
-`test: on | off`는 `brief`와 `feature`에만 적용하며, 생략하면 `off`입니다. `on`일 때만 OpenSpec 기반 TDD를 합니다. `feature`의 E2E·영상 증빙은 이 테스트 스위치와 별개입니다.
+공통 입력은 `case`, 대상 프로젝트 절대 경로, 구현 요청입니다. 화면이 바뀌는 모든 케이스는 화면 비교를 시도하고, 비교하지 못한 상태를 통과로 표시하지 않습니다.
 
 ## brief
 
-- 구현 전에 [OpenSpec 준비](openspec.md)를 읽습니다. 기획서, 제공된 API 문서, Figma를 OpenSpec 문서로 정리하고 서로 대조한 뒤 구현합니다.
-- UI가 있으면 대상 프로젝트의 사내 디자인 시스템을 먼저 사용합니다.
-- Figma와 API 문서는 제공된 경우에만 참고합니다. 없다고 추측하거나 막지 말고, 필요한 정보가 비어 있으면 OpenSpec의 미확정 항목과 PR Gap으로 남깁니다.
-- 화면 기준은 제공된 Figma 또는 승인된 기획 화면입니다. 기준 이미지가 없으면 화면 일치율은 `측정하지 못함`으로 기록합니다.
+- 기획서와 제공된 API 문서·Figma를 구현 기준으로 읽습니다.
+- OpenSpec은 사용자 입력 전제 조건이 아닙니다. 저장소 규칙이 있거나 요구사항·수용 시나리오를 정리할 가치가 있으면 에이전트가 준비하며, 부재·충돌은 Gap으로 남기고 구현을 진행합니다.
+- 요구사항마다 구현 결과와 증빙을 PR의 `요구사항 충족` 표에 기록합니다. 명시적으로 하지 않은 것은 `제외 범위`에만 기록합니다.
+- UI는 대상 디자인 시스템과 기존 컴포넌트를 우선 사용합니다.
 
 ## feature
 
-- 구현 전에 [OpenSpec 준비](openspec.md)를 읽습니다. 기능 요청과 제공된 API 문서·Figma를 OpenSpec 문서로 정리하고 서로 대조한 뒤 구현합니다.
-- 요청한 한 가지 기능과 직접 필요한 파일만 수정합니다.
-- UI가 있으면 대상 프로젝트의 사내 디자인 시스템을 먼저 사용하고, 요청한 흐름의 화면·입력·선택·확인 결과까지 구현합니다.
-- 제공된 Figma·문서·OpenAPI만 참고합니다.
-- 화면 기준 이미지가 없으면 일치율을 만들지 않습니다. `화면 기준 없음` Gap을 남깁니다.
-- 변경 기능만 고르는 E2E를 한 번 실행하고, 같은 사용자 흐름을 보여 주는 WebM 또는 MP4 영상 한 개를 `spec-to-pr-evidence/<change>/`에 남깁니다. 기존 프로젝트 도구가 없거나 실행에 실패하면 이유·영향·다음 작업을 Gap에 기록합니다.
-
-## 화면 비교 공통 규칙
-
-- 92% 미만이면 Diff를 보고 구현을 보완한 뒤, 같은 기준 이미지와 같은 캡처 조건으로 다시 비교합니다.
-- 유효한 숫자 비교는 최초 비교를 포함해 최대 3회입니다. 세 번째도 92% 미만이면 마지막 점수와 1·2·3차 Diff를 PR에 남기고 Gap으로 처리합니다.
-- 캡처 실패나 이미지 크기 불일치는 횟수에 넣지 않습니다. 기준 이미지를 바꾸거나 잘라 맞추기, mask, 임의 점수는 사용하지 않습니다.
+- 요청한 한 가지 사용자 기능과 직접 필요한 파일을 구현합니다.
+- UI는 대상 디자인 시스템과 기존 컴포넌트를 우선 사용합니다.
+- 변경 전후 동작, 관련 회귀 검증, 화면 비교를 PR에 씁니다.
+- 변경 기능만 고르는 E2E를 한 번 실행하고, 버튼 동작부터 결과 확인까지 보이는 WebM 또는 MP4 영상 한 개를 `spec-to-pr-evidence/<change>/`에 커밋합니다. 실행 실패는 Gap이지만 영상 섹션을 삭제하거나 통과라고 쓰지 않습니다.
 
 ## figma
 
-- Figma URL의 선택된 화면과 상태를 구현 기준으로 사용합니다.
-- 사내 디자인 시스템 컴포넌트와 토큰을 우선 사용합니다. 정확히 대응하지 않는 부분은 직접 구현하고 Gap에 적지 않습니다. 기능 또는 화면을 완성하지 못한 경우만 Gap입니다.
-- Figma 캡처를 기준 이미지로, 실행 중인 대상 프로젝트 캡처를 구현 이미지로 사용합니다.
+- 제공한 Figma URL의 화면과 상태를 기준으로 구현합니다.
+- Figma state/node와 구현 경로·상태를 1:1로 매핑합니다.
+- 대상 디자인 시스템의 컴포넌트·토큰을 우선 사용합니다. 대응 컴포넌트가 없으면 프로젝트 규칙에 따라 직접 구현합니다.
+- 상태별 일치율, 디자인 검증, 접근성 검증을 PR에 기록합니다.
 
 ## legacy
 
-- 사용자가 지정한 레거시 프로젝트와 요청 기능만 읽습니다. 레거시 프로젝트는 절대 수정하지 않습니다.
-- 동작, 화면 상태, 실제 API 호출을 레거시 기준으로 대상 프로젝트에 옮깁니다.
-- 대상 프로젝트의 기존 구조와 컴포넌트 규칙을 따릅니다. 디자인 시스템을 쓸 수 있다면 레거시 결과를 유지하는 범위에서만 사용합니다.
-- 실행 중인 레거시 화면을 기준 이미지로, 대상 프로젝트 화면을 구현 이미지로 사용합니다.
+### 입력과 범위 고정
+
+```yaml
+case: legacy
+projectRoot: /absolute/path/to/new-project
+legacyProjectRoot: /absolute/path/to/legacy-project
+targetPaths:
+  - apps/gzApp/src/pages/mapfinder
+request: Mapfinder를 Vue 3 MPA entry로 이관해줘
+```
+
+- `legacyProjectRoot`와 `targetPaths`는 이름 유사성으로 추론하지 않습니다. 받은 경로와 불일치하면 구현 전에 보고합니다.
+- 레거시 프로젝트는 절대 수정하지 않습니다.
+- 이관은 **재디자인이 아닙니다.** 사용자가 명시적으로 승인하지 않은 한 레거시 template/DOM class, CSS, sprite·이미지 자산, 지도·검색·필터·하단 컨트롤, 사용자 동작을 보존하고 Vue 3 문법·MPA 진입점만 변환합니다.
+- 레거시 이관에는 대상 디자인 시스템을 적용하지 않습니다. 기존 프로젝트 셸과 빌드 연결은 사용해도 되지만, `@frontend/ui` 같은 새 Chip·Icon·컴포넌트로 화면을 대체하지 않습니다.
+
+### 화면 매트릭스는 필수
+
+라우터 선언만이 아니라 라우터에서 도달 가능한 사용자 상태를 인벤토리로 만듭니다. 예를 들어 Mapfinder라면 `/map`, `/map/:rgnNo`, `/map/filter/:optFilter`, `/map/:lat/:lng`, `/404`와 목록 전환·검색어 자동완성·카테고리/옵션 필터·매장 액션·현재 위치·로딩/빈 결과/오류처럼 실제로 보이는 상태를 확인합니다.
+
+각 인벤토리 항목은 다음 중 하나여야 합니다.
+
+1. 같은 fixture, viewport, DPR, 로그인 상태에서 기준·이관·Diff 이미지를 가진 `visualTarget`
+2. 실행할 수 없는 이유, 영향, 리뷰어가 결정할 사항을 가진 `exclusion`
+
+기본 지도 한 장을 `1/1 통과`로 기록해 전체 이관을 통과 처리할 수 없습니다. 전체 PR에는 `통과/전체`, `미달`, `비교 불가`, `명시적 제외`를 함께 보여 줍니다.
+
+### 증빙 manifest
+
+`spec-to-pr-evidence/<change>/legacy-visual-manifest.json`에 아래 형식으로 기록합니다. 파일 경로는 manifest가 있는 evidence 디렉터리 기준 상대 경로입니다.
+
+```json
+{
+  "schemaVersion": 1,
+  "case": "legacy",
+  "change": "mapfinder",
+  "legacyProjectRoot": "/absolute/path/to/legacy-project",
+  "targetPaths": ["apps/gzApp/src/pages/mapfinder"],
+  "migration": {
+    "strategy": "preserve-legacy",
+    "preservation": {
+      "template": "preserved",
+      "styles": "preserved",
+      "assets": "preserved",
+      "controls": "preserved"
+    },
+    "forbiddenImports": ["@frontend/ui"]
+  },
+  "routeInventory": [
+    {
+      "id": "map-default",
+      "route": "/map",
+      "state": "default-map",
+      "sourceFiles": ["src/views/Mapfinder.vue"],
+      "targetFiles": ["apps/gzApp/src/pages/mapfinder/views/MapfinderPage.vue"]
+    }
+  ],
+  "visualTargets": [
+    {
+      "id": "map-default",
+      "inventoryId": "map-default",
+      "fixture": "qa:authenticated-current-location",
+      "viewport": { "width": 390, "height": 844, "dpr": 1 },
+      "baselinePath": "baseline/map-default.png",
+      "attempts": [
+        {
+          "actualPath": "actual/map-default-attempt-1.png",
+          "diffPath": "diff/map-default-attempt-1.png"
+        }
+      ],
+      "criticalRegions": [
+        { "id": "bottom-controls", "x": 0, "y": 650, "width": 390, "height": 194 }
+      ]
+    }
+  ],
+  "exclusions": []
+}
+```
+
+`legacy-visual-evidence.cjs`는 전체 이미지와 `criticalRegions`를 모두 비교합니다. 큰 빈 지도 영역이 높은 점수를 만들어도 검색·필터·목록·하단 컨트롤 영역이 미달하면 해당 상태는 통과가 아닙니다.
+
+### 이미지 전달
+
+`baseline`, `actual`, `diff`, manifest, 생성된 PR 섹션을 모두 stage·commit·push합니다. 도구가 출력하는 PR Markdown은 GitHub/GitLab branch의 raw 이미지 URL을 사용하므로 리뷰어는 PR에서 기준·이관 결과를 바로 봅니다. 로컬 절대 경로, 내부 artifact ID, Diff 하나만으로 증빙을 대신하지 않습니다.
+
+### API와 Gap
+
+레거시에서 확인한 실제 호출만 대상 API client에 연결합니다. 요청 body·권한·write 동작이 확정되지 않으면 추측하지 않고 API Gap으로 남깁니다. 이 사실은 화면·읽기 GET·상태 이관을 막지 않습니다.

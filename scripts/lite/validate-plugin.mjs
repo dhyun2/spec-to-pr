@@ -35,9 +35,15 @@ assert(
 for (const file of [
   "skills/spec-to-pr/SKILL.md",
   "skills/spec-to-pr/references/cases.md",
+  "skills/spec-to-pr/references/model-routing.md",
   "skills/spec-to-pr/references/openspec.md",
-  "skills/spec-to-pr/assets/pr-template.md",
+  "skills/spec-to-pr/assets/pr-templates/README.md",
+  "skills/spec-to-pr/assets/pr-templates/legacy-migration.md",
+  "skills/spec-to-pr/assets/pr-templates/brief-delivery.md",
+  "skills/spec-to-pr/assets/pr-templates/feature-flow.md",
+  "skills/spec-to-pr/assets/pr-templates/figma-ui.md",
   "skills/spec-to-pr/scripts/compare-images.cjs",
+  "skills/spec-to-pr/scripts/legacy-visual-evidence.cjs",
   "skills/spec-to-pr/scripts/check-gitlab-mr.cjs",
 ]) {
   assert(existsSync(path.join(root, file)), `Required Lite plugin file is missing: ${file}`);
@@ -58,22 +64,43 @@ assert(
   "Visual comparison must allow at most three valid attempts",
 );
 assert(
-  skill.includes("openspec.md") &&
-    skill.includes("`brief`와 `feature`") &&
-    skill.includes("test: on") &&
-    skill.includes("서브에이전트 사용"),
-  "Brief and feature delivery must prepare OpenSpec documents with optional TDD",
+  skill.includes("OpenSpec은 사용자가 준비해야 하는 전제 조건이 아닙니다") &&
+    skill.includes("API·binding·인증·증빙 분석의 실패") &&
+    skill.includes("skipped") &&
+    skill.includes("targetPaths"),
+  "Core delivery must keep OpenSpec optional, record analysis gaps, and bind legacy paths exactly",
 );
 assert(
-  skill.includes("check-gitlab-mr.cjs") && skill.includes("ready-to-attempt"),
-  "GitLab delivery must perform a read-only Draft MR preflight",
+  skill.includes("check-gitlab-mr.cjs") && skill.includes("발행 Gap"),
+  "GitLab delivery must diagnose publication readiness without blocking safe implementation",
+);
+assert(
+  skill.includes("legacy-visual-evidence.cjs") &&
+    skill.includes("모든 사용자 노출 route·대표 상태") &&
+    skill.includes("@frontend/ui"),
+  "Legacy delivery must verify full visual coverage and preserve legacy UI without design-system substitutions",
 );
 
-const template = readFileSync(path.join(root, "skills/spec-to-pr/assets/pr-template.md"), "utf8");
+const templateRoot = path.join(root, "skills/spec-to-pr/assets/pr-templates");
+const templates = {
+  legacy: readFileSync(path.join(templateRoot, "legacy-migration.md"), "utf8"),
+  brief: readFileSync(path.join(templateRoot, "brief-delivery.md"), "utf8"),
+  feature: readFileSync(path.join(templateRoot, "feature-flow.md"), "utf8"),
+  figma: readFileSync(path.join(templateRoot, "figma-ui.md"), "utf8"),
+};
 assert(
-  template.includes("{{FEATURE_E2E_VIDEO_SECTION}}"),
-  "PR template must support the feature E2E video section",
+  templates.legacy.includes("기준 · 이관 결과 · Diff"),
+  "Legacy template must show all visual evidence",
 );
+assert(
+  templates.brief.includes("요구사항 충족"),
+  "Brief template must show requirement fulfillment",
+);
+assert(
+  templates.feature.includes("사용자 흐름 영상"),
+  "Feature template must require user-flow video",
+);
+assert(templates.figma.includes("Figma 상태 매핑"), "Figma template must map Figma states");
 
 console.log("SpecToPR Lite plugin validation passed");
 

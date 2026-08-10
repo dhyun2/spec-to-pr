@@ -30,22 +30,28 @@ describe("SpecToPR Lite package", () => {
     }
     expect(skill).not.toContain("workflow_");
     expect(skill).not.toContain("Run ID");
-    expect(skill).toContain("사내 디자인 시스템");
+    expect(skill).toContain("보존 이관");
+    expect(skill).toContain("legacy-visual-evidence.cjs");
     expect(skill).toContain("`brief`와 `feature`");
     expect(skill).toContain("test: on");
     expect(skill).toContain("TDD");
   });
 
-  it("ships the fixed Korean PR sections and bundled comparator", () => {
-    const template = readFileSync(
-      path.join(root, "skills/spec-to-pr/assets/pr-template.md"),
-      "utf8",
-    );
+  it("ships four focused PR templates and legacy visual evidence tooling", () => {
+    const templates = path.join(root, "skills/spec-to-pr/assets/pr-templates");
+    const legacyTemplate = readFileSync(path.join(templates, "legacy-migration.md"), "utf8");
+    const briefTemplate = readFileSync(path.join(templates, "brief-delivery.md"), "utf8");
+    const featureTemplate = readFileSync(path.join(templates, "feature-flow.md"), "utf8");
+    const figmaTemplate = readFileSync(path.join(templates, "figma-ui.md"), "utf8");
 
-    for (const section of ["개발한 기능", "화면 일치율", "사용한 API", "Gap", "검증"]) {
-      expect(template).toContain(`## ${section}`);
-    }
+    expect(legacyTemplate).toContain("기준 · 이관 결과 · Diff");
+    expect(briefTemplate).toContain("요구사항 충족");
+    expect(featureTemplate).toContain("사용자 흐름 영상");
+    expect(figmaTemplate).toContain("Figma 상태 매핑");
     expect(existsSync(path.join(root, "skills/spec-to-pr/scripts/compare-images.cjs"))).toBe(true);
+    expect(
+      existsSync(path.join(root, "skills/spec-to-pr/scripts/legacy-visual-evidence.cjs")),
+    ).toBe(true);
     expect(existsSync(path.join(root, "skills/spec-to-pr/scripts/check-gitlab-mr.cjs"))).toBe(true);
   });
 });

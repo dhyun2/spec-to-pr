@@ -3,65 +3,62 @@ sidebar_position: 5
 title: 레거시 이관
 ---
 
-`legacy`는 별도의 레거시 프로젝트에 있는 특정 기능을 대상 프로젝트로 옮길 때 사용합니다.
+`legacy`는 별도의 레거시 프로젝트에 있는 **정확히 지정된 기능**을 대상 프로젝트로 옮길 때 사용합니다. 재디자인 워크플로가 아닙니다.
 
-레거시 이관은 OpenSpec 문서나 `test: on | off` TDD 모드를 만들지 않고, 실행 중인 레거시 동작·화면·API를 직접 구현 기준으로 사용합니다.
-
-## 입력
+## 입력과 범위
 
 ```yaml
 case: legacy
 projectRoot: /absolute/path/to/new-project
 legacyProjectRoot: /absolute/path/to/legacy-project
-request: 주문 내역 목록과 상세 이동을 이관해줘
+targetPaths:
+  - apps/gzApp/src/pages/mapfinder
+request: Mapfinder를 Vue 3 MPA entry로 이관해줘
 ```
 
-## 가장 중요한 규칙
+`legacyProjectRoot`와 `targetPaths`는 이름이 비슷한 경로로 추론하거나 대체하지 않습니다. 일치하지 않으면 구현 전에 차이를 보고합니다. 레거시 프로젝트는 읽기 전용입니다.
 
-**레거시 프로젝트는 읽기 전용입니다.** 대상 프로젝트에만 코드를 작성합니다.
+## 보존 이관
 
-## 무엇을 기준으로 옮기나요?
+명시적인 재디자인 승인 없이는 아래를 유지합니다.
 
-- 사용자가 요청한 기능의 화면과 상태
-- 실제 사용자 동작
-- 그 기능이 호출하는 실제 API
-- 대상 프로젝트의 기존 구조와 컴포넌트 규칙
+- 레거시 template, DOM class, CSS, 레이아웃
+- sprite·이미지·아이콘 등 자산
+- 검색·필터·목록·지도·하단 버튼 같은 사용자 컨트롤
+- hash route를 포함한 사용자 경로와 동작
 
-디자인 시스템을 사용할 수 있다면 결과가 레거시 동작과 화면을 유지하는 범위에서 사용합니다.
+Vue 3 문법, MPA 진입점, 대상 앱의 빌드·API client 연결만 변환합니다. 이관 과정에서 `@frontend/ui` 또는 다른 디자인 시스템으로 새 Chip·Icon·컨트롤을 대체하면 안 됩니다. 그 결과가 비슷해 보여도 이관이 아니라 재구성입니다.
 
-## 화면과 API 확인
+## 화면 매트릭스
 
-실행 중인 레거시 화면을 기준으로 캡처하고, 대상 프로젝트의 같은 화면과 비교합니다. 레거시에서 확인한 실제 HTTP 호출 중 대상 프로젝트에서 사용한 것만 PR의 API 표에 기록합니다.
+레거시 router와 실제 사용자 흐름을 읽어 모든 사용자 노출 `route · state`를 인벤토리로 기록합니다. 예를 들어 Mapfinder의 `/map`, `/map/:rgnNo`, `/map/filter/:optFilter`, `/map/:lat/:lng`, `/404`와 검색·필터·목록 전환·현재 위치·매장 액션·로딩·빈 결과·오류 상태는 각각 검토 대상입니다.
 
-정확한 메서드·경로를 확인할 수 없으면 추측하지 말고 Gap으로 기록합니다.
+각 항목은 반드시 다음 중 하나입니다.
 
-## PR 예시
+1. 같은 fixture, viewport, DPR, 인증 상태에서 캡처한 기준·이관·Diff 이미지
+2. 실행할 수 없는 이유, 영향, 리뷰어 결정이 있는 명시적 제외
 
-```md
-# [레거시 이관] 주문 내역 목록과 상세 이동
+기본 지도 한 장만 95%여도 전체 이관은 검증된 것이 아닙니다. PR은 `통과/전체`, 미달, 비교 불가, 제외 수를 맨 위에 표시합니다.
 
-> Draft PR · 화면 93.10% · Gap 1개
+## 증빙과 PR 이미지
 
-## 개발한 기능
+`spec-to-pr-evidence/<change>/legacy-visual-manifest.json`에 route/state inventory와 visual targets를 기록합니다. 모든 증빙은 `baseline/`, `actual/`, `diff/` 아래에 저장하고 stage·commit·push합니다.
 
-- 주문 내역 목록을 조회하고 항목을 누르면 주문 상세로 이동할 수 있습니다.
+```bash
+git add spec-to-pr-evidence/mapfinder
 
-## 화면 일치율
-
-| 화면 | 비교 기준 | 비교 횟수 | 일치율 | 결과 | 증빙 |
-| 주문 내역 목록 | 실행 중인 레거시 화면 | 1/3 | 93.10% | 통과 | 기준 · 구현 · Diff |
-
-## 사용한 API
-
-| Method | Path | 사용 목적 |
-| GET | /orders | 주문 내역 목록 조회 |
-
-## Gap
-
-| 확인 또는 개발이 필요한 내용 | 영향 | 다음 작업 |
-| 주문 취소 버튼의 권한 정책 | 중간 | 레거시 정책 확인 후 버튼 노출 반영 |
-
-## 검증
-
-- 목록 조회와 상세 이동 회귀 테스트 통과
+node /absolute/path/to/legacy-visual-evidence.cjs \
+  --manifest /absolute/path/to/project/spec-to-pr-evidence/mapfinder/legacy-visual-manifest.json \
+  --project-root /absolute/path/to/project \
+  --repository-web-url https://gitlab.example.com/group/project \
+  --source-ref codex/mapfinder \
+  --write-pr-section /absolute/path/to/project/spec-to-pr-evidence/mapfinder/legacy-pr-section.md
 ```
+
+도구는 전체 이미지와 지정한 핵심 UI 영역을 모두 비교합니다. 따라서 빈 지도·배경 영역이 높은 전체 점수를 만들더라도 검색창·필터·목록·하단 조작이 다르면 통과가 아닙니다. 생성한 PR section은 기준·이관·Diff의 raw 이미지 링크를 포함하므로 리뷰어가 로컬 파일이나 artifact ID를 찾을 필요가 없습니다.
+
+## API와 Gap
+
+확인한 레거시 API만 연결합니다. write body, 권한, 인증, binding이 확정되지 않았다면 추측하지 않고 영향과 다음 작업을 Gap에 기록합니다. 안전하지 않은 write를 제외하면 이 문제는 페이지·상태·확인된 GET·화면 비교 준비를 막지 않습니다.
+
+Draft PR은 화면 미달이나 API Gap이 있어도 만들 수 있습니다. 단, `NOT VERIFIED`이며 merge-ready가 아닙니다.

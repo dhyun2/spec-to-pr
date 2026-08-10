@@ -1,78 +1,89 @@
 ---
 name: spec-to-pr
-description: Use when turning a brief, one feature, a Figma design, or a separate legacy project into a Korean draft pull request.
+description: Use when implementing a brief, feature, Figma UI, or an explicitly bounded legacy migration and preparing a Korean draft pull request with truthful visual evidence and Gaps.
 ---
 
-# SpecToPR Lite
+# SpecToPR
 
-SpecToPR는 네 가지 개발 요청을 **한 번 실행해서** 한국어 Draft PR로 정리하는 스킬입니다. 작업 상태 저장, 상태 머신, 재개, 별도 리뷰어, MCP 도구를 사용하지 않습니다.
+SpecToPR는 `brief`, `feature`, `figma`, `legacy` 중 **하나**를 선택해 구현하고, 리뷰어가 바로 판단할 수 있는 한국어 Draft PR을 준비하는 스킬입니다. 실행 상태 저장·상태 머신·MCP 서버는 사용하지 않지만, UI 결과와 미확정 사항을 흐리지 않습니다.
+
+## 변하지 않는 원칙
+
+1. UI 작업은 케이스와 관계없이 화면 비교를 시도합니다. 기준 화면이 없거나 캡처가 불가능하면 점수를 꾸미지 않고 `화면 비교 불가` Gap으로 남깁니다.
+2. API·binding·인증·증빙 분석의 실패는 안전하지 않은 쓰기를 시도해야 하는 경우가 아니면 구현을 멈추지 않습니다. 확인한 범위부터 개발하고 영향·다음 작업을 Open Gap으로 남깁니다.
+3. `skipped`, `waived`, `not run`은 `passed`가 아닙니다. Draft PR은 Gap이나 화면 미달이 있어도 만들 수 있지만, 이때 `VERIFIED` 또는 merge-ready라고 쓰지 않습니다.
+4. 사용자가 준 `legacyProjectRoot`와 `targetPaths`를 정확히 사용합니다. 이름이 비슷한 폴더·라우트로 범위를 추론하거나 넓히지 않습니다.
+5. OpenSpec은 사용자가 준비해야 하는 전제 조건이 아닙니다. `brief`·`feature`는 저장소에 OpenSpec 규칙이 있거나 변경 문서가 유용할 때만 에이전트가 스스로 준비하며, 누락·충돌은 구현을 막지 않고 Gap으로 남깁니다.
 
 ## 입력
 
-다음 세 가지를 먼저 확인합니다.
+먼저 `case`, 대상 프로젝트 절대 경로, 구현 요청을 확인합니다.
 
-1. `case`: `brief`, `feature`, `figma`, `legacy` 중 하나
-2. 대상 프로젝트의 절대 경로
-3. 구현 요청
+```yaml
+case: brief | feature | figma | legacy
+projectRoot: /absolute/path/to/project
+request: 구현할 사용자 기능
+targetBranch: main # 선택
+```
 
-`brief`에는 기획서 경로가 필요합니다. API 문서 경로와 Figma URL은 제공되면 함께 사용합니다. `figma`에는 Figma URL, `legacy`에는 별도 레거시 프로젝트 경로가 필요합니다. `feature`는 요청만으로 시작할 수 있습니다. 대상 브랜치를 받지 않으면 저장소 기본 브랜치를 사용합니다.
+- `brief`: `briefPath`가 필요합니다.
+- `figma`: Figma URL이 필요합니다.
+- `legacy`: `legacyProjectRoot`와 **정확한** `targetPaths`가 필요합니다.
+- `feature`: 요청만으로 시작할 수 있습니다.
 
-`brief`와 `feature`에는 선택적으로 `test: on | off`를 받습니다. 생략하면 `off`입니다. `on`은 OpenSpec의 요구사항·수용 시나리오를 테스트로 먼저 쓰는 TDD이고, `off`는 이 작업을 위한 단위·통합 테스트를 새로 만들거나 실행하지 않는다는 뜻입니다. `figma`와 `legacy`에는 OpenSpec·TDD 모드를 적용하지 않습니다.
-
-케이스의 세부 규칙은 [references/cases.md](references/cases.md)를 읽습니다. 네 케이스를 섞거나 새 workflow를 만들지 않습니다.
+`brief`와 `feature`는 `test: on | off`를 선택할 수 있고 기본은 `off`입니다. `test: on`은 확정 수용 시나리오를 실패 테스트로 먼저 쓰는 TDD이며, 기존 도구가 없거나 시나리오를 테스트할 수 없으면 Gap으로 남깁니다. `feature`는 test 값과 별개로 변경 기능만 고르는 E2E를 실행하고 사용자 흐름 영상 한 개를 남깁니다. 케이스별 규칙은 [references/cases.md](references/cases.md), 모델 선택 규칙은 [references/model-routing.md](references/model-routing.md)를 읽습니다.
 
 ## 실행 순서
 
-1. 대상 저장소·현재 브랜치·remote를 확인합니다. 대상 프로젝트 밖은 수정하지 않습니다. `legacy`의 레거시 프로젝트는 읽기 전용입니다. GitLab remote라면 구현을 시작하기 전에 이 스킬 디렉터리의 `scripts/check-gitlab-mr.cjs`를 절대 경로로 찾아 읽기 전용 사전 진단을 실행합니다.
+1. 대상 저장소·현재 브랜치·remote를 읽습니다. `legacy`라면 `legacyProjectRoot`, `targetPaths`를 요청값과 한 글자씩 대조하고, 레거시 프로젝트는 읽기 전용으로 고정합니다. 일치하지 않으면 코드를 수정하기 전에 범위 차이를 보고합니다.
+2. GitLab remote면 `scripts/check-gitlab-mr.cjs`로 읽기 전용 사전 진단을 합니다. 인증·권한·TLS·MR API 실패는 **발행 Gap**입니다. 구현은 계속하되, 안전하지 않은 쓰기나 실제 Draft 발행은 준비가 될 때만 시도합니다.
+3. 제공 자료와 대상 프로젝트의 기존 구조를 읽습니다. `brief`·`feature`의 OpenSpec은 에이전트가 만들 수 있는 보조 산출물이며, 없다는 이유로 core 구현을 멈추지 않습니다.
+4. UI를 구현합니다.
+   - `brief`, `feature`, `figma`: 대상 프로젝트의 디자인 시스템과 기존 컴포넌트를 우선 사용합니다.
+   - `legacy`: 기본 전략은 **보존 이관**입니다. 레거시 템플릿·클래스·CSS·자산·스프라이트·컨트롤·사용자 동작을 최대한 그대로 가져오고 Vue 3 문법·진입점·대상 앱 연결만 변환합니다. `@frontend/ui` 등 디자인 시스템으로 대체하거나 UI를 재구성하지 않습니다. 사용자가 명시적으로 재디자인을 승인한 경우만 승인 문구를 증빙에 기록합니다.
+5. API·binding·로그인·런타임 증빙이 불명확하면 확인한 호출만 연결합니다. POST/PATCH/DELETE를 추측해 쓰지 않고, 해당 동작을 Open Gap으로 남깁니다. 이 실패를 이유로 페이지·컴포넌트·확인된 GET 연결·상태 구조·화면 비교 준비를 중단하지 않습니다.
+6. 화면을 캡처하고 비교합니다.
+   - 기준·구현 이미지는 같은 route, UI state, fixture, viewport, DPR, 인증 상태에서 캡처합니다.
+   - `legacy`는 [레거시 화면 매트릭스](references/cases.md#legacy)를 먼저 만들고, 레거시 라우터에서 발견한 **모든 사용자 노출 route·대표 상태**를 하나씩 비교하거나 명시적으로 제외합니다. 기본 화면 하나만 비교해 전체 이관을 통과 처리하면 안 됩니다.
+   - 이미지는 `spec-to-pr-evidence/<change>/`에 `baseline`, `actual`, `diff`로 저장합니다. 비교 결과는 최대 3회까지 시도하며 92% 미만·캡처 실패·미실행은 Gap입니다.
+   - 빈 영역이 점수를 부풀리지 않도록 legacy target마다 검색·필터·목록·지도 컨트롤 같은 핵심 UI 영역을 하나 이상 지정해 전체 화면과 별도로 비교합니다.
+7. `legacy`는 `spec-to-pr-evidence/<change>/legacy-visual-manifest.json`을 만들고 아래 도구로 검증합니다. 도구는 빠진 화면을 숨기지 않고 `NOT VERIFIED`와 Gap을 만들며, 비교 이미지가 Git index에 있는지도 확인합니다.
 
    ```bash
-   node /absolute/path/to/check-gitlab-mr.cjs \
+   node /absolute/path/to/legacy-visual-evidence.cjs \
+     --manifest /absolute/path/to/project/spec-to-pr-evidence/<change>/legacy-visual-manifest.json \
      --project-root /absolute/path/to/project \
-     --remote origin
+     --repository-web-url https://gitlab.example.com/group/project \
+     --source-ref codex/<branch> \
+     --write-pr-section /absolute/path/to/project/spec-to-pr-evidence/<change>/legacy-pr-section.md
    ```
 
-   결과 JSON의 `status`가 `blocked`이면 코드·문서·브랜치를 수정하지 않고 `nextSteps`와 [GitLab MR 사전 진단 가이드](https://dhyun2.github.io/spec-to-pr/getting-started/gitlab)를 안내합니다. `not-applicable`이면 GitHub remote로 판단한 것이므로 GitHub PR 흐름을 사용합니다. `ready-to-attempt`는 `glab`, 인증, 프로젝트·MR API의 GET 접근과 알려진 Developer 이상 권한을 확인했다는 뜻입니다. GitLab에는 Draft MR 생성 dry-run이 없으므로 생성 성공을 보장한다고 쓰지 않습니다.
+   이 명령은 `git add spec-to-pr-evidence/<change>/` 뒤에 실행합니다. 기준·이관·Diff를 PR 본문에 실제 이미지 링크로 넣으므로, 로컬 경로만 적거나 Diff 하나만 올리지 않습니다.
 
-2. 선택한 케이스의 자료만 읽고, 대상 프로젝트 지침과 기존 구조를 확인합니다. `brief`와 `feature`는 구현 전에 [references/openspec.md](references/openspec.md)를 읽고 OpenSpec 문서를 준비·대조합니다. `figma`와 `legacy`는 각각 Figma와 실행 중인 레거시를 직접 구현 기준으로 사용하며 OpenSpec을 만들지 않습니다.
-3. UI 작업이면 설치된 사내 디자인 시스템과 대상 프로젝트의 기존 컴포넌트를 우선 사용합니다. 요청한 사용자 흐름에 포함된 화면·입력·선택·확인 결과까지 구현합니다. 관련 없는 화면이나 구조는 넓히지 않습니다.
-4. `brief`와 `feature`의 `test` 값을 따릅니다. `test: on`이면 OpenSpec의 확정 요구사항과 수용 시나리오를 테스트 항목으로 옮기고, 관련 실패 테스트를 먼저 작성한 뒤 최소 구현으로 통과시키고 리팩터링합니다. 대상 프로젝트의 기존 테스트 도구만 사용합니다. 적절한 테스트 도구나 테스트 가능한 시나리오를 찾지 못하면 TDD를 했다고 쓰지 않고 Gap에 남깁니다. `test: off`이면 이 변경을 위한 단위·통합 테스트를 새로 만들거나 실행하지 않습니다. `feature`는 `test` 값과 별개로 변경 기능만 고르는 E2E를 한 번 실행하고, 그 사용자 흐름을 보여 주는 WebM 또는 MP4 영상 한 개를 남깁니다. 프로젝트의 기존 E2E 도구를 사용하며, 새 도구를 억지로 설치하거나 전체 프로젝트 E2E를 실행하지 않습니다.
-5. UI 기준 이미지와 구현 이미지를 같은 경로·상태·데이터·화면 크기로 캡처합니다. Figma는 Figma 캡처, legacy는 실행 중인 레거시 화면을 기준으로 합니다.
-6. 이 스킬 디렉터리의 `scripts/compare-images.cjs`를 절대 경로로 찾아 아래처럼 실행합니다.
+8. 구현과 증빙을 읽지 않은 새 컨텍스트에서 기능 검토하고, UI가 있으면 디자인·접근성 검토도 합니다. `passed` 판정만 검증 통과로 씁니다. 실패·미실행·모델/환경 부재는 Gap이며, 상위 모델을 쓸 수 없다고 이 검토를 생략하거나 통과로 바꾸지 않습니다.
+9. 최종 `git diff`, 화면 증빙, 검증 결과를 바탕으로 **case 전용** PR 템플릿 하나를 채웁니다. 템플릿 선택 기준은 [assets/pr-templates/README.md](assets/pr-templates/README.md)입니다. 내부 실행 식별자·로그, 토큰·쿠키, 비어 있는 체크리스트, 중복 discovery 행은 PR 본문에 넣지 않습니다.
+10. 구현 코드와 화면 증빙을 의도적으로 stage·commit·push한 뒤 Draft PR을 만듭니다. Gap이나 화면 미달이 있으면 Draft를 만들되 `NOT VERIFIED`로 표시합니다. 실제 발행 실패는 코드 실패로 감추지 말고 발행 Gap으로 기록합니다.
 
-   ```bash
-   node /absolute/path/to/compare-images.cjs \
-     --baseline spec-to-pr-evidence/<change>/baseline.png \
-     --actual spec-to-pr-evidence/<change>/actual.png \
-     --diff spec-to-pr-evidence/<change>/diff.png
-   ```
+## 화면 비교 규칙
 
-   결과 JSON의 `matchPercent`를 PR에 사용합니다. 92% 이상이면 증빙을 기록하고 다음 단계로 갑니다. 92% 미만이면 Diff를 보고 구현을 고친 뒤, 같은 기준 이미지와 같은 캡처 조건으로 다시 비교합니다. **유효한 숫자 비교는 최초 비교를 포함해 최대 3회**입니다. 세 번째도 92% 미만이면 더 비교하지 않고 최종 점수·세 번의 Diff 경로·다음 작업을 Gap에 남깁니다. 캡처 실패나 이미지 크기 불일치는 유효 비교 횟수에 넣지 않으며, 이유를 Gap에 남깁니다. 기준 이미지를 바꾸거나 잘라 맞추기, mask, 임의 점수는 사용하지 않습니다.
+동일 크기의 PNG를 비교할 때는 번들 도구를 사용합니다.
 
-7. 최종 `git diff`와 검증 결과를 기준으로 아래만 한국어로 정리합니다.
+```bash
+node /absolute/path/to/compare-images.cjs \
+  --baseline spec-to-pr-evidence/<change>/baseline/<state>.png \
+  --actual spec-to-pr-evidence/<change>/actual/<state>-attempt-1.png \
+  --diff spec-to-pr-evidence/<change>/diff/<state>-attempt-1.png
+```
 
-   - 실제로 개발한 사용자 기능
-   - 실제 추가·변경한 API의 method, path, 목적
-   - 화면별 비교 횟수, 일치율, 기준·구현·Diff 증빙 경로
-   - `brief`·`feature`인 경우 `test` 값, `on`이면 OpenSpec 수용 시나리오와 연결한 TDD 테스트 명령·결과
-   - `feature`인 경우 변경 기능 E2E 명령·결과와 사용자 흐름 영상 경로
-   - 개발하지 못했거나 확인이 필요한 Gap, 영향, 다음 작업
+92% 이상이면 통과입니다. 92% 미만이면 같은 조건에서 구현을 보완해 다시 비교합니다. 유효 비교는 최초를 포함해 최대 3회이며, 세 번째도 92% 미만이면 더 비교하지 않고 마지막 결과를 Gap으로 남깁니다. 기준 이미지를 바꾸거나 잘라 맞추기, mask, 임의 점수는 금지합니다.
 
-8. [assets/pr-template.md](assets/pr-template.md)를 채워 PR 본문을 만듭니다. 비밀값, 토큰, 쿠키, 긴 내부 로그는 본문에 쓰지 않습니다. API가 없으면 `사용한 API 없음`, Gap이 없으면 `없음` 한 행을 넣습니다. `feature`일 때만 `E2E 영상` 섹션을 넣습니다.
-9. 구현 코드와 `brief`·`feature`의 OpenSpec 문서, `spec-to-pr-evidence/<change>/`의 화면 증빙, 그리고 `feature`의 E2E 영상 한 개를 의도적으로 커밋합니다. 호스트의 GitHub/GitLab 도구 또는 `gh`/`glab`로 Draft PR을 만듭니다. 같은 소스 브랜치의 열린 Draft가 있으면 새로 만들지 말고 갱신합니다. GitLab은 실제 `glab mr create --draft` 또는 열린 Draft 갱신이 성공하고 MR URL을 확인해야 완료로 말합니다. 실패하면 성공한 것처럼 PR을 쓰지 말고 오류를 요약하고 위 가이드의 해결 절차를 안내합니다.
+## 중단 기준
 
-## 서브에이전트 사용
-
-서브에이전트는 필수 단계가 아닙니다. 호스트가 지원하고 기획서·API 문서·Figma 자료가 넓거나 서로 충돌할 때만, 한 명의 읽기 전용 서브에이전트에게 자료와 OpenSpec 문서의 누락·충돌 검토를 맡길 수 있습니다. 구현·문서 수정·Git 작업은 주 작업자가 맡습니다. 작은 요청은 주 작업자가 직접 대조하며, 모델 라우팅·작업 상태·리뷰어 역할을 고정하거나 저장하지 않습니다.
-
-## 중단과 실패
-
-중단되면 다음 실행에서 현재 `git diff`를 다시 읽고 이어서 작업합니다. 플러그인은 Run을 저장하지 않습니다.
-
-다음만 즉시 멈춥니다.
+다음만 즉시 중단합니다.
 
 - 대상 저장소 또는 쓰기 경로를 안전하게 확인할 수 없음
-- 레거시 프로젝트를 수정하려는 상황
+- legacy 프로젝트를 수정하려는 상황
+- 위험한 쓰기 요청의 대상·권한·요청 body를 확인할 수 없음
 - 새 브랜치·커밋을 만들 수 없음
-- GitLab 사전 진단이 `blocked`이거나 실제 Draft MR 생성·갱신에 실패함
 
-`test: on`의 TDD 미확보, 화면 불일치, API 미확인, `feature` E2E 또는 영상 미확보는 모두 Gap으로 남기고 Draft PR을 계속 준비합니다.
+화면 미달, API 미확인, binding·인증 분석 실패, 테스트 실패, 디자인 검토 미실행, GitLab 발행 인증 실패는 구현을 중단시키지 않습니다. 각각 영향과 다음 작업을 Gap으로 남기고, Draft의 검증 상태를 사실대로 표시합니다.

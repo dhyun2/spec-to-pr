@@ -2,8 +2,8 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "spec-to-pr",
   "displayName": "SpecToPR",
-  "version": "1.0.0",
-  "description": "Turn four development cases into Korean draft pull requests; brief and feature delivery prepare OpenSpec documents with optional TDD, and feature delivery includes targeted E2E and one user-flow video.",
+  "version": "1.0.1",
+  "description": "Turn four development cases into Korean draft pull requests with visual evidence; legacy migration preserves legacy DOM, CSS, assets, controls, and route/state coverage rather than redesigning.",
   "author": {
     "name": "SpecToPR Team"
   },

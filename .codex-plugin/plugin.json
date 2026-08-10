@@ -1,7 +1,7 @@
 {
   "name": "spec-to-pr",
-  "version": "1.0.0",
-  "description": "Turn a brief, feature, Figma design, or legacy screen into a Korean draft pull request.",
+  "version": "1.0.1",
+  "description": "Turn a brief, feature, Figma design, or bounded legacy migration into a Korean draft pull request with truthful visual evidence and Gaps.",
   "author": {
     "name": "SpecToPR Team",
     "email": "dhp94d@gmail.com",
@@ -14,8 +14,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "SpecToPR",
-    "shortDescription": "Turn four development cases into Korean draft PRs.",
-    "longDescription": "SpecToPR uses one lightweight skill for brief, feature, Figma, and legacy delivery. Brief and feature delivery first prepare and review OpenSpec change documents, with optional acceptance-scenario TDD. The plugin then records visual match ratios, used APIs, and remaining Gaps. Feature delivery records one targeted E2E user-flow video.",
+    "shortDescription": "Four delivery cases with visual evidence and Gaps.",
+    "longDescription": "SpecToPR prepares Korean Draft PRs for brief, feature, Figma, and bounded legacy delivery. UI work records truthful visual comparison evidence. Legacy migrations preserve the legacy DOM, CSS, assets, controls, and route/state matrix rather than redesigning with a design system. API and authentication uncertainty becomes a visible Gap, not a false pass or a safe-work blocker.",
     "developerName": "SpecToPR Team",
     "category": "Developer Tools",
     "capabilities": ["Read", "Write"],
@@ -23,8 +23,8 @@
     "termsOfServiceURL": "https://github.com/dhyun2/spec-to-pr/blob/main/LICENSE",
     "defaultPrompt": [
       "Use the spec-to-pr skill and choose exactly one case: brief, feature, figma, or legacy.",
-      "Use the design system for UI work, or the running legacy screen as the migration baseline.",
-      "For brief and feature delivery, prepare and review OpenSpec change documents from the supplied sources before implementation. test: on uses OpenSpec acceptance scenarios for TDD; test: off is the default and skips new unit/integration tests. Create a Korean Draft PR with implemented features, visual match ratios, APIs, and Gaps. Feature delivery still runs targeted E2E and commits one user-flow video."
+      "Use the design system for brief, feature, and Figma UI. For legacy, preserve the running legacy DOM/CSS/assets/controls and only convert the framework entry unless redesign is explicitly approved.",
+      "For a legacy migration, inventory every user-visible legacy route and state, capture baseline/actual/Diff evidence for each or record an explicit reviewer-visible exclusion. Create a Korean Draft PR using the case-specific template; APIs, authentication, binding, and capture failures remain visible as Gaps rather than passed checks. Feature delivery still runs targeted E2E and commits one user-flow video."
     ],
     "brandColor": "#2563EB",
     "screenshots": []

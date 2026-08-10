@@ -7,6 +7,18 @@ title: 문제 해결
 
 기준 이미지와 구현 이미지의 크기, 경로, 상태, 데이터가 같은지 확인합니다. 기준 화면 자체가 없다면 숫자를 만들지 말고 `화면 기준 없음` Gap을 남깁니다.
 
+## 이미지는 저장됐는데 PR에서 보이지 않아요
+
+로컬 경로만 PR에 쓰면 리뷰어는 이미지를 볼 수 없습니다. `baseline`, `actual`, `diff`, manifest를 `spec-to-pr-evidence/<change>/` 아래에 저장하고 stage·commit·push합니다. Legacy라면 `legacy-visual-evidence.cjs`를 `git add` 뒤에 실행해 생성한 Markdown을 PR에 넣습니다. 이 도구가 기준·이관 결과·Diff의 GitHub/GitLab raw URL을 만듭니다.
+
+## 레거시 기본 화면만 통과했어요
+
+그 결과는 전체 이관 검증이 아닙니다. 레거시 router와 실제 흐름에서 모든 사용자 노출 `route · state`를 인벤토리로 만들고, 각각 비교하거나 사유·영향·리뷰어 결정을 갖춘 제외를 기록합니다. 누락된 항목이 하나라도 있으면 Draft는 `NOT VERIFIED`입니다.
+
+## Vue 3 이관 후 디자인이 달라졌어요
+
+명시적 재디자인 승인이 없는 legacy 이관에서는 디자인 시스템을 적용하면 안 됩니다. 레거시 template/class, CSS, sprite·자산, 컨트롤을 보존하고 Vue 3 문법·진입점만 바꿉니다. `legacy-visual-manifest.json`의 전략을 `preserve-legacy`로 두면 `@frontend/ui` 같은 대체 import도 Gap으로 표시됩니다.
+
 ## 일치율이 92%보다 낮아요
 
 Diff 이미지를 보고 차이가 큰 영역부터 수정한 뒤, 같은 조건으로 다시 캡처해 비교합니다. 최초 비교를 포함해 최대 3회까지 유효한 숫자 비교를 합니다. 세 번째도 92% 미만이면 더 시도하지 않고 마지막 점수와 1·2·3차 Diff를 Gap에 남깁니다.

@@ -12,6 +12,28 @@ export type ImageComparisonInput = {
   diffPath: string;
   threshold?: number;
   pixelTolerance?: number;
+  regions?: readonly ImageComparisonRegion[];
+};
+
+export type ImageComparisonRegion = {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  threshold?: number;
+};
+
+export type ImageComparisonRegionResult = {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  matchRatio: number;
+  matchPercent: string;
+  threshold: number;
+  status: "passed" | "failed";
 };
 
 export type ImageComparisonResult = {
@@ -22,6 +44,7 @@ export type ImageComparisonResult = {
   threshold: number;
   status: "passed" | "failed";
   diffPath: string;
+  regions: ImageComparisonRegionResult[];
 };
 
 /**
@@ -50,12 +73,21 @@ export async function compareImages(input: ImageComparisonInput): Promise<ImageC
   const diff = new PNG({ width: baseline.width, height: baseline.height });
   const pixels = baseline.width * baseline.height;
   let matched = 0;
+  const normalizedRegions = (input.regions ?? []).map((region) =>
+    normalizeRegion(region, baseline.width, baseline.height, threshold),
+  );
+  const regionalMatches = normalizedRegions.map(() => 0);
 
   for (let pixel = 0; pixel < pixels; pixel += 1) {
     const offset = pixel * 4;
     const distance = rgbaDistance(baseline.data, actual.data, offset);
     if (distance <= pixelTolerance) {
       matched += 1;
+      for (const [index, region] of normalizedRegions.entries()) {
+        if (contains(region, pixel % baseline.width, Math.floor(pixel / baseline.width))) {
+          regionalMatches[index] = (regionalMatches[index] ?? 0) + 1;
+        }
+      }
       diff.data[offset] = 0;
       diff.data[offset + 1] = 0;
       diff.data[offset + 2] = 0;
@@ -71,6 +103,15 @@ export async function compareImages(input: ImageComparisonInput): Promise<ImageC
 
   await writeFile(input.diffPath, PNG.sync.write(diff));
   const matchRatio = matched / pixels;
+  const regions: ImageComparisonRegionResult[] = normalizedRegions.map((region, index) => {
+    const regionMatchRatio = (regionalMatches[index] ?? 0) / (region.width * region.height);
+    return {
+      ...region,
+      matchRatio: regionMatchRatio,
+      matchPercent: `${(regionMatchRatio * 100).toFixed(2)}%`,
+      status: regionMatchRatio >= region.threshold ? "passed" : "failed",
+    };
+  });
 
   return {
     width: baseline.width,
@@ -78,9 +119,56 @@ export async function compareImages(input: ImageComparisonInput): Promise<ImageC
     matchRatio,
     matchPercent: `${(matchRatio * 100).toFixed(2)}%`,
     threshold,
-    status: matchRatio >= threshold ? "passed" : "failed",
+    status:
+      matchRatio >= threshold && regions.every((region) => region.status === "passed")
+        ? "passed"
+        : "failed",
     diffPath: input.diffPath,
+    regions,
   };
+}
+
+function normalizeRegion(
+  region: ImageComparisonRegion,
+  imageWidth: number,
+  imageHeight: number,
+  defaultThreshold: number,
+): Required<ImageComparisonRegion> {
+  if (!/^[a-z0-9][a-z0-9._-]*$/iu.test(region.id)) {
+    throw new Error(`region id must be a non-empty safe identifier: ${region.id}`);
+  }
+  for (const [name, value] of Object.entries({
+    x: region.x,
+    y: region.y,
+    width: region.width,
+    height: region.height,
+  })) {
+    if (!Number.isInteger(value) || value < 0) {
+      throw new Error(`region ${region.id} ${name} must be a non-negative integer`);
+    }
+  }
+  if (
+    region.width === 0 ||
+    region.height === 0 ||
+    region.x + region.width > imageWidth ||
+    region.y + region.height > imageHeight
+  ) {
+    throw new Error(`region ${region.id} is outside the compared image`);
+  }
+
+  return {
+    ...region,
+    threshold: normalizeRatio(
+      region.threshold ?? defaultThreshold,
+      `region ${region.id} threshold`,
+    ),
+  };
+}
+
+function contains(region: Required<ImageComparisonRegion>, x: number, y: number): boolean {
+  return (
+    x >= region.x && x < region.x + region.width && y >= region.y && y < region.y + region.height
+  );
 }
 
 function rgbaDistance(left: Buffer, right: Buffer, offset: number): number {

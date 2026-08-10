@@ -60,6 +60,38 @@ describe("compareImages", () => {
     expect(result.status).toBe("failed");
   });
 
+  it("fails when a required control region fails even if the mostly blank full image passes", async () => {
+    const directory = await createTemporaryDirectory();
+    const baselinePath = path.join(directory, "baseline.png");
+    const actualPath = path.join(directory, "actual.png");
+    const diffPath = path.join(directory, "diff.png");
+    const actual = PNG.sync.read(createPng(10, 10, [0, 0, 0, 255]));
+    for (let y = 0; y < 2; y += 1) {
+      for (let x = 0; x < 2; x += 1) {
+        const offset = (y * 10 + x) * 4;
+        actual.data[offset] = 255;
+      }
+    }
+    await Promise.all([
+      writeFile(baselinePath, createPng(10, 10, [0, 0, 0, 255])),
+      writeFile(actualPath, PNG.sync.write(actual)),
+    ]);
+
+    const result = await compareImages({
+      baselinePath,
+      actualPath,
+      diffPath,
+      pixelTolerance: 0,
+      regions: [{ id: "bottom-controls", x: 0, y: 0, width: 2, height: 2 }],
+    });
+
+    expect(result.matchPercent).toBe("96.00%");
+    expect(result.status).toBe("failed");
+    expect(result.regions).toEqual([
+      expect.objectContaining({ id: "bottom-controls", matchPercent: "0.00%", status: "failed" }),
+    ]);
+  });
+
   it("refuses images with different dimensions instead of inventing a ratio", async () => {
     const directory = await createTemporaryDirectory();
     const baselinePath = path.join(directory, "baseline.png");

@@ -9,16 +9,18 @@ title: 스킬 구조
 skills/spec-to-pr/
 ├── SKILL.md                 # 네 케이스와 공통 규칙
 ├── references/cases.md      # 케이스별 참고 기준
+├── references/model-routing.md # provider-neutral 역할과 model routing 규칙
 ├── references/openspec.md   # brief·feature OpenSpec·TDD 규칙
-├── assets/pr-template.md    # 한국어 Draft PR 형식
+├── assets/pr-templates/     # 네 가지 case 전용 Draft PR 형식
 └── scripts/
     ├── compare-images.cjs   # PNG 비교와 Diff 생성
+    ├── legacy-visual-evidence.cjs # legacy route/state coverage와 PR 이미지 링크
     └── check-gitlab-mr.cjs  # GitLab Draft MR 읽기 전용 사전 진단
 ```
 
 스킬은 모델에게 구현 순서와 PR 작성 규칙을 알려줍니다. 자체 서버, 데이터베이스, 실행 ID, 작업 재개 기능은 포함하지 않습니다.
 
-`brief`와 `feature`에만 OpenSpec 문서 준비·대조 규칙이 적용됩니다. 두 케이스의 `test: on`은 OpenSpec 수용 시나리오 기반 TDD이고, 생략하거나 `test: off`이면 TDD 테스트를 만들거나 실행하지 않습니다. Figma와 레거시는 OpenSpec·TDD 모드를 쓰지 않습니다. 자료가 넓거나 충돌할 때는 호스트가 지원하는 읽기 전용 서브에이전트로 대조를 보조할 수 있지만, 필수 역할이나 고정된 모델 라우팅은 아닙니다.
+OpenSpec은 사용자 입력 전제 조건이 아니며 core 구현을 막지 않습니다. `brief`와 `feature`의 `test: on`은 확정 수용 시나리오 기반 TDD이고, 생략하거나 `test: off`이면 TDD 테스트를 만들거나 실행하지 않습니다. Figma와 레거시는 OpenSpec·TDD 모드를 쓰지 않습니다. 모델 라우팅은 Codex/Claude 중립적인 fast/build/expert 역할로 판단하며, 한 Run에서 두 provider를 자동으로 섞지 않습니다.
 
 ## 이미지 비교 도구
 
@@ -32,6 +34,8 @@ node /absolute/path/to/compare-images.cjs \
 ```
 
 출력 JSON의 `matchPercent`와 `status`를 PR에 사용합니다. 이미지 크기가 다르면 오류를 내고 점수를 만들지 않습니다.
+
+`legacy-visual-evidence.cjs`는 레거시 인벤토리의 모든 사용자 노출 route/state가 비교 또는 명시적 제외인지 검증합니다. 기준·이관·Diff 이미지가 Git index에 있는지도 확인하고, PR에 삽입할 raw 이미지 Markdown을 만듭니다. 보존 이관에서 `@frontend/ui` 같은 금지된 대체 import가 발견되면 `NOT VERIFIED` Gap으로 표시합니다.
 
 ## GitLab MR 사전 진단 도구
 
