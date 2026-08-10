@@ -1,7 +1,7 @@
 {
   "name": "spec-to-pr",
   "version": "1.0.0",
-  "description": "Evidence-backed Codex workflow for full brief delivery, legacy migration, feature E2E, and Figma implementation into draft pull requests.",
+  "description": "Turn a brief, feature, Figma design, or legacy screen into a Korean draft pull request.",
   "author": {
     "name": "SpecToPR Team",
     "email": "dhp94d@gmail.com",
@@ -10,30 +10,21 @@
   "homepage": "https://github.com/dhyun2/spec-to-pr",
   "repository": "https://github.com/dhyun2/spec-to-pr",
   "license": "MIT",
-  "keywords": ["codex", "mcp", "figma", "openapi", "legacy", "testing", "pull-requests"],
+  "keywords": ["codex", "figma", "legacy", "design-system", "pull-requests"],
   "skills": "./skills/",
-  "mcpServers": {
-    "spec_to_pr": {
-      "command": "node",
-      "args": ["./dist/mcp/server.js"],
-      "env": {
-        "SPEC_TO_PR_HOST": "codex"
-      }
-    }
-  },
   "interface": {
     "displayName": "SpecToPR",
-    "shortDescription": "Turn briefs, migrations, features, and Figma into verified draft PRs.",
-    "longDescription": "SpecToPR provides four reviewer-first deliveries: brief, separate-project legacy migration, feature flow with a packet-bound video, and Figma UI. UI work always records measured visual comparison; API and binding uncertainty stays visible as a Gap instead of stopping confirmed work.",
+    "shortDescription": "Turn four development cases into Korean draft PRs.",
+    "longDescription": "SpecToPR uses one lightweight skill for brief, feature, Figma, and legacy delivery. Brief and feature delivery first prepare and review OpenSpec change documents, with optional acceptance-scenario TDD. The plugin then records visual match ratios, used APIs, and remaining Gaps. Feature delivery records one targeted E2E user-flow video.",
     "developerName": "SpecToPR Team",
     "category": "Developer Tools",
-    "capabilities": ["Interactive", "Read", "Write"],
+    "capabilities": ["Read", "Write"],
     "websiteURL": "https://github.com/dhyun2/spec-to-pr",
     "termsOfServiceURL": "https://github.com/dhyun2/spec-to-pr/blob/main/LICENSE",
     "defaultPrompt": [
-      "Use workflow_info, choose one of the four delivery modes, then call workflow_start once.",
-      "For UI, use Figma or the running legacy screen as the measured visual baseline; never treat skipped validation as passed.",
-      "Keep API or binding uncertainty as a reviewer-facing Gap and publish the compact four-template Draft body."
+      "Use the spec-to-pr skill and choose exactly one case: brief, feature, figma, or legacy.",
+      "Use the design system for UI work, or the running legacy screen as the migration baseline.",
+      "For brief and feature delivery, prepare and review OpenSpec change documents from the supplied sources before implementation. test: on uses OpenSpec acceptance scenarios for TDD; test: off is the default and skips new unit/integration tests. Create a Korean Draft PR with implemented features, visual match ratios, APIs, and Gaps. Feature delivery still runs targeted E2E and commits one user-flow video."
     ],
     "brandColor": "#2563EB",
     "screenshots": []

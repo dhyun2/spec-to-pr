@@ -4,6 +4,8 @@ node_modules
 # Build output
 dist
 coverage
+skills/spec-to-pr/scripts/compare-images.cjs
+skills/spec-to-pr/scripts/check-gitlab-mr.cjs
 
 # Plugin/runtime data
 .claude

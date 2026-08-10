@@ -3,124 +3,32 @@ sidebar_position: 2
 title: 설치
 ---
 
-import Tabs from "@theme/Tabs";
-import TabItem from "@theme/TabItem";
-import NextStep from "@site/src/components/guide/NextStep";
+SpecToPR는 하나의 스킬만 제공하는 플러그인입니다. 별도 서버를 실행하거나 데이터베이스를 만들지 않습니다.
 
-# SpecToPR 설치
-
-제품명은 **SpecToPR**, 저장소·설치 ID·명령 식별자는 `spec-to-pr`입니다.
-
-<Tabs groupId="host">
-<TabItem value="claude" label="Claude Code" default>
-
-## 마켓플레이스 설치
-
-Claude Code에서:
-
-```text
-/plugin marketplace add dhyun2/spec-to-pr
-/plugin install spec-to-pr@spec-to-pr
-```
-
-설치 직후에는 `/reload-plugins`를 실행하거나 새 세션을 시작합니다.
-
-업데이트:
-
-```text
-/plugin marketplace update spec-to-pr
-/plugin update spec-to-pr@spec-to-pr
-/reload-plugins
-```
-
-## 로컬 소스 실행
-
-```bash
-git clone https://github.com/dhyun2/spec-to-pr.git
-cd spec-to-pr
-corepack enable
-pnpm install
-pnpm build
-claude --plugin-dir /absolute/path/to/spec-to-pr
-```
-
-</TabItem>
-<TabItem value="codex" label="Codex">
-
-## Git 마켓플레이스 설치
+## Codex
 
 ```bash
 codex plugin marketplace add https://github.com/dhyun2/spec-to-pr --ref main
 codex plugin add spec-to-pr@spec-to-pr
 ```
 
-업데이트:
+설치한 뒤 새 작업을 열면 최신 스킬을 사용할 수 있습니다.
 
-```bash
-codex plugin marketplace upgrade spec-to-pr
-codex plugin add spec-to-pr@spec-to-pr
+## Claude Code
+
+```text
+/plugin marketplace add dhyun2/spec-to-pr
+/plugin install spec-to-pr@spec-to-pr
 ```
-
-## 로컬 마켓플레이스 설치
-
-```bash
-git clone https://github.com/dhyun2/spec-to-pr.git
-cd spec-to-pr
-corepack enable
-pnpm install
-pnpm build
-codex plugin marketplace add .
-codex plugin add spec-to-pr@spec-to-pr
-```
-
-설치 후 Codex를 다시 열고 새 작업을 시작합니다. `/plugins`에서 SpecToPR 마켓플레이스와 `spec-to-pr` 설치 상태를 확인하세요.
-
-## SDK 실행기
-
-```bash
-pnpm --dir packages/codex-sdk install
-pnpm --dir packages/codex-sdk build
-node packages/codex-sdk/dist/cli.js \
-  --cwd /path/to/app \
-  --mode brief \
-  --brief docs/plan.md \
-  --publish
-```
-
-사용 가능한 모드와 옵션은 [설정](/reference/config)에 있습니다.
-
-</TabItem>
-</Tabs>
 
 ## 설치 확인
 
+새 작업에서 아래처럼 요청합니다.
+
 ```text
-/spec-to-pr:doctor
+spec-to-pr 스킬로 feature 케이스를 사용해줘.
+projectRoot: /absolute/path/to/project
+request: 알림 설정 토글을 추가해줘
 ```
 
-Doctor는 `workflow_info`를 호출해 계약 버전 `2.0.0`과 다음 공개 기능을 확인합니다.
-
-- 도구 7개
-- 중단 후 이어갈 수 있는 단계 8개
-- 독립 검토 역할 2개
-- UI 구현 전 `api-ready` 확인, 독립 기능·디자인 검토, UI 변경에만 적용되는 디자인 검토
-
-설치된 릴리스 패키지는 `node_modules`를 포함하지 않을 수 있습니다. 플러그인 캐시에서 SDK를 직접 불러오지 말고, 호스트가 실제로 제공하는 `workflow_info`로 진단하세요.
-
-## 설치되는 구성
-
-- 공개 마켓플레이스 스킬 8개
-- `node ./dist/mcp/server.js`로 실행되는 로컬 stdio MCP 서버
-- `functional-reviewer`, `design-reviewer` 검토자 정의
-- 검증 자료 기록부, 산출물 저장소, 초안 발행기, 명시적으로 실행하는 보관 기능
-
-호스트마다 도구 이름 공간 표기는 다를 수 있지만 공개 계약은 같습니다.
-
-<NextStep
-  eyebrow="설치 확인 완료"
-  title="첫 PR 초안을 5분 안에 만들어 보세요"
-  description="Doctor 결과를 확인했다면, 요건을 갖춘 기획서 요청 하나로 접수부터 발행까지 이어집니다."
-  href="/getting-started/quickstart"
-  label="퀵스타트 시작"
-  secondary={{ label: "설정 레퍼런스", href: "/reference/config" }}
-/>
+모델이 `case`, 대상 프로젝트 절대 경로, 구현 요청을 확인하면 준비가 된 것입니다.

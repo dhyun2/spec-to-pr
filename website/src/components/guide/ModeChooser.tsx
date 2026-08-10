@@ -2,66 +2,36 @@ import Link from "@docusaurus/Link";
 
 import styles from "./guide.module.css";
 
-type Locale = "ko" | "en";
+type Locale = "ko";
 
 const modes = {
   ko: [
     {
       id: "brief",
-      title: "기획서 기반 전체 구현",
-      input: "기획서 + Figma + OpenAPI",
-      result: "API·UI, Figma 화면 비교, API 차이, Web Vitals",
+      title: "기획서로 시작하기",
+      input: "기획서 경로 + 구현 요청",
+      result: "OpenSpec 대조 뒤 구현, test: on이면 TDD",
       href: "/usage/brief",
     },
     {
       id: "legacy",
-      title: "레거시를 더 나은 구조로 이관",
+      title: "레거시 화면과 동작 옮기기",
       input: "대상 저장소 + 별도 레거시 경로",
-      result: "이관 목록·검증 현황, 실행 중인 레거시와 화면 비교",
+      result: "레거시 동작·화면·API를 기준으로 구현, 화면 비교",
       href: "/usage/legacy",
     },
     {
       id: "feature",
-      title: "사용자 기능 하나를 끝까지",
-      input: "기획서 + Figma + OpenAPI",
-      result: "전체 검증 자료, 대상 기능 E2E, 영상 1개",
+      title: "기능 하나를 만들기",
+      input: "한 가지 기능 요청",
+      result: "OpenSpec 대조, 선택 TDD, E2E·영상 1개",
       href: "/usage/feature",
     },
     {
       id: "figma",
-      title: "Figma를 모의 데이터 UI로 구현",
+      title: "Figma 화면 구현하기",
       input: "Figma URL + 대상 저장소",
-      result: "모의 데이터 상태, 수치화된 Figma 화면 비교",
-      href: "/usage/figma",
-    },
-  ],
-  en: [
-    {
-      id: "brief",
-      title: "Build the full brief",
-      input: "Brief + Figma + OpenAPI",
-      result: "API/UI, Figma comparison, API gaps, Web Vitals",
-      href: "/usage/brief",
-    },
-    {
-      id: "legacy",
-      title: "Migrate legacy into a better structure",
-      input: "Target repository + separate legacy path",
-      result: "Inventory, coverage, and running-legacy comparison",
-      href: "/usage/legacy",
-    },
-    {
-      id: "feature",
-      title: "Deliver one user feature end to end",
-      input: "Brief + Figma + OpenAPI",
-      result: "Full evidence + targeted E2E + one video",
-      href: "/usage/feature",
-    },
-    {
-      id: "figma",
-      title: "Implement Figma with mock states",
-      input: "Figma URL + target repository",
-      result: "Mock-backed states and measured Figma comparison",
+      result: "디자인 시스템 우선 구현, Figma와 화면 비교",
       href: "/usage/figma",
     },
   ],
@@ -72,22 +42,18 @@ const modes = {
 
 export default function ModeChooser({ locale }: { locale: Locale }) {
   return (
-    <nav
-      className={styles.modeGrid}
-      data-testid="mode-chooser"
-      aria-label={locale === "ko" ? "SpecToPR 사용 방식" : "SpecToPR delivery cases"}
-    >
+    <nav className={styles.modeGrid} data-testid="mode-chooser" aria-label="SpecToPR 사용 방식">
       {modes[locale].map((mode, index) => (
         <Link className={styles.modeCard} to={mode.href} key={mode.id}>
           <span className={styles.modeNumber}>{String(index + 1).padStart(2, "0")}</span>
           <span className={styles.modeName}>{mode.title}</span>
           <span className={styles.modeMeta}>
-            <strong>{locale === "ko" ? "입력" : "Input"}</strong> {mode.input}
+            <strong>입력</strong> {mode.input}
           </span>
           <span className={styles.modeMeta}>
-            <strong>{locale === "ko" ? "검증 결과" : "Evidence"}</strong> {mode.result}
+            <strong>결과</strong> {mode.result}
           </span>
-          <span className={styles.modeLink}>{locale === "ko" ? "가이드 열기" : "Open guide"}</span>
+          <span className={styles.modeLink}>가이드 열기</span>
         </Link>
       ))}
     </nav>

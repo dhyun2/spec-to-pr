@@ -1,199 +1,68 @@
 ---
 sidebar_position: 4
-title: 4. Figma → 디자인 구현
-description: 실제 Figma 자료를 기준으로 디자인을 구현하고 검증하는 방법
+title: Figma 화면 구현
 ---
 
-import RunPipeline from "@site/src/components/guide/RunPipeline";
-import NextStep from "@site/src/components/guide/NextStep";
+`figma`는 선택한 Figma 화면과 상태를 기준으로 UI를 구현할 때 사용합니다.
 
-요청을 접수하면 `XS`~`XL` 예상 작업량, 토큰 범위, 신뢰도와 산정 근거를 먼저 보여 줍니다. 이 값은 확정된 약속이 아닙니다. 사용량이 80%에 이르면 진행 상태를 저장하고 간결한 맥락으로 이어갑니다. 한계에 도달해도 `requiredValidations`를 줄이지 않고, 검증 가능한 단위로 범위를 나누거나 사용자의 결정을 기다립니다.
+Figma는 OpenSpec 문서나 `test: on | off` TDD 모드를 만들지 않고, 선택한 화면·상태를 직접 구현 기준으로 사용합니다.
 
-## 이 사용법을 쓰는 경우 <span id="use-this-case-figma"></span>
+## 입력
 
-Figma를 기준으로 실제 API 없이 고정된 모의 데이터로 화면을 구현할 때 사용합니다. 연결된 호스트에서 노드와 기준 PNG를 읽어 기존 디자인 시스템에 연결하고, 결과 화면을 수치로 비교한 뒤 **초안 PR**을 만듭니다.
-
-:::tip[입력 / 결과]
-**입력:** 저장소 + 유효한 Figma URL · **결과:** 모의 데이터 기반 UI, 상태별 Figma 일치율과 차이·겹침 이미지, 디자인·접근성 검증이 있는 Figma UI 초안 PR
-:::
-
-<RunPipeline locale="ko" mode="figma" />
-
-## 반드시 제공할 것 <span id="required-inputs-figma"></span>
-
-| 입력          | 요구사항                                            |
-| ------------- | --------------------------------------------------- |
-| 저장소        | 디자인 시스템과 화면을 구현할 대상 Git 저장소       |
-| `mode`        | `figma`                                             |
-| `scope`       | `ui` 필수                                           |
-| `figmaUrls`   | 모든 화면·상태의 접근 가능한 URL과 구체적 `node-id` |
-| `publication` | 기본값은 `draft`; 구현·검토까지만이면 `none`        |
-| 요청          | 구현할 화면·상태·반응형 범위를 지정                 |
-
-## 선택 입력 <span id="optional-inputs-figma"></span>
-
-- `briefPath`, `docsPaths`: 화면의 문구와 상태 설명을 보충합니다.
-- `guidancePaths`: 디자인 시스템 사용법, 구조 문서, 폴더 구성 문서를 명시합니다.
-- `skillHints`: 설치된 `design-system`, React/Next 성능, 접근성 관련 스킬을 요청합니다.
-
-## 최소 프롬프트 <span id="minimal-prompt-figma"></span>
-
-```text
-/spec-to-pr /absolute/path/to/app
-mode: figma
-scope: ui
-figmaUrls: [https://www.figma.com/design/FILE/shop?node-id=12-345, https://www.figma.com/design/FILE/shop?node-id=12-678]
-publication: draft
-Figma를 고정된 모의 데이터로 구현하고 결과 화면과 92% 기준으로 비교한 뒤 초안 PR로 발행해줘.
+```yaml
+case: figma
+projectRoot: /absolute/path/to/project
+request: 결제 수단 선택 화면을 구현해줘
+figmaUrl: https://www.figma.com/design/FILE/checkout?node-id=12-345
 ```
 
-## 전체 프롬프트 예시 <span id="full-prompt-figma"></span>
+## 구현 규칙
 
-```text
-/spec-to-pr /absolute/path/to/app
-mode: figma
-scope: ui
-figmaUrls: [https://www.figma.com/design/FILE/shop?node-id=12-345, https://www.figma.com/design/FILE/shop?node-id=12-678]
-docsPaths: [docs/checkout-states.md]
-guidancePaths: [docs/design-system.md, docs/etc/folder-structure.md]
-skillHints: [design-system, react-best-practices, accessibility-auditor]
-changeKind: design
-publication: draft
-노드 12:345의 데스크톱·모바일 화면과 로딩·오류·성공 상태를 기존 컴포넌트로 구현해줘.
-실제 Figma 자료 묶음과 `visualTargets`를 만들고 모의 데이터로 모든 상태를 고정해.
-결과 화면의 정확 일치율·검토 일치율, 차이·겹침 이미지와 독립 검토를 만든 뒤 초안 PR로 발행해줘.
+- URL이 가리키는 화면과 상태를 기준으로 구현합니다.
+- 사내 디자인 시스템의 컴포넌트·토큰을 우선 사용합니다.
+- 정확히 대응하는 컴포넌트가 없으면 프로젝트 규칙에 맞춰 직접 구현합니다.
+- 디자인 시스템과 정확히 일치하지 않는다는 이유만으로 Gap을 만들지 않습니다. 화면이나 기능을 완료하지 못했을 때만 Gap입니다.
+
+## 화면 비교
+
+Figma 캡처를 기준 이미지로, 실행 중인 대상 프로젝트의 같은 화면을 구현 이미지로 사용합니다. 두 이미지는 같은 경로·상태·데이터·화면 크기여야 합니다.
+
+```bash
+node /absolute/path/to/compare-images.cjs \
+  --baseline spec-to-pr-evidence/payment/baseline.png \
+  --actual spec-to-pr-evidence/payment/actual.png \
+  --diff spec-to-pr-evidence/payment/diff.png
 ```
 
-## SpecToPR이 진행하는 과정 <span id="process-figma"></span>
+일치율이 92% 미만이면 Diff를 보고 구현을 보완한 뒤 같은 조건으로 다시 비교합니다. 최초 비교를 포함해 최대 3회까지 시도하고, 세 번째도 92% 미만이면 1·2·3차 Diff와 다음 작업을 Gap에 기록합니다.
 
-1. **시작 전 고정:** 지정한 target 브랜치에서 깨끗한 `codex/*` 브랜치를 준비하고, 저장소 루트·대상 경로·base SHA·remote·모든 Figma URL을 확인한 뒤 `workflow_start`를 정확히 한 번 호출합니다.
-2. **Figma 계약 확정:** 연결된 호스트에서 모든 URL의 노드 ID, 논리 프레임 크기, export bitmap 크기/배율, 변수, 컴포넌트, 화면, 글꼴과 자산을 읽습니다. 썸네일 크기를 브라우저 viewport로 사용하지 않습니다.
-3. **디자인 시스템 연결:** 새 마크업 전에 각 Figma 컴포넌트를 설치된 사내 컴포넌트 export, 해시로 고정한 canonical asset, 또는 명시적 예외에 정확히 한 번 대응시킵니다. `Logo/Normal/nxplus_park` 같은 이름을 CSS로 추측하지 않습니다.
-4. **구현:** `{deterministic:true, fixtures:[{id,path,sha256}]}` 형태의 엄격한 모의 데이터 매니페스트와 별도 JSON fixture를 제출합니다. 모든 화면 상태가 이름 있는 fixture ID와 해시에 연결되어야 합니다.
-5. **화면 비교 및 보정:** 브라우저는 fixture·`document.fonts.ready`·자산 로드를 기다리고 현재 패킷/HEAD, 논리 크기, DPR, 자료 제공자와 실행 환경, 글꼴·자산·fixture 해시, PNG 해시를 담은 receipt를 만듭니다. 런타임이 sRGB 정규화와 고정 92% 비교를 소유합니다. 최초 비교와 첫 두 유효 실패의 `implementation-repair`는 사용자에게 묻지 않고 자동 진행합니다. 잘못된 receipt나 geometry는 시도 횟수를 소비하지 않습니다. 세 번째 유효 비교도 실패하면 자동 보정만 멈추고 동일 크기 기준/결과와 차이·겹침 이미지를 **화면 비교 Gap**으로 남깁니다.
-6. **검토·보고서·발행:** Figma UI 본문에 Figma 상태 매핑, 상태별 일치율, 디자인·접근성 검증과 상단 Gap을 만든 뒤, 시작 시 고정한 source/target/remote가 그대로일 때 초안 PR을 발행합니다. 독립 디자인 검토는 가능한 증거를 별도로 판정합니다.
-
-각 보고서 섹션은 `complete`, `not-run`, `blocked`, `not-applicable` 중 하나입니다. 현재 검토 묶음에 속하지 않는 이전 검증 자료는 PR에서 제외합니다. 초안 PR에는 Figma 기준·결과·차이 이미지와 일치율을 제공합니다. GitHub용 이미지는 실행마다 새 브랜치를 만들지 않고 관리 브랜치 `spec-to-pr/evidence`의 변경되지 않는 경로에 올린 뒤 업로드 커밋 SHA로 고정합니다.
-
-### 실제 구현에서 놓치기 쉬운 항목
-
-- 연결된 호스트가 내려 준 축소 썸네일은 목표 프레임으로 확대하지 않고 native export를 다시 얻습니다.
-- 화면 설명보다 캡처한 state facts가 우선하며, 사실이 다른 상태마다 별도 fixture와 digest를 사용합니다.
-- `Spot`, `Circle`, `Close`는 사내 패키지의 정확한 공개 export와 `semantic/text/tertiary` 같은 semantic token으로 연결합니다. 외부 SVG나 비슷한 hex 색은 자동 대체가 아닙니다.
-- baseline PNG는 비교 증거이며 제품 DOM·CSS·SVG·canvas의 레이어로 넣지 않습니다.
-- 좌우 이미지 geometry, 표의 위아래 border, 복사 버튼, 아이콘 geometry/color, focus, heading, accessible name, action을 집중 assertion으로 검증합니다. 이 검증은 92% 총점과 별개입니다.
-
-## 단계와 작업 담당
-
-| 단계                | 이 방식에서 수행하는 작업                                                                      |
-| ------------------- | ---------------------------------------------------------------------------------------------- |
-| `intake`            | Figma 파일·노드, UI 상태·반응형 범위, 발행 방식, 예상 작업량을 고정합니다.                     |
-| `contracts`         | 연결된 호스트에서 실제 노드·변수·자산·화면을 읽고 엄격한 `figma-bundle`을 제출합니다.          |
-| `implementation`    | 한 명의 구현 담당자가 기존 디자인 시스템에 연결하고 고정된 모의 데이터 기반 UI를 구현합니다.   |
-| `functional-review` | 읽기 전용 `functional-reviewer`가 상태 동작과 관련 프로젝트 검사를 판정합니다.                 |
-| `design-review`     | 읽기 전용 `design-reviewer`가 Figma 대비 화면·상호작용·반응형 상태·접근성을 판정합니다.        |
-| `report`            | Figma 상태 매핑, 상태별 일치율, 디자인·접근성 검증과 상단 Gap을 리뷰어 우선 본문으로 만듭니다. |
-| `publish`           | `publication: draft`이면 Gap·실패·미실행 증빙이 있어도 검토 묶음에 연결된 초안을 만듭니다.     |
-| `archive`           | 발행한 초안이 병합되었다는 근거가 있고 사용자가 별도로 요청한 경우에만 실행합니다.             |
-
-작업량이 XS/S이면 별도 조사 담당자를 두지 않고, M이면 최대 1명, L/XL이면 최대 2명의 읽기 전용 조사 담당자를 둘 수 있습니다. 조사 담당자는 큰 Figma 자료와 저장소의 대응 관계처럼 서로 겹치지 않는 항목만 탐색합니다. 구현은 한 명의 담당자만 편집하며 중첩 위임과 여러 구현 담당자의 동시 편집은 허용하지 않습니다. UI의 두 검토는 작업량과 관계없이 구현이 끝난 직후 동시에 진행하고 결과를 같은 packet inbox에서 함께 적용합니다.
-
-<details>
-<summary>스킬과 도구의 세부 규칙</summary>
-
-- `stageSkillRoute`: 공개 작업은 `intake-contracts` → `implement` → `review-functional`/`review-design` 순서로 진행하며, 초안 발행이면 `publish`가 이어집니다. 이 경로는 `deliveryProfile.recommendedSkills`와 다릅니다.
-- `recommendedSkills`: `figmaUrl` → `figma`, `design-system`; `openApiPaths` → `api-generator`; 감지된 React/Next 패키지 → `react-best-practices`, `next-best-practices`
-- Figma UI라는 이유만으로 `playwright`를 추천하지 않습니다. `mode: feature`이고 UI 연결이 있을 때만 후보에 추가합니다.
-- `appliedSkills`: `recommendedSkills`와 실제로 설치되어 있고 현재 작업에 맞는 `skillHints`만 기록합니다. 선택 스킬이 없어도 실행을 중단하지 않지만 실제 Figma 검증 자료는 반드시 필요합니다.
-- **워크플로 도구:** 필수입니다. **Figma 호스트 기능:** URL의 파일과 노드를 읽는 데 필수이며 반복 상태 조회로 대신할 수 없습니다. **Playwright Test/CLI:** 실행 화면 검증이 `requiredValidations`에 있으면 관련 검사에 사용하지만 기능 E2E나 영상은 요구하지 않습니다.
-- **Browser MCP:** 상호작용과 화면을 살펴볼 때 선택적으로 사용합니다. **Chrome DevTools MCP:** 콘솔·네트워크·성능·메모리·실시간 DOM 문제를 진단할 때만 사용합니다. 스크린샷이나 DevTools 관찰은 Playwright 검증을 대신하지 않습니다.
-
-</details>
-
-### 정상 발행, 차단 진단, 재개
-
-`workflow_publish`는 Figma나 브라우저 검증 자료가 없어도 코드 변경과 발행 사전 조건이 있으면 Draft를 만들 수 있습니다. 이 경우 `BROWSER_NOT_RUN` 같은 Gap의 영향·리뷰어 결정을 상단에 표시하고 verified나 merge-ready로 표시하지 않습니다. 조건을 충족하지 못하거나 `PUBLISH_NO_DELTA`이면 빈 커밋이나 대체 이슈를 만들지 않고 **로컬 보고서**를 반환합니다.
-
-명시적으로 초안을 요청한 실행이 `diagnostic-publication-uncertain`을 반환하면 자동으로 다시 발행하지 않습니다. GitHub/GitLab에서 소스와 대상 브랜치가 같은 기존 초안을 확인해 사용자에게 보여 주고, 명시적인 승인을 받은 경우에만 같은 `workflow_publish`를 `recoverUncertain: true`로 호출합니다.
-
-권한·노드·검증 자료를 고친 뒤 최신 상태의 **같은 실행**을 재개합니다. 진단용 초안이 있었다면 소스와 대상 브랜치가 같은 **기존 초안 PR**의 `[Blocked]` 제목·본문을 정상 `intent: ready` 내용으로 바꾸고 차단 라벨을 제거합니다.
-
-## 검증 자료와 통과 기준 <span id="evidence-figma"></span>
-
-| 검증 자료       | 예상 예시                                                            | 통과 기준                                                                       |
-| --------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| Figma 자료 묶음 | `evidence/figma/figma-bundle.json`                                   | 모든 `fileUrls`, 노드, native geometry, design mapping, 글꼴·자산 출처가 연결됨 |
-| 화면 목록       | `evidence/figma/manifest.json`, `evidence/figma/checkout-mobile.png` | 논리 프레임과 export bitmap을 구분한 실제 PNG `visualPaths`                     |
-| 화면 비교       | `evidence/visual/figma-report.json`                                  | 검토 일치율 92% 이상, 기준·결과·차이·겹침 이미지                                |
-| 모의 데이터     | `evidence/fixtures/checkout.json`                                    | 이름·경로·해시가 receipt까지 이어지는 고정 상태                                 |
-| 캡처 receipt    | `evidence/visual/<packet>/checkout.json`                             | 현재 패킷/HEAD, 환경, geometry, fixture, 글꼴·자산, PNG 해시가 일치             |
-| 반응형·상호작용 | `evidence/design/responsive.json`, `interaction.json`                | 지정한 화면 크기와 상태 전이를 검증함                                           |
-| 접근성          | `evidence/design/accessibility.json`                                 | 의미 구조·키보드·초점·명암비 검사가 성공                                        |
-| 디자인 검토     | `evidence/reviews/design.json`                                       | 고정된 차이 이미지와 검증 자료에 대한 독립 판정이 승인됨                        |
-
-Figma 방식은 기능 개발용 E2E와 영상을 자동으로 요구하지 않습니다. 기능 전체와 영상까지 필요하면 `mode: feature`를 선택하고 `figmaUrl`을 입력 자료로 함께 제공합니다.
-
-## 예상 브랜치와 커밋 <span id="branch-and-commits-figma"></span>
-
-- 예상 브랜치: 지정한 target에서 만든 `codex/figma-checkout`
-- 커밋 예상 예시: `feat: implement checkout from Figma`
-- 초안 발행 전에는 다른 사용법과 마찬가지로 커밋한 소스 브랜치와 깨끗한 작업 트리가 필요합니다.
-
-## 예상 초안 PR <span id="expected-pr-figma"></span>
-
-**예상 예시 제목:** `feat: implement checkout from Figma`
+## PR 예시
 
 ```md
-## Figma 출처
+# [Figma 화면 구현] 결제 수단 선택
 
-- 파일/노드: checkout / 12:345
-- 자료 묶음: evidence/figma/figma-bundle.json
+> Draft PR · 화면 94.20% · Gap 1개
 
-## 구현
+## 개발한 기능
 
-- 기존 디자인 시스템 컴포넌트와 토큰 사용
-- 데스크톱/모바일, 로딩/오류/성공 상태 구현
+- 저장된 카드와 새 카드 입력을 전환할 수 있습니다.
 
-## 디자인 검증
+## 화면 일치율
 
-- 정확 일치율: 97.84%, 검토 일치율: 99.12%, 통과 기준: 92%
-- 기준 / 결과 / 차이 이미지와 일치율
-- 반응형 / 상호작용 / 접근성: 통과
-- design-reviewer: approved
+| 화면 | 비교 기준 | 비교 횟수 | 일치율 | 결과 | 증빙 |
+| 기본 상태 | Figma | 1/3 | 94.20% | 통과 | 기준 · 구현 · Diff |
 
-## 알려진 차이
+## 사용한 API
 
-- Figma에 정의되지 않은 상태와 의도적으로 제외한 범위
+| Method | Path | 사용 목적 |
+| - | 사용한 API 없음 | - |
+
+## Gap
+
+| 확인 또는 개발이 필요한 내용 | 영향 | 다음 작업 |
+| 카드 삭제 정책 | 낮음 | 정책 확인 후 버튼 추가 |
+
+## 검증
+
+- 컴포넌트 테스트 통과
 ```
-
-## 실행이 멈추는 경우 <span id="blockers-figma"></span>
-
-| 중단 원인                             | 사용자가 할 일                                          |
-| ------------------------------------- | ------------------------------------------------------- |
-| URL·노드가 잘못되었거나 권한이 없음   | 접근 가능한 URL과 정확한 `node-id` 제공                 |
-| 연결된 호스트에서 자료를 읽을 수 없음 | Figma 연결·로그인·권한을 복구하고 재개                  |
-| 필요한 상태·화면 크기가 Figma에 없음  | 기준으로 삼을 동작 또는 승인된 보완 요구사항 제공       |
-| 기존 디자인 시스템과 Figma가 충돌     | 재사용·확장·예외 중 원하는 방향을 결정                  |
-| source/target/remote가 시작 뒤 변경됨 | 고정된 workspace binding으로 복원하고 새 검토 패킷 생성 |
-
-## 이 사용법이 하지 않는 것 <span id="exclusions-figma"></span>
-
-- URL만으로 노드·변수·컴포넌트를 확인했다고 주장하지 않습니다.
-- Figma 상태를 반복 조회하거나 별도 실행 도구를 추가하지 않습니다.
-- 실제 API 클라이언트, API 누락 현황, Web Vitals, 기능 E2E와 영상을 기본 계약에 추가하지 않습니다.
-- 기능 개발 방식의 전체 기능 E2E와 영상 계약을 암묵적으로 추가하지 않습니다.
-
-<NextStep
-  eyebrow="점수의 근거 보기"
-  title="Figma 일치율은 사람이 적는 숫자가 아닙니다"
-  description="실제 기준·결과·차이·겹침 이미지와 해시가 화면 비교 수치에 어떻게 연결되는지 확인하세요."
-  href="/concepts/visual-verification"
-  label="시각 검증 보기"
-  secondary={{ label: "검토자 역할 보기", href: "/concepts/reviews" }}
-/>
-
-## 다른 사용법
-
-- [기획서 → 초안 PR](./brief)
-- [레거시 마이그레이션 → 초안 PR](./legacy)
-- [기능 개발 → E2E·영상·초안 PR](./feature)

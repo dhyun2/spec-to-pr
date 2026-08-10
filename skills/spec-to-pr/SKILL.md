@@ -1,40 +1,78 @@
 ---
 name: spec-to-pr
-description: Use when orchestrating an evidence-driven v2 Run across its stage-specific external actions.
+description: Use when turning a brief, one feature, a Figma design, or a separate legacy project into a Korean draft pull request.
 ---
 
-# Spec to PR
+# SpecToPR Lite
 
-Use the v2 facade as the sole workflow authority:
+SpecToPR는 네 가지 개발 요청을 **한 번 실행해서** 한국어 Draft PR로 정리하는 스킬입니다. 작업 상태 저장, 상태 머신, 재개, 별도 리뷰어, MCP 도구를 사용하지 않습니다.
 
-1. Call `workflow_info` and require contract version `2.0.0`.
-2. Choose one delivery profile. Delivery mode controls delivery and evidence; sources compose independently. Before the single durable start, resolve the canonical Git root, clean non-target `codex/*` source branch created from the requested target ref, target/supporting paths, remote, and every supplied Figma state URL. Call `workflow_start` exactly once with `projectRoot`, `requestText`, `scope`, `mode`, `changeKind`, `publication`, the complete `workspace` binding, and supplied `legacyProjectRoot`, `legacyNetworkEvidencePath`, `briefPath`, `figmaUrl`/`figmaUrls`, `docsPaths`, `openApiPaths`, `openApiUrls`, `guidancePaths`, or `skillHints`. Set `scope` to exactly one of `auto | ui | non-ui | docs`; never send a natural-language label. The four delivery cases are UI contracts:
-   - `brief`: require `briefPath`, `figmaUrl`, and at least one local `openApiPaths` or HTTPS `openApiUrls` source. Default `changeKind: feature` and `publication: draft`.
-   - `legacy`: require a separate `legacyProjectRoot`; treat it as read-only and migrate into `projectRoot`. Treat `legacyProjectRoot` and `workflow_status.legacyInventory` as the immutable feature boundary, not a dependency visibility boundary. Resolve each requested feature against that inventory; when no feature key matches, report an in-bound scope mismatch. A sibling, parent, or keyword-similar module requires an explicit replacement `legacyProjectRoot` and is never inferred from repository-wide search. You may inspect directly referenced dependency evidence outside that root—import targets, HTTP client or alias configuration, environment-name schemas/examples, package metadata or type declarations, and enclosing build/start metadata—only to resolve or run an in-bound feature. Follow explicit import/configuration edges, keep the inspection bounded, never read or persist secret values, and never turn dependency evidence into unrelated feature keys, routes, screens, or API candidates. Inspect `legacyInventory.apiCandidates` and `supportingDependencies`: only terminal HTTP calls are operations; constructors and local wrapper calls are provenance/callsites. Preserve `originRef`, including its environment name and safe origin metadata, and map it to the target project's existing environment/base-URL convention rather than deleting the base or copying the legacy syntax literally. Preserve auth/no-auth distinctions from `transportRef` and callsites when selecting the target client. When source evidence is genuinely ambiguous, create a project-local `legacyNetworkEvidencePath` containing at most 1 MB and 1,000 requests as standard HAR, `{requests:[{method,url}]}`, or `[{method,url}]`. If status returns `collect-legacy-network-evidence`, collect only the selected legacy feature's runtime requests and submit `kind: legacy-network-evidence` with `evidencePath`; this resumes the same Run. Resolve an ambiguous method/path only from a unique scoped runtime/OpenAPI match. Default `changeKind: migration` and `publication: draft`.
-   - `feature`: require the same brief/Figma/OpenAPI inputs as `brief`, then add only changed-feature E2E and exactly one video. Set `changeKind: feature` and `publication: draft`.
-   - `figma`: require one or more normalized `figmaUrls`, use deterministic named mock fixtures, set `changeKind: design`, and capture real Figma evidence for every URL before contracts. Figma defaults to `publication: draft` and normalizes API scope to false.
-   - `auto`: remain lightweight for non-UI scope, but require the same runtime screen comparison and design/accessibility review whenever scope is UI.
-   - Any supplied `figmaUrl` requires a real `figma-bundle` before contracts, including in `feature` mode.
-     API/binding/auth/certificate/evidence analysis uncertainty is an open Gap, not an implementation stop, unless a write would be unsafe. Do not infer request bodies or authenticated mutations. OpenSpec is optional post-merge integration and is never an input, path, or contract prerequisite for the core Run.
-3. When `publication: draft`, perform workspace/remote preflight as a read-only check before `workflow_start`. A missing publication credential or TLS issue is a publication Gap: preserve the exact binding if it is available and continue safe local implementation. The returned `workspaceBinding` is immutable: implementation snapshots, review packets, preview, and execute publication must use its exact repository root, source/target branches, base SHA, remote name/URL, and sanitized publication target.
-4. Call `workflow_advance` until it returns an external action.
-5. Perform that action with the matching skill, then record compact evidence with `workflow_submit`. Preserve timestamped intake `sourceProvenance` and the complete OpenAPI operation inventory. For every UI scope, `compare-visuals` is mandatory: submit a current-packet capture and receipt for every target with matching route, state, logical geometry, fixture, browser/environment, actual PNG path/digest, and runner/normalizer versions. When status exposes both actions, run capture and functional reviewer concurrently against the same immutable packet. The runtime owns the score, diff, overlay, and 92% verdict. Run up to three valid numeric comparisons without pausing for user approval: each of the first two failures returns `implementation-repair` for a fresh packet; invalid acquisition consumes no attempt; a third valid failure terminally blocks the comparison, so Do not start design review and use the same-template blocked-diagnostic Draft path. Failed or unavailable capture is `failed`/`not-run` plus an open Gap; it never becomes passed or skipped, but a truthful Draft remains allowed. Reviews remain independent and read-only; they may report their own verdict while visual evidence stays an unresolved Gap. Never accept caller-computed scores.
-6. Read `workflow_status`; repeat advance, action, and submission while required gates remain.
-7. Before publication, stage only intended files, commit all intended implementation and evidence changes on the source branch, and require a clean working tree with at least one commit beyond the target branch.
-8. Require the packet-bound canonical `pr-report-v2.1` JSON and Markdown body before ready publication. The 15 sections cover sources, requirements, files, API coverage/gaps, legacy coverage, visual ratios/assets, both reviews, performance, feature evidence, blockers, risks, rollback, and evidence. A blocked diagnostic uses the same shape and names the stopped stage, unrun validations, and exact unblock action.
-9. Call `workflow_publish` only when `publication: draft` was requested and status is publish-ready, or use the explicit blocked-diagnostic path for a currently blocked Run. Publishing is draft-only and must repeat the exact `workspaceBinding.sourceBranch`, `targetBranch`, and `remoteName`; never infer replacements.
-10. Call `workflow_archive` only after the merged review request is explicitly verified.
+## 입력
 
-Immediately after start, report the `workflow_status.workload` size (`XS`–`XL`), token range, and confidence. Treat it as a range, not a promise, and preserve the complete `requiredValidations` list from status. When the SDK reports the 80% boundary, finish the current action group and continue from the compact fresh-thread checkpoint using `resumeContext.goal`, its project-relative evidence paths, and submission summaries. On `--resume`, call `workflow_status` for the existing run ID first; never repeat intake or create a duplicate Run. At the automatic hard limit, do not begin another action: keep that list unchanged and return `split-required` for independently verifiable scope slices. If SDK usage is unavailable, stop before another nonterminal action instead of assuming zero.
+다음 세 가지를 먼저 확인합니다.
 
-This is a latency-bound user Run. Keep one writer context. Do not create generic helper agents for planning, intake, status polling, progress narration, or re-checking completed work. Do not poll or repeatedly wait for an agent; read one fresh `workflow_status` after a submitted external action, then continue the returned action group or stop. Delegate only status-authorized independent read-heavy discovery and never nest it. For each immutable review packet, use one reviewer per applicable role; do not retry or replace a reviewer for that packet when it returns blocked, missing evidence, or times out. Submit that diagnostic truthfully and let the returned workflow status decide whether a changed implementation packet warrants a later review.
+1. `case`: `brief`, `feature`, `figma`, `legacy` 중 하나
+2. 대상 프로젝트의 절대 경로
+3. 구현 요청
 
-Read `deliveryProfile.modelRouting` as an immutable host-local policy. Core uses only `fast`, `build`, and `expert`: Codex maps them to Luna/Terra/Sol and Claude maps them to Haiku/Sonnet/Opus. `adaptive-verified` is the default. With `pinned`, use the one user-selected model for every action and independent review; with `custom`, use all three declared role models. Never auto-mix Codex and Claude. Any supplied model-quality reduction remains an open Gap with the requested model, actual model, impact, and reviewer decision; it never lowers visual, test, or review requirements.
+`brief`에는 기획서 경로가 필요합니다. API 문서 경로와 Figma URL은 제공되면 함께 사용합니다. `figma`에는 Figma URL, `legacy`에는 별도 레거시 프로젝트 경로가 필요합니다. `feature`는 요청만으로 시작할 수 있습니다. 대상 브랜치를 받지 않으면 저장소 기본 브랜치를 사용합니다.
 
-Keep API and UI work in one implementation context. The `api-ready` checkpoint precedes UI evidence only when the documented API contract is applicable; unresolved API/binding/auth data stays a Gap rather than blocking confirmed UI work. Use only `functional-reviewer`, plus `design-reviewer` when UI scope applies; these independent reviews may run in parallel after implementation. Never merge, approve, waive missing required evidence, treat skipped work as passed, or remove verification because the runtime reached an automatic boundary.
+`brief`와 `feature`에는 선택적으로 `test: on | off`를 받습니다. 생략하면 `off`입니다. `on`은 OpenSpec의 요구사항·수용 시나리오를 테스트로 먼저 쓰는 TDD이고, `off`는 이 작업을 위한 단위·통합 테스트를 새로 만들거나 실행하지 않는다는 뜻입니다. `figma`와 `legacy`에는 OpenSpec·TDD 모드를 적용하지 않습니다.
 
-For `legacy`, read `workflow_status.legacyInventory`, plan stable keys in contracts, replace that plan with current-packet migrated/excluded `legacyCoverage` during implementation, and use running legacy screenshots as `visualTargets` baselines. The API report is always applicable: bounded legacy candidates require API-ready/exact coverage, zero candidates produce a complete empty inventory with its root digest, and optional OpenAPI only enriches candidates. For brief/feature, require `apiCoverage` to exactly cover supplied OpenAPI and require `performanceEvidence`. For Figma-only delivery, require `visualTargets` plus digest-bound deterministic JSON fixtures and no real API-ready/performance/video evidence. Keep these and canonical ready/blocked `pr-report-v2.1` JSON/Markdown runtime-enforced rather than replacing them with prose claims.
+케이스의 세부 규칙은 [references/cases.md](references/cases.md)를 읽습니다. 네 케이스를 섞거나 새 workflow를 만들지 않습니다.
 
-Route stage work to the matching public skill; do not use the umbrella skill as a substitute for stage-specific instructions. Keep `deliveryProfile.recommendedSkills` and user `skillHints` optional, apply only installed and applicable candidates, and record only skills actually applied. Reviewers remain read-only and never call the workflow MCP.
+## 실행 순서
 
-Before every `workflow_submit`, require each `artifactPaths` or evidence-path entry to be a portable project-relative, `/`-separated safe name. Reject absolute, traversal, control-character, backslash/non-portable, or secret-shaped paths, and never embed token, password, secret, or credential values. A descriptive filename such as `token-validation.json` remains valid because it names evidence rather than containing a secret value.
+1. 대상 저장소·현재 브랜치·remote를 확인합니다. 대상 프로젝트 밖은 수정하지 않습니다. `legacy`의 레거시 프로젝트는 읽기 전용입니다. GitLab remote라면 구현을 시작하기 전에 이 스킬 디렉터리의 `scripts/check-gitlab-mr.cjs`를 절대 경로로 찾아 읽기 전용 사전 진단을 실행합니다.
+
+   ```bash
+   node /absolute/path/to/check-gitlab-mr.cjs \
+     --project-root /absolute/path/to/project \
+     --remote origin
+   ```
+
+   결과 JSON의 `status`가 `blocked`이면 코드·문서·브랜치를 수정하지 않고 `nextSteps`와 [GitLab MR 사전 진단 가이드](https://dhyun2.github.io/spec-to-pr/getting-started/gitlab)를 안내합니다. `not-applicable`이면 GitHub remote로 판단한 것이므로 GitHub PR 흐름을 사용합니다. `ready-to-attempt`는 `glab`, 인증, 프로젝트·MR API의 GET 접근과 알려진 Developer 이상 권한을 확인했다는 뜻입니다. GitLab에는 Draft MR 생성 dry-run이 없으므로 생성 성공을 보장한다고 쓰지 않습니다.
+
+2. 선택한 케이스의 자료만 읽고, 대상 프로젝트 지침과 기존 구조를 확인합니다. `brief`와 `feature`는 구현 전에 [references/openspec.md](references/openspec.md)를 읽고 OpenSpec 문서를 준비·대조합니다. `figma`와 `legacy`는 각각 Figma와 실행 중인 레거시를 직접 구현 기준으로 사용하며 OpenSpec을 만들지 않습니다.
+3. UI 작업이면 설치된 사내 디자인 시스템과 대상 프로젝트의 기존 컴포넌트를 우선 사용합니다. 요청한 사용자 흐름에 포함된 화면·입력·선택·확인 결과까지 구현합니다. 관련 없는 화면이나 구조는 넓히지 않습니다.
+4. `brief`와 `feature`의 `test` 값을 따릅니다. `test: on`이면 OpenSpec의 확정 요구사항과 수용 시나리오를 테스트 항목으로 옮기고, 관련 실패 테스트를 먼저 작성한 뒤 최소 구현으로 통과시키고 리팩터링합니다. 대상 프로젝트의 기존 테스트 도구만 사용합니다. 적절한 테스트 도구나 테스트 가능한 시나리오를 찾지 못하면 TDD를 했다고 쓰지 않고 Gap에 남깁니다. `test: off`이면 이 변경을 위한 단위·통합 테스트를 새로 만들거나 실행하지 않습니다. `feature`는 `test` 값과 별개로 변경 기능만 고르는 E2E를 한 번 실행하고, 그 사용자 흐름을 보여 주는 WebM 또는 MP4 영상 한 개를 남깁니다. 프로젝트의 기존 E2E 도구를 사용하며, 새 도구를 억지로 설치하거나 전체 프로젝트 E2E를 실행하지 않습니다.
+5. UI 기준 이미지와 구현 이미지를 같은 경로·상태·데이터·화면 크기로 캡처합니다. Figma는 Figma 캡처, legacy는 실행 중인 레거시 화면을 기준으로 합니다.
+6. 이 스킬 디렉터리의 `scripts/compare-images.cjs`를 절대 경로로 찾아 아래처럼 실행합니다.
+
+   ```bash
+   node /absolute/path/to/compare-images.cjs \
+     --baseline spec-to-pr-evidence/<change>/baseline.png \
+     --actual spec-to-pr-evidence/<change>/actual.png \
+     --diff spec-to-pr-evidence/<change>/diff.png
+   ```
+
+   결과 JSON의 `matchPercent`를 PR에 사용합니다. 92% 이상이면 증빙을 기록하고 다음 단계로 갑니다. 92% 미만이면 Diff를 보고 구현을 고친 뒤, 같은 기준 이미지와 같은 캡처 조건으로 다시 비교합니다. **유효한 숫자 비교는 최초 비교를 포함해 최대 3회**입니다. 세 번째도 92% 미만이면 더 비교하지 않고 최종 점수·세 번의 Diff 경로·다음 작업을 Gap에 남깁니다. 캡처 실패나 이미지 크기 불일치는 유효 비교 횟수에 넣지 않으며, 이유를 Gap에 남깁니다. 기준 이미지를 바꾸거나 잘라 맞추기, mask, 임의 점수는 사용하지 않습니다.
+
+7. 최종 `git diff`와 검증 결과를 기준으로 아래만 한국어로 정리합니다.
+
+   - 실제로 개발한 사용자 기능
+   - 실제 추가·변경한 API의 method, path, 목적
+   - 화면별 비교 횟수, 일치율, 기준·구현·Diff 증빙 경로
+   - `brief`·`feature`인 경우 `test` 값, `on`이면 OpenSpec 수용 시나리오와 연결한 TDD 테스트 명령·결과
+   - `feature`인 경우 변경 기능 E2E 명령·결과와 사용자 흐름 영상 경로
+   - 개발하지 못했거나 확인이 필요한 Gap, 영향, 다음 작업
+
+8. [assets/pr-template.md](assets/pr-template.md)를 채워 PR 본문을 만듭니다. 비밀값, 토큰, 쿠키, 긴 내부 로그는 본문에 쓰지 않습니다. API가 없으면 `사용한 API 없음`, Gap이 없으면 `없음` 한 행을 넣습니다. `feature`일 때만 `E2E 영상` 섹션을 넣습니다.
+9. 구현 코드와 `brief`·`feature`의 OpenSpec 문서, `spec-to-pr-evidence/<change>/`의 화면 증빙, 그리고 `feature`의 E2E 영상 한 개를 의도적으로 커밋합니다. 호스트의 GitHub/GitLab 도구 또는 `gh`/`glab`로 Draft PR을 만듭니다. 같은 소스 브랜치의 열린 Draft가 있으면 새로 만들지 말고 갱신합니다. GitLab은 실제 `glab mr create --draft` 또는 열린 Draft 갱신이 성공하고 MR URL을 확인해야 완료로 말합니다. 실패하면 성공한 것처럼 PR을 쓰지 말고 오류를 요약하고 위 가이드의 해결 절차를 안내합니다.
+
+## 서브에이전트 사용
+
+서브에이전트는 필수 단계가 아닙니다. 호스트가 지원하고 기획서·API 문서·Figma 자료가 넓거나 서로 충돌할 때만, 한 명의 읽기 전용 서브에이전트에게 자료와 OpenSpec 문서의 누락·충돌 검토를 맡길 수 있습니다. 구현·문서 수정·Git 작업은 주 작업자가 맡습니다. 작은 요청은 주 작업자가 직접 대조하며, 모델 라우팅·작업 상태·리뷰어 역할을 고정하거나 저장하지 않습니다.
+
+## 중단과 실패
+
+중단되면 다음 실행에서 현재 `git diff`를 다시 읽고 이어서 작업합니다. 플러그인은 Run을 저장하지 않습니다.
+
+다음만 즉시 멈춥니다.
+
+- 대상 저장소 또는 쓰기 경로를 안전하게 확인할 수 없음
+- 레거시 프로젝트를 수정하려는 상황
+- 새 브랜치·커밋을 만들 수 없음
+- GitLab 사전 진단이 `blocked`이거나 실제 Draft MR 생성·갱신에 실패함
+
+`test: on`의 TDD 미확보, 화면 불일치, API 미확인, `feature` E2E 또는 영상 미확보는 모두 Gap으로 남기고 Draft PR을 계속 준비합니다.

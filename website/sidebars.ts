@@ -9,6 +9,7 @@ const sidebars: SidebarsConfig = {
       collapsed: false,
       items: [
         "getting-started/prerequisites",
+        "getting-started/gitlab",
         "getting-started/installation",
         "getting-started/quickstart",
       ],
@@ -25,14 +26,14 @@ const sidebars: SidebarsConfig = {
       collapsed: false,
       items: [
         "concepts/pipeline",
-        "concepts/reviews",
         "concepts/visual-verification",
         "concepts/comparison",
+        "concepts/reviews",
       ],
     },
     {
       type: "category",
-      label: "레퍼런스",
+      label: "참고",
       items: ["reference/skills", "reference/config"],
     },
     "troubleshooting",

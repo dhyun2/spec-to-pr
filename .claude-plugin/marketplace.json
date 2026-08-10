@@ -12,17 +12,17 @@
     {
       "name": "spec-to-pr",
       "displayName": "SpecToPR",
-      "description": "Reviewer-first workflow for brief delivery, legacy migration, feature-flow video, and Figma UI into truthful draft pull requests.",
+      "description": "Turn four development cases into Korean draft pull requests; brief delivery prepares OpenSpec documents, and feature delivery includes targeted E2E and one user-flow video.",
       "version": "1.0.0",
       "author": {
         "name": "SpecToPR Team"
       },
       "category": "development",
-      "tags": ["agent", "mcp", "figma", "openapi", "legacy", "testing", "pull-requests"],
+      "tags": ["agent", "figma", "legacy", "design-system", "pull-requests"],
       "source": {
         "source": "url",
         "url": "https://github.com/dhyun2/spec-to-pr.git",
-        "ref": "spec-to-pr--v1.0.0"
+        "ref": "main"
       },
       "homepage": "https://github.com/dhyun2/spec-to-pr",
       "repository": "https://github.com/dhyun2/spec-to-pr",

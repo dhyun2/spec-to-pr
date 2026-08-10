@@ -1,10 +1,37 @@
 ---
-title: 사용법으로 이동
-pagination_next: null
-pagination_prev: null
+sidebar_position: 6
+title: 요청 예시
 ---
 
-import { Redirect } from "@docusaurus/router";
-import useBaseUrl from "@docusaurus/useBaseUrl";
+## 기획서와 Figma가 있는 새 기능
 
-<Redirect to={useBaseUrl("/usage/brief")} />
+```yaml
+case: brief
+projectRoot: /workspace/store-web
+briefPath: docs/coupon.md
+figmaUrl: https://www.figma.com/design/FILE/coupon?node-id=1-2
+request: 장바구니 쿠폰 선택 기능을 구현해줘
+test: on
+```
+
+## 화면 기준 없이 기능 하나 추가
+
+```yaml
+case: feature
+projectRoot: /workspace/admin-web
+request: 회원 목록에 휴면 계정 필터를 추가해줘
+test: off
+```
+
+## 레거시 화면 이관
+
+```yaml
+case: legacy
+projectRoot: /workspace/new-web
+legacyProjectRoot: /workspace/old-web
+request: 쿠폰 목록의 조회와 사용 가능 상태를 이관해줘
+```
+
+## 여러 화면을 다뤄야 할 때
+
+한 요청에 필요한 화면 상태를 구체적으로 적습니다. 예를 들어 `기본·빈 목록·오류 상태를 구현해줘`처럼 작성하면, PR의 화면 일치율 표에도 상태별 결과와 Gap이 분리되어 보입니다.

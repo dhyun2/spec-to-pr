@@ -1,70 +1,27 @@
 ---
-sidebar_position: 2
-title: 명세 기반 개발 도구 비교와 채택 원칙
-description: 공식 1차 자료를 바탕으로 네 프레임워크와 작업 조율 도구를 비교한 SpecToPR의 채택 기록
+sidebar_position: 3
+title: Gap을 남기는 원칙
 ---
 
-# 명세 기반 개발 도구 비교와 채택 원칙
+Gap은 실패를 감추지 않는 방법입니다. 개발하지 못한 일, 확실하지 않은 정보, 비교하지 못한 화면을 PR에서 바로 볼 수 있게 적습니다.
 
-이 페이지는 **2026-07-15**에 확인한 공식 제품 문서와 공식 저장소만 근거로 합니다. 기능 수를 겨루는 순위가 아닙니다. SpecToPR이 MCP 도구 7개, 실행 상태를 보존하는 단계 8개, 구현 담당자 1명, 읽기 전용 검토자 2명이라는 경계를 유지하는 이유를 설명합니다.
+## Gap으로 남기는 경우
 
-:::info[버전 표기]
-이 문서는 현재 배포된 SpecToPR의 공개 동작을 기준으로 설명합니다.
-:::
+- 정책이나 요구사항이 비어 있어 구현을 확정할 수 없음
+- API의 method, path, 인증 방식이 확인되지 않음
+- 테스트가 실패했거나 실행할 수 없음
+- 기준 화면이 없어 화면 일치율을 계산하지 못함
+- 화면 일치율이 92% 미만임
 
-## 프레임워크 비교 <span id="comparison-matrix"></span>
+## 좋은 Gap의 형식
 
-| 프레임워크                                                       | 접수·계약                                                                                           | 구현                                                                                        | 검증                                                                                                    | 발행                                                                                              | 차단·재개                                                                                                               | 잘 맞는 경우                                                           |
-| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| [GitHub Spec Kit](https://github.github.com/spec-kit/index.html) | `constitution`에서 `specify`·`clarify`·`plan`·`checklist`·`tasks`로 이어지는 Markdown 산출물을 만듦 | `/speckit.implement`; 큰 작업은 작업·단계 범위, 지원되는 하위 에이전트, 더 작은 명세로 제한 | 구현 전 `analyze`, 구현 후 `converge`                                                                   | 핵심 SDD는 PR 발행을 맡지 않으며 Git·PR 기능은 확장 영역에 둠                                     | 실행 엔진이 상태를 저장해 일시 정지하거나 실패한 단계에서 재개함. 다만 구조화된 차단 진단 발행 계약은 없음              | 도구에 종속되지 않는 산출물과 확장 가능한 통과 조건이 필요한 기능 기획 |
-| [OpenSpec](https://openspec.dev/)                                | 변경 폴더의 제안서·변경 명세·설계·작업과 저장소의 기준 명세를 사용                                  | `/opsx:apply`; 구현 중에도 산출물을 양방향으로 수정할 수 있음                               | `openspec validate`; `/opsx:verify`는 완결성·정확성·일관성을 보지만 보관을 막지는 않음                  | Git에 남는 산출물과 보관이 핵심이며 상태를 보존하는 PR 발행 단계는 정의하지 않음                  | 의존성이 준비되지 않으면 상태에 누락 산출물을 표시함. 미완료 작업과 검증 결과는 보관 경고이며 강제 차단 조건은 아님     | 기존 코드에 살아 있는 요구사항과 검토 가능한 변경 명세가 필요한 팀     |
-| [Kiro](https://kiro.dev/docs/specs/)                             | 기능·버그·빠른 계획에서 요구사항 또는 버그 분석, 설계, 작업을 생성                                  | 작업별 또는 일괄 실행; IDE의 Run All은 의존성 순서로 실행하고 CLI는 `/spec run` 사용        | 작업 사이 검증을 수행함. 요구사항에 연결된 속성 기반 테스트는 기본 선택 사항이며 무결함을 보장하지 않음 | 인용 가능한 PR 흐름은 Kiro Web/Automations의 동작이며 IDE·CLI 전체의 공통 계약은 아님             | 명세 파일과 작업 진행 상태로 `/spec <name>`에서 이어가지만 공식적인 진단용 초안 스키마는 없음                           | IDE·CLI·웹을 아우르는 기획과 테스트 생성을 원하는 팀                   |
-| [BMAD](https://docs.bmad-method.org/reference/workflow-map/)     | Quick Flow·Method·Enterprise가 규모에 맞춰 PRD·UX·구조·에픽·스토리·준비 상태를 생성                 | 전문 역할별 흐름이 스토리 단위로 진행되며 공식 가이드는 흐름마다 새 대화를 권장             | PRD 검증, 준비 상태 `PASS/CONCERNS/FAIL`, 테스트와 코드 검토                                            | 모든 경로가 PR을 만드는 것은 아님. Quick Dev는 사람이 코드 차이를 검토한 뒤 푸시·PR 생성을 제안함 | `bmad-help`가 다음 흐름을 추천하고 `bmad-correct-course`가 큰 변경의 경로를 다시 잡음. 구조화된 차단 사유 스키마는 없음 | 크거나 모호한 제품 작업과 역할별 점진 산출물, 작은 작업은 Quick Flow   |
+| 확인 또는 개발이 필요한 내용 | 영향 | 다음 작업                        |
+| ---------------------------- | ---- | -------------------------------- |
+| 쿠폰 중복 적용 정책          | 중간 | 서버 정책 확인 후 제한 로직 추가 |
+| 빈 목록 화면 기준 없음       | 낮음 | 승인 화면 수령 뒤 캡처 비교      |
 
-### 확인한 근거
+`확인 필요`처럼 짧게 끝내지 말고, 무엇이 비었는지와 누가 다음에 무엇을 판단하면 되는지를 적습니다.
 
-- Spec Kit의 산출물 순서와 구현 전후 검사는 [Quick Start](https://github.github.com/spec-kit/quickstart.html), 정확한 단계 재개는 [Workflows reference](https://github.github.com/spec-kit/reference/workflows.html)에 설명되어 있습니다.
-- OpenSpec의 산출물 원칙은 [core concepts](https://github.com/Fission-AI/OpenSpec/blob/main/docs/overview.md), 검증이 보관을 막지 않는다는 점은 [commands](https://github.com/Fission-AI/OpenSpec/blob/main/docs/commands.md), 의존성과 엄격한 검증은 [troubleshooting](https://github.com/Fission-AI/OpenSpec/blob/main/docs/troubleshooting.md)에서 확인했습니다.
-- Kiro의 환경별 계약은 [CLI Specs](https://kiro.dev/docs/cli/v3/specs/), 선택적 속성 기반 테스트의 한계는 [correctness](https://kiro.dev/docs/specs/correctness/), PR 동작은 [Web Specs](https://kiro.dev/docs/web/specs/)에 설명되어 있습니다.
-- BMAD의 작업 경로와 재개 안내는 [getting started](https://docs.bmad-method.org/tutorials/getting-started/), 사람이 검토한 뒤에만 제안되는 Quick Dev PR 경로는 [Quick fixes](https://docs.bmad-method.org/how-to/quick-fixes/)를 따릅니다.
+## Gap이 아닌 것
 
-## 오케스트레이션과 도구에서 배운 것
-
-| 제품                                                                                                   | 확인한 공식 동작                                                                                                                                                                                                                                                                                                                                                                                                                    | SpecToPR의 판단                                                                                                                          |
-| ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| [Codex](https://learn.chatgpt.com/docs/agent-configuration/subagents.md)                               | 하위 에이전트는 독립적인 읽기 중심 탐색·테스트·요약에 적합하고 여러 에이전트의 동시 편집은 충돌 비용이 큼. [skills](https://learn.chatgpt.com/docs/build-skills.md)는 필요한 만큼만 지침을 읽는 방식을, [MCP](https://learn.chatgpt.com/docs/extend/mcp.md)는 간결한 서버 지침을 지원함                                                                                                                                             | **채택:** 범위가 제한된 읽기 전용 조사 담당자, 같은 규칙의 스킬 기록, 작은 MCP 인터페이스                                                |
-| [Codex Browser](https://learn.chatgpt.com/docs/browser.md)                                             | 데스크톱 앱에서 보이는 브라우저 기능이며 CLI·IDE 전체에 공통으로 적용할 수 없음                                                                                                                                                                                                                                                                                                                                                     | **조건부 채택:** 상호작용 진단에만 사용하고 통과 여부의 판정 기준으로 사용하지 않음                                                      |
-| [GitHub Copilot](https://docs.github.com/en/copilot/concepts/agents/cloud-agent/risks-and-mitigations) | 제한된 브랜치에 초안 PR을 만들고 검토 준비 전환·승인·병합은 사람이 수행                                                                                                                                                                                                                                                                                                                                                             | **채택:** 초안만 발행하고 사람이 검토                                                                                                    |
-| [GitHub Agentic Workflows](https://github.github.com/gh-aw/reference/safe-outputs-pull-requests/)      | 쓰기 작업을 안전한 출력 경계로 분리하고 PR은 기본적으로 초안임. [permissions](https://github.github.com/gh-aw/reference/permissions/)은 기본 읽기·명시적 쓰기 권한 모델을 사용                                                                                                                                                                                                                                                      | **채택:** 최소 권한 발행자. **제외:** 이슈 대체 발행과 에이전트의 자동 병합                                                              |
-| [Claude Code](https://code.claude.com/docs/en/sub-agents)                                              | Claude Code v2.1.172부터 하위 에이전트가 다시 하위 에이전트를 만들 수 있지만, 공급자가 정한 최대 깊이는 5단계임. 5단계 에이전트에는 `Agent` 도구가 없고 각 하위 에이전트에서 `Agent`를 생략하면 중첩을 끔. [skills](https://code.claude.com/docs/en/slash-commands), [hooks](https://code.claude.com/docs/en/hooks), [MCP](https://code.claude.com/docs/en/mcp), [Chrome](https://code.claude.com/docs/en/chrome)은 호스트별 기능임 | **조건부 채택:** 호스트 연결 기능과 브라우저. **제외:** SpecToPR은 경량 실행 규칙상 중첩 위임, 숨은 훅 조율, 에이전트 팀을 사용하지 않음 |
-| [Cursor](https://cursor.com/docs/rules)                                                                | 버전 관리되는 범위별 규칙과 [agent modes](https://docs.cursor.com/agent), [best practices](https://cursor.com/blog/agent-best-practices)의 작업 트리·병렬 에이전트를 지원                                                                                                                                                                                                                                                           | **채택:** 범위별 프로젝트 지침. **제외:** 분리된 작업 트리에서도 여러 구현 담당자의 동시 편집                                            |
-| [Cline](https://docs.cline.bot/features/subagents)                                                     | 실험적 하위 에이전트는 읽기 전용 조사 담당자임. [tools](https://docs.cline.bot/tools-reference/all-cline-tools)는 브라우저·MCP 권한을 따로 제어하고 [teams](https://docs.cline.bot/sdk/guides/multi-agent-teams)은 팀 운영 비용을 경고함                                                                                                                                                                                            | **채택:** 범위가 제한된 조사 담당자. **제외:** 무거운 상시 에이전트 팀                                                                   |
-| [Playwright](https://playwright.dev/docs/test-assertions)                                              | 웹 중심 검증문은 재시도되며 [reporters](https://playwright.dev/docs/test-reporters)는 구조화된 결과를 만듦. [videos](https://playwright.dev/docs/videos)는 별도 설정이 필요한 보조 자료임                                                                                                                                                                                                                                           | **채택:** 검증문과 구조화 결과를 통과 여부의 기준으로 사용하고, 영상 1개는 `feature`에서만 요구                                          |
-| [Chrome DevTools MCP](https://developer.chrome.com/docs/devtools/agents/get-started)                   | 실행 중인 Chrome의 콘솔·네트워크·성능·메모리·DOM을 검사함. [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp)의 [tool reference](https://github.com/ChromeDevTools/chrome-devtools-mcp/blob/main/docs/tool-reference.md)가 범위를 정의함                                                                                                                                                                  | **조건부 채택:** 필요한 진단에만 사용하며 스크린샷·추적 기록으로 검증문을 대신하지 않음                                                  |
-
-## 채택
-
-- 안정적인 계약·산출물 전달, 구현 전 일관성 확인, 구현 후 검증 자료 확인
-- 실패·차단 상태를 보존하고 같은 실행에서 재개
-- 구현 담당자 한 명, 작업량에 따른 읽기 전용 조사 담당자, 구현 뒤 읽기 전용 검토자
-- 최소 권한 발행자가 초안 PR/MR만 만들거나 갱신하고 사람만 검토·병합
-- Playwright 검증문과 구조화 보고서를 브라우저 통과 여부의 기준으로 사용
-- 민감 정보를 제거한 `blockerDetails`와 정확한 해결 방법, 성공 자료와 차단 자료의 분리
-
-## 조건부 채택
-
-- 읽기 전용 조사 담당자: XS/S는 0명, M은 최대 1명, L/XL은 최대 2명이며 서로 겹치지 않는 읽기 중심 탐색에만 사용
-- 기능·디자인 검토의 동시 실행: 모든 UI 검토 묶음에서 구현이 끝난 뒤 함께 시작하며, 디자인 검토자는 UI 작업에만 사용
-- 설치되어 있고 현재 작업에 맞는 호스트 스킬, Browser MCP, 호스트 브라우저, Chrome DevTools MCP
-- 변경 기능만 고른 Playwright E2E와 영상 1개: `feature` 방식에만 적용
-
-## 제외
-
-- 공급자별 개념을 위한 새 상태 보존 도구·단계, 중첩 위임, 여러 구현 담당자의 동시 편집, API와 UI 사이의 별도 전달 경로
-- 발행·브라우저 판단 전용 에이전트, 숨은 훅 검증, 무거운 상시 에이전트 팀
-- 초안 PR을 만들 수 없을 때의 이슈 대체 발행, 직접 병합·승인·닫기·검토 준비 전환
-- 경고나 도구의 “완료” 메시지를 `requiredValidations` 통과로 취급하는 것
-- 스크린샷·영상·DevTools 추적 기록·에이전트 관찰로 검증문을 대신하는 것
-- 시간·맥락·토큰·도구 부족을 이유로 `requiredValidations`를 줄이는 것
-
-이 선택은 다른 도구의 기능이 부족하다는 뜻이 아닙니다. 각 도구의 강점을 SpecToPR의 작은 실행 엔진과 구조화된 정상·차단 발행 계약 안에서 안전하게 채택할 수 있는지에 대한 경계입니다.
+디자인 시스템 컴포넌트가 Figma와 완전히 같지 않다는 사실만으로는 Gap이 아닙니다. 결과 화면과 기능이 요구를 만족하면 됩니다. 실제 미완료나 확인 불가만 Gap으로 남깁니다.

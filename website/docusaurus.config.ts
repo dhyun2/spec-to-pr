@@ -8,9 +8,7 @@ const { version } = require("../package.json") as { version: string };
 
 const config: Config = {
   title: "SpecToPR",
-  tagline: "기획서·레거시·사용자 기능·Figma를 검증된 구현과 초안 PR로 연결합니다",
-  favicon: "img/favicon.ico",
-
+  tagline: "네 가지 개발 요청을 구현하고, 사실에 근거한 한국어 Draft PR로 정리합니다",
   future: { v4: true },
   url: "https://dhyun2.github.io",
   baseUrl: "/spec-to-pr/",
@@ -21,10 +19,9 @@ const config: Config = {
 
   i18n: {
     defaultLocale: "ko",
-    locales: ["ko", "en"],
+    locales: ["ko"],
     localeConfigs: {
       ko: { label: "한국어", htmlLang: "ko-KR" },
-      en: { label: "English", htmlLang: "en-US" },
     },
   },
 
@@ -42,7 +39,7 @@ const config: Config = {
       require.resolve("@easyops-cn/docusaurus-search-local"),
       {
         hashed: true,
-        language: ["en", "ko"],
+        language: ["ko"],
         indexBlog: false,
         docsRouteBasePath: ["/"],
         highlightSearchTermsOnTargetPage: true,
@@ -73,8 +70,7 @@ const config: Config = {
       items: [
         { type: "docSidebar", sidebarId: "guideSidebar", position: "left", label: "가이드" },
         { to: "/usage/", position: "left", label: "사용법" },
-        { to: "/concepts/pipeline", position: "left", label: "v2 구조" },
-        { type: "localeDropdown", position: "right" },
+        { to: "/concepts/pipeline", position: "left", label: "진행 방식" },
         { href: "https://github.com/dhyun2/spec-to-pr", label: "GitHub", position: "right" },
       ],
     },
@@ -90,12 +86,12 @@ const config: Config = {
           ],
         },
         {
-          title: "v2 알아보기",
+          title: "핵심 개념",
           items: [
-            { label: "도구 7개 · 단계 8개", to: "/concepts/pipeline" },
-            { label: "스킬 8개 · 독립 검토자 2명", to: "/reference/skills" },
-            { label: "비교 · 채택 정책", to: "/concepts/comparison" },
-            { label: "설정 · CLI", to: "/reference/config" },
+            { label: "진행 방식", to: "/concepts/pipeline" },
+            { label: "화면 비교", to: "/concepts/visual-verification" },
+            { label: "Draft PR", to: "/concepts/reviews" },
+            { label: "입력 형식", to: "/reference/config" },
           ],
         },
         {

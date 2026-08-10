@@ -1,19 +1,28 @@
-# SpecToPR
+# SpecToPR Lite
 
-Take a brief, legacy application, feature request, or Figma design through implementation, verification, and an evidence-backed draft PR.
+SpecToPR Lite is a small Codex and Claude Code skill that turns one of four delivery cases into a Korean draft pull request:
 
-[한국어](README.ko.md) · [Documentation](https://dhyun2.github.io/spec-to-pr/en/) · [Choose a use case](https://dhyun2.github.io/spec-to-pr/en/usage/)
+- `brief` — prepare and review OpenSpec change documents from the brief and supplied API/Figma sources; optionally use its acceptance scenarios for TDD
+- `feature` — prepare and review OpenSpec change documents from the feature request and supplied sources; optionally use TDD, then record targeted E2E and one user-flow video
+- `figma` — implement from a Figma screen with design-system components
+- `legacy` — migrate an explicitly supplied legacy feature and screen
+
+It has no MCP server, database, Run ID, workflow state machine, or background process. Each invocation works from the current Git diff. If interrupted, run it again and continue from the worktree.
+
+## Draft PR contents
+
+Every Draft PR uses one Korean template with:
+
+1. implemented user-facing features
+2. Figma or legacy visual match ratios and diff assets
+3. APIs actually used by the change
+4. gaps, impact, and next actions
+5. commands that were run for verification
+6. for `feature`, one targeted E2E result and one user-flow video
+
+When visual comparison is below 92%, inspect the diff, repair the implementation, and compare again under the same conditions, up to three valid comparisons including the first. A third miss, unavailable screenshots, failed tests, and uncertain APIs stay visible as a Gap. They do not hide completed work or stop a Draft PR.
 
 ## Install
-
-Requirements: Node.js 22+, Git, and Claude Code or Codex.
-
-### Claude Code
-
-```text
-/plugin marketplace add dhyun2/spec-to-pr
-/plugin install spec-to-pr@spec-to-pr
-```
 
 ### Codex
 
@@ -22,71 +31,54 @@ codex plugin marketplace add https://github.com/dhyun2/spec-to-pr --ref main
 codex plugin add spec-to-pr@spec-to-pr
 ```
 
-Restart the host, start a new task, and verify the installation:
+### Claude Code
 
 ```text
-/spec-to-pr:doctor
+/plugin marketplace add dhyun2/spec-to-pr
+/plugin install spec-to-pr@spec-to-pr
 ```
 
-[See the complete installation guide](https://dhyun2.github.io/spec-to-pr/en/getting-started/installation).
-
-## Choose a use case
-
-| Use case                                                                        | What you provide                                     | What you get                                                                         |
-| ------------------------------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| [Brief-based delivery](https://dhyun2.github.io/spec-to-pr/en/usage/brief)      | Brief/PDF/MD, Figma URL, and OpenAPI                 | Implemented API/UI, visual comparison, API gaps, Web Vitals, and a draft PR          |
-| [Legacy migration](https://dhyun2.github.io/spec-to-pr/en/usage/legacy)         | Target repository and a separate legacy project path | Migration based on the running legacy application, visual comparison, and a draft PR |
-| [Single-feature delivery](https://dhyun2.github.io/spec-to-pr/en/usage/feature) | Brief, Figma, and API sources for one feature        | Full verification, targeted E2E, one video, and a draft PR                           |
-| [Figma implementation](https://dhyun2.github.io/spec-to-pr/en/usage/figma)      | Figma URL and target repository                      | Mock-backed UI, measured Figma comparison, and a draft PR                            |
-
-Start every request with the target repository:
+## Input
 
 ```text
-/spec-to-pr /absolute/path/to/project
+case: figma
+projectRoot: /absolute/path/to/project
+request: Implement the checkout payment method screen.
+source: https://www.figma.com/design/FILE/checkout?node-id=12-345
+targetBranch: main
 ```
 
-Then copy the prompt from the guide for your use case. The guide explains required inputs, the execution pipeline, validation evidence, blockers, and the expected draft PR.
+`brief` requires a brief path, `figma` requires a Figma URL, and `legacy` requires a separate legacy project path. `feature` can start from the request alone. `brief` and `feature` both prepare and review OpenSpec documents before implementation. Their optional `test: on | off` defaults to `off`; `on` uses OpenSpec acceptance scenarios for test-first development, while `off` creates and runs no unit or integration tests for the change. Feature E2E and video evidence remain separate from this switch.
 
-## Current release (1.0.0)
+## Visual comparison
 
-SpecToPR exposes 7 MCP tools, 8 durable stages, 8 skills, and 2 independent reviewers. The four reviewer-facing Draft templates are `legacy-migration`, `brief-delivery`, `feature-flow`, and `figma-ui`.
-
-Composable intake fields include `briefPath`, `figmaUrl`, `docsPaths`, `openApiPaths`, `openApiUrls`, `guidancePaths`, and `skillHints`. For example:
-
-```yaml
-mode: feature
-briefPath: docs/checkout.md
-figmaUrl: https://www.figma.com/design/FILE/checkout?node-id=12-345
-docsPaths: []
-openApiPaths:
-  - docs/openapi.yaml
-guidancePaths: []
-skillHints: []
-```
-
-Legacy analysis stays inside the exact requested feature boundary and follows direct imports and configuration references needed to understand it. An explicit external `legacyProjectRoot` is read-only. API, auth, certificate, or dynamic-request uncertainty is recorded as a Gap: confirmed UI, route, state, type, and read behavior can continue, while an unconfirmed write interaction is never invented.
-
-Every UI scope attempts a runtime-owned visual comparison. A failed or unavailable comparison is visible as a merge-blocking Gap, but it does not hide the Draft PR or erase completed work. `feature-flow` additionally requires a review-packet-bound user-flow video. OpenSpec is optional post-merge integration, not an implementation or publication prerequisite.
-
-The PR body is deliberately concise: status, any top-level Gaps with impact and a reviewer decision, what changed, visual-comparison results, Feature video when applicable, and validation verdicts. It excludes Run IDs, raw logs, internal schema/digest dumps, and empty checklists.
-
-Model routing is role-based and host-local: the core uses `fast`, `build`, and `expert`; Codex maps them to Luna/Terra/Sol and Claude maps them to Haiku/Sonnet/Opus. The default is `adaptive-verified`. `pinned` keeps one user-selected model through every stage and independent review, while `custom` supplies all three role models. A Run never auto-mixes hosts, and an unavailable higher role becomes a visible quality Gap rather than a weaker hidden verification.
-
-If GitHub or GitLab authentication, TLS, or host access prevents publication, SpecToPR keeps a local diagnostic report and records a publication Gap; after recovery it updates the same draft PR rather than creating a replacement Run.
-
-### Self-hosted GitLab
-
-Configure the exact remote host and API base before starting a self-hosted GitLab publication. The publisher verifies `GET /user` through the same TLS transport before it pushes a branch, creates a Draft MR, or uploads visual evidence.
+The bundled `compare-images.cjs` compares two same-size PNGs and writes a diff asset.
 
 ```bash
-export SPEC_TO_PR_GIT_HOST=gitlab
-export SPEC_TO_PR_WEB_BASE_URL=https://gitlab.example.internal
-export SPEC_TO_PR_API_BASE_URL=https://gitlab.example.internal/api/v4
-export SPEC_TO_PR_GITLAB_CA_FILE=/absolute/path/to/company-ca-bundle.pem
+node /absolute/path/to/compare-images.cjs \
+  --baseline spec-to-pr-evidence/checkout/baseline.png \
+  --actual spec-to-pr-evidence/checkout/actual.png \
+  --diff spec-to-pr-evidence/checkout/diff.png
 ```
 
-`SPEC_TO_PR_GITLAB_CA_FILE` is optional when the Node process already trusts the host CA. It adds an explicit CA bundle only for the GitLab publisher; it never disables certificate verification. Do not use `NODE_TLS_REJECT_UNAUTHORIZED=0` or a `glab` profile with `skip_tls_verify=true`.
+Commit the resulting evidence under `spec-to-pr-evidence/<change>/` so the Draft PR can link to it.
 
-## Documentation
+## GitLab Draft MR preflight
 
-**https://dhyun2.github.io/spec-to-pr/en/**
+For a GitLab remote, SpecToPR first performs a read-only check of the remote, `glab` authentication, project and MR API access, and an available Developer-or-higher role value. A blocked result stops work before code changes and returns Korean setup steps. GitLab has no Draft MR creation dry-run, so the final confirmation is a successful `glab mr create --draft` (or update of an existing Draft) and its MR URL.
+
+```bash
+node /absolute/path/to/check-gitlab-mr.cjs \
+  --project-root /absolute/path/to/project \
+  --remote origin
+```
+
+See the [Korean GitLab preflight guide](https://dhyun2.github.io/spec-to-pr/getting-started/gitlab) for setup and recovery.
+
+## Deliberate non-goals
+
+- persisted workflow state or automatic resumption
+- independent reviewers and durable stage transitions
+- mandatory OpenSpec documents or TDD for `figma` and `legacy`, mandatory video for every case, or performance evidence
+- a custom GitHub/GitLab publishing server
+- exhaustive runtime parsing of APIs or legacy projects

@@ -1,64 +1,36 @@
 ---
 sidebar_position: 1
-title: 사전 준비물
+title: 준비 사항
 ---
 
-import NextStep from "@site/src/components/guide/NextStep";
+SpecToPR는 Codex 또는 Claude Code가 대상 프로젝트에서 코드를 읽고 쓸 수 있을 때 사용합니다.
 
-# 사전 준비물
+## 공통 준비
 
-## 항상 필요
+- Git 저장소인 대상 프로젝트
+- `brief`·`feature`에서 `test: on`을 쓸 경우 프로젝트의 테스트·실행 명령을 알 수 있는 환경
+- Draft PR을 만들 수 있는 GitHub 또는 GitLab 권한
+- UI 작업이라면 실행할 수 있는 화면과 일정한 테스트 데이터
 
-| 항목        | 요구사항               | 확인                                   |
-| ----------- | ---------------------- | -------------------------------------- |
-| Node.js     | `>=22`                 | `node --version`                       |
-| Git 저장소  | 구현 대상 저장소       | `git -C <repo> status`                 |
-| 실행 호스트 | Claude Code 또는 Codex | `claude --version` / `codex --version` |
+## 케이스별 자료
 
-소스에서 플러그인을 빌드할 때만 `pnpm`과 Corepack이 필요합니다.
+| 케이스    | 꼭 필요한 자료            | 있으면 좋은 자료                   |
+| --------- | ------------------------- | ---------------------------------- |
+| `brief`   | 기획서 경로               | Figma URL, API 문서, OpenSpec 규칙 |
+| `feature` | 기능 요청                 | Figma URL, API 문서, OpenSpec 규칙 |
+| `figma`   | Figma URL                 | 화면별 상태 설명                   |
+| `legacy`  | 별도 레거시 프로젝트 경로 | 대상 기능을 재현하는 방법          |
 
-## 기능별 준비
+UI 기준 이미지가 없다면 화면 일치율을 계산하지 않습니다. 이 경우 `화면 기준 없음`을 Gap에 남깁니다.
 
-| 기능             | 준비                                                                        |
-| ---------------- | --------------------------------------------------------------------------- |
-| GitHub 초안 PR   | `GITHUB_TOKEN`, `GH_TOKEN`, 또는 로그인된 `gh`                              |
-| GitLab 초안 MR   | `GITLAB_TOKEN`, `GITLAB_PRIVATE_TOKEN`, 또는 로그인된 `glab`                |
-| 기획서/기능 개발 | 기획서 파일, Figma URL·열람 권한, OpenAPI 로컬 파일 또는 HTTPS URL          |
-| 레거시 이관      | 대상과 다른 레거시 프로젝트 절대 경로와 두 프로젝트의 실행 환경             |
-| Figma 모드       | Figma URL·열람 권한과 결과가 항상 같은 모의 데이터로 화면을 실행할 환경     |
-| 사용자 기능 영상 | 변경 기능만 선택하고 영상 녹화를 지원하는 Playwright 등의 브라우저 E2E 환경 |
+`brief`와 `feature`는 OpenSpec 변경 문서를 만듭니다. `test: on`일 때만 기존 테스트 도구로 OpenSpec 수용 시나리오 기반 TDD를 합니다. 생략하거나 `test: off`면 이 변경을 위한 단위·통합 테스트는 만들거나 실행하지 않습니다.
 
-## Figma 연결 원칙
+`feature`는 변경 기능을 고를 수 있는 프로젝트의 E2E 명령과 영상 녹화 기능이 있으면 가장 좋습니다. 기존 도구를 사용해 사용자 흐름 영상 한 개를 PR 증빙으로 남깁니다. 이 E2E·영상은 `test` 값과 별개입니다.
 
-SpecToPR은 별도의 Figma 연동 서비스를 실행하거나 상태를 반복 조회하지 않습니다. Claude Code나 Codex에 이미 연결된 Figma 기능을 사용합니다. 연결 방법은 사용 중인 호스트와 Figma 연동 문서를 따르세요.
+## GitLab을 쓰는 경우
 
-실행 시에는 다음 순서를 지킵니다.
+GitLab remote에서는 구현 전에 읽기 전용 사전 진단을 실행합니다. `glab` 인증, 프로젝트 접근, MR API 읽기 접근과 확인 가능한 역할 값을 점검해 실제 Draft MR 생성을 시도할 준비가 되었는지 알려 줍니다. 자세한 설정과 실패 해결은 [GitLab MR 사전 진단](./gitlab)을 참고하세요.
 
-1. 호스트 기능으로 URL의 실제 노드와 프레임 정보를 읽습니다.
-2. 사용할 수 있는 화면 캡처, 변수, 자산, 컴포넌트 정보를 프로젝트 안의 검증 자료 파일로 저장합니다.
-3. `provider: host-connected-figma`, ISO 형식의 `capturedAt`, 입력한 Figma 파일과 일치하는 `fileUrl`, 비어 있지 않은 `nodeIds`, JSON `manifestPath`를 기록합니다.
-4. 엄격한 형식의 매니페스트에 같은 출처 값과 PNG `visualPaths`를 기록합니다. 매니페스트와 실제 PNG 한 개 이상을 `artifactPaths`에 포함해 형식이 지정된 `figma-bundle`을 정확히 한 번 제출합니다.
-5. 같은 실행에서 자료 묶음을 반복 제출하지 않습니다.
-6. URL만 읽었다는 주장으로 계약 단계를 통과시키지 않습니다.
+## 레거시 이관의 경계
 
-특정 프레임만 구현하려면 해당 프레임을 선택한 상태에서 복사한 `node-id` 포함 URL을 사용하세요.
-
-## Feature 영상 원칙
-
-영상은 사용자 화면을 바꾸는 `feature` 모드에만 필요합니다.
-
-- 테스트 경로·태그·프로젝트로 변경된 기능만 선택
-- 선택 조건을 실제 인자로 사용하는, 다른 명령과 이어 붙이지 않은 단일 Playwright 명령 기록
-- `status: passed`, 정확한 선택 조건, 같은 `implementationContextId`, 양수 `testCount`만 담은 프로젝트 내부의 엄격한 JSON 결과 기록
-- 재생 시간이 0보다 큰 구조적으로 유효한 WebM/MP4 컨테이너 정확히 한 개, 최대 25 MB
-
-전체 프로젝트 E2E를 기본으로 실행하거나 여러 영상을 PR에 올리는 방식은 지원 정책이 아닙니다.
-
-<NextStep
-eyebrow="준비 완료"
-title="호스트에 SpecToPR을 설치하세요"
-description="Claude Code와 Codex 중 사용하는 환경을 고르고, 마켓플레이스 또는 로컬 경로로 설치할 수 있습니다."
-href="/getting-started/installation"
-label="설치 방법 보기"
-secondary={{ label: "네 가지 입력 비교", href: "/usage/" }}
-/>
+레거시 프로젝트는 참고 자료입니다. SpecToPR는 레거시 프로젝트를 수정하지 않고, 지정한 기능 범위 안에서 동작·화면·API 호출을 읽어 대상 프로젝트에 옮깁니다.
