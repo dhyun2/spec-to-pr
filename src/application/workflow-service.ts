@@ -1144,6 +1144,9 @@ export class WorkflowService {
       await this.assertLegacyReferenceFresh(run);
     }
     if (submission.kind === "visual-comparison") {
+      await assertReviewPacketFresh(run, this.dependencies.artifactStore, this.metrics, {
+        allowedUntrackedPaths: submission.artifactPaths,
+      });
       await this.recordVisualComparison(run, submission);
       return this.mutatingStatus(run.id, view);
     }
@@ -4007,7 +4010,9 @@ export class WorkflowService {
           boundEvidenceArtifacts,
           preparedContent,
         );
-        await assertReviewPacketFresh(current, this.dependencies.artifactStore, this.metrics);
+        await assertReviewPacketFresh(current, this.dependencies.artifactStore, this.metrics, {
+          allowedUntrackedPaths: submission.artifactPaths,
+        });
       },
     );
     if (reservationResult.kind === "busy") {
@@ -9947,6 +9952,7 @@ export async function captureGitSnapshot(
   run: RunManifest,
   metrics: RuntimeMetricsSink = new NoopRuntimeMetrics(),
   capturedAt = new Date().toISOString(),
+  options: { allowedUntrackedPaths?: readonly string[] } = {},
 ): Promise<GitSnapshot> {
   const baseCommit = run.workspaceBinding?.baseSha ?? run.baseCommit;
   const projectRoot = run.workspaceBinding?.repositoryRoot ?? run.projectRoot;
@@ -9957,6 +9963,7 @@ export async function captureGitSnapshot(
   if (headSha === null)
     throw new Error("Implementation review packets require a readable Git HEAD");
   try {
+    const allowedUntrackedPaths = normalizedUntrackedPaths(options.allowedUntrackedPaths);
     const strictBinding = bindingWithLegacyDraftEvidenceRoots(run);
     if (strictBinding !== undefined) {
       metrics.increment("git.command_count", 2);
@@ -9968,7 +9975,7 @@ export async function captureGitSnapshot(
           timeout: GIT_COMMAND_TIMEOUT_MS,
           killSignal: "SIGTERM",
         }),
-        execFileAsync("git", ["status", "--porcelain=v1", "--untracked-files=all"], {
+        execFileAsync("git", ["status", "--porcelain=v1", "-z", "--untracked-files=all"], {
           cwd: projectRoot,
           encoding: "utf8",
           maxBuffer: 5 * 1024 * 1024,
@@ -9981,7 +9988,7 @@ export async function captureGitSnapshot(
           `WORKSPACE_BRANCH_MISMATCH: expected ${strictBinding.sourceBranch}, found ${checkedOutBranch.trim() || "detached HEAD"}`,
         );
       }
-      if (trackedStatus.trim() !== "") {
+      if (!isCleanExceptAllowedUntracked(trackedStatus, allowedUntrackedPaths)) {
         throw new Error(
           "WORKSPACE_ROOT_MISMATCH: strict implementation snapshots require committed source changes",
         );
@@ -10018,7 +10025,9 @@ export async function captureGitSnapshot(
     const binaryDiffBytes = Buffer.isBuffer(diff) ? diff.byteLength : Buffer.byteLength(diff);
     metrics.increment("git.binary_diff_bytes", binaryDiffBytes);
     const tracked = splitNullPaths(trackedNames);
-    const untracked = splitNullPaths(untrackedNames);
+    const untracked = splitNullPaths(untrackedNames).filter(
+      (relativePath) => !allowedUntrackedPaths.has(relativePath),
+    );
     const changedFiles = [...new Set([...tracked, ...untracked])].sort();
     assertChangedFilesWithinWorkspace(changedFiles, strictBinding);
     const digest = createHash("sha256").update(Buffer.isBuffer(diff) ? diff : Buffer.from(diff));
@@ -10158,6 +10167,7 @@ async function assertReviewPacketFresh(
   run: RunManifest,
   artifactStore: ArtifactBlobStore,
   metrics: RuntimeMetricsSink = new NoopRuntimeMetrics(),
+  options: { allowedUntrackedPaths?: readonly string[] } = {},
 ): Promise<void> {
   const packet = reviewPacketFromRun(run);
   if (packet === undefined) throw new Error("The implementation review packet is missing");
@@ -10183,6 +10193,7 @@ async function assertReviewPacketFresh(
           const current = await captureImplementationSnapshotFence(
             run.workspaceBinding?.repositoryRoot ?? run.projectRoot,
             metrics,
+            options.allowedUntrackedPaths,
           );
           if (reusableImplementationSnapshot(snapshot, current)) return;
         }
@@ -10191,13 +10202,13 @@ async function assertReviewPacketFresh(
       }
     }
     try {
-      await captureGitSnapshot(run, metrics);
+      await captureGitSnapshot(run, metrics, undefined, options);
     } catch {
       // The stale-packet error below is authoritative for all fence mismatches.
     }
     throw new Error("The implementation review packet is stale; current Git diff does not match");
   }
-  const snapshot = await captureGitSnapshot(run, metrics);
+  const snapshot = await captureGitSnapshot(run, metrics, undefined, options);
   if (
     snapshot.headSha !== packet.headSha ||
     snapshot.diffDigest !== packet.diffDigest ||
@@ -10210,6 +10221,7 @@ async function assertReviewPacketFresh(
 async function captureImplementationSnapshotFence(
   projectRoot: string,
   metrics: RuntimeMetricsSink,
+  allowedUntrackedPaths: readonly string[] | undefined = undefined,
 ): Promise<{ headSha: string; sourceBranch: string; clean: boolean }> {
   metrics.increment("git.command_count", 3);
   const [{ stdout: head }, { stdout: sourceBranch }, { stdout: status }] = await Promise.all([
@@ -10227,7 +10239,7 @@ async function captureImplementationSnapshotFence(
       timeout: GIT_COMMAND_TIMEOUT_MS,
       killSignal: "SIGTERM",
     }),
-    execFileAsync("git", ["status", "--porcelain=v1", "--untracked-files=all"], {
+    execFileAsync("git", ["status", "--porcelain=v1", "-z", "--untracked-files=all"], {
       cwd: projectRoot,
       encoding: "utf8",
       maxBuffer: 5 * 1024 * 1024,
@@ -10238,8 +10250,26 @@ async function captureImplementationSnapshotFence(
   return {
     headSha: head.trim(),
     sourceBranch: sourceBranch.trim(),
-    clean: status.trim() === "",
+    clean: isCleanExceptAllowedUntracked(status, normalizedUntrackedPaths(allowedUntrackedPaths)),
   };
+}
+
+function normalizedUntrackedPaths(paths: readonly string[] | undefined): ReadonlySet<string> {
+  return new Set((paths ?? []).map(normalizeGitPath));
+}
+
+function isCleanExceptAllowedUntracked(
+  status: string,
+  allowedUntrackedPaths: ReadonlySet<string>,
+): boolean {
+  if (status.length === 0) return true;
+  return status
+    .split("\0")
+    .filter(Boolean)
+    .every((entry) => {
+      if (!entry.startsWith("?? ")) return false;
+      return allowedUntrackedPaths.has(normalizeGitPath(entry.slice(3)));
+    });
 }
 
 function assertChangedFilesMatch(declared: string[], actual: string[]): void {
