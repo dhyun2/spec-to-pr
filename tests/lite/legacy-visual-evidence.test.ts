@@ -65,6 +65,44 @@ describe("legacy visual evidence", () => {
     expect(report.markdown).toContain("@frontend/ui");
   });
 
+  it("uses Computer Use by default and makes a Browser fallback reviewer-visible", async () => {
+    const manifest = createManifest();
+    manifest.visualTargets[0]!.baselineCapture = {
+      provider: "browser",
+      authState: "authenticated",
+      capturedAt: "2026-08-10T00:00:00.000Z",
+      fallbackReason: "Computer Use capability was not available in this host.",
+    };
+
+    const report = await buildLegacyEvidenceReport(manifest, {
+      projectRoot: await createProject(),
+      requireStaged: false,
+    });
+
+    expect(report.status).toBe("not-verified");
+    expect(report.captureEvidence.status).toBe("gap");
+    expect(report.markdown).toContain("캡처 방식 (기준 → 대상)");
+    expect(report.markdown).toContain("Computer Use capability was not available");
+    expect(report.markdown).toContain("Browser fallback");
+  });
+
+  it("rejects credential-shaped fallback text", async () => {
+    const manifest = createManifest();
+    manifest.visualTargets[0]!.baselineCapture = {
+      provider: "browser",
+      authState: "authenticated",
+      capturedAt: "2026-08-10T00:00:00.000Z",
+      fallbackReason: "token=eyJhbGciOiJIUzI1NiJ9.payload.signature",
+    };
+
+    await expect(
+      buildLegacyEvidenceReport(manifest, {
+        projectRoot: await createProject(),
+        requireStaged: false,
+      }),
+    ).rejects.toThrow("fallbackReason must not contain cookie, token, or authorization values");
+  });
+
   it("runs as the bundled plugin script and emits a reviewable report", async () => {
     const projectRoot = await createProject();
     const manifestPath = path.join(
@@ -224,12 +262,16 @@ async function createProject(source = "export default {};\n"): Promise<string> {
 
 function createManifest(): LegacyVisualManifest {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     case: "legacy",
     change: "mapfinder",
     legacyProjectRoot: "/legacy/mapfinder",
     sourceInventoryPath: "legacy-source-inventory.json",
     targetPaths: ["apps/gzApp/src/pages/mapfinder"],
+    capturePolicy: {
+      preferredProvider: "computer-use",
+      fallback: "browser-or-playwright-with-gap",
+    },
     migration: {
       strategy: "preserve-legacy",
       preservation: {
@@ -256,7 +298,22 @@ function createManifest(): LegacyVisualManifest {
         fixture: "qa:authenticated",
         viewport: { width: 10, height: 10, dpr: 1 },
         baselinePath: "baseline-map-default.png",
-        attempts: [{ actualPath: "actual-map-default.png", diffPath: "diff-map-default.png" }],
+        baselineCapture: {
+          provider: "computer-use",
+          authState: "authenticated",
+          capturedAt: "2026-08-10T00:00:00.000Z",
+        },
+        attempts: [
+          {
+            actualPath: "actual-map-default.png",
+            diffPath: "diff-map-default.png",
+            capture: {
+              provider: "computer-use",
+              authState: "authenticated",
+              capturedAt: "2026-08-10T00:00:01.000Z",
+            },
+          },
+        ],
         criticalRegions: [{ id: "bottom-controls", x: 0, y: 0, width: 2, height: 2 }],
       },
     ],

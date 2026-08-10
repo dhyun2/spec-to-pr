@@ -41,6 +41,7 @@ for (const requiredText of [
   "TDD",
   "GitLab MR 사전 진단",
   "legacy-visual-evidence",
+  "Computer Use",
   "보존 이관",
   "NOT VERIFIED",
   "targetPaths",

@@ -1,6 +1,6 @@
 {
   "name": "spec-to-pr",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Turn a brief, feature, Figma design, or bounded legacy migration into a Korean draft pull request with truthful visual evidence and Gaps.",
   "author": {
     "name": "SpecToPR Team",
@@ -24,7 +24,7 @@
     "defaultPrompt": [
       "Use the spec-to-pr skill and choose exactly one case: brief, feature, figma, or legacy.",
       "Use the design system for brief, feature, and Figma UI. For legacy, preserve the running legacy DOM/CSS/assets/controls and only convert the framework entry unless redesign is explicitly approved.",
-      "For a legacy migration, inventory every user-visible legacy route and state, capture baseline/actual/Diff evidence for each or record an explicit reviewer-visible exclusion. Create a Korean Draft PR using the case-specific template; APIs, authentication, binding, and capture failures remain visible as Gaps rather than passed checks. Feature delivery still runs targeted E2E and commits one user-flow video."
+      "For a legacy migration, use Computer Use first when the host exposes it to capture the authenticated running app. Browser/Playwright is only a provider/auth-state/reason-disclosed Gap fallback. Inventory every user-visible legacy route and state, capture baseline/actual/Diff evidence for each or record an explicit reviewer-visible exclusion. Create a Korean Draft PR using the case-specific template; APIs, authentication, binding, and capture failures remain visible as Gaps rather than passed checks. Feature delivery still runs targeted E2E and commits one user-flow video."
     ],
     "brandColor": "#2563EB",
     "screenshots": []

@@ -14,14 +14,21 @@ import type { LegacySourceInventory } from "./legacy-source-inventory.js";
 const execFileAsync = promisify(execFile);
 const SAFE_ID = /^[a-z0-9][a-z0-9._-]*$/iu;
 const TEXT_FILE = /\.(?:[cm]?[jt]sx?|vue|svelte|html?|css|s[ac]ss|less)$/iu;
+const SECRET_SHAPED_CAPTURE_TEXT =
+  /(?:bearer\s+[a-z0-9._~+\-/=]+|eyJ[a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+|(?:cookie|token|authorization)\s*[:=]\s*\S+)/iu;
 
 export type LegacyVisualManifest = {
-  schemaVersion: 2;
+  /**
+   * v2 manifests remain readable so an interrupted Draft does not lose its evidence.
+   * New captures must use v3 to disclose the capture provider and fallback reason.
+   */
+  schemaVersion: 2 | 3;
   case: "legacy";
   change: string;
   legacyProjectRoot: string;
   sourceInventoryPath: string;
   targetPaths: string[];
+  capturePolicy?: LegacyCapturePolicy;
   migration: {
     strategy: "preserve-legacy" | "redesign-approved";
     redesignApproval?: string;
@@ -94,13 +101,41 @@ export type LegacyRouteInventoryItem = {
   userVisible?: boolean;
 };
 
+export type LegacyCaptureProvider = "computer-use" | "browser" | "playwright";
+export type LegacyCaptureAuthState =
+  "authenticated" | "unauthenticated" | "not-required" | "unknown";
+
+/**
+ * Computer Use is the legacy capture default. Browser and Playwright are allowed
+ * only as an explicitly disclosed fallback when that host capability is absent or
+ * cannot produce the required capture.
+ */
+export type LegacyCapturePolicy = {
+  preferredProvider: "computer-use";
+  fallback: "browser-or-playwright-with-gap";
+};
+
+export type LegacyCaptureEvidence = {
+  provider: LegacyCaptureProvider;
+  authState: LegacyCaptureAuthState;
+  capturedAt: string;
+  fallbackReason?: string;
+};
+
+export type LegacyVisualAttempt = {
+  actualPath: string;
+  diffPath: string;
+  capture?: LegacyCaptureEvidence;
+};
+
 export type LegacyVisualTarget = {
   id: string;
   inventoryId: string;
   fixture: string;
   viewport: { width: number; height: number; dpr: number };
   baselinePath: string;
-  attempts: Array<{ actualPath: string; diffPath: string }>;
+  baselineCapture?: LegacyCaptureEvidence;
+  attempts: LegacyVisualAttempt[];
   criticalRegions: ImageComparisonRegion[];
 };
 
@@ -138,6 +173,7 @@ export type LegacyEvidenceReport = {
   };
   designPreservation: { status: "passed" | "gap"; messages: string[] };
   sourcePreservation: SourcePreservationReport;
+  captureEvidence: CaptureEvidenceReport;
   publishing?: LegacyPublishingStatus;
   targets: LegacyEvidenceTargetResult[];
   exclusions: LegacyVisualExclusion[];
@@ -153,6 +189,11 @@ export type SourcePreservationReport = {
     breakpoints: { mapped: number; total: number };
     runtime: { mapped: number; total: number };
   };
+  messages: string[];
+};
+
+export type CaptureEvidenceReport = {
+  status: "passed" | "gap";
   messages: string[];
 };
 
@@ -186,6 +227,7 @@ export async function buildLegacyEvidenceReport(
     options.projectRoot,
     manifestDirectory,
   );
+  const captureEvidence = inspectCaptureEvidence(manifest);
   for (const message of designPreservation.messages) {
     gaps.push({
       item: "레거시 UI 보존 확인",
@@ -197,6 +239,13 @@ export async function buildLegacyEvidenceReport(
     gaps.push({
       item: "레거시 자산·CSS·런타임 보존 확인",
       impact: "높음",
+      nextAction: message,
+    });
+  }
+  for (const message of captureEvidence.messages) {
+    gaps.push({
+      item: "화면 캡처 방식",
+      impact: "중간",
       nextAction: message,
     });
   }
@@ -326,6 +375,7 @@ export async function buildLegacyEvidenceReport(
     coverage,
     designPreservation,
     sourcePreservation,
+    captureEvidence,
     targets: results,
     exclusions,
     ...(manifest.publishing === undefined ? {} : { publishing: manifest.publishing }),
@@ -337,6 +387,7 @@ export async function buildLegacyEvidenceReport(
         coverage,
         designPreservation,
         sourcePreservation,
+        captureEvidence,
         targets: results,
         exclusions,
         ...(manifest.publishing === undefined ? {} : { publishing: manifest.publishing }),
@@ -348,8 +399,13 @@ export async function buildLegacyEvidenceReport(
 }
 
 function validateManifest(manifest: LegacyVisualManifest, projectRoot: string): void {
-  if (manifest.schemaVersion !== 2 || manifest.case !== "legacy") {
-    throw new Error("LEGACY_EVIDENCE_SCHEMA_INVALID: schemaVersion 2 and case legacy are required");
+  if (
+    (manifest.schemaVersion !== 2 && manifest.schemaVersion !== 3) ||
+    manifest.case !== "legacy"
+  ) {
+    throw new Error(
+      "LEGACY_EVIDENCE_SCHEMA_INVALID: schemaVersion 2 or 3 and case legacy are required",
+    );
   }
   assertSafeId(manifest.change, "change");
   if (!path.isAbsolute(manifest.legacyProjectRoot)) {
@@ -454,6 +510,10 @@ function validateManifest(manifest: LegacyVisualManifest, projectRoot: string): 
         artifactPath,
       );
     }
+    validateCaptureEvidence(target.baselineCapture, `${target.id} baselineCapture`);
+    for (const [attemptIndex, attempt] of target.attempts.entries()) {
+      validateCaptureEvidence(attempt.capture, `${target.id} attempt ${attemptIndex + 1} capture`);
+    }
   }
 
   const excludedIds = new Set<string>();
@@ -508,6 +568,36 @@ function validateManifest(manifest: LegacyVisualManifest, projectRoot: string): 
     }
   }
   validatePublishingStatus(manifest.publishing);
+}
+
+function validateCaptureEvidence(capture: LegacyCaptureEvidence | undefined, label: string): void {
+  if (capture === undefined) return;
+  if (!(["computer-use", "browser", "playwright"] as const).includes(capture.provider)) {
+    throw new Error(`LEGACY_EVIDENCE_SCHEMA_INVALID: ${label} provider is invalid`);
+  }
+  if (
+    !(["authenticated", "unauthenticated", "not-required", "unknown"] as const).includes(
+      capture.authState,
+    )
+  ) {
+    throw new Error(`LEGACY_EVIDENCE_SCHEMA_INVALID: ${label} authState is invalid`);
+  }
+  if (!Number.isFinite(Date.parse(capture.capturedAt))) {
+    throw new Error(`LEGACY_EVIDENCE_SCHEMA_INVALID: ${label} capturedAt must be an ISO timestamp`);
+  }
+  if (capture.provider !== "computer-use" && (capture.fallbackReason?.trim().length ?? 0) === 0) {
+    throw new Error(
+      `LEGACY_EVIDENCE_SCHEMA_INVALID: ${label} browser/playwright fallback needs fallbackReason`,
+    );
+  }
+  if (
+    capture.fallbackReason !== undefined &&
+    SECRET_SHAPED_CAPTURE_TEXT.test(capture.fallbackReason)
+  ) {
+    throw new Error(
+      `LEGACY_EVIDENCE_SCHEMA_INVALID: ${label} fallbackReason must not contain cookie, token, or authorization values`,
+    );
+  }
 }
 
 function validateMappings<T extends { status: string; approval?: string }>(
@@ -643,6 +733,41 @@ async function inspectSourcePreservation(
     coverage: { assets, selectors, breakpoints, runtime },
     messages,
   };
+}
+
+function inspectCaptureEvidence(manifest: LegacyVisualManifest): CaptureEvidenceReport {
+  const messages: string[] = [];
+  if (manifest.schemaVersion < 3 || manifest.capturePolicy === undefined) {
+    messages.push(
+      "Computer Use 우선 캡처 정책 또는 제공자 기록이 없습니다. 새 캡처를 schemaVersion 3 manifest로 다시 기록합니다.",
+    );
+  } else if (
+    manifest.capturePolicy.preferredProvider !== "computer-use" ||
+    manifest.capturePolicy.fallback !== "browser-or-playwright-with-gap"
+  ) {
+    messages.push("legacy 캡처 정책은 Computer Use 우선과 공개된 fallback이어야 합니다.");
+  }
+  for (const target of manifest.visualTargets) {
+    inspectOneCapture(target.baselineCapture, `${target.id} 레거시 기준`, messages);
+    inspectOneCapture(target.attempts.at(-1)?.capture, `${target.id} Vue 3 이관 결과`, messages);
+  }
+  return { status: messages.length === 0 ? "passed" : "gap", messages };
+}
+
+function inspectOneCapture(
+  capture: LegacyCaptureEvidence | undefined,
+  label: string,
+  messages: string[],
+): void {
+  if (capture === undefined) {
+    messages.push(`${label}의 capture provider·인증 상태 기록이 없습니다.`);
+    return;
+  }
+  if (capture.provider !== "computer-use") {
+    messages.push(
+      `${label}은 ${captureProviderLabel(capture.provider)} fallback으로 캡처했습니다 (인증: ${captureAuthLabel(capture.authState)}). 사유: ${capture.fallbackReason}`,
+    );
+  }
 }
 
 async function readSourceInventory(
@@ -979,6 +1104,7 @@ function renderLegacyMarkdown(
     .join("\n");
   const visualRows = report.targets
     .map((target) => {
+      const finalAttempt = target.target.attempts.at(-1);
       const images = [
         imageMarkdown("레거시", target.artifacts.baseline, options),
         target.artifacts.actual === undefined
@@ -993,7 +1119,8 @@ function renderLegacyMarkdown(
         target.result === undefined
           ? "-"
           : target.result.regions.map((region) => `${region.id} ${region.matchPercent}`).join(", ");
-      return `| ${escapeCell(`${target.inventory.route} · ${target.inventory.state}`)} | ${escapeCell(target.target.fixture)} | ${target.target.viewport.width}×${target.target.viewport.height} @${target.target.viewport.dpr} | ${score} | ${critical} | ${statusLabel(target.status)} | ${images} |`;
+      const capture = `${captureSummary(target.target.baselineCapture)} → ${captureSummary(finalAttempt?.capture)}`;
+      return `| ${escapeCell(`${target.inventory.route} · ${target.inventory.state}`)} | ${escapeCell(target.target.fixture)} | ${target.target.viewport.width}×${target.target.viewport.height} @${target.target.viewport.dpr} | ${escapeCell(capture)} | ${score} | ${critical} | ${statusLabel(target.status)} | ${images} |`;
     })
     .join("\n");
   const exclusions = report.exclusions.length
@@ -1027,9 +1154,9 @@ ${scopeRows}
 
 ## 화면 비교
 
-| 경로 · 상태 | Fixture | Viewport | 전체 일치율 | 핵심 UI 영역 | 결과 | 기준 · 이관 결과 · Diff |
-| --- | --- | --- | ---: | --- | --- | --- |
-${visualRows || "| 비교 대상 없음 | - | - | - | - | Gap | - |"}
+| 경로 · 상태 | Fixture | Viewport | 캡처 방식 (기준 → 대상) | 전체 일치율 | 핵심 UI 영역 | 결과 | 기준 · 이관 결과 · Diff |
+| --- | --- | --- | --- | ---: | --- | --- | --- |
+${visualRows || "| 비교 대상 없음 | - | - | - | - | - | Gap | - |"}
 
 ## 보존 이관 확인
 
@@ -1098,6 +1225,26 @@ function statusLabel(status: LegacyEvidenceTargetResult["status"]): string {
   if (status === "passed") return "통과";
   if (status === "failed") return "미달";
   return "Gap";
+}
+
+function captureSummary(capture: LegacyCaptureEvidence | undefined): string {
+  if (capture === undefined) return "기록 없음";
+  const fallback =
+    capture.provider === "computer-use" ? "" : ` fallback: ${capture.fallbackReason}`;
+  return `${captureProviderLabel(capture.provider)} · ${captureAuthLabel(capture.authState)}${fallback}`;
+}
+
+function captureProviderLabel(provider: LegacyCaptureProvider): string {
+  if (provider === "computer-use") return "Computer Use";
+  if (provider === "browser") return "Browser";
+  return "Playwright";
+}
+
+function captureAuthLabel(authState: LegacyCaptureAuthState): string {
+  if (authState === "authenticated") return "로그인";
+  if (authState === "unauthenticated") return "비로그인";
+  if (authState === "not-required") return "인증 불필요";
+  return "인증 상태 미확인";
 }
 
 function imageMarkdown(

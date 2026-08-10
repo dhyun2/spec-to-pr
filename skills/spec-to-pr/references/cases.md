@@ -61,6 +61,12 @@ node /absolute/path/to/legacy-source-inventory.cjs \
 
 누락·승인 없는 대체·대상 파일 부재는 `NOT VERIFIED` Gap입니다. 원본 asset을 디자인 시스템 아이콘으로 자동 대체하지 않습니다.
 
+### 캡처 provider는 Computer Use 우선
+
+레거시 화면은 호스트에 Computer Use가 있으면 이를 먼저 사용합니다. 이미 로그인된 실제 앱에서 모든 route·state를 순회하고, 같은 앱 컨텍스트에서 기준·이관 결과 PNG를 얻습니다. 화면 비교만을 위해 독립 Browser/Playwright 창을 먼저 띄우지 않습니다.
+
+Computer Use가 현재 호스트에 노출되지 않았거나 동일 조건의 PNG를 만들 수 없을 때만 Browser 또는 Playwright를 fallback으로 사용합니다. fallback은 통과로 숨기지 않습니다. provider, 인증 상태, 캡처 시각, 사유를 manifest와 PR 화면 비교 표에 기록하고 Open Gap으로 남깁니다. 인증 쿠키·토큰 값은 어떤 증빙에도 기록하지 않습니다.
+
 ### 화면 매트릭스는 필수
 
 라우터 선언만이 아니라 라우터에서 도달 가능한 사용자 상태를 인벤토리로 만듭니다. 예를 들어 Mapfinder라면 `/map`, `/map/:rgnNo`, `/map/filter/:optFilter`, `/map/:lat/:lng`, `/404`와 목록 전환·검색어 자동완성·카테고리/옵션 필터·매장 액션·현재 위치·로딩/빈 결과/오류처럼 실제로 보이는 상태를 확인합니다.
@@ -78,12 +84,16 @@ node /absolute/path/to/legacy-source-inventory.cjs \
 
 ```json
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "case": "legacy",
   "change": "mapfinder",
   "legacyProjectRoot": "/absolute/path/to/legacy-project",
   "sourceInventoryPath": "legacy-source-inventory.json",
   "targetPaths": ["apps/gzApp/src/pages/mapfinder"],
+  "capturePolicy": {
+    "preferredProvider": "computer-use",
+    "fallback": "browser-or-playwright-with-gap"
+  },
   "migration": {
     "strategy": "preserve-legacy",
     "preservation": {
@@ -110,10 +120,20 @@ node /absolute/path/to/legacy-source-inventory.cjs \
       "fixture": "qa:authenticated-current-location",
       "viewport": { "width": 390, "height": 844, "dpr": 1 },
       "baselinePath": "baseline/map-default.png",
+      "baselineCapture": {
+        "provider": "computer-use",
+        "authState": "authenticated",
+        "capturedAt": "2026-08-10T00:00:00.000Z"
+      },
       "attempts": [
         {
           "actualPath": "actual/map-default-attempt-1.png",
-          "diffPath": "diff/map-default-attempt-1.png"
+          "diffPath": "diff/map-default-attempt-1.png",
+          "capture": {
+            "provider": "computer-use",
+            "authState": "authenticated",
+            "capturedAt": "2026-08-10T00:00:01.000Z"
+          }
         }
       ],
       "criticalRegions": [
@@ -160,7 +180,7 @@ node /absolute/path/to/legacy-source-inventory.cjs \
 }
 ```
 
-`legacy-visual-evidence.cjs`는 전체 이미지와 `criticalRegions`를 모두 비교하고, route/asset/CSS/runtime mapping, glyph/placeholder 대체, 발행 실패를 검증합니다. 큰 빈 지도 영역이 높은 점수를 만들어도 검색·필터·목록·하단 컨트롤 영역이 미달하면 해당 상태는 통과가 아닙니다.
+`legacy-visual-evidence.cjs`는 전체 이미지와 `criticalRegions`를 모두 비교하고, Computer Use 우선 capture policy·fallback 공개, route/asset/CSS/runtime mapping, glyph/placeholder 대체, 발행 실패를 검증합니다. 큰 빈 지도 영역이 높은 점수를 만들어도 검색·필터·목록·하단 컨트롤 영역이 미달하면 해당 상태는 통과가 아닙니다.
 
 ### 이미지 전달
 

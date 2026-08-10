@@ -77,6 +77,8 @@ node /absolute/path/to/compare-images.cjs \
 
 `legacy`는 사용자가 명시적으로 재디자인을 승인하지 않는 한 디자인 시스템을 적용하지 않습니다. 기존 템플릿·클래스·CSS·sprite/이미지 자산·검색/필터/지도 컨트롤·사용자 동작을 보존하고 Vue 3 문법과 대상 앱 진입점만 바꿉니다.
 
+레거시 화면은 호스트에 Computer Use가 있으면 이를 우선 사용해 이미 로그인된 실제 앱의 모든 route·state를 순회하며 캡처합니다. Computer Use가 없거나 같은 조건의 PNG를 만들 수 없을 때만 Browser/Playwright를 fallback으로 사용하며, provider·인증 상태·시각·사유를 `legacy-visual-manifest.json`과 PR에 기록한 Open Gap으로 남깁니다. 쿠키·토큰 값은 저장하지 않습니다.
+
 레거시 라우터에서 발견한 모든 사용자 노출 route와 대표 상태를 `legacy-visual-manifest.json`에 인벤토리로 기록합니다. 먼저 `legacy-source-inventory.cjs`가 원본 asset URL, CSS selector·breakpoint, Kakao Map·Swiper·bridge 표식을 수집하고, 각각 대상 파일·CSS·실제 runtime code에 1:1 mapping돼야 합니다. 각 화면 항목은 다음 중 하나여야 합니다.
 
 1. 같은 fixture·viewport·DPR의 기준/이관/Diff 이미지로 비교됨

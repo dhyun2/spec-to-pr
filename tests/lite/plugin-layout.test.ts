@@ -31,6 +31,7 @@ describe("SpecToPR Lite package", () => {
     expect(skill).not.toContain("workflow_");
     expect(skill).not.toContain("Run ID");
     expect(skill).toContain("보존 이관");
+    expect(skill).toContain("Computer Use");
     expect(skill).toContain("legacy-visual-evidence.cjs");
     expect(skill).toContain("`brief`와 `feature`");
     expect(skill).toContain("test: on");

@@ -11,6 +11,10 @@ title: 문제 해결
 
 로컬 경로만 PR에 쓰면 리뷰어는 이미지를 볼 수 없습니다. `baseline`, `actual`, `diff`, manifest를 `spec-to-pr-evidence/<change>/` 아래에 저장하고 stage·commit·push합니다. Legacy라면 `legacy-visual-evidence.cjs`를 `git add` 뒤에 실행해 생성한 Markdown을 PR에 넣습니다. 이 도구가 기준·이관 결과·Diff의 GitHub/GitLab raw URL을 만듭니다.
 
+## 왜 Browser/Playwright가 Computer Use보다 먼저 쓰였나요?
+
+legacy 기본은 Computer Use입니다. 현재 호스트에 Computer Use capability가 없거나 필요한 PNG를 만들 수 없을 때만 Browser/Playwright를 fallback으로 씁니다. fallback은 숨기지 않고 `legacy-visual-manifest.json`의 provider·인증 상태·사유와 PR의 Open Gap에 기록해야 합니다. 쿠키·토큰 값은 증빙에 기록하지 않습니다.
+
 ## 레거시 기본 화면만 통과했어요
 
 그 결과는 전체 이관 검증이 아닙니다. 레거시 router와 실제 흐름에서 모든 사용자 노출 `route · state`를 인벤토리로 만들고, 각각 비교하거나 사유·영향·리뷰어 결정을 갖춘 제외를 기록합니다. 누락된 항목이 하나라도 있으면 Draft는 `NOT VERIFIED`입니다.

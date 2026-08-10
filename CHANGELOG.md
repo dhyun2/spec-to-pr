@@ -1,5 +1,13 @@
 # 변경 이력
 
+## 1.0.3 - 2026-08-10
+
+### 수정
+
+- legacy 화면 캡처는 호스트에 Computer Use가 있으면 이미 로그인된 실제 앱을 조작하는 방식을 우선하도록 고정했습니다. 비교만을 위해 독립 Browser/Playwright를 먼저 띄우지 않습니다.
+- `legacy-visual-manifest.json` schema v3는 기준·이관 이미지별 capture provider, 인증 상태, 시각을 기록합니다. Browser/Playwright fallback에는 사유가 필수이며 PR 화면 비교 표와 Open Gap에 표시됩니다.
+- 기존 schema v2 증빙은 읽을 수 있지만 capture provider가 없어 `NOT VERIFIED` Gap으로 정직하게 표시합니다. 쿠키·토큰 값은 어떤 증빙에도 기록하지 않습니다.
+
 ## 1.0.2 - 2026-08-10
 
 ### 수정
