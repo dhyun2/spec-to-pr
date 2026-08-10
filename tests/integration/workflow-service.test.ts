@@ -4058,6 +4058,29 @@ describe("WorkflowService", () => {
     await expect(store.list()).resolves.toHaveLength(0);
   });
 
+  it("resolves a relative legacy project root from the target project root", async () => {
+    const legacyRoot = await mkdtemp(
+      path.join(path.dirname(directory), "spec-to-pr-relative-legacy-"),
+    );
+    try {
+      await mkdir(path.join(legacyRoot, "src"));
+      await writeFile(path.join(legacyRoot, "src", "route.ts"), 'export const route = "/skill";\n');
+
+      const started = await service.start({
+        projectRoot: directory,
+        legacyProjectRoot: `../${path.basename(legacyRoot)}`,
+        requestText: "Migrate the legacy Skill screen",
+        mode: "legacy",
+        changeKind: "migration",
+      });
+
+      expect(started.status).not.toBe("blocked");
+      expect(started.deliveryProfile.legacyProjectRoot).toBe(await realpath(legacyRoot));
+    } finally {
+      await rm(legacyRoot, { recursive: true, force: true });
+    }
+  });
+
   it("rejects nested legacy/target roots and detects legacy mutation after intake", async () => {
     const nestedLegacy = path.join(directory, "nested-legacy");
     await mkdir(nestedLegacy);

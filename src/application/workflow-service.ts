@@ -9404,7 +9404,14 @@ async function canonicalLegacyDirectory(input: {
 
   let legacyRoot: string;
   try {
-    legacyRoot = await realpath(input.legacyProjectRoot);
+    // `legacyProjectRoot` is part of the workflow input contract, so a
+    // relative value must be anchored to the target project—not the MCP
+    // server's own working directory. The latter varies between Codex hosts
+    // and made valid sibling legacy roots fail before a Run could be created.
+    const requestedLegacyRoot = path.isAbsolute(input.legacyProjectRoot)
+      ? input.legacyProjectRoot
+      : path.resolve(input.projectRoot, input.legacyProjectRoot);
+    legacyRoot = await realpath(requestedLegacyRoot);
   } catch {
     throw new Error("Legacy project path does not exist: " + input.legacyProjectRoot);
   }
