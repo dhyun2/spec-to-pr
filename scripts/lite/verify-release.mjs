@@ -35,6 +35,7 @@ const allowedFiles = new Set([
   "skills/spec-to-pr/references/openspec.md",
   "skills/spec-to-pr/scripts/compare-images.cjs",
   "skills/spec-to-pr/scripts/legacy-visual-evidence.cjs",
+  "skills/spec-to-pr/scripts/legacy-source-inventory.cjs",
   "skills/spec-to-pr/scripts/check-gitlab-mr.cjs",
 ]);
 

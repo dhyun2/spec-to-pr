@@ -9,16 +9,18 @@ import {
   type ImageComparisonRegion,
   type ImageComparisonResult,
 } from "./compare-images.js";
+import type { LegacySourceInventory } from "./legacy-source-inventory.js";
 
 const execFileAsync = promisify(execFile);
 const SAFE_ID = /^[a-z0-9][a-z0-9._-]*$/iu;
 const TEXT_FILE = /\.(?:[cm]?[jt]sx?|vue|svelte|html?|css|s[ac]ss|less)$/iu;
 
 export type LegacyVisualManifest = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   case: "legacy";
   change: string;
   legacyProjectRoot: string;
+  sourceInventoryPath: string;
   targetPaths: string[];
   migration: {
     strategy: "preserve-legacy" | "redesign-approved";
@@ -34,6 +36,53 @@ export type LegacyVisualManifest = {
   routeInventory: LegacyRouteInventoryItem[];
   visualTargets: LegacyVisualTarget[];
   exclusions?: LegacyVisualExclusion[];
+  assetMappings: LegacyAssetMapping[];
+  selectorMappings: LegacySelectorMapping[];
+  breakpointMappings: LegacyBreakpointMapping[];
+  runtimeMappings: LegacyRuntimeMapping[];
+  publishing?: LegacyPublishingStatus;
+};
+
+export type LegacyAssetMapping = {
+  sourceAssetId: string;
+  target: string;
+  status: "preserved" | "approved-replacement" | "gap";
+  approval?: string;
+};
+
+export type LegacySelectorMapping = {
+  sourceSelectorId: string;
+  targetSelector: string;
+  status: "preserved" | "approved-replacement" | "gap";
+  approval?: string;
+};
+
+export type LegacyBreakpointMapping = {
+  sourceBreakpointId: string;
+  targetQuery: string;
+  status: "preserved" | "approved-replacement" | "gap";
+  approval?: string;
+};
+
+export type LegacyRuntimeMapping = {
+  sourceRuntimeId: string;
+  targetFiles: string[];
+  targetEvidence: string;
+  status: "preserved" | "approved-replacement" | "gap";
+  approval?: string;
+};
+
+export type LegacyPublishingStatus = {
+  plugin: {
+    status: "not-attempted" | "passed" | "failed";
+    summary?: string;
+  };
+  draft: {
+    status: "not-attempted" | "published" | "failed";
+    method?: "plugin-api" | "glab" | "gh";
+    url?: string;
+    summary?: string;
+  };
 };
 
 export type LegacyRouteInventoryItem = {
@@ -88,10 +137,23 @@ export type LegacyEvidenceReport = {
     failed: number;
   };
   designPreservation: { status: "passed" | "gap"; messages: string[] };
+  sourcePreservation: SourcePreservationReport;
+  publishing?: LegacyPublishingStatus;
   targets: LegacyEvidenceTargetResult[];
   exclusions: LegacyVisualExclusion[];
   gaps: Array<{ item: string; impact: string; nextAction: string }>;
   markdown: string;
+};
+
+export type SourcePreservationReport = {
+  status: "passed" | "gap";
+  coverage: {
+    assets: { mapped: number; total: number };
+    selectors: { mapped: number; total: number };
+    breakpoints: { mapped: number; total: number };
+    runtime: { mapped: number; total: number };
+  };
+  messages: string[];
 };
 
 /**
@@ -119,9 +181,21 @@ export async function buildLegacyEvidenceReport(
   );
   const requiredInventory = manifest.routeInventory.filter((item) => item.userVisible !== false);
   const designPreservation = await inspectDesignPreservation(manifest, options.projectRoot);
+  const sourcePreservation = await inspectSourcePreservation(
+    manifest,
+    options.projectRoot,
+    manifestDirectory,
+  );
   for (const message of designPreservation.messages) {
     gaps.push({
       item: "레거시 UI 보존 확인",
+      impact: "높음",
+      nextAction: message,
+    });
+  }
+  for (const message of sourcePreservation.messages) {
+    gaps.push({
+      item: "레거시 자산·CSS·런타임 보존 확인",
       impact: "높음",
       nextAction: message,
     });
@@ -217,6 +291,8 @@ export async function buildLegacyEvidenceReport(
     });
   }
 
+  appendPublishingGaps(manifest.publishing, gaps);
+
   if (options.requireStaged ?? true) {
     const evidencePaths = results.flatMap((result) =>
       [result.artifacts.baseline, result.artifacts.actual, result.artifacts.diff].filter(
@@ -249,25 +325,41 @@ export async function buildLegacyEvidenceReport(
     status,
     coverage,
     designPreservation,
+    sourcePreservation,
     targets: results,
     exclusions,
+    ...(manifest.publishing === undefined ? {} : { publishing: manifest.publishing }),
     gaps,
     markdown: renderLegacyMarkdown(
       manifest,
-      { status, coverage, designPreservation, targets: results, exclusions, gaps },
+      {
+        status,
+        coverage,
+        designPreservation,
+        sourcePreservation,
+        targets: results,
+        exclusions,
+        ...(manifest.publishing === undefined ? {} : { publishing: manifest.publishing }),
+        gaps,
+      },
       options,
     ),
   };
 }
 
 function validateManifest(manifest: LegacyVisualManifest, projectRoot: string): void {
-  if (manifest.schemaVersion !== 1 || manifest.case !== "legacy") {
-    throw new Error("LEGACY_EVIDENCE_SCHEMA_INVALID: schemaVersion 1 and case legacy are required");
+  if (manifest.schemaVersion !== 2 || manifest.case !== "legacy") {
+    throw new Error("LEGACY_EVIDENCE_SCHEMA_INVALID: schemaVersion 2 and case legacy are required");
   }
   assertSafeId(manifest.change, "change");
   if (!path.isAbsolute(manifest.legacyProjectRoot)) {
     throw new Error("LEGACY_EVIDENCE_SCHEMA_INVALID: legacyProjectRoot must be an absolute path");
   }
+  resolveEvidencePath(
+    projectRoot,
+    resolveWithin(projectRoot, "spec-to-pr-evidence", manifest.change),
+    manifest.sourceInventoryPath,
+  );
   if (
     manifest.targetPaths.length === 0 ||
     manifest.targetPaths.some((target) => !isSafeRelativePath(target))
@@ -387,6 +479,74 @@ function validateManifest(manifest: LegacyVisualManifest, projectRoot: string): 
     }
     excludedIds.add(exclusion.inventoryId);
   }
+  validateMappings(manifest.assetMappings, "sourceAssetId", "assetMappings");
+  validateMappings(manifest.selectorMappings, "sourceSelectorId", "selectorMappings");
+  validateMappings(manifest.breakpointMappings, "sourceBreakpointId", "breakpointMappings");
+  validateMappings(manifest.runtimeMappings, "sourceRuntimeId", "runtimeMappings");
+  if (
+    manifest.assetMappings.some(
+      (mapping) =>
+        mapping.target.trim().length === 0 ||
+        (!isCanonicalUrl(mapping.target) && !isTargetPath(mapping.target, manifest.targetPaths)),
+    ) ||
+    manifest.selectorMappings.some((mapping) => mapping.targetSelector.trim().length === 0) ||
+    manifest.breakpointMappings.some((mapping) => mapping.targetQuery.trim().length === 0)
+  ) {
+    throw new Error(
+      "LEGACY_EVIDENCE_SCHEMA_INVALID: preservation mappings need a non-empty target inside targetPaths or a canonical URL",
+    );
+  }
+  for (const mapping of manifest.runtimeMappings) {
+    if (
+      mapping.targetFiles.length === 0 ||
+      mapping.targetFiles.some((file) => !isTargetPath(file, manifest.targetPaths)) ||
+      mapping.targetEvidence.trim().length === 0
+    ) {
+      throw new Error(
+        "LEGACY_EVIDENCE_SCHEMA_INVALID: runtime mappings need target files inside targetPaths and targetEvidence",
+      );
+    }
+  }
+  validatePublishingStatus(manifest.publishing);
+}
+
+function validateMappings<T extends { status: string; approval?: string }>(
+  mappings: readonly T[],
+  idKey: keyof T,
+  label: string,
+): void {
+  const ids = new Set<string>();
+  for (const mapping of mappings) {
+    const sourceId = mapping[idKey];
+    if (typeof sourceId !== "string" || !SAFE_ID.test(sourceId) || ids.has(sourceId)) {
+      throw new Error(
+        `LEGACY_EVIDENCE_SCHEMA_INVALID: ${label} source ids must be unique safe identifiers`,
+      );
+    }
+    if (!["preserved", "approved-replacement", "gap"].includes(mapping.status)) {
+      throw new Error(`LEGACY_EVIDENCE_SCHEMA_INVALID: ${label} status is invalid`);
+    }
+    if (mapping.status === "approved-replacement" && (mapping.approval?.trim().length ?? 0) === 0) {
+      throw new Error(
+        `LEGACY_EVIDENCE_SCHEMA_INVALID: ${label} approved replacement needs approval`,
+      );
+    }
+    ids.add(sourceId);
+  }
+}
+
+function validatePublishingStatus(publishing: LegacyPublishingStatus | undefined): void {
+  if (publishing === undefined) return;
+  for (const stage of [publishing.plugin, publishing.draft]) {
+    if (stage.status === "failed" && (stage.summary?.trim().length ?? 0) === 0) {
+      throw new Error(
+        "LEGACY_EVIDENCE_SCHEMA_INVALID: failed publication status needs a concise summary",
+      );
+    }
+  }
+  if (publishing.draft.status === "published" && publishing.draft.url === undefined) {
+    throw new Error("LEGACY_EVIDENCE_SCHEMA_INVALID: published Draft needs its URL");
+  }
 }
 
 async function inspectDesignPreservation(
@@ -421,6 +581,325 @@ async function inspectDesignPreservation(
     }
   }
   return { status: messages.length === 0 ? "passed" : "gap", messages };
+}
+
+async function inspectSourcePreservation(
+  manifest: LegacyVisualManifest,
+  projectRoot: string,
+  manifestDirectory: string,
+): Promise<SourcePreservationReport> {
+  const inventoryPath = resolveEvidencePath(
+    projectRoot,
+    manifestDirectory,
+    manifest.sourceInventoryPath,
+  );
+  let inventory: LegacySourceInventory;
+  try {
+    inventory = await readSourceInventory(inventoryPath, manifest);
+  } catch (error) {
+    return {
+      status: "gap",
+      coverage: {
+        assets: { mapped: 0, total: 0 },
+        selectors: { mapped: 0, total: 0 },
+        breakpoints: { mapped: 0, total: 0 },
+        runtime: { mapped: 0, total: 0 },
+      },
+      messages: [error instanceof Error ? error.message : String(error)],
+    };
+  }
+  const targetFiles = await listTargetTextFiles(projectRoot, manifest.targetPaths);
+  const targetContents = new Map(
+    await Promise.all(
+      targetFiles.map(
+        async (file) =>
+          [relativeProjectPath(projectRoot, file), await readFile(file, "utf8")] as const,
+      ),
+    ),
+  );
+  const messages: string[] = [];
+  const inventoryRoutes = new Set(manifest.routeInventory.map((item) => item.route));
+  for (const route of inventory.routes) {
+    if (!inventoryRoutes.has(route.route)) {
+      messages.push(
+        `레거시 router 경로가 화면 매트릭스에 없습니다: ${route.sourceFile} → ${route.route}`,
+      );
+    }
+  }
+  const assets = validateAssetMappings(manifest, inventory, projectRoot, messages);
+  const selectors = validateSelectorMappings(manifest, inventory, targetContents, messages);
+  const breakpoints = validateBreakpointMappings(manifest, inventory, targetContents, messages);
+  const runtime = validateRuntimeMappings(manifest, inventory, targetContents, messages);
+  const glyphs = findForbiddenGlyphs(targetContents);
+  if (glyphs.length > 0) {
+    messages.push(`Unicode glyph/emoji로 대체한 아이콘이 있습니다: ${glyphs.join(", ")}`);
+  }
+  const placeholders = findPlaceholderSubstitutions(targetContents);
+  if (placeholders.length > 0) {
+    messages.push(`placeholder/mock UI 대체가 있습니다: ${placeholders.join(", ")}`);
+  }
+  return {
+    status: messages.length === 0 ? "passed" : "gap",
+    coverage: { assets, selectors, breakpoints, runtime },
+    messages,
+  };
+}
+
+async function readSourceInventory(
+  inventoryPath: string,
+  manifest: LegacyVisualManifest,
+): Promise<LegacySourceInventory> {
+  if (!existsSync(inventoryPath)) {
+    throw new Error(`LEGACY_SOURCE_INVENTORY_MISSING: ${inventoryPath}`);
+  }
+  const inventory = JSON.parse(await readFile(inventoryPath, "utf8")) as LegacySourceInventory;
+  if (inventory.schemaVersion !== 1 || inventory.legacyProjectRoot !== manifest.legacyProjectRoot) {
+    throw new Error(
+      "LEGACY_SOURCE_INVENTORY_INVALID: source inventory does not match legacyProjectRoot",
+    );
+  }
+  for (const collection of [
+    inventory.routes,
+    inventory.assets,
+    inventory.selectors,
+    inventory.breakpoints,
+    inventory.runtimeDependencies,
+  ]) {
+    if (!Array.isArray(collection) || collection.some((item) => !SAFE_ID.test(item.id))) {
+      throw new Error("LEGACY_SOURCE_INVENTORY_INVALID: inventory collections require safe ids");
+    }
+  }
+  return inventory;
+}
+
+function validateAssetMappings(
+  manifest: LegacyVisualManifest,
+  inventory: LegacySourceInventory,
+  projectRoot: string,
+  messages: string[],
+): { mapped: number; total: number } {
+  const mappings = new Map(
+    manifest.assetMappings.map((mapping) => [mapping.sourceAssetId, mapping]),
+  );
+  let mapped = 0;
+  for (const asset of inventory.assets) {
+    const mapping = mappings.get(asset.id);
+    if (mapping === undefined) {
+      messages.push(`레거시 asset mapping 누락: ${asset.sourceFile} → ${asset.reference}`);
+      continue;
+    }
+    if (mapping.status !== "preserved") {
+      messages.push(assetMappingGap(asset.reference, mapping.status, mapping.approval));
+      continue;
+    }
+    if (
+      !isCanonicalUrl(mapping.target) &&
+      !existsSync(resolveWithin(projectRoot, mapping.target))
+    ) {
+      messages.push(`대상 asset을 찾을 수 없습니다: ${asset.reference} → ${mapping.target}`);
+      continue;
+    }
+    mapped += 1;
+  }
+  for (const mapping of manifest.assetMappings) {
+    if (!inventory.assets.some((asset) => asset.id === mapping.sourceAssetId)) {
+      messages.push(`존재하지 않는 source asset id를 매핑했습니다: ${mapping.sourceAssetId}`);
+    }
+  }
+  return { mapped, total: inventory.assets.length };
+}
+
+function validateSelectorMappings(
+  manifest: LegacyVisualManifest,
+  inventory: LegacySourceInventory,
+  targetContents: Map<string, string>,
+  messages: string[],
+): { mapped: number; total: number } {
+  const mappings = new Map(
+    manifest.selectorMappings.map((mapping) => [mapping.sourceSelectorId, mapping]),
+  );
+  let mapped = 0;
+  for (const selector of inventory.selectors) {
+    const mapping = mappings.get(selector.id);
+    if (mapping === undefined) {
+      messages.push(
+        `레거시 CSS selector mapping 누락: ${selector.sourceFile} → ${selector.selector}`,
+      );
+      continue;
+    }
+    if (mapping.status !== "preserved") {
+      messages.push(assetMappingGap(selector.selector, mapping.status, mapping.approval));
+      continue;
+    }
+    if (mapping.targetSelector !== selector.selector) {
+      messages.push(
+        `보존 이관의 CSS selector가 바뀌었습니다: ${selector.selector} → ${mapping.targetSelector}`,
+      );
+      continue;
+    }
+    if (!containsTargetText(targetContents, mapping.targetSelector)) {
+      messages.push(
+        `대상 CSS에 보존 selector가 없습니다: ${selector.selector} → ${mapping.targetSelector}`,
+      );
+      continue;
+    }
+    mapped += 1;
+  }
+  return { mapped, total: inventory.selectors.length };
+}
+
+function validateBreakpointMappings(
+  manifest: LegacyVisualManifest,
+  inventory: LegacySourceInventory,
+  targetContents: Map<string, string>,
+  messages: string[],
+): { mapped: number; total: number } {
+  const mappings = new Map(
+    manifest.breakpointMappings.map((mapping) => [mapping.sourceBreakpointId, mapping]),
+  );
+  let mapped = 0;
+  for (const breakpoint of inventory.breakpoints) {
+    const mapping = mappings.get(breakpoint.id);
+    if (mapping === undefined) {
+      messages.push(
+        `레거시 breakpoint mapping 누락: ${breakpoint.sourceFile} → ${breakpoint.query}`,
+      );
+      continue;
+    }
+    if (mapping.status !== "preserved") {
+      messages.push(assetMappingGap(breakpoint.query, mapping.status, mapping.approval));
+      continue;
+    }
+    if (mapping.targetQuery !== breakpoint.query) {
+      messages.push(
+        `보존 이관의 breakpoint가 바뀌었습니다: ${breakpoint.query} → ${mapping.targetQuery}`,
+      );
+      continue;
+    }
+    if (!containsTargetText(targetContents, mapping.targetQuery)) {
+      messages.push(
+        `대상 CSS에 보존 breakpoint가 없습니다: ${breakpoint.query} → ${mapping.targetQuery}`,
+      );
+      continue;
+    }
+    mapped += 1;
+  }
+  return { mapped, total: inventory.breakpoints.length };
+}
+
+function validateRuntimeMappings(
+  manifest: LegacyVisualManifest,
+  inventory: LegacySourceInventory,
+  targetContents: Map<string, string>,
+  messages: string[],
+): { mapped: number; total: number } {
+  const mappings = new Map(
+    manifest.runtimeMappings.map((mapping) => [mapping.sourceRuntimeId, mapping]),
+  );
+  let mapped = 0;
+  for (const dependency of inventory.runtimeDependencies) {
+    const mapping = mappings.get(dependency.id);
+    if (mapping === undefined) {
+      messages.push(
+        `레거시 ${dependency.kind} mapping 누락: ${dependency.sourceFile} → ${dependency.marker}`,
+      );
+      continue;
+    }
+    if (mapping.status !== "preserved") {
+      messages.push(assetMappingGap(dependency.marker, mapping.status, mapping.approval));
+      continue;
+    }
+    if (!mapping.targetEvidence.includes(dependency.marker)) {
+      messages.push(
+        `runtime mapping이 실제 레거시 구성요소를 증명하지 않습니다: ${dependency.marker}`,
+      );
+      continue;
+    }
+    const mappedContents = mapping.targetFiles
+      .map((file) => targetContents.get(file) ?? "")
+      .join("\n");
+    if (!mappedContents.includes(mapping.targetEvidence)) {
+      messages.push(
+        `실제 runtime 보존 증거가 없습니다: ${dependency.marker} → ${mapping.targetEvidence}`,
+      );
+      continue;
+    }
+    mapped += 1;
+  }
+  return { mapped, total: inventory.runtimeDependencies.length };
+}
+
+function assetMappingGap(source: string, status: string, approval: string | undefined): string {
+  if (status === "approved-replacement") {
+    return `레거시 ${source}를 승인된 대체로 바꿨습니다: ${approval}`;
+  }
+  return `레거시 ${source} 보존이 Gap 상태입니다.`;
+}
+
+function isCanonicalUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
+function containsTargetText(targetContents: Map<string, string>, expected: string): boolean {
+  return [...targetContents.values()].some((contents) => contents.includes(expected));
+}
+
+async function listTargetTextFiles(projectRoot: string, targetPaths: string[]): Promise<string[]> {
+  return (
+    await Promise.all(
+      targetPaths.map((targetPath) => listTextFiles(resolveWithin(projectRoot, targetPath))),
+    )
+  ).flat();
+}
+
+function findForbiddenGlyphs(targetContents: Map<string, string>): string[] {
+  const findings: string[] = [];
+  const glyph = /[\u2300-\u2bff\u{1f000}-\u{1faff}]/gu;
+  for (const [file, contents] of targetContents) {
+    const matched = [...contents.matchAll(glyph)].map((match) => match[0]).filter(Boolean);
+    if (matched.length > 0) findings.push(`${file} (${[...new Set(matched)].join(" ")})`);
+  }
+  return findings;
+}
+
+function findPlaceholderSubstitutions(targetContents: Map<string, string>): string[] {
+  const findings: string[] = [];
+  const placeholder =
+    /\b(?:mock(?:[-_ ]?(?:map|icon|logo))?|fake(?:[-_ ]?(?:map|icon|logo))?|(?:map|icon|logo)[-_ ]?placeholder)\b/giu;
+  for (const [file, contents] of targetContents) {
+    const matched = [...contents.matchAll(placeholder)].map((match) => match[0]).filter(Boolean);
+    if (matched.length > 0) findings.push(`${file} (${[...new Set(matched)].join(", ")})`);
+  }
+  return findings;
+}
+
+function appendPublishingGaps(
+  publishing: LegacyPublishingStatus | undefined,
+  gaps: LegacyEvidenceReport["gaps"],
+): void {
+  if (publishing?.plugin.status === "failed") {
+    gaps.push({
+      item: `플러그인 발행 실패: ${publishing.plugin.summary}`,
+      impact: "중간",
+      nextAction:
+        publishing.draft.status === "published"
+          ? "fallback 발행 사실과 실패 원인을 Draft PR 본문에 반영합니다."
+          : "인증·TLS·권한을 해결하거나 허용된 fallback 발행을 시도합니다.",
+    });
+  }
+  if (publishing?.draft.status === "failed") {
+    gaps.push({
+      item: `Draft PR 발행 실패: ${publishing.draft.summary}`,
+      impact: "높음",
+      nextAction:
+        "발행 권한·인증서·API 접근을 확인한 뒤 같은 branch의 Draft를 생성하거나 갱신합니다.",
+    });
+  }
 }
 
 async function findForbiddenImports(
@@ -558,6 +1037,11 @@ ${visualRows || "| 비교 대상 없음 | - | - | - | - | Gap | - |"}
 | --- | --- | --- |
 | 전략 | ${manifest.migration.strategy === "preserve-legacy" ? "레거시 DOM·CSS·자산 보존" : "승인된 재디자인"} | ${escapeCell(manifest.migration.redesignApproval ?? "디자인 시스템 대체 금지")} |
 | 템플릿 · 스타일 · 자산 · 컨트롤 | ${report.designPreservation.status === "passed" ? "통과" : "Gap"} | ${escapeCell(report.designPreservation.messages.join(" / ") || "보존 확인 완료")} |
+| asset inventory | ${report.sourcePreservation.coverage.assets.mapped}/${report.sourcePreservation.coverage.assets.total} | ${report.sourcePreservation.status === "passed" ? "원본 asset 1:1 보존" : "누락·대체는 Gap 참고"} |
+| CSS selector · breakpoint | ${report.sourcePreservation.coverage.selectors.mapped}/${report.sourcePreservation.coverage.selectors.total} · ${report.sourcePreservation.coverage.breakpoints.mapped}/${report.sourcePreservation.coverage.breakpoints.total} | selector·상태·반응형 보존 |
+| runtime UI (지도·carousel·bridge) | ${report.sourcePreservation.coverage.runtime.mapped}/${report.sourcePreservation.coverage.runtime.total} | 실제 SDK/구성요소 증거 |
+
+${renderPublishingSection(report.publishing)}
 
 ## 비교 제외
 
@@ -570,6 +1054,31 @@ ${exclusions}
 | 확인 또는 개발이 필요한 내용 | 영향 | 다음 작업 |
 | --- | --- | --- |
 ${gaps}
+`;
+}
+
+function renderPublishingSection(publishing: LegacyPublishingStatus | undefined): string {
+  if (
+    publishing === undefined ||
+    (publishing.plugin.status === "not-attempted" && publishing.draft.status === "not-attempted")
+  ) {
+    return "";
+  }
+  const plugin = `${publishing.plugin.status}${publishing.plugin.summary === undefined ? "" : ` — ${escapeCell(publishing.plugin.summary)}`}`;
+  const draftDetail = [
+    publishing.draft.method,
+    publishing.draft.url === undefined ? undefined : `[Draft MR](${publishing.draft.url})`,
+    publishing.draft.summary,
+  ]
+    .filter((value): value is string => value !== undefined)
+    .map(escapeCell)
+    .join(" · ");
+  return `## 발행 상태
+
+| 단계 | 결과 | 세부 사항 |
+| --- | --- | --- |
+| 플러그인 발행 | ${plugin} | ${publishing.plugin.status === "failed" ? "실패 원인은 Gap에도 기록" : ""} |
+| Draft PR | ${publishing.draft.status} | ${draftDetail || "-"} |
 `;
 }
 

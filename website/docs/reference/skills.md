@@ -15,6 +15,7 @@ skills/spec-to-pr/
 └── scripts/
     ├── compare-images.cjs   # PNG 비교와 Diff 생성
     ├── legacy-visual-evidence.cjs # legacy route/state coverage와 PR 이미지 링크
+    ├── legacy-source-inventory.cjs # legacy route·asset·CSS·runtime source inventory
     └── check-gitlab-mr.cjs  # GitLab Draft MR 읽기 전용 사전 진단
 ```
 
@@ -35,7 +36,7 @@ node /absolute/path/to/compare-images.cjs \
 
 출력 JSON의 `matchPercent`와 `status`를 PR에 사용합니다. 이미지 크기가 다르면 오류를 내고 점수를 만들지 않습니다.
 
-`legacy-visual-evidence.cjs`는 레거시 인벤토리의 모든 사용자 노출 route/state가 비교 또는 명시적 제외인지 검증합니다. 기준·이관·Diff 이미지가 Git index에 있는지도 확인하고, PR에 삽입할 raw 이미지 Markdown을 만듭니다. 보존 이관에서 `@frontend/ui` 같은 금지된 대체 import가 발견되면 `NOT VERIFIED` Gap으로 표시합니다.
+`legacy-source-inventory.cjs`는 지정한 레거시 source path에서 route, asset URL, CSS selector·breakpoint, 지도/Swiper/native bridge 표식을 추출합니다. `legacy-visual-evidence.cjs`는 이 inventory의 모든 항목이 대상 asset·CSS·runtime code로 매핑됐는지와 모든 사용자 노출 route/state가 비교 또는 명시적 제외인지 검증합니다. 기준·이관·Diff 이미지가 Git index에 있는지도 확인하고, PR에 삽입할 raw 이미지 Markdown을 만듭니다. 보존 이관에서 `@frontend/ui`, Unicode glyph/emoji, mock/placeholder 대체가 발견되면 `NOT VERIFIED` Gap으로 표시합니다.
 
 ## GitLab MR 사전 진단 도구
 

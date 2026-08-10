@@ -5,6 +5,7 @@ export default defineConfig({
     "compare-images": "scripts/lite/compare-images.ts",
     "check-gitlab-mr": "scripts/lite/check-gitlab-mr.ts",
     "legacy-visual-evidence": "scripts/lite/legacy-visual-evidence.ts",
+    "legacy-source-inventory": "scripts/lite/legacy-source-inventory.ts",
   },
   outDir: "skills/spec-to-pr/scripts",
   format: ["cjs"],

@@ -11,6 +11,7 @@ import {
   buildLegacyEvidenceReport,
   type LegacyVisualManifest,
 } from "../../scripts/lite/legacy-visual-evidence.js";
+import { collectLegacySourceInventory } from "../../scripts/lite/legacy-source-inventory.js";
 
 const temporaryDirectories: string[] = [];
 const execFileAsync = promisify(execFile);
@@ -87,6 +88,104 @@ describe("legacy visual evidence", () => {
       coverage: { required: 1, passed: 1 },
     });
   });
+
+  it("requires source asset and CSS mappings and exposes plugin publishing failures in the PR report", async () => {
+    const projectRoot = await createProject();
+    const inventoryPath = path.join(
+      projectRoot,
+      "spec-to-pr-evidence/mapfinder/legacy-source-inventory.json",
+    );
+    await writeFile(
+      inventoryPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        legacyProjectRoot: "/legacy/mapfinder",
+        sourcePaths: ["src/modules/mapfinder"],
+        routes: [{ id: "route-001", sourceFile: "src/router.ts", route: "/map" }],
+        assets: [
+          {
+            id: "asset-001",
+            sourceFile: "src/map.scss",
+            reference: "../assets/logo.png",
+            kind: "css-url",
+          },
+        ],
+        selectors: [{ id: "selector-001", sourceFile: "src/map.scss", selector: ".shop-logo" }],
+        breakpoints: [],
+        runtimeDependencies: [],
+      }),
+      "utf8",
+    );
+    const manifest = createManifest();
+    manifest.publishing = {
+      plugin: { status: "failed", summary: "UNABLE_TO_VERIFY_LEAF_SIGNATURE" },
+      draft: {
+        status: "published",
+        method: "glab",
+        url: "https://gitlab.example.com/group/app/-/merge_requests/1",
+        summary: "fallback Draft MR created",
+      },
+    };
+
+    const report = await buildLegacyEvidenceReport(manifest, { projectRoot, requireStaged: false });
+
+    expect(report.status).toBe("not-verified");
+    expect(report.sourcePreservation.coverage.assets).toEqual({ mapped: 0, total: 1 });
+    expect(report.markdown).toContain("UNABLE_TO_VERIFY_LEAF_SIGNATURE");
+    expect(report.markdown).toContain("fallback Draft MR created");
+    expect(report.markdown).toContain("발행 상태");
+  });
+
+  it("collects routes, assets, CSS selectors, breakpoints, and map SDK markers from the legacy source", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "spec-to-pr-legacy-source-"));
+    temporaryDirectories.push(root);
+    await mkdir(path.join(root, "src/modules/mapfinder"), { recursive: true });
+    await Promise.all([
+      writeFile(
+        path.join(root, "src/modules/mapfinder/router.ts"),
+        "export const routes = [{ path: '/map' }, { path: '/map/:rgnNo' }];\n",
+      ),
+      writeFile(
+        path.join(root, "src/modules/mapfinder/Map.vue"),
+        'window.kakao.maps.Map;\n<img src="./logo.svg">\n',
+      ),
+      writeFile(
+        path.join(root, "src/modules/mapfinder/map.scss"),
+        ".shop-logo { background: url('./logo.png'); }\n@media (max-width: 640px) { .shop-logo { display: none; } }\n",
+      ),
+    ]);
+
+    const inventory = await collectLegacySourceInventory({
+      legacyProjectRoot: root,
+      sourcePaths: ["src/modules/mapfinder"],
+    });
+
+    expect(inventory.routes.map((route) => route.route)).toEqual(["/map", "/map/:rgnNo"]);
+    expect(inventory.assets.map((asset) => asset.reference)).toEqual(
+      expect.arrayContaining(["./logo.png", "./logo.svg"]),
+    );
+    expect(inventory.selectors.map((selector) => selector.selector)).toContain(".shop-logo");
+    expect(inventory.breakpoints.map((breakpoint) => breakpoint.query)).toContain(
+      "(max-width: 640px)",
+    );
+    expect(inventory.runtimeDependencies).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ marker: "kakao.maps.Map", kind: "map-sdk" }),
+      ]),
+    );
+
+    const { stdout } = await execFileAsync(process.execPath, [
+      path.join(process.cwd(), "skills/spec-to-pr/scripts/legacy-source-inventory.cjs"),
+      "--legacy-root",
+      root,
+      "--source-paths",
+      "src/modules/mapfinder",
+    ]);
+    expect(JSON.parse(stdout)).toMatchObject({
+      routes: expect.arrayContaining([expect.objectContaining({ route: "/map" })]),
+      assets: expect.arrayContaining([expect.objectContaining({ reference: "./logo.png" })]),
+    });
+  });
 });
 
 async function createProject(source = "export default {};\n"): Promise<string> {
@@ -105,16 +204,31 @@ async function createProject(source = "export default {};\n"): Promise<string> {
   await Promise.all([
     writeFile(path.join(evidence, "baseline-map-default.png"), image),
     writeFile(path.join(evidence, "actual-map-default.png"), image),
+    writeFile(
+      path.join(evidence, "legacy-source-inventory.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        legacyProjectRoot: "/legacy/mapfinder",
+        sourcePaths: ["src/modules/mapfinder"],
+        routes: [{ id: "route-001", sourceFile: "src/router.ts", route: "/map" }],
+        assets: [],
+        selectors: [],
+        breakpoints: [],
+        runtimeDependencies: [],
+      }),
+      "utf8",
+    ),
   ]);
   return projectRoot;
 }
 
 function createManifest(): LegacyVisualManifest {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     case: "legacy",
     change: "mapfinder",
     legacyProjectRoot: "/legacy/mapfinder",
+    sourceInventoryPath: "legacy-source-inventory.json",
     targetPaths: ["apps/gzApp/src/pages/mapfinder"],
     migration: {
       strategy: "preserve-legacy",
@@ -146,6 +260,10 @@ function createManifest(): LegacyVisualManifest {
         criticalRegions: [{ id: "bottom-controls", x: 0, y: 0, width: 2, height: 2 }],
       },
     ],
+    assetMappings: [],
+    selectorMappings: [],
+    breakpointMappings: [],
+    runtimeMappings: [],
   };
 }
 

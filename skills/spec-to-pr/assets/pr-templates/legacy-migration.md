@@ -24,6 +24,8 @@
 | --------------------- | ---- | ---- |
 | {{PRESERVATION_ROWS}} |
 
+{{PUBLISHING_STATUS_SECTION_IF_RELEVANT}}
+
 {{API_SECTION_IF_USED}}
 
 {{EXCLUSION_SECTION_IF_USED}}

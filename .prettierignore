@@ -7,6 +7,7 @@ coverage
 skills/spec-to-pr/scripts/compare-images.cjs
 skills/spec-to-pr/scripts/check-gitlab-mr.cjs
 skills/spec-to-pr/scripts/legacy-visual-evidence.cjs
+skills/spec-to-pr/scripts/legacy-source-inventory.cjs
 
 # Plugin/runtime data
 .claude

@@ -17,7 +17,11 @@ title: 문제 해결
 
 ## Vue 3 이관 후 디자인이 달라졌어요
 
-명시적 재디자인 승인이 없는 legacy 이관에서는 디자인 시스템을 적용하면 안 됩니다. 레거시 template/class, CSS, sprite·자산, 컨트롤을 보존하고 Vue 3 문법·진입점만 바꿉니다. `legacy-visual-manifest.json`의 전략을 `preserve-legacy`로 두면 `@frontend/ui` 같은 대체 import도 Gap으로 표시됩니다.
+명시적 재디자인 승인이 없는 legacy 이관에서는 디자인 시스템을 적용하면 안 됩니다. 레거시 template/class, CSS, sprite·자산, 컨트롤을 보존하고 Vue 3 문법·진입점만 바꿉니다. 먼저 `legacy-source-inventory.cjs`로 asset/selector/breakpoint/지도 SDK를 추출하고 `legacy-visual-manifest.json`의 `preserve-legacy` mapping으로 1:1 연결합니다. `@frontend/ui`, Unicode glyph/emoji, 문자·CSS 아이콘, mock map/placeholder가 발견되면 Gap으로 표시됩니다.
+
+## glab fallback으로 MR은 만들었는데 플러그인 발행은 실패했어요
+
+fallback 성공만 PR에 쓰면 안 됩니다. manifest `publishing.plugin`에 TLS·인증·권한 같은 원인을, `publishing.draft`에 `glab`/`gh` method와 Draft URL을 기록한 뒤 PR section을 다시 생성합니다. 플러그인 실패는 발행 Gap으로 보이고, fallback 성공은 별도 결과로 보여야 합니다.
 
 ## 일치율이 92%보다 낮아요
 

@@ -44,6 +44,7 @@ for (const file of [
   "skills/spec-to-pr/assets/pr-templates/figma-ui.md",
   "skills/spec-to-pr/scripts/compare-images.cjs",
   "skills/spec-to-pr/scripts/legacy-visual-evidence.cjs",
+  "skills/spec-to-pr/scripts/legacy-source-inventory.cjs",
   "skills/spec-to-pr/scripts/check-gitlab-mr.cjs",
 ]) {
   assert(existsSync(path.join(root, file)), `Required Lite plugin file is missing: ${file}`);
@@ -76,9 +77,11 @@ assert(
 );
 assert(
   skill.includes("legacy-visual-evidence.cjs") &&
+    skill.includes("legacy-source-inventory.cjs") &&
     skill.includes("모든 사용자 노출 route·대표 상태") &&
-    skill.includes("@frontend/ui"),
-  "Legacy delivery must verify full visual coverage and preserve legacy UI without design-system substitutions",
+    skill.includes("@frontend/ui") &&
+    skill.includes("Unicode glyph"),
+  "Legacy delivery must verify routes, assets, CSS, runtime UI, and preserve legacy UI without replacements",
 );
 
 const templateRoot = path.join(root, "skills/spec-to-pr/assets/pr-templates");

@@ -29,6 +29,27 @@ request: Mapfinder를 Vue 3 MPA entry로 이관해줘
 
 Vue 3 문법, MPA 진입점, 대상 앱의 빌드·API client 연결만 변환합니다. 이관 과정에서 `@frontend/ui` 또는 다른 디자인 시스템으로 새 Chip·Icon·컨트롤을 대체하면 안 됩니다. 그 결과가 비슷해 보여도 이관이 아니라 재구성입니다.
 
+Unicode glyph/emoji, 문자·CSS로 그린 로고·지도 핀·아이콘, 회색 지도 박스, mock/placeholder carousel·bridge도 금지합니다. 레거시가 Kakao Map, Swiper, native bridge를 실제 UI 구성요소로 썼다면 대상도 실제 구성요소를 보존해야 합니다.
+
+## source asset·CSS inventory
+
+화면 비교 전에는 이관 범위의 레거시 source를 읽기 전용으로 수집합니다.
+
+```bash
+node /absolute/path/to/legacy-source-inventory.cjs \
+  --legacy-root /absolute/path/to/legacy-project \
+  --source-paths src/modules/mapfinder \
+  --output /absolute/path/to/project/spec-to-pr-evidence/mapfinder/legacy-source-inventory.json
+```
+
+수집 항목은 route, `url(...)`·image asset, CSS selector, media breakpoint, Kakao Map·Swiper·native bridge 표식입니다. `legacy-visual-manifest.json`은 발견된 항목마다 아래를 1:1로 기록해야 합니다.
+
+- asset → 대상 파일 또는 canonical URL
+- selector/breakpoint → 실제 대상 CSS selector·조건
+- runtime UI → 대상 파일과 실제 SDK/구성요소를 증명하는 코드 문자열
+
+누락·승인 없는 대체·대상 파일 부재는 Gap입니다. asset/CSS inventory를 생략한 legacy PR은 `VERIFIED`가 될 수 없습니다.
+
 ## 화면 매트릭스
 
 레거시 router와 실제 사용자 흐름을 읽어 모든 사용자 노출 `route · state`를 인벤토리로 기록합니다. 예를 들어 Mapfinder의 `/map`, `/map/:rgnNo`, `/map/filter/:optFilter`, `/map/:lat/:lng`, `/404`와 검색·필터·목록 전환·현재 위치·매장 액션·로딩·빈 결과·오류 상태는 각각 검토 대상입니다.
@@ -42,7 +63,7 @@ Vue 3 문법, MPA 진입점, 대상 앱의 빌드·API client 연결만 변환�
 
 ## 증빙과 PR 이미지
 
-`spec-to-pr-evidence/<change>/legacy-visual-manifest.json`에 route/state inventory와 visual targets를 기록합니다. 모든 증빙은 `baseline/`, `actual/`, `diff/` 아래에 저장하고 stage·commit·push합니다.
+`spec-to-pr-evidence/<change>/legacy-visual-manifest.json`에 `schemaVersion: 2`, `sourceInventoryPath`, route/state inventory, visual targets, asset/selector/breakpoint/runtime mappings를 기록합니다. 모든 증빙은 `baseline/`, `actual/`, `diff/` 아래에 저장하고 stage·commit·push합니다.
 
 ```bash
 git add spec-to-pr-evidence/mapfinder
@@ -55,7 +76,11 @@ node /absolute/path/to/legacy-visual-evidence.cjs \
   --write-pr-section /absolute/path/to/project/spec-to-pr-evidence/mapfinder/legacy-pr-section.md
 ```
 
-도구는 전체 이미지와 지정한 핵심 UI 영역을 모두 비교합니다. 따라서 빈 지도·배경 영역이 높은 전체 점수를 만들더라도 검색창·필터·목록·하단 조작이 다르면 통과가 아닙니다. 생성한 PR section은 기준·이관·Diff의 raw 이미지 링크를 포함하므로 리뷰어가 로컬 파일이나 artifact ID를 찾을 필요가 없습니다.
+도구는 전체 이미지와 지정한 핵심 UI 영역을 모두 비교하고 source inventory mapping, 금지된 glyph/placeholder 대체도 확인합니다. 따라서 빈 지도·배경 영역이 높은 전체 점수를 만들더라도 검색창·필터·목록·하단 조작이 다르면 통과가 아닙니다. 생성한 PR section은 기준·이관·Diff의 raw 이미지 링크를 포함하므로 리뷰어가 로컬 파일이나 artifact ID를 찾을 필요가 없습니다.
+
+## 발행 fallback도 PR에 기록합니다
+
+플러그인의 GitLab API가 TLS·인증·권한 문제로 실패하고 `glab`/`gh` fallback이 Draft를 만들었으면, 실패는 사라지지 않습니다. manifest의 `publishing.plugin`에는 실패 사유를, `publishing.draft`에는 fallback method·MR URL·결과를 적고 PR section을 다시 생성해 본문을 갱신합니다. fallback 성공은 발행 결과일 뿐, 플러그인 발행 성공으로 쓰지 않습니다.
 
 ## API와 Gap
 

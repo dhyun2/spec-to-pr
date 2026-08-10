@@ -52,6 +52,9 @@ describe("SpecToPR Lite package", () => {
     expect(
       existsSync(path.join(root, "skills/spec-to-pr/scripts/legacy-visual-evidence.cjs")),
     ).toBe(true);
+    expect(
+      existsSync(path.join(root, "skills/spec-to-pr/scripts/legacy-source-inventory.cjs")),
+    ).toBe(true);
     expect(existsSync(path.join(root, "skills/spec-to-pr/scripts/check-gitlab-mr.cjs"))).toBe(true);
   });
 });

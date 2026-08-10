@@ -65,7 +65,9 @@ Commit and push the resulting evidence under `spec-to-pr-evidence/<change>/` so 
 
 A `legacy` request is not a redesign. Unless the user explicitly approves redesign, preserve legacy templates/classes, CSS, sprites and image assets, visible controls, routes, and behavior. Convert only the framework syntax and target entry integration. Do not substitute `@frontend/ui` or another design system for the legacy UI.
 
-Build a route-and-state inventory from every user-visible legacy route. Every entry must have a baseline/actual/diff target captured under identical fixture, viewport, DPR, and auth conditions, or an explicit exclusion with reviewer decision. `legacy-visual-evidence.cjs` compares full images and critical control regions, checks that assets are staged, and generates the PR Markdown with raw image links.
+Run `legacy-source-inventory.cjs` first to collect bounded legacy routes, asset URLs, CSS selectors/breakpoints, and runtime markers such as Kakao Map or Swiper. Map every item to an actual target asset, CSS, or runtime code. Then build a route-and-state inventory from every user-visible legacy route. Every entry must have a baseline/actual/diff target captured under identical fixture, viewport, DPR, and auth conditions, or an explicit exclusion with reviewer decision. `legacy-visual-evidence.cjs` compares full images and critical control regions, rejects glyph/placeholder substitutions, checks that assets are staged, and generates the PR Markdown with raw image links.
+
+If plugin publication fails but a `glab` or `gh` fallback creates the Draft, record both the failure reason and fallback result in the PR body; a fallback must not erase the plugin failure.
 
 ## GitLab Draft MR preflight
 

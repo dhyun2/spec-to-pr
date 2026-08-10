@@ -1,5 +1,14 @@
 # 변경 이력
 
+## 1.0.2 - 2026-08-10
+
+### 수정
+
+- 레거시 source에서 router, asset URL, CSS selector·breakpoint, Kakao Map·Swiper·native bridge 표식을 읽기 전용으로 추출하는 `legacy-source-inventory.cjs`를 추가했습니다.
+- `legacy-visual-manifest.json` v2는 발견한 asset·selector·breakpoint·runtime 항목을 대상 파일·CSS·실제 SDK 코드에 1:1로 연결해야 합니다. 누락·승인 없는 대체·glyph/emoji·문자/CSS 아이콘·mock placeholder는 `NOT VERIFIED` Gap입니다.
+- 레거시 router의 경로가 화면 매트릭스에서 빠지면, 기본 화면 하나의 높은 픽셀 점수로는 검증을 통과할 수 없게 했습니다.
+- 플러그인 GitLab 발행 실패와 `glab`/`gh` fallback 결과를 manifest 및 PR 본문의 `발행 상태`에 함께 기록하도록 했습니다. fallback 성공이 원래 발행 실패를 숨기지 않습니다.
+
 ## 1.0.1 - 2026-08-10
 
 ### 수정

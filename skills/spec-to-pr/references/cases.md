@@ -40,6 +40,26 @@ request: Mapfinder를 Vue 3 MPA entry로 이관해줘
 - 레거시 프로젝트는 절대 수정하지 않습니다.
 - 이관은 **재디자인이 아닙니다.** 사용자가 명시적으로 승인하지 않은 한 레거시 template/DOM class, CSS, sprite·이미지 자산, 지도·검색·필터·하단 컨트롤, 사용자 동작을 보존하고 Vue 3 문법·MPA 진입점만 변환합니다.
 - 레거시 이관에는 대상 디자인 시스템을 적용하지 않습니다. 기존 프로젝트 셸과 빌드 연결은 사용해도 되지만, `@frontend/ui` 같은 새 Chip·Icon·컴포넌트로 화면을 대체하지 않습니다.
+- Unicode glyph/emoji, 문자·CSS로 그린 로고·지도 핀·아이콘, 회색 지도 박스, mock/placeholder carousel·bridge는 보존 이관에서 금지합니다.
+
+### source inventory는 필수
+
+화면을 선언하기 전에 아래 읽기 전용 도구를 실행합니다.
+
+```bash
+node /absolute/path/to/legacy-source-inventory.cjs \
+  --legacy-root /absolute/path/to/legacy-project \
+  --source-paths src/modules/mapfinder \
+  --output /absolute/path/to/project/spec-to-pr-evidence/mapfinder/legacy-source-inventory.json
+```
+
+이 도구는 지정한 source path에서 route, `url(...)`/image asset, CSS selector, media breakpoint, Kakao Map·Swiper·native bridge 표식을 수집합니다. 추출 결과는 완전한 의미 해석이 아니라 **빠뜨리지 않기 위한 최소 inventory**입니다. 따라서 발견한 항목을 다음 mapping에 1:1로 연결합니다.
+
+- asset: 원본 asset → 대상 파일 또는 canonical URL
+- selector/breakpoint: 원본 selector·반응형 조건 → 실제 대상 CSS
+- runtime: 원본 지도·carousel·bridge → 실제 대상 코드의 증거 문자열
+
+누락·승인 없는 대체·대상 파일 부재는 `NOT VERIFIED` Gap입니다. 원본 asset을 디자인 시스템 아이콘으로 자동 대체하지 않습니다.
 
 ### 화면 매트릭스는 필수
 
@@ -58,10 +78,11 @@ request: Mapfinder를 Vue 3 MPA entry로 이관해줘
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "case": "legacy",
   "change": "mapfinder",
   "legacyProjectRoot": "/absolute/path/to/legacy-project",
+  "sourceInventoryPath": "legacy-source-inventory.json",
   "targetPaths": ["apps/gzApp/src/pages/mapfinder"],
   "migration": {
     "strategy": "preserve-legacy",
@@ -100,15 +121,52 @@ request: Mapfinder를 Vue 3 MPA entry로 이관해줘
       ]
     }
   ],
-  "exclusions": []
+  "exclusions": [],
+  "assetMappings": [
+    {
+      "sourceAssetId": "asset-001",
+      "target": "apps/gzApp/src/pages/mapfinder/assets/logo.png",
+      "status": "preserved"
+    }
+  ],
+  "selectorMappings": [
+    {
+      "sourceSelectorId": "selector-001",
+      "targetSelector": ".mapfinder .shop-logo",
+      "status": "preserved"
+    }
+  ],
+  "breakpointMappings": [],
+  "runtimeMappings": [
+    {
+      "sourceRuntimeId": "runtime-001",
+      "targetFiles": ["apps/gzApp/src/pages/mapfinder/components/ShopMap.vue"],
+      "targetEvidence": "kakao.maps.Map",
+      "status": "preserved"
+    }
+  ],
+  "publishing": {
+    "plugin": {
+      "status": "failed",
+      "summary": "UNABLE_TO_VERIFY_LEAF_SIGNATURE"
+    },
+    "draft": {
+      "status": "published",
+      "method": "glab",
+      "url": "https://gitlab.example.com/group/app/-/merge_requests/123",
+      "summary": "plugin TLS failure after glab fallback"
+    }
+  }
 }
 ```
 
-`legacy-visual-evidence.cjs`는 전체 이미지와 `criticalRegions`를 모두 비교합니다. 큰 빈 지도 영역이 높은 점수를 만들어도 검색·필터·목록·하단 컨트롤 영역이 미달하면 해당 상태는 통과가 아닙니다.
+`legacy-visual-evidence.cjs`는 전체 이미지와 `criticalRegions`를 모두 비교하고, route/asset/CSS/runtime mapping, glyph/placeholder 대체, 발행 실패를 검증합니다. 큰 빈 지도 영역이 높은 점수를 만들어도 검색·필터·목록·하단 컨트롤 영역이 미달하면 해당 상태는 통과가 아닙니다.
 
 ### 이미지 전달
 
 `baseline`, `actual`, `diff`, manifest, 생성된 PR 섹션을 모두 stage·commit·push합니다. 도구가 출력하는 PR Markdown은 GitHub/GitLab branch의 raw 이미지 URL을 사용하므로 리뷰어는 PR에서 기준·이관 결과를 바로 봅니다. 로컬 절대 경로, 내부 artifact ID, Diff 하나만으로 증빙을 대신하지 않습니다.
+
+플러그인 발행 API가 TLS·인증·권한 오류로 실패하고 `glab`/`gh` fallback이 Draft를 만들었다면, fallback만 성공이라고 말하면 안 됩니다. `publishing.plugin`에 실패 원인, `publishing.draft`에 fallback method·MR URL·결과를 넣고 생성된 PR section으로 본문을 갱신합니다.
 
 ### API와 Gap
 

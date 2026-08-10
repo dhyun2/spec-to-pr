@@ -1,6 +1,6 @@
 {
   "name": "spec-to-pr",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Turn a brief, feature, Figma design, or bounded legacy migration into a Korean draft pull request with truthful visual evidence and Gaps.",
   "author": {
     "name": "SpecToPR Team",
