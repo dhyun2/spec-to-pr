@@ -1784,19 +1784,22 @@ describe("WorkflowService", () => {
     });
     expect(blocked.status).toBe("blocked");
     expect(blocked.blockerDetails).toEqual([
-      {
+      expect.objectContaining({
         stage: "contracts",
-        code: "MISSING_INPUT",
+        code: "MISSING_APPROVAL",
         kind: "missing-input",
-        summary: "The contracts stage stopped because required input is missing.",
+        summary: "A required approval is missing.",
         retryable: false,
         resumable: true,
-        completedWork: ["intake stage passed."],
+        completedWork: expect.arrayContaining([
+          "The request was classified.",
+          "intake stage passed.",
+        ]),
         evidencePaths: [],
-        attemptedRecovery: [],
+        attemptedRecovery: ["Checked the supplied contract sources."],
         unrunValidations: ["functional"],
-        exactUnblockAction: "Provide the missing input and resume contracts.",
-      },
+        exactUnblockAction: "Provide the approval and resubmit the contracts stage.",
+      }),
     ]);
     expect(blocked.blockers).toEqual([blocked.blockerDetails[0]!.summary]);
 
@@ -5304,22 +5307,44 @@ describe("WorkflowService", () => {
         },
       }),
     ).rejects.toThrow(/FIGMA_DESIGN_SYSTEM_EVIDENCE_INVALID.*mismatched/);
+    const acceptedImplementation = {
+      ...implementation,
+      designSystemEvidence: {
+        usages: [
+          {
+            mappingId: "nxplus-park-logo",
+            sourceFile: "src/checkout.tsx",
+            resolution: designMapping.components[0]!.resolution,
+          },
+        ],
+      },
+    } as const;
     const accepted = await service.submit({
       runId: started.runId,
-      submission: {
-        ...implementation,
-        designSystemEvidence: {
-          usages: [
-            {
-              mappingId: "nxplus-park-logo",
-              sourceFile: "src/checkout.tsx",
-              resolution: designMapping.components[0]!.resolution,
-            },
-          ],
-        },
-      },
+      submission: acceptedImplementation,
     });
     expect(accepted.nextActions.map((action) => action.kind)).toContain("compare-visuals");
+
+    const firstPacket = (await store.get(started.runId)).stages.find(
+      (item) => item.name === "implementation",
+    )?.checkpoint?.data["reviewPacket"] as { headSha?: string } | undefined;
+    await execFileAsync("git", ["add", "src/checkout.tsx"], { cwd: directory });
+    await execFileAsync("git", ["commit", "-qm", "freeze reviewed implementation"], {
+      cwd: directory,
+    });
+
+    const revised = await service.submit({
+      runId: started.runId,
+      submission: acceptedImplementation,
+    });
+    expect(revised.nextActions.map((action) => action.kind)).toContain("compare-visuals");
+    const revisedImplementation = (await store.get(started.runId)).stages.find(
+      (item) => item.name === "implementation",
+    );
+    expect(revisedImplementation).toMatchObject({ status: "passed", attempt: 1 });
+    const revisedPacket = revisedImplementation?.checkpoint?.data["reviewPacket"] as
+      { headSha?: string } | undefined;
+    expect(revisedPacket?.headSha).not.toBe(firstPacket?.headSha);
   });
 
   it("requires a targeted feature E2E and exactly one video only in feature mode", async () => {

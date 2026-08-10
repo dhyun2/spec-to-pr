@@ -117,6 +117,7 @@ export function startStage(
     stage.status === "failed" &&
     (stage.error?.code === "REVIEW_CHANGES_REQUESTED" ||
       stage.error?.code === "VISUAL_IMPLEMENTATION_REPAIR_REQUIRED" ||
+      stage.error?.code === "IMPLEMENTATION_REVISION_REQUIRED" ||
       (stage.name === "publish" &&
         stage.error?.code === "PUBLISH_FAILED" &&
         stage.error.retryable)) &&
@@ -149,6 +150,14 @@ export function reopenImplementationForVisualRepair(
   now: Clock,
 ): RunManifest {
   return reopenImplementation(run, reason, "VISUAL_IMPLEMENTATION_REPAIR_REQUIRED", now);
+}
+
+export function reopenImplementationForRevision(
+  run: RunManifest,
+  reason: string,
+  now: Clock,
+): RunManifest {
+  return reopenImplementation(run, reason, "IMPLEMENTATION_REVISION_REQUIRED", now);
 }
 
 export function terminalizeVisualThresholdFailure(
@@ -246,7 +255,10 @@ export function terminalizeVisualThresholdFailure(
 function reopenImplementation(
   run: RunManifest,
   reason: string,
-  errorCode: "REVIEW_CHANGES_REQUESTED" | "VISUAL_IMPLEMENTATION_REPAIR_REQUIRED",
+  errorCode:
+    | "REVIEW_CHANGES_REQUESTED"
+    | "VISUAL_IMPLEMENTATION_REPAIR_REQUIRED"
+    | "IMPLEMENTATION_REVISION_REQUIRED",
   now: Clock,
 ): RunManifest {
   const implementation = findStage(run, "implementation");

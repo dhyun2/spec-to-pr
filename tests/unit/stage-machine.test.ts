@@ -11,6 +11,7 @@ import {
   completeStage,
   failStage,
   heartbeatStage,
+  reopenImplementationForRevision,
   reopenImplementationForReviewChanges,
   reopenImplementationForVisualRepair,
   startStage,
@@ -324,6 +325,42 @@ describe("stage machine", () => {
     expect(reopened.stages.find((stage) => stage.name === "implementation")).toMatchObject({
       status: "failed",
       error: { code: "VISUAL_IMPLEMENTATION_REPAIR_REQUIRED", retryable: true },
+    });
+    expect(
+      startStage(
+        reopened,
+        { stageName: "implementation", workerId: "worker-2" },
+        () => "2026-06-23T00:00:30.000Z",
+      ).stage,
+    ).toMatchObject({ status: "running", attempt: 2 });
+  });
+
+  it("reopens a passed implementation when its committed review packet is superseded", () => {
+    const run = baseRun();
+    const prepared = {
+      ...run,
+      stages: run.stages.map((stage) =>
+        stage.name === "implementation"
+          ? {
+              ...stage,
+              status: "passed" as const,
+              completedAt: "2026-06-23T00:00:10.000Z",
+              attempt: 1,
+              artifactIds: [],
+            }
+          : stage,
+      ),
+    };
+
+    const reopened = reopenImplementationForRevision(
+      prepared,
+      "The implementation changed after the review packet was created.",
+      () => "2026-06-23T00:00:20.000Z",
+    );
+
+    expect(reopened.stages.find((stage) => stage.name === "implementation")).toMatchObject({
+      status: "failed",
+      error: { code: "IMPLEMENTATION_REVISION_REQUIRED", retryable: true },
     });
     expect(
       startStage(

@@ -74,6 +74,19 @@ Model routing is role-based and host-local: the core uses `fast`, `build`, and `
 
 If GitHub or GitLab authentication, TLS, or host access prevents publication, SpecToPR keeps a local diagnostic report and records a publication Gap; after recovery it updates the same draft PR rather than creating a replacement Run.
 
+### Self-hosted GitLab
+
+Configure the exact remote host and API base before starting a self-hosted GitLab publication. The publisher verifies `GET /user` through the same TLS transport before it pushes a branch, creates a Draft MR, or uploads visual evidence.
+
+```bash
+export SPEC_TO_PR_GIT_HOST=gitlab
+export SPEC_TO_PR_WEB_BASE_URL=https://gitlab.example.internal
+export SPEC_TO_PR_API_BASE_URL=https://gitlab.example.internal/api/v4
+export SPEC_TO_PR_GITLAB_CA_FILE=/absolute/path/to/company-ca-bundle.pem
+```
+
+`SPEC_TO_PR_GITLAB_CA_FILE` is optional when the Node process already trusts the host CA. It adds an explicit CA bundle only for the GitLab publisher; it never disables certificate verification. Do not use `NODE_TLS_REJECT_UNAUTHORIZED=0` or a `glab` profile with `skip_tls_verify=true`.
+
 ## Documentation
 
 **https://dhyun2.github.io/spec-to-pr/en/**

@@ -7,6 +7,91 @@ import {
 import type { PublishTarget, ReviewRequestPayload } from "../../src/publisher/index.js";
 
 describe("GitLabPublisherAdapter", () => {
+  it("verifies the authenticated GitLab API before publication", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ id: 42, username: "codex" }));
+    const adapter = new GitLabPublisherAdapter(fetchMock);
+
+    await adapter.preflight({
+      target: gitlabTarget({
+        webBaseUrl: "https://gitlab.golfzon.local",
+        apiBaseUrl: "https://gitlab.golfzon.local/api/v4",
+      }),
+      token: "glpat-example",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://gitlab.golfzon.local/api/v4/user",
+      expect.objectContaining({
+        method: "GET",
+        headers: expect.objectContaining({ "PRIVATE-TOKEN": "glpat-example" }),
+      }),
+    );
+  });
+
+  it("rejects an HTML response from a misconfigured GitLab API base URL", async () => {
+    const adapter = new GitLabPublisherAdapter(
+      vi.fn().mockResolvedValueOnce(
+        new Response("<!doctype html><title>GitLab</title>", {
+          headers: { "content-type": "text/html" },
+        }),
+      ),
+    );
+
+    await expect(
+      adapter.preflight({ target: gitlabTarget(), token: "glpat-example" }),
+    ).rejects.toThrow(/GITLAB_API_PREFLIGHT_FAILED.*non-JSON/i);
+  });
+
+  it("rejects an existing draft whose returned branches do not match the requested publication", async () => {
+    const adapter = new GitLabPublisherAdapter(
+      vi.fn().mockResolvedValueOnce(
+        jsonResponse([
+          {
+            web_url: "https://gitlab.com/acme/spec-to-pr/-/merge_requests/7",
+            iid: 7,
+            id: 70,
+            title: "Draft: unrelated",
+            source_branch: "codex/unrelated",
+            target_branch: "main",
+          },
+        ]),
+      ),
+    );
+
+    await expect(
+      adapter.findExisting({ target: gitlabTarget(), payload: payload(), token: "glpat-example" }),
+    ).rejects.toThrow(/GITLAB_PUBLICATION_MISMATCH/);
+  });
+
+  it("rejects ambiguous existing GitLab drafts instead of choosing the first response", async () => {
+    const adapter = new GitLabPublisherAdapter(
+      vi.fn().mockResolvedValueOnce(
+        jsonResponse([
+          {
+            web_url: "https://gitlab.com/acme/spec-to-pr/-/merge_requests/7",
+            iid: 7,
+            id: 70,
+            title: "Draft: one",
+            source_branch: "spec-to-pr/run-1",
+            target_branch: "main",
+          },
+          {
+            web_url: "https://gitlab.com/acme/spec-to-pr/-/merge_requests/8",
+            iid: 8,
+            id: 80,
+            title: "Draft: two",
+            source_branch: "spec-to-pr/run-1",
+            target_branch: "main",
+          },
+        ]),
+      ),
+    );
+
+    await expect(
+      adapter.findExisting({ target: gitlabTarget(), payload: payload(), token: "glpat-example" }),
+    ).rejects.toThrow(/GITLAB_PUBLICATION_AMBIGUOUS/);
+  });
+
   it("aborts an unresponsive GitLab API request at the adapter deadline", async () => {
     const fetchMock = vi.fn(
       (_url: string, init: RequestInit) =>

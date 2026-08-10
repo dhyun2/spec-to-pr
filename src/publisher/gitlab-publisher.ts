@@ -15,6 +15,7 @@ import {
   type ReviewRequestPublisher,
 } from "./publisher-port.js";
 import { encodeGitLabProjectId } from "./review-host.js";
+import { createGitLabTrustedFetch } from "./gitlab-trusted-fetch.js";
 
 type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 type AbortableRequestInit = Omit<RequestInit, "signal"> & {
@@ -53,9 +54,40 @@ export function canUseGitLabRawEvidenceFallback(error: unknown): boolean {
 
 export class GitLabPublisherAdapter implements ReviewRequestPublisher {
   public constructor(
-    private readonly fetchImpl: FetchLike = fetch,
+    private readonly fetchImpl: FetchLike = createGitLabTrustedFetch(),
     private readonly requestTimeoutMs = DEFAULT_PUBLISH_HTTP_TIMEOUT_MS,
   ) {}
+
+  public async preflight(input: {
+    target: PublishTarget;
+    token: string;
+    signal?: AbortSignal | undefined;
+  }): Promise<void> {
+    assertGitLab(input.target);
+    const response = await this.gitlabFetch(`${input.target.apiBaseUrl}/user`, input.token, {
+      method: "GET",
+      signal: input.signal,
+    });
+    if (!response.ok) {
+      throw new Error(
+        `GITLAB_API_PREFLIGHT_FAILED: GET /user returned HTTP ${response.status} ${await response.text()}`,
+      );
+    }
+    let user: unknown;
+    try {
+      user = await response.json();
+    } catch {
+      throw new Error("GITLAB_API_PREFLIGHT_FAILED: GET /user returned a non-JSON response");
+    }
+    if (
+      typeof user !== "object" ||
+      user === null ||
+      (typeof (user as Record<string, unknown>)["id"] !== "number" &&
+        typeof (user as Record<string, unknown>)["username"] !== "string")
+    ) {
+      throw new Error("GITLAB_API_PREFLIGHT_FAILED: GET /user returned an invalid GitLab user");
+    }
+  }
 
   public async findExisting(input: {
     target: PublishTarget;
@@ -82,13 +114,18 @@ export class GitLabPublisherAdapter implements ReviewRequestPublisher {
     }
 
     const mergeRequests = (await response.json()) as Array<Record<string, unknown>>;
+    if (mergeRequests.length > 1) {
+      throw new Error(
+        "GITLAB_PUBLICATION_AMBIGUOUS: more than one open draft matches the source and target branches",
+      );
+    }
     const first = mergeRequests[0];
 
     if (first === undefined) {
       return undefined;
     }
 
-    return normalizeGitLabMr(first, false, true, input.payload);
+    return normalizeGitLabMr(first, false, true, input.payload, true);
   }
 
   public async create(input: {
@@ -320,7 +357,25 @@ function normalizeGitLabMr(
   created: boolean,
   updated: boolean,
   payload: Pick<ReviewRequestPayload, "sourceBranch" | "targetBranch">,
+  requireResponseBranches = false,
 ): PublishedReviewRequest {
+  const sourceBranch = gitLabBranch(
+    mr["source_branch"],
+    payload.sourceBranch,
+    "source",
+    requireResponseBranches,
+  );
+  const targetBranch = gitLabBranch(
+    mr["target_branch"],
+    payload.targetBranch,
+    "target",
+    requireResponseBranches,
+  );
+  if (sourceBranch !== payload.sourceBranch || targetBranch !== payload.targetBranch) {
+    throw new Error(
+      "GITLAB_PUBLICATION_MISMATCH: existing merge request does not match the requested source and target branches",
+    );
+  }
   return PublishedReviewRequestSchema.parse({
     host: "gitlab",
     url: String(mr["web_url"]),
@@ -330,11 +385,24 @@ function normalizeGitLabMr(
     draft: String(mr["title"] ?? "")
       .toLowerCase()
       .startsWith("draft:"),
-    sourceBranch: payload.sourceBranch,
-    targetBranch: payload.targetBranch,
+    sourceBranch,
+    targetBranch,
     created,
     updated,
   });
+}
+
+function gitLabBranch(
+  value: unknown,
+  expected: string,
+  role: "source" | "target",
+  required: boolean,
+): string {
+  if (typeof value === "string" && value.trim().length > 0) return value;
+  if (required) {
+    throw new Error(`GITLAB_PUBLICATION_MALFORMED: existing merge request has no ${role} branch`);
+  }
+  return expected;
 }
 
 function gitLabUploadUrl(input: {

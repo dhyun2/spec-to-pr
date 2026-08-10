@@ -1167,6 +1167,14 @@ export class PublisherService {
       );
       await this.assertPublicationFenceCurrent(input);
 
+      const publisher = this.publishers[input.plan.target.host];
+      await publisher.preflight?.({
+        target: input.plan.target,
+        token: input.token,
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+      });
+      input.signal?.throwIfAborted();
+
       if (input.pushBranch) {
         await this.git(publicationProjectRoot(input.run), [
           "push",
@@ -1179,7 +1187,6 @@ export class PublisherService {
       }
       input.signal?.throwIfAborted();
 
-      const publisher = this.publishers[input.plan.target.host];
       const prepared = await this.preparePayloadForPublish({
         run: input.run,
         plan: input.plan,
@@ -1331,6 +1338,12 @@ export class PublisherService {
       );
       await this.assertPublicationFenceCurrent(input);
       const publisher = this.publishers[input.plan.target.host];
+      await publisher.preflight?.({
+        target: input.plan.target,
+        token: input.token,
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+      });
+      input.signal?.throwIfAborted();
       const prepared = await this.preparePayloadForPublish({
         run: input.run,
         plan: input.plan,

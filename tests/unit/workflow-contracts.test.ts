@@ -173,6 +173,13 @@ describe("workflow v2 contracts", () => {
     });
     const { headSha: _headSha, ...unbound } = evidence;
     expect(VisualRepairEvidenceV2Schema.safeParse(unbound).success).toBe(false);
+
+    const { captureSummary: _captureSummary, ...legacyImportTarget } = evidence.failedTargets[0];
+    const receiptlessLegacyImport = {
+      ...evidence,
+      failedTargets: [legacyImportTarget],
+    };
+    expect(VisualRepairEvidenceV2Schema.safeParse(receiptlessLegacyImport).success).toBe(true);
   });
 
   it("binds closed visual lineage outcomes to the committed renderer lineage", () => {

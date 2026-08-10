@@ -765,6 +765,32 @@ describe("PublisherService", () => {
     ]);
   });
 
+  it("does not push when the review-host API preflight fails", async () => {
+    const run = await runService.createRun({ projectRoot });
+    await markRunReadyForPublish(run.id);
+    const report = await prReportService.generatePrReport({ runId: run.id });
+    githubPublisher.preflightError = new Error(
+      "GITLAB_API_PREFLIGHT_FAILED: certificate chain cannot be verified",
+    );
+
+    const published = await publisherService.publish({
+      runId: run.id,
+      reportArtifactId: report.markdownArtifactId,
+      sourceBranch: "spec-to-pr/run-1",
+      targetBranch: "main",
+      pushBranch: true,
+      confirm: true,
+    });
+
+    expect(published.result).toMatchObject({
+      status: "failed",
+      errorCode: "PUBLISH_FAILED",
+      errorMessage: expect.stringContaining("GITLAB_API_PREFLIGHT_FAILED"),
+    });
+    expect(gitCalls.some((args) => args[0] === "push")).toBe(false);
+    expect(githubPublisher.createdPayloads).toHaveLength(0);
+  });
+
   it("requires a clean tree and returns a typed result without committed source-branch changes", async () => {
     const run = await runService.createRun({ projectRoot });
     await markRunReadyForPublish(run.id);
@@ -3490,6 +3516,7 @@ class FakePublisher implements ReviewRequestPublisher {
   public failCreate = false;
   public failAssetUpload = false;
   public assetUploadError: Error | undefined;
+  public preflightError: Error | undefined;
   public visualAssetsEmbeddable = true;
   public existingRequest: PublishedReviewRequest | undefined;
   public forceNonDraftResult = false;
@@ -3501,6 +3528,11 @@ class FakePublisher implements ReviewRequestPublisher {
     | undefined;
 
   public constructor(private readonly host: "github" | "gitlab") {}
+
+  public async preflight(input: { signal?: AbortSignal }): Promise<void> {
+    this.receivedSignals.push(input.signal);
+    if (this.preflightError !== undefined) throw this.preflightError;
+  }
 
   public async findExisting(input: {
     signal?: AbortSignal;

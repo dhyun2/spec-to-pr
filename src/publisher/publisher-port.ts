@@ -92,6 +92,8 @@ export class ReviewRequestSynchronizationError extends Error {
 }
 
 export interface ReviewRequestPublisher {
+  preflight?(input: { target: PublishTarget; token: string; signal?: AbortSignal }): Promise<void>;
+
   findExisting(input: {
     target: PublishTarget;
     payload: ReviewRequestPayload;

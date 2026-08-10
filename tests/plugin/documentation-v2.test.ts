@@ -657,6 +657,7 @@ describe("v2 documentation", () => {
       "040-use-a-92-percent-visual-gate-and-terminal-feedback-drafts.md",
       "041-optimize-capture-reuse-review-concurrency-and-reasoning.md",
       "042-use-progressive-evidence-gates-and-reviewer-first-drafts-for-1.0.md",
+      "043-use-revision-cycles-and-recoverable-publication.md",
     ]);
     expect(relativeFiles(path.join(root, "website", "docs"))).toEqual([
       "concepts/comparison.mdx",

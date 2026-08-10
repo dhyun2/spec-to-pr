@@ -110,6 +110,7 @@ import {
   resolveModelRouting,
 } from "../workflow/index.js";
 import {
+  reopenImplementationForRevision,
   reopenImplementationForReviewChanges,
   reopenImplementationForVisualRepair,
   terminalizeVisualThresholdFailure,
@@ -1131,15 +1132,14 @@ export class WorkflowService {
     view: MutatingStatusView,
   ): Promise<MutatingWorkflowStatus> {
     const input = WorkflowSubmitInputSchema.parse(rawInput);
-    const run = await this.dependencies.runStore.get(input.runId);
+    let run = await this.dependencies.runStore.get(input.runId);
     const submission = input.submission;
     if (submission.kind === "legacy-network-evidence") {
       return this.submitLegacyNetworkEvidence(run, submission.evidencePath, view);
     }
     if (
       submission.kind === "visual-comparison" ||
-      ((submission.kind === "contracts" || submission.kind === "implementation") &&
-        submission.status === "passed")
+      (submission.kind === "contracts" && submission.status === "passed")
     ) {
       await this.assertLegacyReferenceFresh(run);
     }
@@ -1149,6 +1149,33 @@ export class WorkflowService {
     }
     assertSubmissionPrerequisites(run, submission, this.now());
     await assertDraftBundleIntegrity(run, submission);
+    let implementationSnapshot: GitSnapshot | undefined;
+    if (
+      submission.kind === "implementation" &&
+      submission.status === "passed" &&
+      stage(run, "implementation").status === "passed"
+    ) {
+      implementationSnapshot = await captureGitSnapshot(run, this.metrics, this.now());
+      assertChangedFilesMatch(submission.changedFiles, implementationSnapshot.changedFiles);
+      const currentPacket = reviewPacketFromRun(run);
+      if (stage(run, "implementation").status === "passed") {
+        const currentSnapshotMatches =
+          currentPacket !== undefined &&
+          currentPacket.headSha === implementationSnapshot.headSha &&
+          currentPacket.diffDigest === implementationSnapshot.diffDigest &&
+          sameStrings(currentPacket.changedFiles, implementationSnapshot.changedFiles);
+        if (currentSnapshotMatches) {
+          return this.mutatingStatus(run.id, view);
+        }
+        const reopened = reopenImplementationForRevision(
+          run,
+          "The committed implementation changed after its review packet was frozen. A new packet is required.",
+          this.now,
+        );
+        await this.dependencies.runStore.save(reopened, run.revision);
+        run = await this.dependencies.runStore.get(run.id);
+      }
+    }
     const reviewStage =
       submission.kind === "functional-review" || submission.kind === "design-review"
         ? submission.kind
@@ -1164,10 +1191,11 @@ export class WorkflowService {
     if (submission.kind === "implementation") {
       await this.assertEvidenceFingerprintInputs(run.projectRoot, submission.evidenceFingerprints);
     }
-    const implementationSnapshot =
-      submission.kind === "implementation" && submission.status === "passed"
+    implementationSnapshot =
+      implementationSnapshot ??
+      (submission.kind === "implementation" && submission.status === "passed"
         ? await captureGitSnapshot(run, this.metrics, this.now())
-        : undefined;
+        : undefined);
     if (submission.kind === "implementation" && implementationSnapshot !== undefined) {
       assertChangedFilesMatch(submission.changedFiles, implementationSnapshot.changedFiles);
     }
@@ -3954,15 +3982,17 @@ export class WorkflowService {
       packet,
       submissionIdentity,
       rendererLineageId,
-      async (current) =>
-        this.assertVisualBaselineIsolation(
+      async (current) => {
+        await this.assertVisualBaselineIsolation(
           current,
           packet,
           submission,
           targets,
           boundEvidenceArtifacts,
           preparedContent,
-        ),
+        );
+        await assertReviewPacketFresh(current, this.dependencies.artifactStore, this.metrics);
+      },
     );
     if (reservationResult.kind === "busy") {
       throw new Error(
@@ -4395,11 +4425,7 @@ export class WorkflowService {
       .filter((result) => result["status"] === "failed")
       .map((result) => {
         const captureSummary = result["captureSummary"];
-        if (typeof captureSummary !== "object" || captureSummary === null) {
-          throw new Error(
-            `VISUAL_REPAIR_EVIDENCE_INCOMPLETE: failed target ${String(result["targetId"])} has no strict capture receipt`,
-          );
-        }
+        const hasCaptureSummary = typeof captureSummary === "object" && captureSummary !== null;
         const metrics =
           typeof result["metrics"] === "object" && result["metrics"] !== null
             ? (result["metrics"] as Record<string, unknown>)
@@ -4414,8 +4440,13 @@ export class WorkflowService {
         ) {
           causeHints.push("implementation");
         }
-        const captureFacts = captureSummary as Record<string, unknown>;
-        if (captureFacts["fontsReady"] !== true || captureFacts["assetsReady"] !== true) {
+        const captureFacts = hasCaptureSummary
+          ? (captureSummary as Record<string, unknown>)
+          : undefined;
+        if (
+          captureFacts !== undefined &&
+          (captureFacts["fontsReady"] !== true || captureFacts["assetsReady"] !== true)
+        ) {
           causeHints.push("acquisition");
         }
         if (causeHints.length === 0) {
@@ -4434,7 +4465,7 @@ export class WorkflowService {
           metrics: result["metrics"],
           diffArtifactId: result["diffArtifactId"],
           overlayArtifactId: result["overlayArtifactId"],
-          captureSummary,
+          ...(captureFacts === undefined ? {} : { captureSummary }),
           causeHints,
         };
       });
@@ -4670,7 +4701,6 @@ export class WorkflowService {
       if (rendererLineageId !== undefined) {
         assertRendererLineageMatchesCommittedAttempts(current, packet, rendererLineageId);
       }
-      await validateBeforeReservation?.(current);
       const events = visualAttemptReservations(current, visualLineageId(packet));
       const summary = reduceVisualReservations(events, this.now());
       const committedReplay = summary.committed.find(
@@ -4688,6 +4718,7 @@ export class WorkflowService {
         this.metrics.gauge("visual.peak_workers", 1, { stage: "implementation" });
         return { kind: "busy", reservation: summary.active };
       }
+      await validateBeforeReservation?.(current);
       if (summary.recoverable !== undefined) {
         const latestRecoverableEvent = [...events]
           .reverse()
@@ -4933,7 +4964,7 @@ export class WorkflowService {
     const legacyApiDiscoveryAdapters = legacyApiDiscoveryAdaptersFromRun(run);
     const visualArtifact = currentVisualReport(run, packet.id);
     let visualReport: Record<string, unknown> | undefined;
-    if (profile.requirements.visualComparison) {
+    if (sectionApplicability.visual) {
       if (visualArtifact?.metadata["visualStatus"] !== "passed") {
         throw new Error("PR report requires a passing current-packet visual comparison");
       }
@@ -5035,7 +5066,11 @@ export class WorkflowService {
         ...(visualArtifact === undefined ? {} : { reportArtifactId: visualArtifact.id }),
         attempt: typeof visualReport?.["attempt"] === "number" ? visualReport["attempt"] : 0,
         status:
-          visualArtifact === undefined ? "not-applicable" : visualArtifact.metadata["visualStatus"],
+          visualArtifact === undefined
+            ? sectionApplicability.visual
+              ? "not-run"
+              : "not-applicable"
+            : visualArtifact.metadata["visualStatus"],
         results: Array.isArray(visualReport?.["results"]) ? visualReport["results"] : [],
       },
       reviews: reviews.map((review) => ({
@@ -6251,20 +6286,49 @@ function reconstructWorkflowBlocker(
   );
   return WorkflowBlockerSchema.parse({
     stage: blocker.stage,
-    code: blockerCodeForKind(blocker.kind),
+    code: safeWorkflowDiagnostic(blocker.code) ? blocker.code : blockerCodeForKind(blocker.kind),
     kind: blocker.kind,
-    summary: genericBlockerSummary(blocker.stage, blocker.kind),
+    summary: safeWorkflowDiagnostic(blocker.summary)
+      ? blocker.summary
+      : genericBlockerSummary(blocker.stage, blocker.kind),
     retryable: blocker.retryable,
     resumable: blocker.resumable,
-    completedWork: completedWorkForRun(run),
+    completedWork: uniqueSafeWorkflowDiagnostics(blocker.completedWork, completedWorkForRun(run)),
     evidencePaths: blocker.evidencePaths.filter(
       (evidencePath) =>
         isSafeDurableEvidencePath(evidencePath) && trustedEvidencePaths.has(evidencePath),
     ),
-    attemptedRecovery: attemptedRecoveryForStage(failedStage),
-    unrunValidations: remainingValidationsForRun(run, requiredValidations),
-    exactUnblockAction: genericUnblockAction(blocker.stage, blocker.kind),
+    attemptedRecovery: uniqueSafeWorkflowDiagnostics(
+      blocker.attemptedRecovery,
+      attemptedRecoveryForStage(failedStage),
+    ),
+    unrunValidations: uniqueSafeWorkflowDiagnostics(
+      blocker.unrunValidations,
+      remainingValidationsForRun(run, requiredValidations),
+    ),
+    exactUnblockAction: safeWorkflowDiagnostic(blocker.exactUnblockAction)
+      ? blocker.exactUnblockAction
+      : genericUnblockAction(blocker.stage, blocker.kind, blocker.code),
   });
+}
+
+const UNSAFE_WORKFLOW_DIAGNOSTIC_PATTERNS = [
+  /\b(?:gh[pousr]_|github_pat_|glpat-|sk-)[A-Za-z0-9_-]{8,}\b/i,
+  /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/,
+  /\b(?:authorization|private-token)\b|\bBearer\s+/i,
+  /(?:^|[/\\])(?:Users|root|home)(?:[/\\]|$)/i,
+  /[A-Z]:\\(?:Users|Documents|\.ssh)\b/i,
+  /\\\\[^\\]+\\/,
+  /(?:^|[^A-Za-z0-9])(?:access[_-]?key|secret(?:[_-][A-Za-z]+)*|private[_-]?key|password|credential)(?:$|[^A-Za-z0-9])/i,
+];
+
+function safeWorkflowDiagnostic(value: string): boolean {
+  return !UNSAFE_WORKFLOW_DIAGNOSTIC_PATTERNS.some((pattern) => pattern.test(value));
+}
+
+function uniqueSafeWorkflowDiagnostics(values: string[], fallback: string[]): string[] {
+  const safeValues = values.filter(safeWorkflowDiagnostic);
+  return [...new Set([...safeValues, ...fallback])].slice(0, 20);
 }
 
 function blockerCodeForKind(kind: WorkflowBlocker["kind"]): string {
@@ -7298,6 +7362,13 @@ function assertSubmissionPrerequisites(
     (submission.kind === "functional-review" || submission.kind === "design-review") &&
     stage(run, "implementation").status !== "passed"
   ) {
+    if (
+      submission.kind === "design-review" &&
+      submission.verdict === "approved" &&
+      scopeFromRun(run).ui
+    ) {
+      assertCurrentVisualComparisonPassed(run, submission.reviewPacketId, nowIso);
+    }
     throw new Error("The implementation stage must pass before review begins");
   }
   if (submission.kind === "design-review" && !scopeFromRun(run).ui) {
@@ -8789,11 +8860,18 @@ function reportSectionApplicabilityForRun(
 ): ReportSectionApplicability {
   const scope = scopeFromRun(run);
   const policy = deliveryPolicyForRun(run, scope, profile);
-  if (policy !== undefined) return policy.sectionApplicability;
+  const visualApplicable =
+    scope.ui || profile.requirements.visualComparison || visualTargetsFromRun(run).length > 0;
+  if (policy !== undefined) {
+    return {
+      ...policy.sectionApplicability,
+      visual: policy.sectionApplicability.visual || visualApplicable,
+    };
+  }
   return {
     api: profile.requirements.apiCoverage || scope.api,
     legacy: profile.requirements.legacyInventory,
-    visual: profile.requirements.visualComparison,
+    visual: visualApplicable,
     "functional-review": true,
     "design-review": scope.ui,
     performance: profile.requirements.performanceEvidence,

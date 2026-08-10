@@ -1776,7 +1776,8 @@ export const VisualRepairEvidenceV2Schema = z
                 fontsReady: z.boolean(),
                 assetsReady: z.boolean(),
               })
-              .strict(),
+              .strict()
+              .optional(),
             causeHints: z.array(
               z.enum([
                 "implementation",
