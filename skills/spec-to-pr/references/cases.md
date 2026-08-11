@@ -38,7 +38,7 @@ request: Mapfinder를 Vue 3 MPA entry로 이관해줘
 
 - `legacyProjectRoot`와 `targetPaths`는 이름 유사성으로 추론하지 않습니다. 받은 경로와 불일치하면 구현 전에 보고합니다.
 - 레거시 프로젝트는 절대 수정하지 않습니다.
-- 이관은 **재디자인이 아닙니다.** 사용자가 명시적으로 승인하지 않은 한 레거시 template/DOM class, CSS, sprite·이미지 자산, 지도·검색·필터·하단 컨트롤, 사용자 동작을 보존하고 Vue 3 문법·MPA 진입점만 변환합니다.
+- 이관은 **재디자인이 아닙니다.** 사용자가 명시적으로 승인하지 않은 한 레거시 template/DOM class, CSS, sprite·이미지 자산, 지도·검색·필터·하단 컨트롤, 사용자 동작을 보존합니다. 반면 script·state·router·utility는 대상 저장소의 Vue 3 규격으로 변환합니다. UI 보존을 이유로 Options API·mixin·Vuex 호환층을 그대로 남기지 않습니다.
 - 레거시 이관에는 대상 디자인 시스템을 적용하지 않습니다. 기존 프로젝트 셸과 빌드 연결은 사용해도 되지만, `@frontend/ui` 같은 새 Chip·Icon·컴포넌트로 화면을 대체하지 않습니다.
 - Unicode glyph/emoji, 문자·CSS로 그린 로고·지도 핀·아이콘, 회색 지도 박스, mock/placeholder carousel·bridge는 보존 이관에서 금지합니다.
 
@@ -53,7 +53,7 @@ node /absolute/path/to/legacy-source-inventory.cjs \
   --output /absolute/path/to/project/spec-to-pr-evidence/mapfinder/legacy-source-inventory.json
 ```
 
-이 도구는 지정한 source path에서 route, `url(...)`/image asset, CSS selector, media breakpoint, Kakao Map·Swiper·native bridge 표식을 수집합니다. 추출 결과는 완전한 의미 해석이 아니라 **빠뜨리지 않기 위한 최소 inventory**입니다. 따라서 발견한 항목을 다음 mapping에 1:1로 연결합니다.
+이 도구는 지정한 source path를 이관 범위로 고정하고 상대 경로·`@/` local import를 읽기 전용으로 따라가 supporting dependency를 별도로 기록합니다. route 선언과 `router.push`, `viewOpen`, `location.href`, router-link, template literal 경로, `url(...)`/image asset, CSS selector, media breakpoint, Kakao Map·Swiper·native bridge 표식을 수집합니다. 해석하지 못한 import는 `warnings`에 남기며 중단하지 않습니다. supporting dependency는 조사 범위일 뿐 이관 `targetPaths`를 자동 확장하지 않습니다.
 
 - asset: 원본 asset → 대상 파일 또는 canonical URL
 - selector/breakpoint: 원본 selector·반응형 조건 → 실제 대상 CSS
@@ -78,13 +78,23 @@ Computer Use가 현재 호스트에 노출되지 않았거나 동일 조건의 P
 
 기본 지도 한 장을 `1/1 통과`로 기록해 전체 이관을 통과 처리할 수 없습니다. 전체 PR에는 `통과/전체`, `미달`, `비교 불가`, `명시적 제외`를 함께 보여 줍니다.
 
+### 라우트 동작 확인은 가볍게 필수
+
+전체 E2E suite나 영상은 만들지 않습니다. 대신 각 비교 화면에 실제 fixture 출처, 최종 URL, 핵심 selector/text, 필요한 API·인증 결과, 관련 console/network 오류를 기록합니다. 여러 화면이 연결되면 홈→카드 클릭→상세처럼 대표 클릭·선택 전환을 한 건 이상 수행합니다. 위험한 POST/PATCH/DELETE 확정은 실행하지 않고 그 직전까지 확인해도 됩니다.
+
+동적 파라미터는 레거시 화면 또는 read API에서 확인한 실제 값을 사용합니다. `0`, `test`, `today` 같은 임의 값, 예상 밖 빈 화면·loading·오류, authenticated 문자열만 있고 인증 성공 증거가 없는 상태, 필수 API 비-2xx/CORS, 관련 console/network 오류는 픽셀 일치율이 높아도 Gap입니다.
+
+### UI 보존과 Vue 3 규격을 별도로 확인
+
+`AGENTS.md`, package 설정, 인접 표준 페이지를 근거로 `targetCodeProfile`을 작성합니다. 대상 규격이 `<script setup lang="ts">`, Pinia, Vue Router 4라면 Options API, mixin, Vuex adapter, Vue 2 Event Bus, 신규 JavaScript 파일이 남은 수를 확인합니다. 미달은 구현을 중단하지 않지만 `NOT VERIFIED` Gap입니다.
+
 ### 증빙 manifest
 
 `spec-to-pr-evidence/<change>/legacy-visual-manifest.json`에 아래 형식으로 기록합니다. 파일 경로는 manifest가 있는 evidence 디렉터리 기준 상대 경로입니다.
 
 ```json
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "case": "legacy",
   "change": "mapfinder",
   "legacyProjectRoot": "/absolute/path/to/legacy-project",
@@ -165,6 +175,69 @@ Computer Use가 현재 호스트에 노출되지 않았거나 동일 조건의 P
       "status": "preserved"
     }
   ],
+  "routeChecks": [
+    {
+      "id": "map-default",
+      "inventoryId": "map-default",
+      "entry": { "type": "direct", "action": "기본 지도 진입" },
+      "expectedUrlPattern": "/map",
+      "expectedScreen": "content",
+      "apiExpectation": { "requirement": "required" },
+      "fixture": {
+        "summary": "QA 로그인·현재 위치",
+        "parameters": []
+      },
+      "baseline": {
+        "finalUrl": "/map",
+        "screenState": "content",
+        "assertions": [
+          {
+            "label": "검색·필터·지도 하단 컨트롤",
+            "kind": "selector",
+            "expected": ".map-controls",
+            "status": "passed"
+          }
+        ],
+        "auth": { "status": "passed", "kind": "api-2xx", "evidence": "사용자 상태 API" },
+        "apiChecks": [
+          { "request": "GET /user/status", "purpose": "auth", "status": 200, "result": "passed" },
+          { "request": "GET /shops", "purpose": "data", "status": 200, "result": "passed" }
+        ],
+        "diagnosticsChecked": true,
+        "relevantConsoleErrors": [],
+        "relevantNetworkErrors": []
+      },
+      "target": {
+        "finalUrl": "/map",
+        "screenState": "content",
+        "assertions": [
+          {
+            "label": "검색·필터·지도 하단 컨트롤",
+            "kind": "selector",
+            "expected": ".map-controls",
+            "status": "passed"
+          }
+        ],
+        "auth": { "status": "passed", "kind": "api-2xx", "evidence": "사용자 상태 API" },
+        "apiChecks": [
+          { "request": "GET /user/status", "purpose": "auth", "status": 200, "result": "passed" },
+          { "request": "GET /shops", "purpose": "data", "status": 200, "result": "passed" }
+        ],
+        "diagnosticsChecked": true,
+        "relevantConsoleErrors": [],
+        "relevantNetworkErrors": []
+      }
+    }
+  ],
+  "targetCodeProfile": {
+    "framework": "vue3",
+    "evidenceSources": ["AGENTS.md", "apps/gzApp/package.json"],
+    "componentStyle": "script-setup",
+    "language": "typescript",
+    "stateManagement": "pinia",
+    "router": "vue-router-4",
+    "legacyCompatibility": "forbidden"
+  },
   "publishing": {
     "plugin": {
       "status": "failed",
@@ -180,7 +253,7 @@ Computer Use가 현재 호스트에 노출되지 않았거나 동일 조건의 P
 }
 ```
 
-`legacy-visual-evidence.cjs`는 전체 이미지와 `criticalRegions`를 모두 비교하고, Computer Use 우선 capture policy·fallback 공개, route/asset/CSS/runtime mapping, glyph/placeholder 대체, 발행 실패를 검증합니다. PR section은 경로·상태별 레거시와 Vue 3 이미지를 좌우로 놓고 Diff 링크를 바로 아래에 생성하며, 별도의 요약형 화면 비교 표를 만들지 않습니다. 큰 빈 지도 영역이 높은 점수를 만들어도 검색·필터·목록·하단 컨트롤 영역이 미달하면 해당 상태는 통과가 아닙니다.
+`legacy-visual-evidence.cjs`는 전체 이미지와 `criticalRegions`, routeChecks, targetCodeProfile을 함께 검증합니다. Computer Use 우선 capture policy·fallback 공개, route/asset/CSS/runtime mapping, glyph/placeholder 대체, 발행 실패도 확인합니다. PR section은 상단 Gap, 간결한 라우트 동작 표, 경로·상태별 레거시와 Vue 3 좌우 이미지와 Diff, Vue 3 규격 결과를 생성합니다. 큰 빈 지도 영역이나 동일한 오류 화면은 픽셀이 같아도 통과가 아닙니다.
 
 ### 이미지 전달
 

@@ -1,5 +1,14 @@
 # 변경 이력
 
+## 1.0.5 - 2026-08-11
+
+### 수정
+
+- 레거시 source inventory가 정확한 이관 경로는 유지하면서 local import graph를 읽기 전용으로 추적하고, supporting dependency·실제 navigation·Kakao/Swiper wrapper를 수집합니다. 해석 실패는 구현을 멈추지 않고 Gap으로 남깁니다.
+- schema v4 `routeChecks`는 전체 E2E 대신 실제 fixture, 최종 URL, 구체적인 selector/text 기대값, API 필요 여부·인증 결과, console/network 진단 여부와 관련 오류, 대표 클릭 전환을 검증합니다. 빈 화면·loading·오류·임의 파라미터·전체 viewport뿐인 핵심 영역은 픽셀이 같아도 통과하지 않습니다.
+- 레거시 화면 계약 보존과 Vue 3 구현 현대화를 분리했습니다. 대상 저장소가 요구하는 `<script setup lang="ts">`, Pinia, Vue Router 4 규격과 Options API·mixin·Vuex/Event Bus 호환층 잔존을 `targetCodeProfile`로 검증합니다.
+- 레거시 PR은 핵심 Gap을 상단에 두고 라우트 동작, 좌우 이미지와 Diff, Vue 3 규격만 간결하게 표시하며 빈 Gap·제외 표와 반복 로그를 생략합니다.
+
 ## 1.0.4 - 2026-08-10
 
 ### 수정

@@ -80,6 +80,11 @@ assert(
     skill.includes("legacy-source-inventory.cjs") &&
     skill.includes("모든 사용자 노출 route·대표 상태") &&
     skill.includes("Computer Use") &&
+    skill.includes("routeChecks") &&
+    skill.includes("targetCodeProfile") &&
+    skill.includes("실제 fixture") &&
+    skill.includes("API 필요 여부") &&
+    skill.includes("진단 실행 여부") &&
     skill.includes("@frontend/ui") &&
     skill.includes("Unicode glyph"),
   "Legacy delivery must prefer Computer Use, verify routes, assets, CSS, runtime UI, and preserve legacy UI without replacements",
@@ -94,6 +99,9 @@ const templates = {
 };
 assert(
   templates.legacy.includes("좌우 이미지 비교") &&
+    templates.legacy.includes("라우트 동작 확인") &&
+    templates.legacy.includes("Vue 3 규격 이관") &&
+    templates.legacy.indexOf("GAP_SECTION_IF_ANY") < templates.legacy.indexOf("이관 범위") &&
     templates.legacy.includes("LEGACY_VISUAL_PAIRS_WITH_DIFF_LINKS") &&
     !templates.legacy.includes("## 화면 비교"),
   "Legacy template must show baseline and Vue 3 images side by side without a duplicate matrix",

@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -116,7 +116,7 @@ describe("legacy visual evidence", () => {
       provider: "browser",
       authState: "authenticated",
       capturedAt: "2026-08-10T00:00:00.000Z",
-      fallbackReason: "token=eyJhbGciOiJIUzI1NiJ9.payload.signature",
+      fallbackReason: ["token", "synthetic-secret"].join("="),
     };
 
     await expect(
@@ -125,6 +125,262 @@ describe("legacy visual evidence", () => {
         requireStaged: false,
       }),
     ).rejects.toThrow("fallbackReason must not contain cookie, token, or authorization values");
+  });
+
+  it("keeps schema v3 readable but does not call pixel-only evidence verified", async () => {
+    const manifest = createManifest();
+    manifest.schemaVersion = 3;
+    delete manifest.routeChecks;
+    delete manifest.targetCodeProfile;
+
+    const report = await buildLegacyEvidenceReport(manifest, {
+      projectRoot: await createProject(),
+      requireStaged: false,
+    });
+
+    expect(report.status).toBe("not-verified");
+    expect(report.targets[0]?.status).toBe("failed");
+    expect(report.markdown).toContain("실제 fixture");
+    expect(report.markdown).toContain("대상 저장소 코드 규격 증빙이 없어 Gap");
+  });
+
+  it("rejects blank runtime state, placeholder route values, API failures, and full-viewport critical regions", async () => {
+    const manifest = createManifest();
+    manifest.routeInventory[0]!.route = "/booking/take/new/:shopNo";
+    const check = manifest.routeChecks![0]!;
+    check.expectedUrlPattern = "/booking/take/new/:shopNo";
+    check.apiExpectation = { requirement: "required" };
+    check.fixture.parameters = [
+      {
+        name: "shopNo",
+        value: "test",
+        provenance: "legacy-runtime",
+        evidence: "레거시 화면의 임시 링크",
+      },
+    ];
+    check.baseline.finalUrl = "/booking/take/new/test";
+    check.target.finalUrl = "/booking/take/new/test";
+    check.target.screenState = "blank";
+    check.target.apiChecks = [
+      {
+        request: "GET /user/status/info",
+        purpose: "auth",
+        status: 404,
+        result: "failed",
+      },
+    ];
+    check.target.relevantNetworkErrors = ["CORS preflight 404"];
+    manifest.visualTargets[0]!.criticalRegions = [
+      { id: "whole-viewport", x: 0, y: 0, width: 10, height: 10 },
+    ];
+
+    const report = await buildLegacyEvidenceReport(manifest, {
+      projectRoot: await createProject(),
+      requireStaged: false,
+    });
+
+    expect(report.status).toBe("not-verified");
+    expect(report.targets[0]?.status).toBe("failed");
+    expect(report.gaps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ nextAction: expect.stringContaining("임의 값 test") }),
+        expect.objectContaining({ nextAction: expect.stringContaining("전체 viewport") }),
+      ]),
+    );
+    expect(report.markdown).toContain("CORS preflight 404");
+    expect(report.markdown).toContain("GET /user/status/info (404 · failed)");
+  });
+
+  it("keeps Draft evidence generation running when a critical UI region is missing", async () => {
+    const manifest = createManifest();
+    manifest.visualTargets[0]!.criticalRegions = [];
+
+    const report = await buildLegacyEvidenceReport(manifest, {
+      projectRoot: await createProject(),
+      requireStaged: false,
+    });
+
+    expect(report.status).toBe("not-verified");
+    expect(report.targets[0]?.status).toBe("failed");
+    expect(report.markdown).toContain("핵심 UI 영역이 유효하지 않음");
+  });
+
+  it("turns incomplete semantic proof into Gaps instead of blocking PR Markdown", async () => {
+    const manifest = createManifest();
+    const check = manifest.routeChecks![0]!;
+    check.entry.action = "";
+    check.target.assertions = [];
+    check.target.auth.evidence = "";
+    manifest.targetCodeProfile!.evidenceSources = ["missing-rules.md"];
+
+    const report = await buildLegacyEvidenceReport(manifest, {
+      projectRoot: await createProject(),
+      requireStaged: false,
+    });
+
+    expect(report.status).toBe("not-verified");
+    expect(report.markdown).toContain("## 핵심 Gap");
+    expect(report.markdown).toContain("핵심 selector/text 확인이 없습니다");
+    expect(report.markdown).toContain("대상 코드 규격 근거 파일을 찾을 수 없습니다");
+  });
+
+  it("requires explicit API applicability, concrete UI assertions, and completed diagnostics", async () => {
+    const manifest = createManifest();
+    const check = manifest.routeChecks![0]!;
+    delete check.apiExpectation;
+    check.target.assertions[0]!.expected = "";
+    check.target.diagnosticsChecked = false;
+
+    const report = await buildLegacyEvidenceReport(manifest, {
+      projectRoot: await createProject(),
+      requireStaged: false,
+    });
+
+    expect(report.status).toBe("not-verified");
+    expect(report.routeValidation.messages).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("API가 필요한지 여부"),
+        expect.stringContaining("selector/text 기대값"),
+        expect.stringContaining("콘솔·네트워크 진단"),
+      ]),
+    );
+  });
+
+  it("does not trust authenticated text without a 2xx auth request or matching user UI assertion", async () => {
+    const manifest = createManifest();
+    manifest.routeChecks![0]!.target.auth = {
+      status: "passed",
+      kind: "ui-assertion",
+      evidence: "존재하지 않는 사용자 UI",
+    };
+
+    const report = await buildLegacyEvidenceReport(manifest, {
+      projectRoot: await createProject(),
+      requireStaged: false,
+    });
+
+    expect(report.status).toBe("not-verified");
+    expect(report.routeValidation.messages).toEqual(
+      expect.arrayContaining([expect.stringContaining("인증 상태를 확인할 증거")]),
+    );
+  });
+
+  it("requires a discovered legacy click navigation to be proven as an interaction", async () => {
+    const projectRoot = await createProject();
+    const inventoryPath = path.join(
+      projectRoot,
+      "spec-to-pr-evidence/mapfinder/legacy-source-inventory.json",
+    );
+    const inventory = JSON.parse(await readFile(inventoryPath, "utf8")) as {
+      routes: Array<Record<string, unknown>>;
+    };
+    inventory.routes[0]!.scope = "migration";
+    inventory.routes[0]!.kind = "navigation";
+    await writeFile(inventoryPath, JSON.stringify(inventory), "utf8");
+
+    const report = await buildLegacyEvidenceReport(createManifest(), {
+      projectRoot,
+      requireStaged: false,
+    });
+
+    expect(report.status).toBe("not-verified");
+    expect(report.sourcePreservation.messages).toEqual(
+      expect.arrayContaining([expect.stringContaining("직접 URL로만 검증")]),
+    );
+  });
+
+  it("accepts a real dynamic fixture and renders compact route and code proof without empty sections", async () => {
+    const manifest = createManifest();
+    manifest.routeInventory[0]!.route = "/booking/take/new/:shopNo";
+    const check = manifest.routeChecks![0]!;
+    check.expectedUrlPattern = "/booking/take/new/:shopNo";
+    check.apiExpectation = { requirement: "required" };
+    check.fixture.parameters = [
+      {
+        name: "shopNo",
+        value: "9327",
+        provenance: "legacy-runtime",
+        evidence: "홈 매장 카드 클릭 후 최종 URL",
+      },
+    ];
+    check.baseline.finalUrl = "/booking/take/new/9327";
+    check.target.finalUrl = "/booking/take/new/9327";
+    check.baseline.apiChecks = [
+      {
+        request: "GET /user/status/info",
+        purpose: "auth",
+        status: 200,
+        result: "passed",
+      },
+      {
+        request: "GET /shops/9327",
+        purpose: "data",
+        status: 200,
+        result: "passed",
+      },
+    ];
+    check.target.apiChecks = [
+      {
+        request: "GET /user/status/info",
+        purpose: "auth",
+        status: 200,
+        result: "passed",
+      },
+      {
+        request: "GET /shops/9327",
+        purpose: "data",
+        status: 200,
+        result: "passed",
+      },
+    ];
+
+    const projectRoot = await createProject();
+    const inventoryPath = path.join(
+      projectRoot,
+      "spec-to-pr-evidence/mapfinder/legacy-source-inventory.json",
+    );
+    const inventory = JSON.parse(await readFile(inventoryPath, "utf8")) as {
+      routes: Array<{ route: string }>;
+    };
+    inventory.routes[0]!.route = "/booking/take/new/:shopNo";
+    await writeFile(inventoryPath, JSON.stringify(inventory), "utf8");
+    const report = await buildLegacyEvidenceReport(manifest, {
+      projectRoot,
+      requireStaged: false,
+    });
+
+    expect(report.status).toBe("verified");
+    expect(report.markdown).toContain("## 라우트 동작 확인");
+    expect(report.markdown).toContain("shopNo=9327 (legacy-runtime)");
+    expect(report.markdown).toContain("## Vue 3 규격 이관");
+    expect(report.markdown).not.toContain("## 핵심 Gap");
+    expect(report.markdown).not.toContain("## 비교 제외");
+  });
+
+  it("marks preserved UI with Vue 2 compatibility code as a target-code Gap", async () => {
+    const projectRoot = await createProject(`<script lang="js">
+import { mapGetters } from './stores';
+export default { mixins: [], computed: { ...mapGetters(['user']) } };
+</script>
+<template><main>Shop</main></template>
+`);
+    const manifest = createManifest();
+    manifest.targetCodeProfile = {
+      framework: "vue3",
+      evidenceSources: ["AGENTS.md"],
+      componentStyle: "script-setup",
+      language: "typescript",
+      stateManagement: "pinia",
+      router: "not-applicable",
+      legacyCompatibility: "forbidden",
+    };
+
+    const report = await buildLegacyEvidenceReport(manifest, { projectRoot, requireStaged: false });
+
+    expect(report.status).toBe("not-verified");
+    expect(report.codeConformance.status).toBe("gap");
+    expect(report.markdown).toContain("0/1 script setup");
+    expect(report.markdown).toContain("Vuex 호환 계층");
   });
 
   it("runs as the bundled plugin script and emits a reviewable report", async () => {
@@ -258,6 +514,7 @@ async function createProject(source = "export default {};\n"): Promise<string> {
     mkdir(path.join(projectRoot, "apps/gzApp/src/pages/mapfinder"), { recursive: true }),
     mkdir(evidence, { recursive: true }),
   ]);
+  await writeFile(path.join(projectRoot, "AGENTS.md"), "Use Vue 3 and TypeScript.\n");
   await writeFile(
     path.join(projectRoot, "apps/gzApp/src/pages/mapfinder/MapfinderPage.vue"),
     source,
@@ -286,7 +543,7 @@ async function createProject(source = "export default {};\n"): Promise<string> {
 
 function createManifest(): LegacyVisualManifest {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     case: "legacy",
     change: "mapfinder",
     legacyProjectRoot: "/legacy/mapfinder",
@@ -345,6 +602,80 @@ function createManifest(): LegacyVisualManifest {
     selectorMappings: [],
     breakpointMappings: [],
     runtimeMappings: [],
+    routeChecks: [
+      {
+        id: "map-default",
+        inventoryId: "map-default",
+        entry: { type: "direct", action: "기본 지도 진입" },
+        expectedUrlPattern: "/map",
+        expectedScreen: "content",
+        apiExpectation: { requirement: "not-required", reason: "정적 지도 shell 비교" },
+        fixture: { summary: "QA 로그인 지도 fixture" },
+        baseline: {
+          finalUrl: "/map",
+          screenState: "content",
+          assertions: [
+            {
+              label: "지도 하단 컨트롤",
+              kind: "selector",
+              expected: ".map-controls",
+              status: "passed",
+            },
+            {
+              label: "사용자 로그인 상태",
+              kind: "text",
+              expected: "내 위치",
+              status: "passed",
+            },
+          ],
+          auth: {
+            status: "passed",
+            kind: "ui-assertion",
+            evidence: "사용자 로그인 상태",
+          },
+          apiChecks: [],
+          diagnosticsChecked: true,
+          relevantConsoleErrors: [],
+          relevantNetworkErrors: [],
+        },
+        target: {
+          finalUrl: "/map",
+          screenState: "content",
+          assertions: [
+            {
+              label: "지도 하단 컨트롤",
+              kind: "selector",
+              expected: ".map-controls",
+              status: "passed",
+            },
+            {
+              label: "사용자 로그인 상태",
+              kind: "text",
+              expected: "내 위치",
+              status: "passed",
+            },
+          ],
+          auth: {
+            status: "passed",
+            kind: "ui-assertion",
+            evidence: "사용자 로그인 상태",
+          },
+          apiChecks: [],
+          diagnosticsChecked: true,
+          relevantConsoleErrors: [],
+          relevantNetworkErrors: [],
+        },
+      },
+    ],
+    targetCodeProfile: {
+      framework: "vue3",
+      evidenceSources: ["AGENTS.md"],
+      componentStyle: "options-api-allowed",
+      language: "mixed",
+      stateManagement: "not-applicable",
+      router: "not-applicable",
+      legacyCompatibility: "allowed",
+    },
   };
 }
 

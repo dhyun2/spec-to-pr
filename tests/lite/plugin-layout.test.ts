@@ -33,6 +33,10 @@ describe("SpecToPR Lite package", () => {
     expect(skill).toContain("보존 이관");
     expect(skill).toContain("Computer Use");
     expect(skill).toContain("legacy-visual-evidence.cjs");
+    expect(skill).toContain("routeChecks");
+    expect(skill).toContain("targetCodeProfile");
+    expect(skill).toContain("API 필요 여부");
+    expect(skill).toContain("진단 실행 여부");
     expect(skill).toContain("`brief`와 `feature`");
     expect(skill).toContain("test: on");
     expect(skill).toContain("TDD");
@@ -47,6 +51,11 @@ describe("SpecToPR Lite package", () => {
 
     expect(legacyTemplate).toContain("좌우 이미지 비교");
     expect(legacyTemplate).toContain("LEGACY_VISUAL_PAIRS_WITH_DIFF_LINKS");
+    expect(legacyTemplate).toContain("라우트 동작 확인");
+    expect(legacyTemplate).toContain("Vue 3 규격 이관");
+    expect(legacyTemplate.indexOf("GAP_SECTION_IF_ANY")).toBeLessThan(
+      legacyTemplate.indexOf("이관 범위"),
+    );
     expect(legacyTemplate).not.toContain("## 화면 비교");
     expect(briefTemplate).toContain("요구사항 충족");
     expect(featureTemplate).toContain("사용자 흐름 영상");

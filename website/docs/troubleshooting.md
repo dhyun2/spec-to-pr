@@ -21,7 +21,11 @@ legacy 기본은 Computer Use입니다. 현재 호스트에 Computer Use capabil
 
 ## Vue 3 이관 후 디자인이 달라졌어요
 
-명시적 재디자인 승인이 없는 legacy 이관에서는 디자인 시스템을 적용하면 안 됩니다. 레거시 template/class, CSS, sprite·자산, 컨트롤을 보존하고 Vue 3 문법·진입점만 바꿉니다. 먼저 `legacy-source-inventory.cjs`로 asset/selector/breakpoint/지도 SDK를 추출하고 `legacy-visual-manifest.json`의 `preserve-legacy` mapping으로 1:1 연결합니다. `@frontend/ui`, Unicode glyph/emoji, 문자·CSS 아이콘, mock map/placeholder가 발견되면 Gap으로 표시됩니다.
+명시적 재디자인 승인이 없는 legacy 이관에서는 디자인 시스템을 적용하면 안 됩니다. 레거시 template/class, CSS, sprite·자산, 컨트롤은 보존하지만 script·state·router·utility는 대상 Vue 3 규격으로 변환합니다. 먼저 `legacy-source-inventory.cjs`로 supporting import, asset/selector/breakpoint/지도 SDK를 추출하고 `legacy-visual-manifest.json`의 `preserve-legacy` mapping으로 1:1 연결합니다. `@frontend/ui`, Unicode glyph/emoji, 문자·CSS 아이콘, mock map/placeholder 또는 대상 규격에 어긋난 Options API·mixin·Vuex 호환층이 발견되면 Gap으로 표시됩니다.
+
+## 픽셀은 같은데 기능이 동작하지 않아요
+
+schema v4의 `routeChecks`에서 레거시 화면/read API로 얻은 실제 동적 파라미터, 최종 URL, 핵심 UI, 필요한 API·인증 결과, 관련 console/network 오류를 기록합니다. 전체 E2E나 영상은 필요 없지만 연결된 화면의 대표 클릭·선택 전환은 한 건 이상 확인합니다. 예상 밖 빈 화면·loading·오류, `0`/`test`/`today` 같은 임의 fixture, 비-2xx/CORS는 이미지가 100% 같아도 `NOT VERIFIED`입니다.
 
 ## glab fallback으로 MR은 만들었는데 플러그인 발행은 실패했어요
 

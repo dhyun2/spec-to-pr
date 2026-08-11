@@ -11,7 +11,7 @@ SpecToPR Lite는 서버, MCP, Run ID, 상태 머신, 데이터베이스를 사�
 | `brief`   | 기획서와 제공된 보조 자료    | OpenSpec 문서 작성·대조, 선택한 TDD 뒤 사내 디자인 시스템 우선 |
 | `feature` | 한 가지 기능 요청            | OpenSpec 문서 작성·대조, 선택한 TDD·E2E·사용자 흐름 영상 1개   |
 | `figma`   | Figma URL과 선택한 화면 상태 | 사내 디자인 시스템 우선                                        |
-| `legacy`  | 지정한 레거시 기능·실행 화면 | 레거시 DOM·CSS·자산·컨트롤을 보존해 Vue 3 진입점만 변환        |
+| `legacy`  | 지정한 레거시 기능·실행 화면 | UI는 보존하고 구현은 대상 Vue 3 코드 규격으로 변환             |
 
 UI 작업은 케이스와 관계없이 화면 비교를 시도합니다. 기준 화면이 없거나 캡처할 수 없으면 점수를 추측하지 않고 Gap으로 남깁니다. `skipped`, `waived`, `not run`은 통과가 아닙니다.
 
@@ -75,16 +75,16 @@ node /absolute/path/to/compare-images.cjs \
 
 ## 레거시 이관은 재디자인이 아닙니다
 
-`legacy`는 사용자가 명시적으로 재디자인을 승인하지 않는 한 디자인 시스템을 적용하지 않습니다. 기존 템플릿·클래스·CSS·sprite/이미지 자산·검색/필터/지도 컨트롤·사용자 동작을 보존하고 Vue 3 문법과 대상 앱 진입점만 바꿉니다.
+`legacy`는 사용자가 명시적으로 재디자인을 승인하지 않는 한 디자인 시스템을 적용하지 않습니다. 기존 템플릿·클래스·CSS·sprite/이미지 자산·검색/필터/지도 컨트롤·사용자 동작은 보존합니다. 반면 script·state·router·utility는 대상 저장소 규칙에 맞춰 `<script setup lang="ts">`, Pinia, Vue Router 4 등으로 변환하며 Options API·mixin·Vuex 호환층을 완료 상태로 남기지 않습니다.
 
 레거시 화면은 호스트에 Computer Use가 있으면 이를 우선 사용해 이미 로그인된 실제 앱의 모든 route·state를 순회하며 캡처합니다. Computer Use가 없거나 같은 조건의 PNG를 만들 수 없을 때만 Browser/Playwright를 fallback으로 사용하며, provider·인증 상태·시각·사유를 `legacy-visual-manifest.json`과 PR에 한 번 공개합니다. 동일 조건의 이미지와 기능 검증이 있으면 fallback 자체는 Gap이 아닙니다. PR에는 경로·상태별 레거시와 Vue 3 이미지를 좌우로 표시하고 Diff 링크만 바로 아래에 둡니다. 쿠키·토큰 값은 저장하지 않습니다.
 
-레거시 라우터에서 발견한 모든 사용자 노출 route와 대표 상태를 `legacy-visual-manifest.json`에 인벤토리로 기록합니다. 먼저 `legacy-source-inventory.cjs`가 원본 asset URL, CSS selector·breakpoint, Kakao Map·Swiper·bridge 표식을 수집하고, 각각 대상 파일·CSS·실제 runtime code에 1:1 mapping돼야 합니다. 각 화면 항목은 다음 중 하나여야 합니다.
+레거시 라우터에서 발견한 모든 사용자 노출 route와 대표 상태를 `legacy-visual-manifest.json`에 인벤토리로 기록합니다. 먼저 `legacy-source-inventory.cjs`가 정확한 source path와 supporting import graph에서 navigation, 원본 asset URL, CSS selector·breakpoint, Kakao Map·Swiper·bridge 표식을 수집하고, 각각 대상 파일·CSS·실제 runtime code에 1:1 mapping돼야 합니다. supporting dependency는 조사 증거일 뿐 이관 범위를 자동 확장하지 않습니다. 각 화면 항목은 다음 중 하나여야 합니다.
 
 1. 같은 fixture·viewport·DPR의 기준/이관/Diff 이미지로 비교됨
 2. 이유·영향·리뷰어 결정을 갖춘 명시적 제외
 
-기본 화면 한 장의 높은 점수는 전체 이관 통과가 아닙니다. `legacy-visual-evidence.cjs`는 전체 화면 외에 검색·필터·목록·지도 조작 같은 핵심 UI 영역과 source inventory mapping을 비교하고, 이미지를 stage했는지 확인해 PR용 Markdown을 생성합니다. Unicode glyph/emoji, 문자·CSS 아이콘, mock/placeholder 지도 대체는 Gap입니다.
+기본 화면 한 장의 높은 점수는 전체 이관 통과가 아닙니다. `legacy-visual-evidence.cjs`는 전체 화면 외에 검색·필터·목록·지도 조작 같은 핵심 UI 영역, 실제 fixture의 최종 URL·구체적인 UI 기대값·API 필요 여부와 결과·인증·진단 여부와 관련 오류, source inventory, Vue 3 대상 규격을 확인합니다. 전체 E2E나 영상은 요구하지 않고, 연결된 화면의 대표 클릭·선택 전환만 가볍게 증명합니다. 예상 밖 빈 화면·loading·오류나 CORS/API 실패는 픽셀이 같아도 Gap입니다. PR은 핵심 Gap을 상단에, 레거시와 Vue 3 화면을 좌우로 표시합니다.
 
 플러그인 GitLab API가 TLS·인증·권한 오류로 실패하고 `glab`/`gh` fallback으로 Draft를 만들면, 실패 원인·fallback 방법·MR URL을 manifest `publishing`에 기록하고 PR 본문을 다시 갱신합니다.
 

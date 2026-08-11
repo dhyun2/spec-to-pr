@@ -27,7 +27,7 @@ request: Mapfinder를 Vue 3 MPA entry로 이관해줘
 - 검색·필터·목록·지도·하단 버튼 같은 사용자 컨트롤
 - hash route를 포함한 사용자 경로와 동작
 
-Vue 3 문법, MPA 진입점, 대상 앱의 빌드·API client 연결만 변환합니다. 이관 과정에서 `@frontend/ui` 또는 다른 디자인 시스템으로 새 Chip·Icon·컨트롤을 대체하면 안 됩니다. 그 결과가 비슷해 보여도 이관이 아니라 재구성입니다.
+화면 계약과 구현 계약을 분리합니다. template·DOM class·CSS·자산·사용자 동작은 보존하지만, script·state·router·utility는 `AGENTS.md`, package 설정, 인접 페이지에서 확인한 대상 Vue 3 규격으로 변환합니다. 대상 규격이 `<script setup lang="ts">`·Pinia·Vue Router 4라면 Options API·mixin·Vuex 호환층을 복사해 남기지 않습니다. 이관 과정에서 `@frontend/ui` 또는 다른 디자인 시스템으로 새 Chip·Icon·컨트롤을 대체하면 안 됩니다. 그 결과가 비슷해 보여도 이관이 아니라 재구성입니다.
 
 Unicode glyph/emoji, 문자·CSS로 그린 로고·지도 핀·아이콘, 회색 지도 박스, mock/placeholder carousel·bridge도 금지합니다. 레거시가 Kakao Map, Swiper, native bridge를 실제 UI 구성요소로 썼다면 대상도 실제 구성요소를 보존해야 합니다.
 
@@ -42,7 +42,7 @@ node /absolute/path/to/legacy-source-inventory.cjs \
   --output /absolute/path/to/project/spec-to-pr-evidence/mapfinder/legacy-source-inventory.json
 ```
 
-수집 항목은 route, `url(...)`·image asset, CSS selector, media breakpoint, Kakao Map·Swiper·native bridge 표식입니다. `legacy-visual-manifest.json`은 발견된 항목마다 아래를 1:1로 기록해야 합니다.
+정확한 source path는 그대로 유지하면서 local import graph를 읽기 전용으로 따라가 supporting dependency를 별도로 기록합니다. 수집 항목은 route 선언과 실제 navigation, `url(...)`·image asset, CSS selector, media breakpoint, Kakao Map·Swiper·native bridge 표식입니다. 해석 실패는 warning/Gap이며 구현을 중단하지 않습니다. `legacy-visual-manifest.json`은 발견된 항목마다 아래를 1:1로 기록해야 합니다.
 
 - asset → 대상 파일 또는 canonical URL
 - selector/breakpoint → 실제 대상 CSS selector·조건
@@ -63,7 +63,7 @@ node /absolute/path/to/legacy-source-inventory.cjs \
 
 ## 증빙과 PR 이미지
 
-`spec-to-pr-evidence/<change>/legacy-visual-manifest.json`에 `schemaVersion: 3`, Computer Use 우선 capture policy, 기준·이관 결과별 capture provider/인증 상태/시각, route/state inventory, asset/selector/breakpoint/runtime mappings를 기록합니다. 모든 증빙은 `baseline/`, `actual/`, `diff/` 아래에 저장하고 stage·commit·push합니다.
+`spec-to-pr-evidence/<change>/legacy-visual-manifest.json`에 `schemaVersion: 4`, Computer Use 우선 capture policy, 기준·이관 결과별 capture provider/인증 상태/시각, route/state inventory, asset/selector/breakpoint/runtime mappings, `routeChecks`, `targetCodeProfile`을 기록합니다. 모든 증빙은 `baseline/`, `actual/`, `diff/` 아래에 저장하고 stage·commit·push합니다.
 
 ```bash
 git add spec-to-pr-evidence/mapfinder
@@ -76,13 +76,13 @@ node /absolute/path/to/legacy-visual-evidence.cjs \
   --write-pr-section /absolute/path/to/project/spec-to-pr-evidence/mapfinder/legacy-pr-section.md
 ```
 
-도구는 전체 이미지와 지정한 핵심 UI 영역을 모두 비교하고 source inventory mapping, 금지된 glyph/placeholder 대체도 확인합니다. 따라서 빈 지도·배경 영역이 높은 전체 점수를 만들더라도 검색창·필터·목록·하단 조작이 다르면 통과가 아닙니다. 생성한 PR section은 경로·상태별 기준과 이관 이미지를 좌우로 놓고 바로 아래에 Diff 링크를 하나만 둡니다. 별도의 요약형 화면 비교 표는 만들지 않으므로 리뷰어가 같은 이미지를 반복해서 볼 필요가 없습니다.
+도구는 전체 이미지와 지정한 핵심 UI 영역, 실제 fixture·최종 URL·구체적인 selector/text 기대값·API 필요 여부와 결과·인증·console/network 진단 여부와 관련 오류, Vue 3 대상 규격을 함께 확인합니다. 전체 E2E나 영상 대신 여러 화면이 연결되면 대표 클릭·선택 전환 한 건 이상만 확인합니다. 임의의 `0`/`test`/`today`, 예상 밖 빈 화면·loading·오류, 인증 문자열만 있는 상태, 비-2xx/CORS는 픽셀이 같아도 통과가 아닙니다. 생성한 PR section은 상단 핵심 Gap, 라우트 동작 요약, 경로·상태별 좌우 이미지와 Diff, Vue 3 규격을 보여 줍니다.
 
 ## Computer Use 우선 캡처
 
 호스트에 Computer Use가 있으면 이미 로그인된 실제 레거시 앱을 먼저 조작해 모든 route·state를 캡처합니다. 화면 비교를 위해 독립 Browser/Playwright 창을 먼저 띄우지 않습니다.
 
-Computer Use가 없거나 동일 조건의 PNG를 만들 수 없을 때만 Browser 또는 Playwright를 fallback으로 사용합니다. `legacy-visual-manifest.json` schema v3에는 기준과 이관 결과별 provider, 인증 상태, 캡처 시각을 기록합니다. fallback이면 사유도 필수이며 PR 좌우 이미지 비교 위에 중복 없이 표시합니다. 같은 조건의 PNG와 기능 검증이 있으면 fallback 자체는 Gap이 아닙니다. 쿠키·토큰 값은 manifest, 이미지, 로그, PR 어디에도 넣지 않습니다.
+Computer Use가 없거나 동일 조건의 PNG를 만들 수 없을 때만 Browser 또는 Playwright를 fallback으로 사용합니다. `legacy-visual-manifest.json` schema v4에는 기준과 이관 결과별 provider, 인증 상태, 캡처 시각을 기록합니다. fallback이면 사유도 필수이며 PR 좌우 이미지 비교 위에 중복 없이 표시합니다. 같은 조건의 이미지와 라우트 동작 증빙이 있으면 fallback 자체는 Gap이 아닙니다. 쿠키·토큰 값은 manifest, 이미지, 로그, PR 어디에도 넣지 않습니다.
 
 ## 발행 fallback도 PR에 기록합니다
 

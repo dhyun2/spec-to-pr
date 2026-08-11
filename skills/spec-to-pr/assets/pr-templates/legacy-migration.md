@@ -6,11 +6,19 @@
 
 {{REVIEWER_DECISION}}
 
+{{GAP_SECTION_IF_ANY}}
+
 ## 이관 범위
 
 | 레거시 경로 · 상태       | 원본 파일 | 대상 파일 | 화면 증빙 |
 | ------------------------ | --------- | --------- | --------- |
 | {{MIGRATION_SCOPE_ROWS}} |
+
+## 라우트 동작 확인
+
+| 시작 · 동작          | 실제 fixture | 최종 경로 | 핵심 UI | API · 인증 | 관련 오류 | 결과 |
+| -------------------- | ------------ | --------- | ------- | ---------- | --------- | ---- |
+| {{ROUTE_CHECK_ROWS}} |
 
 ## 좌우 이미지 비교
 
@@ -24,13 +32,17 @@
 | --------------------- | ---- | ---- |
 | {{PRESERVATION_ROWS}} |
 
+## Vue 3 규격 이관
+
+| 항목                         | 대상 규격 | 결과 |
+| ---------------------------- | --------- | ---- |
+| {{TARGET_CODE_PROFILE_ROWS}} |
+
 {{PUBLISHING_STATUS_SECTION_IF_RELEVANT}}
 
 {{API_SECTION_IF_USED}}
 
 {{EXCLUSION_SECTION_IF_USED}}
-
-{{GAP_SECTION_IF_ANY}}
 
 ## 검증
 
